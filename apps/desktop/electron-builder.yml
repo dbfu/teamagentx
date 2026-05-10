@@ -1,0 +1,89 @@
+appId: com.teamagentx.app
+productName: TeamAgentX
+directories:
+  output: release
+
+extraResources:
+  - from: electron/tray-icon.png
+    to: tray-icon.png
+  - from: electron/icon.png
+    to: icon.png
+  - from: ../../server/dist/
+    to: server/dist/
+    filter:
+      - "**/*"
+  - from: ../../server/prisma/
+    to: server/prisma/
+    filter:
+      - "**/*"
+  - from: ../../server/node_modules-prod/node_modules/
+    to: server/node_modules/
+    filter:
+      - "**/*"
+      - "!**/.modules.yaml"
+      - "!**/.bin/**"
+      - "!**/@prisma/engines/prisma-fmt-*"
+      - "!**/*.md"
+      - "!**/README*"
+      - "!**/CHANGELOG*"
+      - "!**/.DS_Store"
+
+# Windows 特殊配置 - server 目录不解压到 asar，保持为普通文件
+asar: true
+
+afterPack: electron/after-pack.cjs
+afterSign: electron/after-sign.cjs
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - arm64
+  category: public.app-category.developer-tools
+  icon: electron/icon.icns
+  identity: null
+  darkModeSupport: true
+
+dmg:
+  icon: electron/icon.icns
+  iconSize: 160
+  contents:
+    - x: 180
+      y: 170
+      type: file
+    - x: 480
+      y: 170
+      type: link
+      path: /Applications
+  window:
+    width: 660
+    height: 400
+  backgroundColor: "#ffffff"
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: electron/icon.ico
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  allowElevation: true
+  deleteAppDataOnUninstall: false
+  runAfterFinish: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: TeamAgentX
+
+linux:
+  target:
+    - AppImage
+  icon: electron/icon.png
+  category: Development
+
+files:
+  - dist/**/*
+  - dist-electron/**/*

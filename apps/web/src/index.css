@@ -1,0 +1,476 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.274 0.006 260);        /* zinc-800 - 暖黑色，Apple风格 */
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.55 0.22 250);           /* 蓝色主题 ≈ blue-500 */
+  --primary-foreground: oklch(0.985 0 0);    /* 白色 */
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.39 0.006 260);   /* zinc-700 - 非激活状态字体 */
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.55 0.22 250);              /* 蓝色聚焦环 */
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --radius: 0.625rem;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.55 0.22 250);   /* 蓝色主题 */
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.55 0.22 250);
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.22 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.22 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.60 0.20 250);           /* 深色模式下稍亮 */
+  --primary-foreground: oklch(0.145 0 0);    /* 深色背景 */
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.396 0.141 25.723);
+  --destructive-foreground: oklch(0.637 0.237 25.331);
+  --border: oklch(0.269 0 0);
+  --input: oklch(0.269 0 0);
+  --ring: oklch(0.60 0.20 250);
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.60 0.20 250);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(0.269 0 0);
+  --sidebar-ring: oklch(0.60 0.20 250);
+}
+
+/* 截图容器 - 强制使用亮色主题 */
+.screenshot-container {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.274 0.006 260);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.55 0.22 250);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.39 0.006 260);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.55 0.22 250);
+  background-color: white;
+  color: oklch(0.274 0.006 260);
+}
+
+/* 截图中确保消息气泡高度能正确撑开 */
+.screenshot-container .select-text {
+  overflow: visible !important;
+  height: auto !important;
+  max-width: none !important;
+}
+
+/* 截图中 prose 内容不拆分单词 */
+.screenshot-container .prose {
+  height: auto !important;
+  overflow: visible !important;
+  max-width: none !important;
+  width: 100% !important;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
+}
+
+/* 截图中 prose 段落不换行 */
+.screenshot-container .prose p {
+  height: auto !important;
+  overflow: visible !important;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
+}
+
+/* 截图中用户消息内容区域不限制最小宽度 */
+.screenshot-container .min-w-0 {
+  min-width: auto !important;
+}
+
+/* 截图中 flex 容器正确布局 */
+.screenshot-container .flex-col {
+  width: auto !important;
+}
+
+/* 截图中用户消息区域 */
+.screenshot-container .justify-end {
+  max-width: none !important;
+}
+
+/* 截图中 flex-row-reverse */
+.screenshot-container .flex-row-reverse {
+  max-width: none !important;
+}
+
+/* 截图中禁止异常单词拆分 */
+.screenshot-container * {
+  word-break: normal !important;
+  overflow-wrap: break-word !important;
+  hyphens: none !important;
+}
+
+@theme inline {
+  --font-sans: 'Geist', 'Geist Fallback';
+  --font-mono: 'Geist Mono', 'Geist Mono Fallback';
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  /* Global scrollbar - hidden by default, show on hover */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background-color: transparent;
+    border-radius: 3px;
+    border: 1px solid transparent;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+  }
+
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  /* Show scrollbar on hover - elegant gray with subtle border */
+  *:hover {
+    scrollbar-color: oklch(0.65 0.02 250 / 0.5) transparent;
+  }
+
+  *:hover::-webkit-scrollbar-thumb {
+    background-color: oklch(0.85 0.02 250 / 0.6);
+    border: 1px solid oklch(0.75 0.04 250 / 0.4);
+  }
+
+  /* Dark mode scrollbar - darker for dark background */
+  .dark *:hover {
+    scrollbar-color: oklch(0.35 0.02 250 / 0.5) transparent;
+  }
+
+  .dark *:hover::-webkit-scrollbar-thumb {
+    background-color: oklch(0.28 0.02 250 / 0.6);
+    border: 1px solid oklch(0.35 0.04 250 / 0.3);
+  }
+
+  /* Show when scrolling or focused */
+  *:active::-webkit-scrollbar-thumb,
+  *:focus::-webkit-scrollbar-thumb {
+    background-color: oklch(0.85 0.02 250 / 0.6);
+    border: 1px solid oklch(0.75 0.04 250 / 0.4);
+  }
+
+  .dark *:active::-webkit-scrollbar-thumb,
+  .dark *:focus::-webkit-scrollbar-thumb {
+    background-color: oklch(0.32 0.02 250 / 0.7);
+    border: 1px solid oklch(0.4 0.04 250 / 0.4);
+  }
+}
+
+/* Custom scrollbar that shows only on hover - overlay style */
+.scrollbar-hover {
+  overflow-y: auto;
+  overflow-y: overlay; /* Overlay scrollbar, falls back to auto */
+  scrollbar-width: thin; /* Firefox */
+  scrollbar-color: transparent transparent; /* Firefox - hidden by default */
+  padding-right: 6px; /* Reserve space for scrollbar */
+}
+
+.scrollbar-hover::-webkit-scrollbar {
+  width: 6px;
+  position: absolute;
+}
+
+.scrollbar-hover::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-hover::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 3px;
+  transition: background-color 0.2s;
+}
+
+.scrollbar-hover:hover {
+  scrollbar-color: #d1d5db transparent; /* Firefox - show on hover */
+}
+
+.scrollbar-hover:hover::-webkit-scrollbar-thumb {
+  background-color: #d1d5db;
+}
+
+/* Dark mode scrollbar-hover */
+.dark .scrollbar-hover:hover {
+  scrollbar-color: #4b5563 transparent;
+}
+
+.dark .scrollbar-hover:hover::-webkit-scrollbar-thumb {
+  background-color: #4b5563;
+}
+
+/* Prose styles for markdown content */
+.prose {
+  line-height: 1.7;
+}
+
+.prose hr {
+  margin: 8px 0;
+}
+
+.prose p {
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.prose h1, .prose h2, .prose h3, .prose h4 {
+  font-weight: 600;
+  margin: 0.25rem 0;
+  font-size: 1rem;
+}
+
+.prose ul, .prose ol {
+  margin: 0.25rem 0;
+  padding-left: 1.5rem;
+}
+
+.prose ul {
+  list-style-type: disc;
+}
+
+.prose ol {
+  list-style-type: decimal;
+}
+
+.prose li {
+  margin: 0.125rem 0;
+}
+
+.prose li::marker {
+  color: #6b7280;
+}
+
+.dark .prose li::marker {
+  color: #9ca3af;
+}
+
+.prose code {
+  color: #7c3aed;
+  background-color: #f5f3ff;
+  padding: 0.125rem 0.25rem;
+  border-radius: 0.25rem;
+  font-size: 0.875rem;
+}
+
+.dark .prose code {
+  color: #a78bfa;
+  background-color: #1e1b4b;
+}
+
+.prose pre {
+  background-color: #f3f4f6;
+  padding: 0.5rem;
+  border-radius: 0.25rem;
+  overflow-x: auto;
+}
+
+.dark .prose pre {
+  background-color: #1f2937;
+}
+
+.prose pre code {
+  background-color: transparent;
+  padding: 0;
+}
+
+.prose a {
+  color: #2563eb;
+  text-decoration: underline;
+}
+
+.dark .prose a {
+  color: #60a5fa;
+}
+
+.prose a:hover {
+  color: #1d4ed8;
+}
+
+.dark .prose a:hover {
+  color: #93c5fd;
+}
+
+.prose blockquote {
+  border-left: 3px solid #d1d5db;
+  padding-left: 1rem;
+  color: #6b7280;
+  margin: 0.5rem 0;
+}
+
+.dark .prose blockquote {
+  border-left-color: #4b5563;
+  color: #9ca3af;
+}
+
+.prose strong {
+  font-weight: 600;
+}
+
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.5rem 0;
+  font-size: 0.875rem;
+}
+
+.prose th,
+.prose td {
+  border: 1px solid #e5e7eb;
+  padding: 0.25rem 0.5rem;
+  text-align: left;
+}
+
+.prose th {
+  font-weight: 500;
+}
+
+/* Dark mode table styles */
+.dark .prose th,
+.dark .prose td {
+  border-color: #374151;
+}
+
+/* Typing animation for loading dots - appear one by one */
+@keyframes dot-appear {
+  0%, 20% {
+    opacity: 0;
+  }
+  30%, 100% {
+    opacity: 1;
+  }
+}
+
+/* Custom thin scrollbar */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: #d1d5db transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 4px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: #d1d5db;
+  border-radius: 2px;
+}
+
+.scrollbar-thin:hover::-webkit-scrollbar-thumb {
+  background-color: #9ca3af;
+}
+
+/* 移动端安全区域 */
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* 移动端触摸优化：禁用双击缩放和长按菜单 */
+.touch-manipulation {
+  touch-action: manipulation;
+}

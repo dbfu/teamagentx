@@ -1,0 +1,35 @@
+{
+  "name": "@teamagentx/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "TeamAgentX desktop shell",
+  "author": "TeamAgentX Team",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "cd ../web && vite --config ../desktop/vite.config.ts --mode electron",
+    "typecheck": "tsc -p electron/tsconfig.json --noEmit",
+    "build:renderer": "pnpm typecheck && tsc -p ../web/tsconfig.json && cd ../web && vite --config ../desktop/vite.config.ts --mode electron build",
+    "build:server": "cd ../../server && pnpm db:generate && pnpm build && pnpm prebuild:electron",
+    "build:server:prod-deps": "cd ../.. && pnpm --filter=server deploy server/node_modules-prod --prod --frozen-lockfile --force && cd server && pnpm verify:electron-deps && pnpm sync:prisma:prod",
+    "build:package": "electron-builder",
+    "build": "pnpm build:server && pnpm build:server:prod-deps && pnpm build:renderer && pnpm build:package",
+    "electron:dev": "pnpm dev",
+    "electron:build": "pnpm build"
+  },
+  "devDependencies": {
+    "@locator/babel-jsx": "^0.5.1",
+    "@types/node": "^22",
+    "@vitejs/plugin-react": "^4.0.0",
+    "electron": "^41.2.0",
+    "electron-builder": "^26.8.1",
+    "typescript": "5.7.3",
+    "vite": "^6.0.0",
+    "vite-plugin-electron": "^0.29.1",
+    "vite-plugin-electron-renderer": "^0.14.6"
+  },
+  "dependencies": {
+    "qrcode-generator": "^2.0.4",
+    "react": "19.1.0"
+  }
+}

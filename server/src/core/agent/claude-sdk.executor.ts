@@ -1,0 +1,1167 @@
+import type { LlmProvider } from '@prisma/client';
+import type { HookCallbackMatcher, HookEvent, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import { query } from '@anthropic-ai/claude-agent-sdk';
+import { createHash, randomUUID } from 'crypto';
+import * as fs from 'fs';
+import { createRequire } from 'module';
+import * as os from 'os';
+import * as path from 'path';
+import { agentMemoryService } from '../../modules/agent-memory/agent-memory.service.js';
+import { skillInstallService } from '../../modules/skill/skill-install.service.js';
+import type { AttachmentData } from '../../modules/task-queue/task-queue.service.js';
+import { buildAgentLongTermMemorySection } from './agent-long-term-memory.js';
+import { debugLog } from './agent-handler/debug.js';
+import { buildAcpProviderEnv, type AcpProviderInfo } from './acp-provider.adapter.js';
+import {
+  resolveAgentWorkDir,
+  resolveChatRoomAgentInfoWorkDir,
+} from './work-dir.js';
+import {
+  buildInstalledSkillsInstructions,
+  buildInstalledSkillsSignature,
+} from './skill-instructions.js';
+import type {
+  AgentDebugInfo,
+  AgentExecResult,
+  ChatRoomAgentInfo,
+  HistoryMessage,
+  IAgentExecutor,
+  MessageEmitCallback,
+  StreamEmitCallback,
+  ThinkingEmitCallback,
+  TokenUsage,
+  ToolCall,
+  ToolCallEmitCallback,
+} from './executor.interface.js';
+
+function shortHash(input: string): string {
+  return createHash('sha256').update(input).digest('hex').slice(0, 16);
+}
+
+function sanitizeClaudeProjectPath(projectPath: string): string {
+  return projectPath.replace(/[^a-zA-Z0-9_-]/g, '-');
+}
+
+function getMessageWithoutMentions(message: string): string {
+  const mentionRegex =
+    /(?:^|\s|[*_>#`\-])@([\u4e00-\u9fa5a-zA-Z0-9_]+)(?=\s|$)/g;
+  return message.trim().replace(mentionRegex, '').trim();
+}
+
+function extractTextFromContent(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+
+  return content
+    .map((block: any) => {
+      if (block?.type === 'text' && typeof block.text === 'string') return block.text;
+      return '';
+    })
+    .join('');
+}
+
+function extractThinkingFromContent(content: unknown): string {
+  if (!Array.isArray(content)) return '';
+
+  return content
+    .map((block: any) => {
+      if (block?.type === 'thinking' && typeof block.thinking === 'string') return block.thinking;
+      return '';
+    })
+    .join('');
+}
+
+function normalizeUsage(usage: any): TokenUsage | undefined {
+  if (!usage || typeof usage !== 'object') return undefined;
+  const inputTokens = Number(usage.input_tokens ?? usage.inputTokens ?? 0);
+  const outputTokens = Number(usage.output_tokens ?? usage.outputTokens ?? 0);
+  const cacheReadTokens = Number(usage.cache_read_input_tokens ?? usage.cacheReadInputTokens ?? 0);
+  const cacheCreationTokens = Number(usage.cache_creation_input_tokens ?? usage.cacheCreationInputTokens ?? 0);
+
+  if (!inputTokens && !outputTokens && !cacheReadTokens && !cacheCreationTokens) {
+    return undefined;
+  }
+
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens: inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens,
+    cacheReadTokens,
+    cacheCreationTokens,
+  };
+}
+
+const requireFromServerBundle = createRequire(import.meta.url);
+const requireFromClaudeSdk = (() => {
+  try {
+    return createRequire(requireFromServerBundle.resolve('@anthropic-ai/claude-agent-sdk'));
+  } catch {
+    return requireFromServerBundle;
+  }
+})();
+
+function redactValue(value: string | undefined): string | undefined {
+  if (!value) return value;
+  if (value.length <= 12) return `${value.slice(0, 2)}***`;
+  return `${value.slice(0, 6)}...${value.slice(-4)}`;
+}
+
+function logClaudeSdkDebug(message: string, details?: Record<string, unknown>): void {
+  if (details) {
+    console.log(`[ClaudeSDK] ${message}`, details);
+    return;
+  }
+  console.log(`[ClaudeSDK] ${message}`);
+}
+
+function getClaudeMaxTurns(): number {
+  const rawValue = process.env.CLAUDE_AGENT_MAX_TURNS;
+  if (!rawValue) return 50;
+
+  const parsed = Number.parseInt(rawValue, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return 50;
+
+  return parsed;
+}
+
+function getClaudeThinkingOptions(provider?: LlmProvider): { type: 'adaptive' } | { type: 'enabled'; budgetTokens?: number } | { type: 'disabled' } | undefined {
+  const mode = (process.env.CLAUDE_AGENT_THINKING || 'enabled').toLowerCase();
+
+  if ((provider as any)?.supportsThinking === false || mode === 'disabled' || mode === 'off' || mode === '0') {
+    return { type: 'disabled' };
+  }
+
+  if (mode === 'adaptive') {
+    return { type: 'adaptive' };
+  }
+
+  const rawBudget = process.env.CLAUDE_AGENT_THINKING_BUDGET_TOKENS;
+  const budgetTokens = rawBudget ? Number.parseInt(rawBudget, 10) : 16000;
+  if (!Number.isFinite(budgetTokens) || budgetTokens < 1) {
+    return { type: 'enabled', budgetTokens: 16000 };
+  }
+
+  return { type: 'enabled', budgetTokens };
+}
+
+function isSessionAlreadyInUseError(message: string): boolean {
+  return /Session ID .+ is already in use/.test(message)
+    || message.includes('session ID is already in use');
+}
+
+function isRecoverableSessionError(message: string): boolean {
+  return message.includes('Claude Code process exited with code 1')
+    || message.includes('No conversation found with session ID')
+    || isSessionAlreadyInUseError(message);
+}
+
+const DEFAULT_LONG_RUNNING_BASH_TIMEOUT_MS = 15 * 1000;
+const DEFAULT_BACKGROUND_IDLE_FINISH_MS = 20 * 1000;
+
+const LONG_RUNNING_COMMAND_PATTERNS = [
+  /\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:dev|serve|preview|start)\b/i,
+  /\b(?:vite|next|nuxt|astro|remix|webpack-dev-server|storybook)\b/i,
+  /\b(?:tsx|ts-node|node)\b.*\b(?:dev|serve|server|watch)\b/i,
+  /\b(?:python|python3)\s+-m\s+(?:http\.server|uvicorn)\b/i,
+  /\b(?:uvicorn|fastapi\s+dev|flask\s+run|django-admin\s+runserver)\b/i,
+  /\b(?:rails|bin\/rails)\s+(?:s|server)\b/i,
+  /\b(?:php\s+-S|air|reflex)\b/i,
+  /\b(?:docker\s+compose|docker-compose)\s+up\b/i,
+] as const;
+
+function getLongRunningBashTimeoutMs(): number {
+  const rawValue = process.env.CLAUDE_AGENT_LONG_RUNNING_BASH_TIMEOUT_MS;
+  if (!rawValue) return DEFAULT_LONG_RUNNING_BASH_TIMEOUT_MS;
+
+  const parsed = Number.parseInt(rawValue, 10);
+  if (!Number.isFinite(parsed) || parsed < 1000) {
+    return DEFAULT_LONG_RUNNING_BASH_TIMEOUT_MS;
+  }
+
+  return parsed;
+}
+
+function getBackgroundIdleFinishMs(): number {
+  const rawValue = process.env.CLAUDE_AGENT_BACKGROUND_IDLE_FINISH_MS;
+  if (!rawValue) return DEFAULT_BACKGROUND_IDLE_FINISH_MS;
+
+  const parsed = Number.parseInt(rawValue, 10);
+  if (!Number.isFinite(parsed) || parsed < 1000) {
+    return DEFAULT_BACKGROUND_IDLE_FINISH_MS;
+  }
+
+  return parsed;
+}
+
+function normalizeBashCommand(command: string): string {
+  return command
+    .replace(/^\s*(?:cd\s+[^;&|]+\s*&&\s*)+/i, '')
+    .trim();
+}
+
+function shouldRunBashInBackground(command: string): boolean {
+  const normalizedCommand = normalizeBashCommand(command);
+  if (!normalizedCommand || /(?:^|\s)(?:&|nohup|disown)(?:\s|$)/.test(normalizedCommand)) {
+    return false;
+  }
+
+  return LONG_RUNNING_COMMAND_PATTERNS.some((pattern) => pattern.test(normalizedCommand));
+}
+
+function resolveClaudeCodeExecutable(): string | undefined {
+  const extension = process.platform === 'win32' ? '.exe' : '';
+  const packageNames = process.platform === 'linux'
+    ? [
+        `@anthropic-ai/claude-agent-sdk-linux-${process.arch}-musl`,
+        `@anthropic-ai/claude-agent-sdk-linux-${process.arch}`,
+      ]
+    : [`@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`];
+
+  for (const packageName of packageNames) {
+    try {
+      return requireFromClaudeSdk.resolve(`${packageName}/claude${extension}`);
+    } catch {
+      // Optional native package for another platform/arch is expected to be absent.
+    }
+  }
+
+  return undefined;
+}
+
+export class ClaudeAgentSdkExecutor implements IAgentExecutor {
+  readonly name: string;
+  readonly chatRoomId: string;
+  readonly injectGroupHistory: boolean;
+  readonly workDir: string;
+  readonly agentWorkDir: string | null;
+  readonly chatRoomAgents: ChatRoomAgentInfo[];
+  readonly llmProvider?: LlmProvider;
+
+  private _lastInjectedMessageId?: string;
+  private systemPrompt: string;
+  private agentId: string | null = null;
+  private sessionId: string;
+  private hasStartedSession = false;
+  private lastInjectedSkillsSignature?: string;
+  private acpProviderInfo?: AcpProviderInfo;
+  private currentAbortController: AbortController | null = null;
+
+  private content = '';
+  private thinking = '';
+  private toolCalls: ToolCall[] = [];
+  private hasBackgroundedLongRunningCommand = false;
+
+  private lastContext: string | null = null;
+  private lastResponse: string | null = null;
+  private lastInvokeResult: string | null = null;
+  private lastClaudeStderr = '';
+  private claudeCodeExecutable = resolveClaudeCodeExecutable();
+
+  private emitStream: StreamEmitCallback | null = null;
+  private emitThinking: ThinkingEmitCallback | null = null;
+  private emitToolCall: ToolCallEmitCallback | null = null;
+
+  constructor(
+    name: string,
+    systemPrompt: string,
+    chatRoomId: string,
+    workDir: string | null,
+    injectGroupHistory: boolean = true,
+    agentId?: string,
+    sessionDir?: string,
+    customWorkDir?: string,
+    lastInjectedMessageId?: string,
+    chatRoomAgents?: ChatRoomAgentInfo[],
+    llmProvider?: LlmProvider,
+  ) {
+    this.name = name;
+    this.chatRoomId = chatRoomId;
+    this.injectGroupHistory = injectGroupHistory;
+    this.agentId = agentId || null;
+    this.agentWorkDir = workDir || null;
+    this._lastInjectedMessageId = lastInjectedMessageId;
+    this.chatRoomAgents = chatRoomAgents || [];
+    this.llmProvider = llmProvider;
+    this.workDir = resolveAgentWorkDir({
+      chatRoomId,
+      sessionDir,
+      customWorkDir,
+      agentWorkDir: workDir,
+    });
+    const savedSession = this.loadSessionState();
+    this.sessionId = savedSession?.sessionId || randomUUID();
+    this.hasStartedSession = savedSession?.hasStartedSession ?? false;
+    this.lastInjectedSkillsSignature = savedSession?.skillsSignature;
+
+    const modelInfo = this.llmProvider
+      ? `
+## 当前模型
+你正在使用 ${this.llmProvider.name} 提供的模型服务。
+- 模型名称：${this.llmProvider.model}
+- 供应商类型：${this.llmProvider.type}`
+      : '';
+
+    this.systemPrompt = `${modelInfo}
+${systemPrompt}
+
+## 工作目录
+你的工作目录是：${this.workDir}
+执行文件操作和命令时，默认在此目录下操作。使用相对路径时，基于此目录解析。`;
+
+    this.ensureWorkDirectory();
+  }
+
+  get lastInjectedMessageId(): string | undefined {
+    return this._lastInjectedMessageId;
+  }
+
+  setLastInjectedMessageId(id: string): void {
+    this._lastInjectedMessageId = id;
+  }
+
+  private ensureWorkDirectory(): void {
+    if (!fs.existsSync(this.workDir)) {
+      fs.mkdirSync(this.workDir, { recursive: true });
+    }
+  }
+
+  private getClaudeConfigDir(): string {
+    return path.join(os.homedir(), '.teamagentx', 'acp-config', this.agentId || 'default');
+  }
+
+  private getSessionStatePath(): string {
+    const scope = `${this.chatRoomId}-${shortHash(this.workDir)}`;
+    return path.join(this.getClaudeConfigDir(), 'sessions', `${scope}.json`);
+  }
+
+  private getClaudeConversationPath(sessionId: string): string {
+    return path.join(
+      this.getClaudeConfigDir(),
+      'projects',
+      sanitizeClaudeProjectPath(this.workDir),
+      `${sessionId}.jsonl`,
+    );
+  }
+
+  private ensureResumableSessionExists(): void {
+    if (!this.hasStartedSession) return;
+
+    const conversationPath = this.getClaudeConversationPath(this.sessionId);
+    if (fs.existsSync(conversationPath)) return;
+
+    console.warn(`${this.name}: Claude SDK session 文件不存在，创建新 session`, {
+      sessionId: this.sessionId,
+      conversationPath,
+      statePath: this.getSessionStatePath(),
+    });
+    this.resetSession();
+  }
+
+  private loadSessionState(): { sessionId: string; hasStartedSession: boolean; skillsSignature?: string } | null {
+    try {
+      const statePath = this.getSessionStatePath();
+      if (!fs.existsSync(statePath)) {
+        logClaudeSdkDebug('session state not found', {
+          agentName: this.name,
+          agentId: this.agentId,
+          statePath,
+        });
+        return null;
+      }
+      const state = JSON.parse(fs.readFileSync(statePath, 'utf-8'));
+      if (typeof state.sessionId !== 'string') {
+        logClaudeSdkDebug('session state ignored: missing sessionId', {
+          agentName: this.name,
+          agentId: this.agentId,
+          statePath,
+        });
+        return null;
+      }
+      const loaded = {
+        sessionId: state.sessionId,
+        hasStartedSession: state.hasStartedSession !== false,
+        skillsSignature: typeof state.skillsSignature === 'string' ? state.skillsSignature : undefined,
+      };
+      const conversationPath = this.getClaudeConversationPath(loaded.sessionId);
+      if (!loaded.hasStartedSession && fs.existsSync(conversationPath)) {
+        logClaudeSdkDebug('session state ignored: unstarted session already has conversation file', {
+          agentName: this.name,
+          agentId: this.agentId,
+          statePath,
+          sessionId: loaded.sessionId,
+          conversationPath,
+        });
+        return null;
+      }
+      if (loaded.hasStartedSession && !fs.existsSync(conversationPath)) {
+        logClaudeSdkDebug('session state ignored: conversation file not found', {
+          agentName: this.name,
+          agentId: this.agentId,
+          statePath,
+          sessionId: loaded.sessionId,
+          conversationPath,
+        });
+        return null;
+      }
+      logClaudeSdkDebug('session state loaded', {
+        agentName: this.name,
+        agentId: this.agentId,
+        statePath,
+        sessionId: loaded.sessionId,
+        hasStartedSession: loaded.hasStartedSession,
+      });
+      return loaded;
+    } catch {
+      logClaudeSdkDebug('session state load failed', {
+        agentName: this.name,
+        agentId: this.agentId,
+        statePath: this.getSessionStatePath(),
+      });
+      return null;
+    }
+  }
+
+  private saveSessionId(): void {
+    try {
+      const statePath = this.getSessionStatePath();
+      fs.mkdirSync(path.dirname(statePath), { recursive: true });
+      fs.writeFileSync(
+        statePath,
+        JSON.stringify(
+          {
+            sessionId: this.sessionId,
+            hasStartedSession: this.hasStartedSession,
+            skillsSignature: this.lastInjectedSkillsSignature,
+            updatedAt: new Date().toISOString(),
+          },
+          null,
+          2,
+        ),
+        { mode: 0o600 },
+      );
+    } catch (error) {
+      console.warn(`${this.name}: 保存 Claude SDK sessionId 失败:`, error);
+    }
+  }
+
+  private ensureSkillsSymlink(): void {
+    if (!this.agentId) return;
+
+    const globalSkillsDir = skillInstallService.getGlobalAgentSkillsDir(this.agentId);
+    if (!fs.existsSync(globalSkillsDir)) return;
+
+    const claudeConfigDir = this.getClaudeConfigDir();
+    const configSkillsDir = path.join(claudeConfigDir, 'skills');
+
+    try {
+      if (fs.existsSync(configSkillsDir)) {
+        const existingTarget = fs.readlinkSync(configSkillsDir);
+        if (existingTarget === globalSkillsDir) return;
+      }
+    } catch {
+      // 不是 symlink，继续重建。
+    }
+
+    try {
+      fs.rmSync(configSkillsDir, { recursive: true, force: true });
+    } catch {
+      // 忽略删除失败。
+    }
+
+    fs.mkdirSync(claudeConfigDir, { recursive: true });
+    try {
+      fs.symlinkSync(globalSkillsDir, configSkillsDir);
+      console.log(`${this.name}: Skills symlink 已创建 ${configSkillsDir} → ${globalSkillsDir}`);
+    } catch (error) {
+      console.error(`${this.name}: 创建 Skills symlink 失败:`, error);
+    }
+  }
+
+  private buildEnv(): Record<string, string | undefined> {
+    const cleanEnv: Record<string, string | undefined> = { ...process.env };
+    const keysToClear = [
+      'ANTHROPIC_API_KEY',
+      'ANTHROPIC_AUTH_TOKEN',
+      'ANTHROPIC_BASE_URL',
+      'ANTHROPIC_API_URL',
+      'ANTHROPIC_MODEL',
+      'ANTHROPIC_SMALL_FAST_MODEL',
+      'ANTHROPIC_DEFAULT_SONNET_MODEL',
+      'ANTHROPIC_DEFAULT_OPUS_MODEL',
+      'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+      'ANTHROPIC_REASONING_MODEL',
+      'ACPX_AUTH_ANTHROPIC_API_KEY',
+      'ACPX_AUTH_ANTHROPIC_AUTH_TOKEN',
+    ];
+    keysToClear.forEach((key) => delete cleanEnv[key]);
+
+    const providerEnv = this.llmProvider
+      ? buildAcpProviderEnv('claude', this.llmProvider, this.agentId)
+      : { CLAUDE_CONFIG_DIR: this.getClaudeConfigDir() };
+
+    if (this.llmProvider) {
+      this.acpProviderInfo = {
+        id: this.llmProvider.id,
+        name: this.llmProvider.name,
+        type: this.llmProvider.type,
+        model: this.llmProvider.model,
+        apiProtocol: ((this.llmProvider as any).apiProtocol || 'anthropic').toLowerCase(),
+      };
+    }
+
+    return {
+      ...cleanEnv,
+      ...providerEnv,
+      CLAUDE_AGENT_SDK_CLIENT_APP: 'teamagentx/claude-sdk-executor',
+      DEBUG_CLAUDE_AGENT_SDK: cleanEnv.DEBUG_CLAUDE_AGENT_SDK || '1',
+    };
+  }
+
+  private logQueryStart(env: Record<string, string | undefined>): void {
+    logClaudeSdkDebug('query start', {
+      agentName: this.name,
+      agentId: this.agentId,
+      chatRoomId: this.chatRoomId,
+      cwd: this.workDir,
+      cwdExists: fs.existsSync(this.workDir),
+      claudeConfigDir: env.CLAUDE_CONFIG_DIR,
+      claudeConfigDirExists: env.CLAUDE_CONFIG_DIR ? fs.existsSync(env.CLAUDE_CONFIG_DIR) : false,
+      sessionStatePath: this.getSessionStatePath(),
+      sessionStateExists: fs.existsSync(this.getSessionStatePath()),
+      sessionId: this.sessionId,
+      hasStartedSession: this.hasStartedSession,
+      optionSessionId: this.hasStartedSession ? undefined : this.sessionId,
+      optionResume: this.hasStartedSession ? this.sessionId : undefined,
+      maxTurns: getClaudeMaxTurns(),
+      thinking: getClaudeThinkingOptions(this.llmProvider),
+      model: this.llmProvider?.model,
+      provider: this.llmProvider
+        ? {
+            id: this.llmProvider.id,
+            name: this.llmProvider.name,
+            type: this.llmProvider.type,
+            apiProtocol: ((this.llmProvider as any).apiProtocol || 'anthropic').toLowerCase(),
+            apiUrl: this.llmProvider.apiUrl,
+          }
+        : undefined,
+      sdkImportUrl: import.meta.url,
+      sdkPackagePath: (() => {
+        try {
+          return requireFromServerBundle.resolve('@anthropic-ai/claude-agent-sdk');
+        } catch (error) {
+          return error instanceof Error ? error.message : String(error);
+        }
+      })(),
+      claudeCodeExecutable: this.claudeCodeExecutable,
+      claudeCodeExecutableExists: this.claudeCodeExecutable ? fs.existsSync(this.claudeCodeExecutable) : false,
+      nodeExecPath: process.execPath,
+      processCwd: process.cwd(),
+      nodePath: process.env.NODE_PATH,
+      pathHead: env.PATH?.split(path.delimiter).slice(0, 8),
+      anthropicEnv: {
+        key: redactValue(env.ANTHROPIC_API_KEY),
+        authToken: redactValue(env.ANTHROPIC_AUTH_TOKEN),
+        baseUrl: env.ANTHROPIC_BASE_URL,
+        apiUrl: env.ANTHROPIC_API_URL,
+        model: env.ANTHROPIC_MODEL,
+      },
+    });
+  }
+
+  private buildHooks(): Partial<Record<HookEvent, HookCallbackMatcher[]>> {
+    return {
+      PreToolUse: [
+        {
+          hooks: [
+            async (input) => {
+              if (input.hook_event_name !== 'PreToolUse' || input.tool_name !== 'Bash') {
+                return { continue: true };
+              }
+
+              const toolInput = input.tool_input;
+              if (!toolInput || typeof toolInput !== 'object') {
+                return { continue: true };
+              }
+
+              const command = (toolInput as { command?: unknown }).command;
+              if (typeof command !== 'string' || !shouldRunBashInBackground(command)) {
+                return { continue: true };
+              }
+
+              this.hasBackgroundedLongRunningCommand = true;
+
+              return {
+                continue: true,
+                hookSpecificOutput: {
+                  hookEventName: 'PreToolUse' as const,
+                  updatedInput: {
+                    ...(toolInput as Record<string, unknown>),
+                    timeout: getLongRunningBashTimeoutMs(),
+                    run_in_background: true,
+                  },
+                  additionalContext: 'TeamAgentX detected a long-running service command and started it in the background so the conversation can continue.',
+                },
+              };
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  private buildFullMessage(message: string, history?: HistoryMessage[]): string {
+    let fullMessage = '';
+
+    if (this.systemPrompt) {
+      fullMessage += `【系统指令】\n${this.systemPrompt}\n\n`;
+    }
+
+    const longTermMemorySection = buildAgentLongTermMemorySection(this.chatRoomId, this.agentId, this.name);
+    if (longTermMemorySection) {
+      fullMessage += `${longTermMemorySection}\n\n`;
+    }
+
+    const skillsUpdateSection = this.buildSkillsUpdateSection();
+    if (skillsUpdateSection) {
+      fullMessage += `${skillsUpdateSection}\n\n`;
+    }
+
+    if (this.injectGroupHistory && history && history.length > 0) {
+      const memorySummary = history.find((msg) => msg.kind === 'memory_summary')?.content;
+      const recentHistory = history.filter((msg) => msg.kind !== 'memory_summary');
+
+      if (memorySummary) {
+        fullMessage += `【群聊长期记忆摘要】
+${memorySummary}
+
+`;
+      }
+
+      if (recentHistory.length > 0) {
+        const historyText = recentHistory
+          .map((msg) => `[${msg.senderName}]: ${msg.content}`)
+          .join('\n');
+
+        fullMessage += `【最近群聊消息】以下是当前消息之前最近的群聊消息（共 ${recentHistory.length} 条）：
+${historyText}
+
+`;
+      }
+    }
+
+    if (this.chatRoomAgents.length > 0) {
+      const agentsInfo = this.chatRoomAgents.map((agent) => agent.name).join('、');
+      const otherAgents = this.chatRoomAgents.filter((agent) => agent.name !== this.name);
+      const otherAgentsDetail = otherAgents
+        .map((agent) => {
+          const workDir = resolveChatRoomAgentInfoWorkDir(this.chatRoomId, agent);
+          return `${agent.name}（工作目录：${workDir})`;
+        })
+        .join('\n  ');
+      const othersInfo = otherAgents.length > 0 ? otherAgentsDetail : '无';
+      const mentionTip = otherAgents.length > 0
+        ? '\n【提示】\n你可以通过 @助手名称 给其他助手发消息。'
+        : '';
+
+      fullMessage += `【群聊成员信息】
+当前群聊中的助手有：${agentsInfo}
+你是：${this.name}（工作目录：${this.workDir})
+其他助手：
+  ${othersInfo}${mentionTip}
+
+`;
+    }
+
+    fullMessage += `【当前消息】\n${message}`;
+    return fullMessage;
+  }
+
+  private buildSkillsUpdateSection(): string {
+    const currentSignature = buildInstalledSkillsSignature(this.agentId);
+    if (this.lastInjectedSkillsSignature === currentSignature) {
+      return '';
+    }
+
+    this.lastInjectedSkillsSignature = currentSignature;
+    this.saveSessionId();
+    return `【技能清单更新】
+${buildInstalledSkillsInstructions(this.agentId)}`;
+  }
+
+  private buildPrompt(fullMessage: string, attachments?: AttachmentData[]): string | AsyncIterable<SDKUserMessage> {
+    if (!attachments || attachments.length === 0) {
+      return fullMessage;
+    }
+
+    const userMessage = {
+      type: 'user',
+      parent_tool_use_id: null,
+      message: {
+        role: 'user',
+        content: [
+          { type: 'text', text: fullMessage },
+          ...attachments.map((attachment) => ({
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: attachment.mimeType,
+              data: attachment.base64,
+            },
+          })),
+        ],
+      },
+    } as SDKUserMessage;
+
+    return (async function* () {
+      yield userMessage;
+    })();
+  }
+
+  private resetCollectors(): void {
+    this.content = '';
+    this.thinking = '';
+    this.toolCalls = [];
+    this.hasBackgroundedLongRunningCommand = false;
+  }
+
+  private resetSession(): void {
+    this.sessionId = randomUUID();
+    this.hasStartedSession = false;
+    this.saveSessionId();
+    logClaudeSdkDebug('session reset', {
+      agentName: this.name,
+      agentId: this.agentId,
+      newSessionId: this.sessionId,
+      statePath: this.getSessionStatePath(),
+    });
+  }
+
+  private upsertToolCall(toolCall: ToolCall): void {
+    const existing = this.toolCalls.find((item) => item.toolCallId === toolCall.toolCallId);
+    if (!existing) {
+      this.toolCalls.push(toolCall);
+      this.emitToolCall?.(toolCall);
+      return;
+    }
+
+    let changed = false;
+    for (const key of ['name', 'status', 'output', 'input'] as const) {
+      if (toolCall[key] && existing[key] !== toolCall[key]) {
+        (existing as any)[key] = toolCall[key];
+        changed = true;
+      }
+    }
+    if (changed) this.emitToolCall?.(existing);
+  }
+
+  private handleStreamEvent(message: any): void {
+    const event = message.event;
+    if (!event || typeof event !== 'object') return;
+
+    if (event.type === 'content_block_start' && event.content_block?.type === 'thinking') {
+      this.appendThinking(event.content_block.thinking);
+      return;
+    }
+
+    if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
+      this.upsertToolCall({
+        name: event.content_block.name || 'tool_call',
+        input: event.content_block.input || {},
+        toolCallId: event.content_block.id || message.uuid || randomUUID(),
+        status: 'in_progress',
+        timestamp: Date.now(),
+      });
+      return;
+    }
+
+    if (event.type === 'content_block_delta') {
+      if (event.delta?.type === 'text_delta' && typeof event.delta.text === 'string') {
+        this.content += event.delta.text;
+        this.emitStream?.(event.delta.text);
+      }
+      if (event.delta?.type === 'thinking_delta' && typeof event.delta.thinking === 'string') {
+        this.appendThinking(event.delta.thinking);
+      }
+    }
+  }
+
+  private appendThinking(text: string | undefined): void {
+    if (!text) return;
+
+    if (this.thinking && text.startsWith(this.thinking)) {
+      const delta = text.slice(this.thinking.length);
+      if (delta) this.emitThinking?.(delta);
+      this.thinking = text;
+      return;
+    }
+
+    if (this.thinking.endsWith(text)) return;
+
+    this.thinking += text;
+    this.emitThinking?.(text);
+  }
+
+  private handleAssistantMessage(message: any): void {
+    const content = message.message?.content;
+    if (!Array.isArray(content)) return;
+
+    for (const block of content) {
+      if (block?.type === 'thinking' && typeof block.thinking === 'string') {
+        this.appendThinking(block.thinking);
+      }
+
+      if (block?.type === 'tool_use') {
+        this.upsertToolCall({
+          name: block.name || 'tool_call',
+          input: block.input || {},
+          toolCallId: block.id || randomUUID(),
+          status: 'completed',
+          timestamp: Date.now(),
+        });
+      }
+    }
+
+    if (!this.content) {
+      const text = extractTextFromContent(content);
+      if (text) this.content = text;
+    }
+  }
+
+  private handleUserMessage(message: any): void {
+    const content = message.message?.content;
+    if (!Array.isArray(content)) return;
+
+    for (const block of content) {
+      if (block?.type === 'tool_result') {
+        const toolUseId = block.tool_use_id || message.uuid || randomUUID();
+        const output = extractTextFromContent(block.content);
+        const status = block.is_error ? 'error' : 'completed';
+        const existing = this.toolCalls.find((item) => item.toolCallId === toolUseId);
+
+        if (existing) {
+          let changed = false;
+          if (existing.status !== status) {
+            existing.status = status;
+            changed = true;
+          }
+          if (existing.output !== output) {
+            existing.output = output;
+            changed = true;
+          }
+          if (changed) this.emitToolCall?.(existing);
+        } else {
+          this.upsertToolCall({
+            name: 'tool_result',
+            input: {},
+            toolCallId: toolUseId,
+            status,
+            output,
+            timestamp: Date.now(),
+          });
+        }
+      }
+    }
+  }
+
+  private handleSdkMessage(message: SDKMessage): TokenUsage | undefined {
+    debugLog('claudeSdkEvent', {
+      agentName: this.name,
+      eventType: message.type,
+      event: message as Record<string, unknown>,
+    });
+
+    const sdkSessionId = (message as any).session_id;
+    if (typeof sdkSessionId === 'string' && sdkSessionId) {
+      const shouldSaveSession = this.sessionId !== sdkSessionId || !this.hasStartedSession;
+      this.sessionId = sdkSessionId;
+      this.hasStartedSession = true;
+      if (shouldSaveSession) this.saveSessionId();
+    }
+
+    switch (message.type) {
+      case 'stream_event':
+        this.handleStreamEvent(message);
+        return undefined;
+      case 'assistant':
+        this.handleAssistantMessage(message);
+        return normalizeUsage((message as any).message?.usage);
+      case 'user':
+        this.handleUserMessage(message);
+        return undefined;
+      case 'tool_progress':
+        this.upsertToolCall({
+          name: (message as any).tool_name || 'tool_call',
+          input: {},
+          toolCallId: (message as any).tool_use_id || message.uuid,
+          status: 'in_progress',
+          timestamp: Date.now(),
+        });
+        return undefined;
+      case 'system':
+        if ((message as any).subtype === 'status') {
+          const status = (message as any).status?.text || (message as any).status?.message;
+          if (typeof status === 'string') {
+            this.content += status;
+          }
+        }
+        if ((message as any).subtype === 'task_updated' && (message as any).patch?.is_backgrounded === true) {
+          this.hasBackgroundedLongRunningCommand = true;
+        }
+        return undefined;
+      case 'result':
+        if ((message as any).session_id) {
+          this.sessionId = (message as any).session_id;
+          this.hasStartedSession = true;
+          this.saveSessionId();
+        }
+        if ((message as any).subtype === 'success' && typeof (message as any).result === 'string' && !this.content) {
+          this.content = (message as any).result;
+        }
+        return normalizeUsage((message as any).usage);
+      default:
+        return undefined;
+    }
+  }
+
+  private async handleClearContext(
+    emit: MessageEmitCallback,
+    originalMessageId: string,
+  ): Promise<string> {
+    this.currentAbortController?.abort();
+    this.currentAbortController = null;
+    this._lastInjectedMessageId = undefined;
+    if (this.agentId) {
+      await agentMemoryService.clear(this.chatRoomId, this.agentId);
+    }
+    this.sessionId = randomUUID();
+    this.hasStartedSession = false;
+    this.saveSessionId();
+    const resultMessage = '✅ 上下文已清除，开始新的对话';
+    await emit(resultMessage, originalMessageId);
+    return resultMessage;
+  }
+
+  private async runQuery(
+    fullMessage: string,
+    attachments: AttachmentData[] | undefined,
+    signal: AbortSignal | undefined,
+    abortController: AbortController,
+  ): Promise<TokenUsage | undefined> {
+    const env = this.buildEnv();
+    const maxTurns = getClaudeMaxTurns();
+    const thinking = getClaudeThinkingOptions(this.llmProvider);
+    this.lastClaudeStderr = '';
+    this.logQueryStart(env);
+    const q = query({
+      prompt: this.buildPrompt(fullMessage, attachments),
+      options: {
+        cwd: this.workDir,
+        env,
+        model: this.llmProvider?.model,
+        includePartialMessages: true,
+        maxTurns,
+        thinking,
+        permissionMode: 'bypassPermissions',
+        allowDangerouslySkipPermissions: true,
+        settingSources: ['user', 'project', 'local'],
+        hooks: this.buildHooks(),
+        sessionId: this.hasStartedSession ? undefined : this.sessionId,
+        resume: this.hasStartedSession ? this.sessionId : undefined,
+        abortController,
+        pathToClaudeCodeExecutable: this.claudeCodeExecutable,
+        stderr: (chunk: string) => {
+          for (const line of chunk.split(/\r?\n/)) {
+            if (line.trim()) {
+              this.lastClaudeStderr = `${this.lastClaudeStderr}\n${line}`.slice(-4000);
+              console.error(`[ClaudeSDK stderr][${this.name}] ${line}`);
+            }
+          }
+        },
+      },
+    });
+
+    let tokenUsage: TokenUsage | undefined;
+    const iterator = q[Symbol.asyncIterator]();
+    const idleFinishMs = getBackgroundIdleFinishMs();
+
+    while (true) {
+      if (signal?.aborted) {
+        throw new DOMException('执行已被用户中断', 'AbortError');
+      }
+
+      const nextMessage = iterator.next();
+      const result = this.hasBackgroundedLongRunningCommand && this.content.trim()
+        ? await Promise.race([
+            nextMessage,
+            new Promise<{ done: true; value: undefined; timedOut: true }>((resolve) => {
+              setTimeout(() => resolve({ done: true, value: undefined, timedOut: true }), idleFinishMs);
+            }),
+          ])
+        : await nextMessage;
+
+      if ('timedOut' in result) {
+        nextMessage.catch(() => undefined);
+        console.warn(`${this.name}: Claude SDK 后台任务空闲 ${idleFinishMs}ms，主动结束本轮对话`);
+        abortController.abort('background-idle-finish');
+        return tokenUsage;
+      }
+
+      if (result.done) break;
+
+      const sdkMessage = result.value;
+      const usage = this.handleSdkMessage(sdkMessage);
+      if (usage) tokenUsage = usage;
+    }
+    return tokenUsage;
+  }
+
+  async exec(
+    message: string,
+    emit: MessageEmitCallback,
+    originalMessageId: string,
+    history?: HistoryMessage[],
+    emitStream?: StreamEmitCallback,
+    emitToolCall?: ToolCallEmitCallback,
+    emitThinking?: ThinkingEmitCallback,
+    signal?: AbortSignal,
+    attachments?: AttachmentData[],
+  ): Promise<AgentExecResult> {
+    this.emitStream = emitStream || null;
+    this.emitToolCall = emitToolCall || null;
+    this.emitThinking = emitThinking || null;
+    this.ensureSkillsSymlink();
+    this.resetCollectors();
+
+    const messageWithoutMentions = getMessageWithoutMentions(message);
+    if (messageWithoutMentions.startsWith('/')) {
+      const command = messageWithoutMentions.toLowerCase().trim();
+      if (command === '/clear' || command === '/new') {
+        const resultMessage = await this.handleClearContext(emit, originalMessageId);
+        return { actions: [{ type: 'message', content: resultMessage }] };
+      }
+
+      const unsupportedMessage = `暂不支持当前指令: ${command}`;
+      await emit(unsupportedMessage, originalMessageId);
+      return { actions: [{ type: 'message', content: unsupportedMessage }] };
+    }
+
+    const fullMessage = this.buildFullMessage(message, history);
+    this.lastContext = fullMessage;
+
+    const abortController = new AbortController();
+    this.currentAbortController = abortController;
+    const abort = () => abortController.abort();
+    signal?.addEventListener('abort', abort, { once: true });
+
+    let tokenUsage: TokenUsage | undefined;
+
+    try {
+      if (signal?.aborted) {
+        throw new DOMException('执行已被用户中断', 'AbortError');
+      }
+
+      this.ensureResumableSessionExists();
+      const shouldResume = this.hasStartedSession;
+      try {
+        tokenUsage = await this.runQuery(fullMessage, attachments, signal, abortController);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '';
+        const errorDetails = `${message}\n${this.lastClaudeStderr}`;
+        console.error(`${this.name}: Claude SDK query failed`, {
+          errorName: error instanceof Error ? error.name : undefined,
+          errorMessage: message,
+          stderrTail: this.lastClaudeStderr || undefined,
+          shouldResume,
+          sessionId: this.sessionId,
+          hasStartedSession: this.hasStartedSession,
+          claudeCodeExecutable: this.claudeCodeExecutable,
+          cwd: this.workDir,
+          configDir: this.getClaudeConfigDir(),
+        });
+        if (signal?.aborted) {
+          console.warn(`${this.name}: Claude SDK query 已中止`);
+          throw new DOMException('执行已被用户中断', 'AbortError');
+        }
+
+        const canRetryWithFreshSession = isRecoverableSessionError(errorDetails);
+        if (!canRetryWithFreshSession) {
+          throw error;
+        }
+
+        console.warn(`${this.name}: Claude SDK session 失败，清理 session 后重试一次`);
+        this.resetSession();
+        this.resetCollectors();
+        tokenUsage = await this.runQuery(fullMessage, attachments, signal, abortController);
+      }
+
+      const finalResponse = this.content || 'claude 执行完成';
+      await emit(finalResponse, originalMessageId);
+      this.lastResponse = finalResponse;
+      this.lastInvokeResult = JSON.stringify(
+        {
+          toolCalls: this.toolCalls,
+          responseLength: finalResponse.length,
+          thinking: this.thinking ? { content: this.thinking, timestamp: Date.now() } : undefined,
+          sessionId: this.sessionId,
+        },
+        null,
+        2,
+      );
+
+      return {
+        actions: [{ type: 'message', content: finalResponse }],
+        tokenUsage,
+      };
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.warn(`${this.name}: Claude SDK query 已中止，重置 session 供下一轮使用`);
+        this.resetSession();
+        throw error;
+      }
+      console.error(`${this.name}: claude sdk 执行失败`, error);
+      const errorMessage = error instanceof Error ? error.message : '未知错误';
+      await emit(`claude 执行出错: ${errorMessage}`, originalMessageId);
+      throw error;
+    } finally {
+      signal?.removeEventListener('abort', abort);
+      if (this.currentAbortController === abortController) {
+        this.currentAbortController = null;
+      }
+      this.emitStream = null;
+      this.emitToolCall = null;
+      this.emitThinking = null;
+    }
+  }
+
+  getDebugInfo(): AgentDebugInfo {
+    return {
+      name: this.name,
+      type: 'acp',
+      systemPrompt: this.systemPrompt,
+      chatRoomId: this.chatRoomId,
+      acpTool: 'claude',
+      workDir: this.workDir,
+      injectGroupHistory: this.injectGroupHistory,
+      lastContext: this.lastContext,
+      lastInvokeResult: this.lastInvokeResult,
+      lastResponse: this.lastResponse,
+      lastHistory: null,
+      agentId: this.agentId,
+      chatRoomAgents: this.chatRoomAgents,
+      llmProvider: this.acpProviderInfo || (this.llmProvider
+        ? {
+            id: this.llmProvider.id,
+            name: this.llmProvider.name,
+            type: this.llmProvider.type,
+            model: this.llmProvider.model,
+          }
+        : undefined),
+    };
+  }
+
+  async cleanup(): Promise<void> {
+    this.currentAbortController?.abort();
+    this.currentAbortController = null;
+    this.resetSession();
+  }
+}

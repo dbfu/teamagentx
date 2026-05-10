@@ -1,0 +1,1089 @@
+import fs from 'fs';
+import { FastifyInstance } from 'fastify';
+import { Server } from 'socket.io';
+import { chatRoomService } from '../modules/chatroom/chatroom.service.js';
+import { checkpointService } from '../modules/checkpoint/checkpoint.service.js';
+import { quickChatSessionService } from '../modules/quick-chat-session/quick-chat-session.service.js';
+import { clearExecutorCache, getAgentDebugInfo, executorCache, getCacheKey } from '../core/agent/agent-handler/index.js';
+import { agentService } from '../core/agent/agent.service.js';
+import { executionRecordService } from '../modules/execution-record/execution-record.service.js';
+import { taskQueueService } from '../modules/task-queue/task-queue.service.js';
+import { messageService } from '../modules/message/message.service.js';
+import { agentMemoryService } from '../modules/agent-memory/agent-memory.service.js';
+
+// Schema definitions
+const lastMessageSchema = {
+  type: 'object',
+  nullable: true,
+  properties: {
+    id: { type: 'string' },
+    content: { type: 'string' },
+    time: { type: 'string' },
+    isHuman: { type: 'boolean' },
+    userId: { type: 'string', nullable: true },
+    agentId: { type: 'string', nullable: true },
+    user: {
+      type: 'object',
+      nullable: true,
+      properties: {
+        id: { type: 'string' },
+        username: { type: 'string' },
+      },
+    },
+    agent: {
+      type: 'object',
+      nullable: true,
+      properties: {
+        id: { type: 'string' },
+        name: { type: 'string' },
+      },
+    },
+  },
+};
+
+const chatRoomSchema = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    name: { type: 'string' },
+    avatar: { type: 'string', nullable: true },
+    avatarColor: { type: 'string', nullable: true },
+    description: { type: 'string', nullable: true },
+    rules: { type: 'string', nullable: true },
+    workDir: { type: 'string', nullable: true },
+    ownerId: { type: 'string', nullable: true },
+    isQuickChatRoom: { type: 'boolean' },
+    quickChatAgentId: { type: 'string', nullable: true },
+    defaultAgentId: { type: 'string', nullable: true },
+    agentTriggerMode: { type: 'string' },
+    isPinned: { type: 'boolean' },
+    pinnedAt: { type: 'string', nullable: true },
+    createdAt: { type: 'string' },
+    updatedAt: { type: 'string' },
+    lastMessage: lastMessageSchema,
+    owner: {
+      type: 'object',
+      nullable: true,
+      properties: {
+        id: { type: 'string' },
+        username: { type: 'string' },
+        avatar: { type: 'string', nullable: true },
+        avatarColor: { type: 'string', nullable: true },
+      },
+    },
+    chatRoomAgents: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          userId: { type: 'string', nullable: true },
+          agentId: { type: 'string', nullable: true },
+          role: { type: 'string' },
+          injectGroupHistory: { type: 'boolean' },
+          joinedAt: { type: 'string' },
+          user: {
+            type: 'object',
+            nullable: true,
+            properties: {
+              id: { type: 'string' },
+              username: { type: 'string' },
+              avatar: { type: 'string', nullable: true },
+              avatarColor: { type: 'string', nullable: true },
+            },
+          },
+          agent: {
+            type: 'object',
+            nullable: true,
+            properties: {
+              id: { type: 'string' },
+              name: { type: 'string' },
+              avatar: { type: 'string', nullable: true },
+              avatarColor: { type: 'string', nullable: true },
+              description: { type: 'string', nullable: true },
+              type: { type: 'string', enum: ['builtin', 'acp'] },
+              agentLevel: { type: 'string', enum: ['normal', 'system'] },
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
+const createChatRoomBodySchema = {
+  type: 'object',
+  required: ['name'],
+  properties: {
+    name: { type: 'string', description: '群聊名称' },
+    avatar: { type: 'string', description: '头像图标（emoji 或 URL）' },
+    avatarColor: { type: 'string', description: '头像背景颜色（如 #1890ff）' },
+    description: { type: 'string', description: '群聊描述' },
+    rules: { type: 'string', description: '群规则/指南，注入到群内所有 Agent 的上下文' },
+    workDir: { type: 'string', nullable: true, description: '群聊工作目录，留空使用默认目录' },
+    ownerId: { type: 'string', description: 'Owner user ID' },
+  },
+};
+
+const addAgentBodySchema = {
+  type: 'object',
+  properties: {
+    userId: { type: 'string', description: '要添加的用户 ID' },
+    agentId: { type: 'string', description: '要添加的助手 ID' },
+    role: { type: 'string', enum: ['OWNER', 'ADMIN', 'MEMBER'], description: '成员角色' },
+    injectGroupHistory: { type: 'boolean', description: '是否注入群历史消息作为上下文' },
+  },
+};
+
+interface CreateChatRoomBody {
+  name: string;
+  avatar?: string;
+  avatarColor?: string;
+  description?: string;
+  workDir?: string | null;
+  ownerId?: string;
+}
+
+interface UpdateChatRoomBody {
+  name?: string;
+  avatar?: string;
+  avatarColor?: string;
+  description?: string;
+  rules?: string;
+  workDir?: string | null;
+  defaultAgentId?: string | null;
+  agentTriggerMode?: 'auto' | 'manual';
+}
+
+interface AddAgentBody {
+  userId?: string;
+  agentId?: string;
+  role?: string;
+  injectGroupHistory?: boolean;
+}
+
+interface ChatRoomParams {
+  id: string;
+}
+
+interface AgentParams {
+  id: string;
+  agentId: string;
+}
+
+export async function chatRoomGateway(app: FastifyInstance) {
+  // Get all chatRooms
+  app.get('/chatrooms', {
+    schema: {
+      description: '获取所有群聊列表',
+      tags: ['ChatRooms'],
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: { type: 'array', items: chatRoomSchema },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const chatRooms = await chatRoomService.findAll();
+    return reply.send({ success: true, data: chatRooms });
+  });
+
+  // Get chatRoom by ID
+  app.get<{ Params: ChatRoomParams }>('/chatrooms/:id', {
+    schema: {
+      description: '根据 ID 获取群聊',
+      tags: ['ChatRooms'],
+      params: {
+        type: 'object',
+        properties: { id: { type: 'string' } },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: chatRoomSchema,
+          },
+        },
+        404: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const chatRoom = await chatRoomService.findById(id);
+
+    if (!chatRoom) {
+      return reply.code(404).send({ success: false, error: '群聊不存在' });
+    }
+
+    return reply.send({ success: true, data: chatRoom });
+  });
+
+  // Create chatRoom
+  app.post<{ Body: CreateChatRoomBody }>('/chatrooms', {
+    schema: {
+      description: '创建新群聊',
+      tags: ['ChatRooms'],
+      body: createChatRoomBodySchema,
+      response: {
+        201: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: chatRoomSchema,
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { name, avatar, avatarColor, description, workDir, ownerId } = request.body;
+
+    // If ownerId is provided, use createWithOwner to auto-add OWNER agent
+    const chatRoom = ownerId
+      ? await chatRoomService.createWithOwner({
+          name,
+          avatar,
+          avatarColor,
+          description,
+          workDir,
+          ownerId,
+        })
+      : await chatRoomService.create({
+          name,
+          avatar,
+          avatarColor,
+          description,
+          workDir,
+        });
+
+    // 广播给所有已连接客户端（通知其他端有新群聊创建）
+    const io = (app as any).io as Server;
+    if (io) {
+      io.emit('chatroom:created', { chatRoom });
+    }
+
+    return reply.code(201).send({ success: true, data: chatRoom });
+  });
+
+  // Add agent to chatRoom
+  app.post<{ Params: ChatRoomParams; Body: AddAgentBody }>('/chatrooms/:id/agents', {
+    schema: {
+      description: '添加助手到群聊',
+      tags: ['ChatRooms'],
+      params: {
+        type: 'object',
+        properties: { id: { type: 'string' } },
+      },
+      body: addAgentBodySchema,
+      response: {
+        201: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                chatRoomId: { type: 'string' },
+                userId: { type: 'string', nullable: true },
+                agentId: { type: 'string', nullable: true },
+                role: { type: 'string' },
+                joinedAt: { type: 'string' },
+              },
+            },
+          },
+        },
+        400: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const { userId, agentId, role, injectGroupHistory } = request.body;
+
+    try {
+      const agent = await chatRoomService.addAgent({
+        chatRoomId: id,
+        userId,
+        agentId,
+        role,
+        injectGroupHistory,
+      });
+
+      return reply.code(201).send({ success: true, data: agent });
+    } catch (error: any) {
+      return reply.code(400).send({ success: false, error: error.message });
+    }
+  });
+
+  // Remove agent from chatRoom
+  app.delete<{ Params: AgentParams }>('/chatrooms/:id/agents/:agentId', {
+    schema: {
+      description: '从群聊移除助手',
+      tags: ['ChatRooms'],
+      params: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          agentId: { type: 'string' },
+        },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+          },
+        },
+        404: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { agentId } = request.params;
+
+    try {
+      await chatRoomService.removeAgent(agentId);
+      return reply.send({ success: true });
+    } catch (error: any) {
+      if (error.code === 'P2025') {
+        return reply.code(404).send({ success: false, error: '助手不存在' });
+      }
+      throw error;
+    }
+  });
+
+  // Update agent settings in chatRoom
+  app.patch<{ Params: AgentParams; Body: { injectGroupHistory?: boolean } }>('/chatrooms/:id/agents/:agentId/settings', {
+    schema: {
+      description: '更新群聊中助手的设置（注入群历史）',
+      tags: ['ChatRooms'],
+      params: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          agentId: { type: 'string' },
+        },
+      },
+      body: {
+        type: 'object',
+        properties: {
+          injectGroupHistory: { type: 'boolean', description: '是否注入群历史' },
+        },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                chatRoomId: { type: 'string' },
+                agentId: { type: 'string', nullable: true },
+                injectGroupHistory: { type: 'boolean' },
+              },
+            },
+          },
+        },
+        404: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id, agentId } = request.params;
+    const data = request.body;
+
+    try {
+      const result = await chatRoomService.updateAgentSettings(id, agentId, data);
+      if (result.agent?.name) {
+        clearExecutorCache(result.agent.name, id);
+      }
+      return reply.send({ success: true, data: result });
+    } catch (error: any) {
+      if (error.message.includes('not found')) {
+        return reply.code(404).send({ success: false, error: error.message });
+      }
+      throw error;
+    }
+  });
+
+  // Clear agent context in chatRoom
+  app.post<{ Params: AgentParams }>('/chatrooms/:id/agents/:agentId/clear-context', {
+    schema: {
+      description: '清空群聊中助手的对话上下文',
+      tags: ['ChatRooms'],
+      params: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: '群聊 ID' },
+          agentId: { type: 'string', description: '群聊助手关系 ID (ChatRoomAgent.id)' },
+        },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            message: { type: 'string' },
+          },
+        },
+        404: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id, agentId } = request.params;
+
+    try {
+      // 获取 ChatRoomAgent 信息
+      const chatRoomAgent = await chatRoomService.findAgentById(agentId);
+      if (!chatRoomAgent) {
+        return reply.code(404).send({ success: false, error: '助手不存在' });
+      }
+
+      // 获取 Agent 信息
+      const agent = await agentService.findById(chatRoomAgent.agentId ?? '');
+      if (!agent) {
+        return reply.code(404).send({ success: false, error: '助手不存在' });
+      }
+
+      // 根据助手类型清空上下文
+      await agentMemoryService.clear(id, agent.id);
+      if (agent.type === 'builtin') {
+        // LangChain 助手：清空 checkpoint 数据
+        await checkpointService.clearChatRoomAgentContext(id, agent.name);
+        // 清空执行器缓存（传入 chatRoomId 精确删除）
+        clearExecutorCache(agent.name, id);
+      } else if (agent.type === 'acp') {
+        // ACP 助手：使用软关闭方案清除上下文
+        // 1. 找到并关闭缓存的 executor 实例
+        for (const [cacheKey, executor] of executorCache.entries()) {
+          // 匹配：{chatRoomId}_{agentName} 或 {chatRoomId}_{agentName}_{sessionDir}
+          if (cacheKey.startsWith(`${id}_`) && cacheKey.includes(`_${agent.name}`)) {
+            console.log(`[ClearContext] 找到 executor: ${cacheKey}`);
+
+            // 调用 cleanup 方法正确关闭会话（如果存在）
+            if (executor.cleanup) {
+              try {
+                console.log(`[ClearContext] 调用 cleanup() 关闭 ACP 会话...`);
+                await executor.cleanup();
+                console.log(`[ClearContext] ACP 会话已软关闭`);
+              } catch (cleanupError) {
+                console.warn(`[ClearContext] cleanup() 失败（可能会话已结束）:`, cleanupError);
+              }
+            }
+          }
+        }
+
+        // 2. 清空执行器缓存（传入 chatRoomId 精确删除，包括快速对话的缓存）
+        clearExecutorCache(agent.name, id);
+
+        // 3. 将历史注入位置推进到当前最新消息，避免清空上下文后再次全量注入旧群聊历史
+        const latestMessages = await messageService.findByChatRoomId(id, { take: 1, order: 'desc' });
+        await chatRoomService.updateLastInjectedMessageId(
+          id,
+          agent.id ?? '',
+          latestMessages[0]?.id ?? null,
+        );
+      }
+
+      return reply.send({
+        success: true,
+        message: `已清空群聊中助手 ${agent.name} 的对话上下文`,
+      });
+    } catch (error: any) {
+      console.error('[ClearContext] 清空上下文失败:', error);
+      return reply.code(500).send({
+        success: false,
+        error: '清空上下文失败',
+      });
+    }
+  });
+
+  // Get agent context in chatRoom
+  app.get<{ Params: AgentParams }>('/chatrooms/:id/agents/:agentId/context', {
+    schema: {
+      description: '获取群聊中助手的对话上下文信息',
+      tags: ['ChatRooms'],
+      params: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: '群聊 ID' },
+          agentId: { type: 'string', description: '群聊助手关系 ID (ChatRoomAgent.id)' },
+        },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: {
+              type: 'object',
+              properties: {
+                agentName: { type: 'string' },
+                agentType: { type: 'string' },
+                latestExecution: {
+                  type: 'object',
+                  nullable: true,
+                  properties: {
+                    context: { type: 'string', nullable: true },
+                    systemPrompt: { type: 'string' },
+                    thinking: { type: 'string', nullable: true },
+                    toolCalls: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          name: { type: 'string' },
+                          input: { type: 'object' },
+                          toolCallId: { type: 'string', nullable: true },
+                          status: { type: 'string', nullable: true },
+                          output: { type: 'string', nullable: true },
+                        },
+                      },
+                    },
+                    triggerMessage: { type: 'string' },
+                    triggerUser: { type: 'string', nullable: true },
+                    duration: { type: 'integer', nullable: true },
+                    createdAt: { type: 'string' },
+                  },
+                },
+                checkpointStats: {
+                  type: 'object',
+                  properties: {
+                    count: { type: 'integer' },
+                    threadId: { type: 'string' },
+                  },
+                },
+                realtimeInfo: {
+                  type: 'object',
+                  nullable: true,
+                  properties: {
+                    threadId: { type: 'string' },
+                    injectGroupHistory: { type: 'boolean' },
+                    chatRoomAgents: {
+                      type: 'array',
+                      items: { type: 'string' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        404: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id, agentId } = request.params;
+
+    try {
+      // 获取 ChatRoomAgent 信息
+      const chatRoomAgent = await chatRoomService.findAgentById(agentId);
+      if (!chatRoomAgent) {
+        return reply.code(404).send({ success: false, error: '助手不存在' });
+      }
+
+      // 获取 Agent 信息
+      const agent = await agentService.findById(chatRoomAgent.agentId ?? '');
+      if (!agent) {
+        return reply.code(404).send({ success: false, error: '助手不存在' });
+      }
+
+      // 获取最近一次执行记录（持久化数据）
+      const latestExecution = await executionRecordService.findLatest(id, agent.id);
+
+      const threadId = getCacheKey(id, agent.name);
+
+      // 获取 checkpoint 统计
+      const checkpointStats = await checkpointService.getCheckpointStats(threadId);
+
+      // 获取 checkpoint 消息历史
+      const checkpointMessages = await checkpointService.getCheckpointMessages(threadId);
+
+      // 尝试获取实时信息（如果内存中有 executor）
+      const realtimeDebugInfo = getAgentDebugInfo(id, agent.name);
+
+      const result = {
+        agentName: agent.name,
+        agentType: agent.type,
+        latestExecution: latestExecution ? {
+          context: latestExecution.context,
+          systemPrompt: latestExecution.systemPrompt,
+          thinking: latestExecution.thinking,
+          toolCalls: latestExecution.toolCalls,
+          triggerMessage: latestExecution.triggerMessage,
+          triggerUser: latestExecution.triggerUser,
+          duration: latestExecution.duration,
+          createdAt: latestExecution.createdAt,
+        } : null,
+        checkpointStats: {
+          count: checkpointStats.count,
+          threadId: checkpointStats.threadId,
+        },
+        checkpointMessages,
+        realtimeInfo: realtimeDebugInfo ? {
+          threadId: realtimeDebugInfo.threadId,
+          injectGroupHistory: realtimeDebugInfo.injectGroupHistory,
+          chatRoomAgents: realtimeDebugInfo.chatRoomAgents,
+        } : null,
+      };
+
+      return reply.send({ success: true, data: result });
+    } catch (error: any) {
+      console.error('[GetContext] 获取上下文失败:', error);
+      return reply.code(500).send({
+        success: false,
+        error: '获取上下文失败',
+      });
+    }
+  });
+
+  // Get agent task queue in chatRoom
+  app.get<{ Params: { id: string; agentId: string } }>('/chatrooms/:id/agents/:agentId/tasks', {
+    schema: {
+      description: '获取群聊中助手的任务队列',
+      tags: ['ChatRooms'],
+      params: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: '群聊 ID' },
+          agentId: { type: 'string', description: '助手 ID' },
+        },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string' },
+                  messageId: { type: 'string' },
+                  messageContent: { type: 'string' },
+                  createdAt: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id, agentId } = request.params;
+
+    try {
+      const tasks = await taskQueueService.getAgentQueue(id, agentId);
+
+      // 只返回必要的信息
+      const result = tasks.map(task => ({
+        id: task.id,
+        messageId: task.messageId,
+        messageContent: task.messageContent,
+        createdAt: task.createdAt,
+      }));
+
+      return reply.send({ success: true, data: result });
+    } catch (error: any) {
+      console.error('[GetTasks] 获取任务队列失败:', error);
+      return reply.code(500).send({
+        success: false,
+        error: '获取任务队列失败',
+      });
+    }
+  });
+
+  // Get all assistant tasks in chatRoom as a board
+  app.get<{ Params: { id: string }; Querystring: { take?: number } }>('/chatrooms/:id/tasks/board', {
+    schema: {
+      description: '获取群聊中所有助手的任务看板',
+      tags: ['ChatRooms'],
+      params: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: '群聊 ID' },
+        },
+      },
+      querystring: {
+        type: 'object',
+        properties: {
+          take: { type: 'integer', default: 50, description: '已完成任务返回数量' },
+        },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: {
+              type: 'object',
+              properties: {
+                completed: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      id: { type: 'string' },
+                      kind: { type: 'string' },
+                      agentId: { type: 'string' },
+                      agentName: { type: 'string' },
+                      messageId: { type: 'string', nullable: true },
+                      messageContent: { type: 'string' },
+                      status: { type: 'string' },
+                      createdAt: { type: 'string' },
+                      duration: { type: 'integer', nullable: true },
+                      errorMessage: { type: 'string', nullable: true },
+                      executionRecordId: { type: 'string', nullable: true },
+                    },
+                  },
+                },
+                failed: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      id: { type: 'string' },
+                      kind: { type: 'string' },
+                      agentId: { type: 'string' },
+                      agentName: { type: 'string' },
+                      messageId: { type: 'string', nullable: true },
+                      messageContent: { type: 'string' },
+                      status: { type: 'string' },
+                      createdAt: { type: 'string' },
+                      duration: { type: 'integer', nullable: true },
+                      errorMessage: { type: 'string', nullable: true },
+                      executionRecordId: { type: 'string', nullable: true },
+                    },
+                  },
+                },
+                executing: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      id: { type: 'string' },
+                      kind: { type: 'string' },
+                      agentId: { type: 'string' },
+                      agentName: { type: 'string' },
+                      messageId: { type: 'string', nullable: true },
+                      messageContent: { type: 'string' },
+                      status: { type: 'string' },
+                      createdAt: { type: 'string' },
+                    },
+                  },
+                },
+                pending: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      id: { type: 'string' },
+                      kind: { type: 'string' },
+                      agentId: { type: 'string' },
+                      agentName: { type: 'string' },
+                      messageId: { type: 'string', nullable: true },
+                      messageContent: { type: 'string' },
+                      status: { type: 'string' },
+                      createdAt: { type: 'string' },
+                    },
+                  },
+                },
+                cancelled: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      id: { type: 'string' },
+                      kind: { type: 'string' },
+                      agentId: { type: 'string' },
+                      agentName: { type: 'string' },
+                      messageId: { type: 'string', nullable: true },
+                      messageContent: { type: 'string' },
+                      status: { type: 'string' },
+                      createdAt: { type: 'string' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const take = Math.min(Math.max(request.query.take ?? 50, 1), 100);
+
+    try {
+      const [queueTasks, completedRecords] = await Promise.all([
+        taskQueueService.getChatRoomBoardTasks(id),
+        executionRecordService.findByChatRoom(id, { take }),
+      ]);
+
+      const queueItems = queueTasks.map(task => ({
+        id: task.id,
+        kind: 'task',
+        agentId: task.agentId,
+        agentName: task.agentName,
+        messageId: task.messageId,
+        messageContent: task.messageContent,
+        status: task.status,
+        createdAt: task.createdAt.toISOString(),
+      }));
+
+      const completed = completedRecords.map(record => ({
+        id: record.id,
+        kind: 'execution',
+        agentId: record.agentId,
+        agentName: record.agentName,
+        messageId: null,
+        messageContent: record.triggerMessage,
+        status: record.status,
+        createdAt: record.createdAt,
+        duration: record.duration,
+        errorMessage: record.errorMessage,
+        executionRecordId: record.id,
+      }));
+
+      return reply.send({
+        success: true,
+        data: {
+          completed: completed.filter(record => record.status === 'completed'),
+          failed: completed.filter(record => record.status === 'failed'),
+          executing: queueItems.filter(task => task.status === 'executing'),
+          pending: queueItems.filter(task => task.status === 'pending'),
+          cancelled: [
+            ...completed.filter(record => record.status === 'cancelled'),
+            ...queueItems.filter(task => task.status === 'cancelled' || task.status === 'interrupted'),
+          ],
+        },
+      });
+    } catch (error: any) {
+      console.error('[GetTaskBoard] 获取任务看板失败:', error);
+      return reply.code(500).send({
+        success: false,
+        error: '获取任务看板失败',
+      });
+    }
+  });
+
+  // Delete chatRoom
+  app.delete<{ Params: ChatRoomParams }>('/chatrooms/:id', {
+    schema: {
+      description: '删除群聊',
+      tags: ['ChatRooms'],
+      params: {
+        type: 'object',
+        properties: { id: { type: 'string' } },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+          },
+        },
+        404: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params;
+
+    try {
+      await chatRoomService.delete(id);
+      return reply.send({ success: true });
+    } catch (error: any) {
+      if (error.code === 'P2025') {
+        return reply.code(404).send({ success: false, error: '群聊不存在' });
+      }
+      throw error;
+    }
+  });
+
+  // Update chatRoom
+  app.put<{ Params: ChatRoomParams; Body: UpdateChatRoomBody }>('/chatrooms/:id', {
+    schema: {
+      description: '更新群聊信息',
+      tags: ['ChatRooms'],
+      params: {
+        type: 'object',
+        properties: { id: { type: 'string' } },
+      },
+      body: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          avatar: { type: 'string' },
+          avatarColor: { type: 'string' },
+          description: { type: 'string' },
+          rules: { type: 'string' },
+          workDir: { type: 'string', nullable: true },
+          defaultAgentId: { type: 'string', nullable: true },
+          agentTriggerMode: { type: 'string' },
+        },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: chatRoomSchema,
+          },
+        },
+        404: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const data = request.body;
+
+    try {
+      const chatRoom = await chatRoomService.update(id, data);
+      if (data.workDir !== undefined) {
+        clearExecutorCache(undefined, id);
+      }
+      return reply.send({ success: true, data: chatRoom });
+    } catch (error: any) {
+      if (error.code === 'P2025') {
+        return reply.code(404).send({ success: false, error: '群聊不存在' });
+      }
+      if (error.message === '默认助手不存在或未启用' || error.message === '默认助手必须是群聊成员') {
+        return reply.code(400).send({ success: false, error: error.message });
+      }
+      throw error;
+    }
+  });
+
+  // Pin chatroom
+  app.patch<{ Params: ChatRoomParams }>('/chatrooms/:id/pin', {
+    schema: {
+      description: '置顶群聊',
+      tags: ['ChatRooms'],
+      params: {
+        type: 'object',
+        properties: { id: { type: 'string' } },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: chatRoomSchema,
+          },
+        },
+        404: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params;
+
+    try {
+      const chatRoom = await chatRoomService.pin(id);
+      return reply.send({ success: true, data: chatRoom });
+    } catch (error: any) {
+      if (error.code === 'P2025') {
+        return reply.code(404).send({ success: false, error: '群聊不存在' });
+      }
+      throw error;
+    }
+  });
+
+  // Unpin chatroom
+  app.patch<{ Params: ChatRoomParams }>('/chatrooms/:id/unpin', {
+    schema: {
+      description: '取消置顶群聊',
+      tags: ['ChatRooms'],
+      params: {
+        type: 'object',
+        properties: { id: { type: 'string' } },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: chatRoomSchema,
+          },
+        },
+        404: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params;
+
+    try {
+      const chatRoom = await chatRoomService.unpin(id);
+      return reply.send({ success: true, data: chatRoom });
+    } catch (error: any) {
+      if (error.code === 'P2025') {
+        return reply.code(404).send({ success: false, error: '群聊不存在' });
+      }
+      throw error;
+    }
+  });
+}

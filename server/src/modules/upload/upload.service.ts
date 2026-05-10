@@ -1,0 +1,103 @@
+import path from 'path';
+import fs from 'fs/promises';
+import { v4 as uuidv4 } from 'uuid';
+import type { FastifyRequest } from 'fastify';
+import type { MultipartFile } from '@fastify/multipart';
+
+// Electron 打包时使用环境变量指定的路径，否则使用 cwd/uploads
+const UPLOAD_DIR = process.env.UPLOADS_DIR || path.join(process.cwd(), 'uploads', 'images');
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+
+// MIME 类型到扩展名的映射
+const MIME_TO_EXT: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+};
+
+interface UploadResult {
+  filename: string;  // 原始文件名
+  mimeType: string;
+  size: number;
+  url: string;
+  width?: number;
+  height?: number;
+}
+
+export const uploadService = {
+  /**
+   * 初始化上传目录
+   */
+  async init() {
+    await fs.mkdir(UPLOAD_DIR, { recursive: true });
+  },
+
+  /**
+   * 处理上传的图片文件
+   */
+  async processImage(file: Awaited<ReturnType<FastifyRequest['file']>>): Promise<UploadResult> {
+    if (!file) {
+      throw new Error('未提供文件');
+    }
+
+    // 验证 MIME 类型
+    if (!ALLOWED_MIME_TYPES.includes(file.mimetype)) {
+      throw new Error(`不支持的文件类型: ${file.mimetype}`);
+    }
+
+    // 读取文件内容
+    const buffer = await file.toBuffer();
+
+    // 验证文件大小
+    if (buffer.length > MAX_FILE_SIZE) {
+      throw new Error(`文件大小超出限制: ${buffer.length} > ${MAX_FILE_SIZE}`);
+    }
+
+    // 生成唯一文件名（使用 MIME 类型推断扩展名）
+    const ext = MIME_TO_EXT[file.mimetype] || 'png';
+    const id = uuidv4();
+    const filename = `${id}.${ext}`;
+
+    // 保存文件
+    await fs.writeFile(path.join(UPLOAD_DIR, filename), buffer);
+
+    return {
+      filename: file.filename, // 原始文件名
+      mimeType: file.mimetype,
+      size: buffer.length,
+      url: `/uploads/images/${filename}`,
+    };
+  },
+
+  /**
+   * 批量处理图片
+   */
+  async processImages(files: AsyncIterableIterator<MultipartFile>): Promise<UploadResult[]> {
+    const results: UploadResult[] = [];
+
+    for await (const file of files) {
+      const result = await uploadService.processImage(file as any);
+      results.push(result);
+    }
+
+    return results;
+  },
+
+  /**
+   * 删除图片文件
+   */
+  async deleteImage(url: string) {
+    const filename = path.basename(url);
+    const filepath = path.join(UPLOAD_DIR, filename);
+
+    // 安全检查：确保路径在允许的目录内
+    const resolvedPath = path.resolve(filepath);
+    if (!resolvedPath.startsWith(path.resolve(UPLOAD_DIR))) {
+      throw new Error('非法路径');
+    }
+
+    await fs.unlink(filepath).catch(() => {});
+  },
+};

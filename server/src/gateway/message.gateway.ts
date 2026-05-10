@@ -1,0 +1,289 @@
+import { FastifyInstance } from 'fastify';
+import { messageService } from '../modules/message/message.service.js';
+import { executionRecordService } from '../modules/execution-record/execution-record.service.js';
+import { checkpointService } from '../modules/checkpoint/checkpoint.service.js';
+import { taskQueueService } from '../modules/task-queue/task-queue.service.js';
+import { abortControllers, processingMap } from '../core/agent/agent-handler/cache.js';
+import { clearExecutorCache, executorCache } from '../core/agent/agent-handler/index.js';
+import { chatRoomService } from '../modules/chatroom/chatroom.service.js';
+import prisma from '../lib/prisma.js';
+
+const messageSchema = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    type: { type: 'string', enum: ['MESSAGE', 'REPLY'] },
+    content: { type: 'string' },
+    time: { type: 'string' },
+    userId: { type: 'string', nullable: true },
+    agentId: { type: 'string', nullable: true },
+    chatRoomId: { type: 'string' },
+    replyMessageId: { type: 'string', nullable: true },
+    isHuman: { type: 'boolean' },
+    executionRecordId: { type: 'string', nullable: true },
+    executionDuration: { type: 'integer', nullable: true },
+    totalTokens: { type: 'integer', nullable: true },
+    cacheReadTokens: { type: 'integer', nullable: true },
+    createdAt: { type: 'string' },
+    updatedAt: { type: 'string' },
+    user: {
+      type: 'object',
+      nullable: true,
+      properties: {
+        id: { type: 'string' },
+        socketId: { type: 'string' },
+        username: { type: 'string' },
+      },
+    },
+    agent: {
+      type: 'object',
+      nullable: true,
+      properties: {
+        id: { type: 'string' },
+        name: { type: 'string' },
+        avatar: { type: 'string', nullable: true },
+        avatarColor: { type: 'string', nullable: true },
+      },
+    },
+  },
+};
+
+interface MessageQuery {
+  chatRoomId?: string;
+}
+
+export async function messageGateway(app: FastifyInstance) {
+  // Get messages - optionally filtered by chatRoom
+  app.get<{ Querystring: MessageQuery }>('/messages', {
+    schema: {
+      description: '获取消息列表（可选按群聊筛选）',
+      tags: ['Messages'],
+      querystring: {
+        type: 'object',
+        properties: {
+          chatRoomId: { type: 'string', description: 'Filter by chatRoom ID' },
+        },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: { type: 'array', items: messageSchema },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { chatRoomId } = request.query;
+
+    if (chatRoomId) {
+      const messages = await messageService.findByChatRoomId(chatRoomId, { take: 100 });
+      return reply.send({ success: true, data: messages });
+    }
+
+    const messages = await messageService.findMany({ take: 100 });
+    return reply.send({ success: true, data: messages });
+  });
+
+  // Get single message by ID
+  app.get<{ Params: { id: string } }>('/messages/:id', {
+    schema: {
+      description: '根据 ID 获取单条消息',
+      tags: ['Messages'],
+      params: {
+        type: 'object',
+        properties: { id: { type: 'string' } },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: messageSchema,
+          },
+        },
+        404: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const message = await messageService.findById(id);
+
+    if (!message) {
+      return reply.code(404).send({ success: false, error: '消息不存在' });
+    }
+
+    return reply.send({ success: true, data: message });
+  });
+
+  // Get execution record for a message
+  app.get<{ Params: { id: string } }>('/messages/:id/execution', {
+    schema: {
+      description: '获取消息关联的执行记录',
+      tags: ['Messages'],
+      params: {
+        type: 'object',
+        properties: { id: { type: 'string' } },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: { type: 'object', nullable: true, additionalProperties: true },
+          },
+        },
+        404: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const message = await messageService.findById(id);
+
+    if (!message) {
+      return reply.code(404).send({ success: false, error: '消息不存在' });
+    }
+
+    if (!message.executionRecordId) {
+      return reply.code(404).send({ success: false, error: '该消息无执行记录' });
+    }
+
+    const executionRecord = await executionRecordService.findById(message.executionRecordId);
+    if (!executionRecord) {
+      return reply.code(404).send({ success: false, error: '执行记录不存在' });
+    }
+
+    return reply.send({ success: true, data: executionRecord });
+  });
+
+  // Clear all messages in a chatRoom
+  app.delete<{ Params: { chatRoomId: string } }>('/messages/chatroom/:chatRoomId', {
+    schema: {
+      description: '清空群聊中的所有消息',
+      tags: ['Messages'],
+      params: {
+        type: 'object',
+        properties: { chatRoomId: { type: 'string' } },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { chatRoomId } = request.params;
+
+    // 1. 中止群内所有正在执行的任务
+    let abortedCount = 0;
+    for (const [key, controller] of abortControllers) {
+      if (key.startsWith(`${chatRoomId}_`)) {
+        controller.abort();
+        abortControllers.delete(key);
+        abortedCount++;
+      }
+    }
+    // 清理群聊的 processing 状态
+    for (const [key] of processingMap) {
+      if (key.startsWith(`${chatRoomId}_`)) {
+        processingMap.delete(key);
+      }
+    }
+    if (abortedCount > 0) {
+      console.log(`[MessageGateway] 已中止群聊 ${chatRoomId} 中 ${abortedCount} 个正在执行的任务`);
+    }
+
+    // 2. 删除群聊的所有待处理任务
+    await taskQueueService.deleteByChatRoomId(chatRoomId);
+
+    // 3. 同时清空群聊中所有助手的上下文
+    try {
+      // 获取群聊中的所有助手
+      const chatRoomAgents = await prisma.chatRoomAgent.findMany({
+        where: { chatRoomId },
+        include: {
+          agent: { select: { id: true, name: true, type: true } },
+        },
+      });
+
+      // 为每个助手清空上下文
+      for (const chatRoomAgent of chatRoomAgents) {
+        if (!chatRoomAgent.agent) continue;
+
+        if (chatRoomAgent.agent.type === 'builtin') {
+          await checkpointService.clearChatRoomAgentContext(
+            chatRoomId,
+            chatRoomAgent.agent.name
+          );
+        } else if (chatRoomAgent.agent.type === 'acp') {
+          for (const [cacheKey, executor] of executorCache.entries()) {
+            if (cacheKey.startsWith(`${chatRoomId}_`) && cacheKey.includes(`_${chatRoomAgent.agent.name}`)) {
+              try {
+                await executor.cleanup?.();
+              } catch (cleanupError) {
+                console.warn(`[MessageGateway] 清理 ACP executor 失败: ${cacheKey}`, cleanupError);
+              }
+            }
+          }
+        }
+
+        clearExecutorCache(chatRoomAgent.agent.name, chatRoomId);
+        await chatRoomService.updateLastInjectedMessageId(chatRoomId, chatRoomAgent.agent.id, null);
+      }
+
+      console.log(`[MessageGateway] 已清空群聊 ${chatRoomId} 的所有助手上下文`);
+    } catch (error) {
+      console.error(`[MessageGateway] 清空助手上下文失败:`, error);
+      // 即使清空上下文失败，消息已清空，仍返回成功
+    }
+
+    // 4. 清空群聊消息
+    await messageService.deleteByChatRoomId(chatRoomId);
+
+    return reply.send({ success: true });
+  });
+
+  // Clear execution records for a chatRoom and agent
+  app.delete<{ Params: { chatRoomId: string; agentId: string } }>('/chatrooms/:chatRoomId/agents/:agentId/executions', {
+    schema: {
+      description: '清除助手在群聊中的所有执行记录',
+      tags: ['ExecutionRecords'],
+      params: {
+        type: 'object',
+        properties: {
+          chatRoomId: { type: 'string' },
+          agentId: { type: 'string' },
+        },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            count: { type: 'integer' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { chatRoomId, agentId } = request.params;
+    const result = await executionRecordService.deleteByChatRoomAndAgent(chatRoomId, agentId);
+    return reply.send({ success: true, count: result.count });
+  });
+}
