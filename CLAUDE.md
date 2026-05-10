@@ -185,7 +185,7 @@ sqlite3 dev.db 'PRAGMA table_info("ChatRoom");'
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **actclaw** (5417 symbols, 9373 relationships, 260 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **teamagentx** (6082 symbols, 11664 relationships, 239 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -208,10 +208,10 @@ This project is indexed by GitNexus as **actclaw** (5417 symbols, 9373 relations
 
 | Resource | Use for |
 |----------|---------|
-| `gitnexus://repo/actclaw/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/actclaw/clusters` | All functional areas |
-| `gitnexus://repo/actclaw/processes` | All execution flows |
-| `gitnexus://repo/actclaw/process/{name}` | Step-by-step execution trace |
+| `gitnexus://repo/teamagentx/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/teamagentx/clusters` | All functional areas |
+| `gitnexus://repo/teamagentx/processes` | All execution flows |
+| `gitnexus://repo/teamagentx/process/{name}` | Step-by-step execution trace |
 
 ## CLI
 
