@@ -143,6 +143,7 @@ interface ChatStore {
   loadExecutionRecords: (chatRoomId: string, agentId: string) => Promise<void>
   loadExecutionDetailByMessage: (messageId: string) => Promise<void>
   loadContextInfo: (chatRoomId: string, chatRoomAgentId: string) => Promise<void>
+  deleteMessage: (messageId: string) => Promise<void>
   clearMessages: (chatRoomId: string) => Promise<void>
   getAvailableAgents: (currentAgentIds: Set<string>) => Agent[]
   getMentionAgents: (chatRoomAgents: ChatRoom['chatRoomAgents']) => MentionAgent[]
@@ -357,6 +358,28 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       console.error('Failed to load context info:', error)
     } finally {
       set({ contextLoading: false })
+    }
+  },
+
+  deleteMessage: async (messageId) => {
+    const message = get().messages.find(m => m.id === messageId)
+    try {
+      const response = await messageApi.delete(messageId)
+      if (!response.success) {
+        throw new Error(response.error || '删除消息失败')
+      }
+      set((state) => ({
+        messages: state.messages
+          .filter(m => m.id !== messageId)
+          .map(m => m.replyMessageId === messageId ? { ...m, replyMessageId: null } : m),
+        selectedReplyMessage: state.selectedReplyMessage?.id === messageId ? null : state.selectedReplyMessage,
+      }))
+      if (message?.chatRoomId) {
+        void useChatRoomStore.getState().loadChatRooms()
+      }
+    } catch (error) {
+      console.error('Failed to delete message:', error)
+      throw error
     }
   },
 
@@ -577,6 +600,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
   const setInactiveTasks = useChatStore((s) => s.setInactiveTasks)
   const loadExecutionDetailByMessage = useChatStore((s) => s.loadExecutionDetailByMessage)
   const loadContextInfo = useChatStore((s) => s.loadContextInfo)
+  const deleteMessage = useChatStore((s) => s.deleteMessage)
 
   const {
     isConnected,
@@ -1458,6 +1482,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     handleKeyDown,
     handleAddAgent,
     handleClearMessages,
+    deleteMessage,
     handleAgentAvatarClick,
     handleTypingAgentClick,
     handleReplyClick,

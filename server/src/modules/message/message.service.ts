@@ -136,6 +136,19 @@ export const messageService = {
     });
   },
 
+  async deleteById(id: string) {
+    return prisma.$transaction(async (tx) => {
+      await tx.message.updateMany({
+        where: { replyMessageId: id },
+        data: { replyMessageId: null },
+      });
+
+      return tx.message.delete({
+        where: { id },
+      });
+    });
+  },
+
   // 批量更新 executionRecordId、executionDuration 和 token 信息
   async updateExecutionRecordId(
     messageIds: string[],

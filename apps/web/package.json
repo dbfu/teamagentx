@@ -64,6 +64,7 @@
     "react-mentions": "^4.4.10",
     "react-resizable-panels": "^2.1.7",
     "react-router-dom": "^7.13.1",
+    "qrcode-generator": "^2.0.4",
     "recharts": "2.15.0",
     "remark-gfm": "^4.0.1",
     "remark-mentions": "^1.1.0",

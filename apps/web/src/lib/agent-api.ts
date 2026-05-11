@@ -571,6 +571,13 @@ export const messageApi = {
     return request<Message>(`/messages/${id}`)
   },
 
+  // 删除单条消息
+  async delete(id: string): Promise<ApiResponse<void>> {
+    return request<void>(`/messages/${id}`, {
+      method: 'DELETE',
+    })
+  },
+
   // 清空群组消息
   async clearByChatRoomId(chatRoomId: string): Promise<ApiResponse<void>> {
     return request<void>(`/messages/chatroom/${chatRoomId}`, {
