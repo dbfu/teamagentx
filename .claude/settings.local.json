@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm --version)",
+      "Bash(pnpm approve-builds *)",
+      "Bash(node install.js)",
+      "Bash(node -e \"require\\('./install'\\).downloadElectron\\(\\)\")",
+      "Bash(./start.sh electron *)",
+      "Bash(/Users/zhangyang/spark_ai_project/teamagentx/start.sh electron *)",
+      "Bash(pnpm add *)",
+      "Bash(pnpm dev *)",
+      "Bash(npx electron *)"
+    ]
+  }
+}

@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "TeamAgentX web client",
+  "main": "../desktop/dist-electron/main.js",
   "author": "TeamAgentX Team",
   "scripts": {
     "dev": "vite --host",
@@ -56,6 +57,7 @@
     "input-otp": "1.4.2",
     "lucide-react": "^0.564.0",
     "mdast-util-find-and-replace": "^3.0.2",
+    "qrcode-generator": "^2.0.4",
     "react": "19.2.4",
     "react-day-picker": "9.13.2",
     "react-dom": "19.2.4",
@@ -65,6 +67,7 @@
     "react-resizable-panels": "^2.1.7",
     "react-router-dom": "^7.13.1",
     "recharts": "2.15.0",
+    "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.1",
     "remark-mentions": "^1.1.0",
     "socket.io-client": "^4.8.3",
