@@ -69,7 +69,7 @@ interface ChatStore {
 
   // Dialog 状态
   showAddAgent: boolean
-  addingAgentId: string | null
+  addingAgentIds: Set<string>
   showClearConfirm: boolean
   clearing: boolean
 
@@ -104,7 +104,7 @@ interface ChatStore {
   addMessage: (message: Message) => void
   setSidePanelMode: (mode: SidePanelMode) => void
   setShowAddAgent: (show: boolean) => void
-  setAddingAgentId: (id: string | null) => void
+  setAddingAgentIds: (ids: Set<string>) => void
   setShowClearConfirm: (show: boolean) => void
   setClearing: (clearing: boolean) => void
   setSelectedRoomAgent: (agent: SelectedRoomAgent | null) => void
@@ -190,7 +190,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
   // Dialog 状态
   showAddAgent: false,
-  addingAgentId: null,
+  addingAgentIds: new Set(),
   showClearConfirm: false,
   clearing: false,
 
@@ -221,7 +221,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   }),
   setSidePanelMode: (mode) => set({ sidePanelMode: mode }),
   setShowAddAgent: (show) => set({ showAddAgent: show }),
-  setAddingAgentId: (id) => set({ addingAgentId: id }),
+  setAddingAgentIds: (ids) => set({ addingAgentIds: ids }),
   setShowClearConfirm: (show) => set({ showClearConfirm: show }),
   setClearing: (clearing) => set({ clearing: clearing }),
   setSelectedRoomAgent: (agent) => set({ selectedRoomAgent: agent }),
@@ -550,7 +550,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
   const selectedRoomAgent = useChatStore((s) => s.selectedRoomAgent)
   const streamingViewAgent = useChatStore((s) => s.streamingViewAgent)
   const showAddAgent = useChatStore((s) => s.showAddAgent)
-  const addingAgentId = useChatStore((s) => s.addingAgentId)
+  const addingAgentIds = useChatStore((s) => s.addingAgentIds)
   const showClearConfirm = useChatStore((s) => s.showClearConfirm)
   const clearing = useChatStore((s) => s.clearing)
   const typingAgents = useChatStore((s) => s.typingAgents)
@@ -571,7 +571,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
   const setInputValue = useChatStore((s) => s.setInputValue)
   const setSidePanelMode = useChatStore((s) => s.setSidePanelMode)
   const setShowAddAgent = useChatStore((s) => s.setShowAddAgent)
-  const setAddingAgentId = useChatStore((s) => s.setAddingAgentId)
+  const setAddingAgentIds = useChatStore((s) => s.setAddingAgentIds)
   const setShowClearConfirm = useChatStore((s) => s.setShowClearConfirm)
   const setSelectedRoomAgent = useChatStore((s) => s.setSelectedRoomAgent)
   const setStreamingViewAgent = useChatStore((s) => s.setStreamingViewAgent)
@@ -1241,23 +1241,26 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     }
   }, [handleSend])
 
-  const handleAddAgent = useCallback(async (agentId: string, settings?: { injectGroupHistory?: boolean }) => {
+  const handleAddAgents = useCallback(async (agentIds: string[]) => {
     if (!chatRoom) return
-    setAddingAgentId(agentId)
+    setAddingAgentIds(new Set(agentIds))
     try {
-      await chatRoomApi.addAgent(chatRoom.id, {
-        agentId,
-        injectGroupHistory: settings?.injectGroupHistory ?? true,
-      })
+      // 依次添加每个助手（默认注入群历史消息）
+      for (const agentId of agentIds) {
+        await chatRoomApi.addAgent(chatRoom.id, {
+          agentId,
+          injectGroupHistory: true,
+        })
+      }
       onChatRoomChange?.()
       loadMessages(chatRoom.id)
     } catch (error) {
-      console.error('Failed to add agent:', error)
+      console.error('Failed to add agents:', error)
     } finally {
-      setAddingAgentId(null)
+      setAddingAgentIds(new Set())
       setShowAddAgent(false)
     }
-  }, [chatRoom, onChatRoomChange, loadMessages, setAddingAgentId, setShowAddAgent])
+  }, [chatRoom, onChatRoomChange, loadMessages, setAddingAgentIds, setShowAddAgent])
 
   const handleClearMessages = useCallback(async () => {
     if (!chatRoom) return
@@ -1470,7 +1473,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     setSelectedReplyMessage,
     showAddAgent,
     setShowAddAgent,
-    addingAgentId,
+    addingAgentIds,
     showClearConfirm,
     setShowClearConfirm,
     clearing,
@@ -1480,7 +1483,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     executingChatRooms,
     handleSend,
     handleKeyDown,
-    handleAddAgent,
+    handleAddAgents,
     handleClearMessages,
     deleteMessage,
     handleAgentAvatarClick,

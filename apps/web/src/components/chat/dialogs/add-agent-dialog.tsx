@@ -1,33 +1,33 @@
 import { Agent } from '@/lib/agent-api'
 import { AgentAvatarImage } from '@/lib/agent-avatars'
-import { Loader2, Folder, FolderOpen, ChevronDown, ChevronRight, X, Search } from 'lucide-react'
+import { Loader2, Folder, FolderOpen, ChevronDown, ChevronRight, X, Search, Check } from 'lucide-react'
 import { useState, useMemo, useEffect } from 'react'
-import { AgentSettingsDialog } from '@/components/chat/dialogs/agent-settings-dialog'
 
 interface AddAgentDialogProps {
   open: boolean
   onClose: () => void
   availableAgents: Agent[]
-  addingAgentId: string | null
-  onAddAgent: (agentId: string, settings: { injectGroupHistory: boolean }) => Promise<void>
+  addingAgentIds: Set<string>
+  onAddAgents: (agentIds: string[]) => Promise<void>
 }
 
 export function AddAgentDialog({
   open,
   onClose,
   availableAgents,
-  addingAgentId,
-  onAddAgent,
+  addingAgentIds,
+  onAddAgents,
 }: AddAgentDialogProps) {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set())
-  const [settingsDialogOpen, setSettingsDialogOpen] = useState(false)
-  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null)
+  const [selectedAgents, setSelectedAgents] = useState<Set<string>>(new Set())
   const [searchQuery, setSearchQuery] = useState('')
+  const [isAdding, setIsAdding] = useState(false)
 
   // 当对话框打开时，重置状态
   useEffect(() => {
     if (open) {
       setSearchQuery('')
+      setSelectedAgents(new Set())
       // 从当前 availableAgents 计算所有分类 ID
       const categoryIds = new Set<string>()
       for (const agent of availableAgents) {
@@ -90,57 +90,84 @@ export function AddAgentDialog({
     })
   }
 
-  // 点击助手，打开设置弹框
-  const handleSelectAgent = (agent: Agent) => {
-    setSelectedAgent(agent)
-    setSettingsDialogOpen(true)
+  // 选择/取消选择助手
+  const toggleAgent = (agentId: string) => {
+    setSelectedAgents((prev) => {
+      const newSet = new Set(prev)
+      if (newSet.has(agentId)) {
+        newSet.delete(agentId)
+      } else {
+        newSet.add(agentId)
+      }
+      return newSet
+    })
   }
 
-  // 保存设置并添加助手
-  const handleSaveSettings = async (settings: { injectGroupHistory: boolean }) => {
-    if (!selectedAgent) return
-    await onAddAgent(selectedAgent.id, settings)
-    setSettingsDialogOpen(false)
+  // 批量添加助手
+  const handleAddAgents = async () => {
+    if (selectedAgents.size === 0) return
+
+    setIsAdding(true)
+    try {
+      await onAddAgents(Array.from(selectedAgents))
+      setSelectedAgents(new Set())
+    } finally {
+      setIsAdding(false)
+    }
   }
 
-  const renderAgent = (agent: Agent) => (
-    <button
-      key={agent.id}
-      className="flex flex-col items-center gap-1.5 rounded-lg p-2 hover:bg-accent disabled:opacity-50 transition-colors"
-      onClick={() => handleSelectAgent(agent)}
-      disabled={addingAgentId === agent.id}
-    >
-      <div className="relative">
-        <AgentAvatarImage avatar={agent.avatar} className="size-10" />
-        {addingAgentId === agent.id && (
-          <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/30">
-            <Loader2 className="size-4 animate-spin text-white" />
-          </div>
-        )}
-      </div>
-      <span className="text-xs text-muted-foreground truncate w-full text-center">{agent.name}</span>
-    </button>
-  )
+  const renderAgent = (agent: Agent) => {
+    const isSelected = selectedAgents.has(agent.id)
+    const isAddingThis = addingAgentIds.has(agent.id)
+
+    return (
+      <button
+        key={agent.id}
+        className={`flex flex-col items-center gap-1.5 rounded-lg p-2 transition-colors ${
+          isSelected
+            ? 'bg-blue-500/20 ring-2 ring-blue-500'
+            : 'hover:bg-accent'
+        } ${isAddingThis || isAdding ? 'opacity-50' : ''}`}
+        onClick={() => toggleAgent(agent.id)}
+        disabled={isAddingThis || isAdding}
+      >
+        <div className="relative">
+          <AgentAvatarImage avatar={agent.avatar} className="size-10" />
+          {/* 选中指示器 */}
+          {isSelected && !isAddingThis && (
+            <div className="absolute -top-1 -right-1 size-5 rounded-full bg-blue-500 flex items-center justify-center">
+              <Check className="size-3 text-white" />
+            </div>
+          )}
+          {/* 加载指示器 */}
+          {isAddingThis && (
+            <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/30">
+              <Loader2 className="size-4 animate-spin text-white" />
+            </div>
+          )}
+        </div>
+        <span className="text-xs text-muted-foreground truncate w-full text-center">{agent.name}</span>
+      </button>
+    )
+  }
 
   if (!open) return null
 
   return (
     <>
-      {/* 设置弹框 */}
-      <AgentSettingsDialog
-        open={settingsDialogOpen}
-        onOpenChange={setSettingsDialogOpen}
-        agent={selectedAgent}
-        onSave={handleSaveSettings}
-        mode="add"
-      />
-
       {/* 选择助手弹框 */}
       <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 py-12">
         <div className="w-[640px] shrink-0 rounded-2xl bg-card shadow-xl">
           {/* Header */}
           <div className="flex items-center justify-between border-b border-border px-6 py-4">
-            <h2 className="text-lg font-semibold text-foreground">添加助手</h2>
+            <h2 className="text-lg font-semibold text-foreground">
+              添加助手
+              {selectedAgents.size > 0 && (
+                <span className="ml-2 text-sm text-muted-foreground">
+                  (已选 {selectedAgents.size} 个)
+                </span>
+              )}
+            </h2>
             <button
               onClick={onClose}
               className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -164,7 +191,7 @@ export function AddAgentDialog({
           </div>
 
           {/* Content */}
-          <div className="max-h-[60vh] overflow-y-auto p-6 scrollbar-thin">
+          <div className="max-h-[50vh] overflow-y-auto p-6 scrollbar-thin">
             {filteredAgents.length === 0 ? (
               <div className="text-sm text-muted-foreground py-4 text-center">
                 {searchQuery.trim() ? '未找到匹配的助手' : '暂无可添加的助手'}
@@ -232,6 +259,23 @@ export function AddAgentDialog({
                 )}
               </div>
             )}
+          </div>
+
+          {/* Footer - 确认按钮 */}
+          <div className="flex items-center justify-between border-t border-border px-6 py-4">
+            <span className="text-sm text-muted-foreground">
+              点击助手卡片可多选，默认注入群历史消息
+            </span>
+            <button
+              onClick={handleAddAgents}
+              disabled={selectedAgents.size === 0 || isAdding}
+              className="flex items-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white shadow-sm transition-all hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isAdding && <Loader2 className="size-4 animate-spin" />}
+              <span>
+                {isAdding ? '添加中...' : `添加 ${selectedAgents.size > 0 ? `(${selectedAgents.size})` : ''}`}
+              </span>
+            </button>
           </div>
         </div>
       </div>
