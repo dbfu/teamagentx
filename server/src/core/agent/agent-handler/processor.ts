@@ -29,6 +29,7 @@ import {
 import { getExecutor } from './executor-manager.js';
 import { buildAIMessage } from './message-utils.js';
 import { debugLog } from './debug.js';
+import { notifySourceAgentOnFailure } from './task-failure-notification.js';
 
 // 处理队列中的任务
 export async function processQueue(chatRoomId: string, agentId: string) {
@@ -460,6 +461,20 @@ export async function processQueue(chatRoomId: string, agentId: string) {
             cacheReadTokens: execResult?.tokenUsage?.cacheReadTokens,
             cacheCreationTokens: execResult?.tokenUsage?.cacheCreationTokens,
           });
+
+          // 如果任务失败（非中断），通知来源助手
+          if (!wasAborted && executionError) {
+            try {
+              await notifySourceAgentOnFailure({
+                task,
+                errorMessage: executionError.message,
+                executionRecordId: execRecord.id,
+                chatRoomId,
+              });
+            } catch (notificationError) {
+              console.error('[processor] 发送失败通知时出错:', notificationError);
+            }
+          }
 
           if (wasAborted) {
             const cancelledMessage = buildAIMessage(
