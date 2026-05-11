@@ -9,6 +9,7 @@ import { ChatArea } from './components/chat/chat-area'
 import { ConversationList } from './components/chat/conversation-list'
 import { CreateGroupModal } from './components/chat/create-group-modal'
 import { MobileTabBar } from './components/chat/mobile-tab-bar'
+import { IntegrationPage } from './components/chat/integration-page'
 import { ModelPage } from './components/chat/model-page'
 import { SkillPage } from './components/chat/skill-page'
 import { SidebarNav } from './components/chat/sidebar-nav'
@@ -477,6 +478,7 @@ function AppContent() {
         <Route path="/assistant/:id" element={<AssistantDetailPage />} />
         <Route path="/skill" element={<SkillPage />} />
         <Route path="/model" element={<ModelPage />} />
+        <Route path="/integration" element={<IntegrationPage />} />
         <Route path="/settings" element={<SettingsPage isMobile={isMobile} />} />
       </Routes>
 

@@ -23,12 +23,14 @@ import { tokenUsageGateway } from './gateway/token-usage.gateway.js';
 import { registerGateways } from './gateway/index.js';
 import { messageGateway } from './gateway/message.gateway.js';
 import { uploadGateway } from './modules/upload/upload.gateway.js';
+import { bridgeGateway } from './gateway/bridge.gateway.js';
 import { uploadService } from './modules/upload/upload.service.js';
 import { setupSocket } from './socket/index.js';
 import { cronSchedulerService } from './core/cron/cron-scheduler.service.js';
 import { backgroundTaskManager } from './core/shell/background-task-manager.js';
 import { taskQueueService } from './modules/task-queue/task-queue.service.js';
 import { checkpointService } from './modules/checkpoint/checkpoint.service.js';
+import { registerAllPlatformSenders } from './modules/bridge/platform-senders.js';
 
 function findLocalIps() {
   const interfaces = os.networkInterfaces();
@@ -97,6 +99,9 @@ export async function createApp(options?: { enableSwagger?: boolean }) {
     },
   );
 
+  // 注册平台消息发送器
+  registerAllPlatformSenders();
+
   // 注册网关
   await registerGateways(app, [
     authGateway,
@@ -109,6 +114,7 @@ export async function createApp(options?: { enableSwagger?: boolean }) {
     cronTaskGateway,
     tokenUsageGateway,
     uploadGateway,
+    bridgeGateway,
   ]);
 
   // 确保 LangGraph checkpoint 表存在

@@ -18,6 +18,7 @@ import { messageService } from '../modules/message/message.service.js';
 import { userService } from '../modules/user/user.service.js';
 import { taskQueueService } from '../modules/task-queue/task-queue.service.js';
 import { todoService } from '../modules/todo/todo.service.js';
+import { bridgeService } from '../modules/bridge/bridge.service.js';
 import { Message, Attachment } from '../types/message.js';
 
 // Track which chatRooms each socket has joined
@@ -87,6 +88,19 @@ export function setupSocket(io: Server) {
   // Emit done indicator when agent finishes working
   const emitDone = (data: { agentId: string; agentName: string; triggerMessageId: string; executionRecordId?: string; messageIds?: string[]; duration?: number | null; totalTokens?: number | null; cacheReadTokens?: number | null }, chatRoomId: string) => {
     io.to(chatRoomId).emit('agent:done', data);
+
+    // 将 Agent 响应回传到外部平台
+    if (data.messageIds && data.messageIds.length > 0) {
+      Promise.all(data.messageIds.map(id => messageService.findById(id)))
+        .then(msgs => {
+          for (const msg of msgs) {
+            if (msg?.content) {
+              bridgeService.sendAgentResponse(chatRoomId, data.agentName, msg.content).catch(console.error);
+            }
+          }
+        })
+        .catch(console.error);
+    }
   };
 
   // Emit streaming content

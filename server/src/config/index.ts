@@ -16,4 +16,8 @@ export const config = {
     secret: process.env.JWT_SECRET || 'teamagentx-default-secret-key',
     expiresIn: process.env.JWT_EXPIRES_IN || '7d',
   },
+  bridge: {
+    baseUrl: process.env.BRIDGE_BASE_URL || '',
+    encryptionKey: process.env.BRIDGE_ENCRYPTION_KEY || '',
+  },
 };

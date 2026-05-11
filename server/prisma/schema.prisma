@@ -101,6 +101,7 @@ model Agent {
   roomMemories      AgentRoomMemory[]
   quickChatSessions QuickChatSession[] // 快速对话会话
   triggeredTodos    Todo[] // 该助手触发的待办
+  externalChannels  ExternalChannel[] // 作为默认助手的外部频道
 
   @@index([name])
   @@index([categoryId])
@@ -133,6 +134,7 @@ model ChatRoom {
   quickChatSessions QuickChatSession[] // 快速对话会话
   cronTasks         CronTask[] // 定时任务
   todos             Todo[] // 群聊中的待办
+  externalChannels  ExternalChannel[] // 关联的外部平台频道
 
   @@index([name])
   @@index([ownerId])
@@ -439,4 +441,25 @@ model Todo {
   @@index([ownerUserId, status])
   @@index([chatRoomId])
   @@index([createdAt])
+}
+
+// 外部聊天平台频道（Telegram / 飞书 / 钉钉 / 企业微信 / QQ）
+model ExternalChannel {
+  id             String   @id @default(uuid())
+  platform       String   // telegram | feishu | dingtalk | wecom | qq
+  externalId     String   // 平台侧群 ID（chat_id / open_chat_id 等）
+  chatRoomId     String
+  botToken       String?  // 平台机器人 Token
+  webhookSecret  String?  // Webhook 验签密钥
+  defaultAgentId String?  // 该群默认 Agent（为空时使用 ChatRoom 默认 Agent）
+  config         String?  // 平台特定配置（JSON 字符串）
+  enabled        Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  chatRoom     ChatRoom @relation(fields: [chatRoomId], references: [id], onDelete: Cascade)
+  defaultAgent Agent?   @relation(fields: [defaultAgentId], references: [id], onDelete: SetNull)
+
+  @@unique([platform, externalId])
+  @@index([chatRoomId])
 }
