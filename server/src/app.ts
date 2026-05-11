@@ -20,6 +20,7 @@ import { llmProviderGateway } from './gateway/llm-provider.gateway.js';
 import { skillGateway } from './gateway/skill.gateway.js';
 import { cronTaskGateway } from './gateway/cron-task.gateway.js';
 import { tokenUsageGateway } from './gateway/token-usage.gateway.js';
+import { internalAgentToolsGateway } from './gateway/internal-agent-tools.gateway.js';
 import { registerGateways } from './gateway/index.js';
 import { messageGateway } from './gateway/message.gateway.js';
 import { uploadGateway } from './modules/upload/upload.gateway.js';
@@ -113,6 +114,7 @@ export async function createApp(options?: { enableSwagger?: boolean }) {
     skillGateway,
     cronTaskGateway,
     tokenUsageGateway,
+    internalAgentToolsGateway,
     uploadGateway,
     bridgeGateway,
   ]);

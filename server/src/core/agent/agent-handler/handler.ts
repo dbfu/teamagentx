@@ -1,20 +1,14 @@
 import { EventEmitter } from 'events';
-import type { Agent } from '@prisma/client';
 import { chatRoomService } from '../../../modules/chatroom/chatroom.service.js';
-import { agentMemoryService } from '../../../modules/agent-memory/agent-memory.service.js';
-import { messageService } from '../../../modules/message/message.service.js';
-import { taskQueueService } from '../../../modules/task-queue/task-queue.service.js';
 import { agentService } from '../agent.service.js';
 import { recoveryService } from '../../../modules/recovery/recovery.service.js';
 import type { Message } from '../../../types/message.js';
-import { SKILLS_HELPER_AGENT_ID } from '../tools/index.js';
-import { setGlobalCallbacks, globalEmitTyping, broadcastAgentStatus } from './status.js';
+import { setGlobalCallbacks } from './status.js';
 import type { AgentStatus } from './status.js';
 import type { ToolCall } from '../executor.interface.js';
-import { getExecutor } from './executor-manager.js';
-import { processQueue } from './processor.js';
 import { parseMentions } from './message-utils.js';
 import { debugLog } from './debug.js';
+import { enqueueAgentTask } from './agent-dispatch.service.js';
 
 // 消息接收事件接口
 interface ReceivedMessageEvent {
@@ -32,100 +26,6 @@ export const messageEventEmitter = emitter as {
   ): void;
   emit(event: 'receivedMessage', data: ReceivedMessageEvent): boolean;
 };
-
-async function enqueueAgentTask(
-  chatRoomId: string,
-  message: Message,
-  agent: Agent,
-  quickChatTargetAgent?: Agent | null,
-) {
-  // 发送正在处理的事件
-  if (globalEmitTyping) {
-    globalEmitTyping(
-      {messageId: message.id, agentId: agent.id, agentName: agent.name, status: 'pending'},
-      chatRoomId,
-    );
-  }
-
-  // 获取该助手在群内的配置，决定是否注入群历史
-  const chatRoomAgent = await chatRoomService.getAgentMember(
-    chatRoomId,
-    agent.id,
-  );
-  const injectGroupHistory = chatRoomAgent?.injectGroupHistory ?? true;
-
-  // 获取 executor（用于检查 lastInjectedMessageId 和后续更新）
-  const executor = await getExecutor(chatRoomId, agent.name);
-
-  // 获取群历史摘要和最近消息。压缩在后台异步执行，不阻塞当前任务。
-  let history: any[] | undefined;
-  if (injectGroupHistory && executor) {
-    history = await agentMemoryService.buildHistory(chatRoomId, agent.id, message.id);
-    console.log(`${agent.name}: 构建群历史上下文 ${history.length} 条（摘要 + 最近消息）`);
-  }
-
-  // 记录任务入队
-  debugLog('taskEnqueue', {
-    chatRoomId,
-    agentId: agent.id,
-    agentName: agent.name,
-    triggerMessageId: message.id,
-    triggerContent: message.content,
-    historyCount: history?.length ?? 0,
-    isIncremental: !!executor?.lastInjectedMessageId,
-    history: history?.map(h => ({sender: h.senderName, content: h.content})),
-  });
-
-  // 准备 attachments 数据（提取 base64）
-  const attachmentsData = message.attachments?.map(att => ({
-    url: att.url,
-    filename: att.filename,
-    mimeType: att.mimeType,
-    base64: att.base64 || '',  // 使用前端传来的 base64
-  }))?.filter(att => att.base64);  // 只保留有 base64 的附件
-
-  // 构建消息内容：如果是技能安装助手且在快速对话中，注入默认目标助手信息
-  let processedMessageContent = message.content;
-  if (agent.id === SKILLS_HELPER_AGENT_ID && quickChatTargetAgent) {
-    // 在消息前附加默认目标助手信息
-    processedMessageContent = `[默认目标助手: ${quickChatTargetAgent.name} (ID: ${quickChatTargetAgent.id})]\n${message.content}`;
-    console.log(`[agent.handler] 技能安装助手在快速对话中被调用，注入默认目标: ${quickChatTargetAgent.name}`);
-  }
-
-  // 任务入队，保存当前历史快照
-  await taskQueueService.enqueue({
-    chatRoomId,
-    agentId: agent.id,
-    agentName: agent.name,
-    messageId: message.id,
-    messageContent: processedMessageContent,
-    history,
-    attachments: attachmentsData,  // 传递图片附件
-  });
-
-  // 入队后更新 lastInjectedMessageId（获取群聊最新消息的 ID）
-  // 系统助手是虚拟成员，没有 ChatRoomAgent 记录，跳过更新
-  if (injectGroupHistory && executor && agent.agentLevel !== 'system') {
-    const latestMessages = await messageService.findByChatRoomId(
-      chatRoomId,
-      {take: 1, order: 'desc'},
-    );
-    if (latestMessages.length > 0) {
-      const newLastInjectedId = latestMessages[0].id;
-      // 更新 executor 实例
-      executor.setLastInjectedMessageId(newLastInjectedId);
-      // 更新数据库
-      await chatRoomService.updateLastInjectedMessageId(chatRoomId, agent.id, newLastInjectedId);
-      console.log(`${agent.name}: 更新上次注入位置为 ${newLastInjectedId}`);
-    }
-  }
-
-  // 入队后广播状态更新（队列长度可能变化）
-  broadcastAgentStatus(chatRoomId);
-
-  // 触发队列处理
-  processQueue(chatRoomId, agent.id);
-}
 
 // 设置 AI 处理器
 export function setupAIHandlers(
@@ -207,15 +107,19 @@ export function setupAIHandlers(
         agentId: message.agentId,
       });
 
+      const chatRoom = await chatRoomService.findById(chatRoomId);
+
+      // 助手消息中的 @ 只作为公开展示，不再触发其他助手任务。
+      if (!message.isHuman) {
+        return;
+      }
+
       // 先解析 @mentions，判断是否有 @助手
       const mentionNames = parseMentions(message.content);
       const hasMentions = mentionNames.length > 0;
 
-      // 检查是否是快速对话群聊
-      const chatRoom = await chatRoomService.findById(chatRoomId);
-
       // 快速对话群聊：如果没有 @其他助手，则触发快速对话助手
-      if (chatRoom?.isQuickChatRoom && chatRoom.quickChatAgentId && message.isHuman && !hasMentions) {
+      if (chatRoom?.isQuickChatRoom && chatRoom.quickChatAgentId && !hasMentions) {
         // 快速对话群聊：直接触发助手，不需要 @mentions
         const agent = await agentService.findById(chatRoom.quickChatAgentId);
         if (agent && agent.isActive) {
@@ -241,15 +145,6 @@ export function setupAIHandlers(
             sessionDir,
           });
 
-          // 发送正在处理的事件
-          if (globalEmitTyping) {
-            globalEmitTyping(
-              {messageId: message.id, agentId: agent.id, agentName: agent.name, status: 'pending'},
-              chatRoomId,
-            );
-          }
-
-          // 准备 attachments 数据（提取 base64）
           const attachmentsData = message.attachments?.map(att => ({
             url: att.url,
             filename: att.filename,
@@ -257,23 +152,11 @@ export function setupAIHandlers(
             base64: att.base64 || '',  // 使用前端传来的 base64
           }))?.filter(att => att.base64);  // 只保留有 base64 的附件
 
-          // 快速对话不注入群历史，直接入队
-          await taskQueueService.enqueue({
-            chatRoomId,
-            agentId: agent.id,
-            agentName: agent.name,
-            messageId: message.id,
-            messageContent: message.content,
-            history: undefined,  // 快速对话不注入群历史
+          await enqueueAgentTask(chatRoomId, message, agent, null, {
+            skipHistory: true,
             sessionDir, // 仅在快速对话显式指定工作目录时传递
             attachments: attachmentsData,  // 传递图片附件
           });
-
-          // 入队后广播状态更新（队列长度可能变化）
-          broadcastAgentStatus(chatRoomId);
-
-          // 触发队列处理
-          processQueue(chatRoomId, agent.id);
         }
         // 快速对话助手已触发，直接返回（不处理 @mentions）
         return;
@@ -285,7 +168,6 @@ export function setupAIHandlers(
           chatRoom &&
           !chatRoom.isQuickChatRoom &&
           chatRoom.defaultAgentId &&
-          message.isHuman &&
           message.userId &&
           message.userId === chatRoom.ownerId
         ) {
@@ -321,12 +203,6 @@ export function setupAIHandlers(
       }
 
       debugLog('mentionsFound', {chatRoomId, mentionNames});
-
-      // 手动模式下，助手消息的 @ 不触发其他助手
-      if (chatRoom?.agentTriggerMode === 'manual' && !message.isHuman) {
-        debugLog('manualModeSkip', { chatRoomId, agentName: message.agentName, mentions: mentionNames });
-        return;
-      }
 
       // 获取快速对话的目标助手信息（用于注入默认目标）
       const quickChatTargetAgent = chatRoom?.isQuickChatRoom && chatRoom.quickChatAgentId

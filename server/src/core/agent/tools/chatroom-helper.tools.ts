@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { tool } from 'langchain';
 import { chatRoomService } from '../../../modules/chatroom/chatroom.service.js';
 import { agentService } from '../../../core/agent/agent.service.js';
+import { broadcastAgentJoinedMessage } from '../agent-handler/message-utils.js';
 
 // 群聊管理助手的专用 ID
 export const CHATROOM_HELPER_AGENT_ID = 'c3d4e5f6-7890-abcd-ef12-345678901234';
@@ -160,7 +161,7 @@ export const addAgentToChatRoomTool = tool(
         return `群聊不存在: ${chatRoomId}`;
       }
 
-      const addedAgents: string[] = [];
+      const addedAgents: { name: string; description: string | null }[] = [];
       const failedAgents: string[] = [];
 
       for (const agentId of agentIds) {
@@ -182,12 +183,15 @@ export const addAgentToChatRoomTool = tool(
           agentId,
           role: 'MEMBER',
         });
-        addedAgents.push(agent.name);
+        addedAgents.push({ name: agent.name, description: agent.description });
+
+        // 发送助手加入通知消息
+        await broadcastAgentJoinedMessage(chatRoomId, agent.name, agent.description);
       }
 
       let message = `群聊"${chatRoom.name}"操作结果：`;
       if (addedAgents.length > 0) {
-        message += `\n✅ 已添加: ${addedAgents.join(', ')}`;
+        message += `\n✅ 已添加: ${addedAgents.map(a => a.name).join(', ')}`;
       }
       if (failedAgents.length > 0) {
         message += `\n❌ 失败: ${failedAgents.join(', ')}`;

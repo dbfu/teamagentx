@@ -24,7 +24,6 @@ import {
 } from './acp-provider.adapter.js';
 import {
   resolveAgentWorkDir,
-  resolveChatRoomAgentInfoWorkDir,
 } from './work-dir.js';
 import {
   buildInstalledSkillsInstructions,
@@ -603,30 +602,25 @@ ${historyText}
         }
       }
 
-      // 注入群内助手列表信息（包含工作目录）
+      // 注入群内助手列表信息
       if (this.chatRoomAgents.length > 0) {
         const agentsInfo = this.chatRoomAgents.map(a => a.name).join('、');
         const otherAgents = this.chatRoomAgents.filter(
           (agent) => agent.name !== this.name,
         );
 
-        // 构建其他助手详细信息（包含工作目录）
-        const otherAgentsDetail = otherAgents.map(agent => {
-          const workDir = resolveChatRoomAgentInfoWorkDir(this.chatRoomId, agent);
-          return `${agent.name}（工作目录：${workDir})`;
-        }).join('\n  ');
-
-        const othersInfo = otherAgents.length > 0 ? otherAgentsDetail : '无';
+        const otherAgentsList = otherAgents.map(agent => agent.name).join('、');
+        const othersInfo = otherAgents.length > 0 ? otherAgentsList : '无';
         const mentionTip =
           otherAgents.length > 0
-            ? '\n【提示】\n你可以通过 @助手名称 给其他助手发消息。'
+            ? '\n【提示】\n直接输出 @助手名称 不会触发其他助手任务。需要协作时，请让用户在群聊中 @ 对应助手，或使用当前执行器支持的平台协作工具。'
             : '';
 
         fullMessage += `【群聊成员信息】
+群聊工作目录：${this.workDir}
 当前群聊中的助手有：${agentsInfo}
-你是：${this.name}（工作目录：${this.workDir})
-其他助手：
-  ${othersInfo}${mentionTip}
+你是：${this.name}
+其他助手：${othersInfo}${mentionTip}
 
 `;
       }
