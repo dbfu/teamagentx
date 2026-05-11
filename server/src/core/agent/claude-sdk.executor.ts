@@ -13,6 +13,7 @@ import type { AttachmentData } from '../../modules/task-queue/task-queue.service
 import { buildAgentLongTermMemorySection } from './agent-long-term-memory.js';
 import { debugLog } from './agent-handler/debug.js';
 import { sendMessageToAgent } from './agent-handler/agent-dispatch.service.js';
+import { getDefaultChatRoomWorkDir } from './work-dir.js';
 import { buildAcpProviderEnv, type AcpProviderInfo } from './acp-provider.adapter.js';
 import {
   resolveAgentWorkDir,
@@ -721,6 +722,19 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
   }
 
   private resetSession(): void {
+    // 删除旧的 conversation 文件，避免垃圾文件累积
+    if (this.hasStartedSession && this.sessionId) {
+      const oldConversationPath = this.getClaudeConversationPath(this.sessionId);
+      try {
+        if (fs.existsSync(oldConversationPath)) {
+          fs.unlinkSync(oldConversationPath);
+          console.log(`${this.name}: 已删除旧 conversation 文件 ${oldConversationPath}`);
+        }
+      } catch (error) {
+        console.warn(`${this.name}: 删除旧 conversation 文件失败:`, error);
+      }
+    }
+
     this.sessionId = randomUUID();
     this.hasStartedSession = false;
     this.saveSessionId();
@@ -1215,4 +1229,80 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     this.currentAbortController = null;
     this.resetSession();
   }
+}
+
+/**
+ * 清理 ACP 助手（Claude SDK）的文件系统上下文
+ * 用于清空群聊消息时，即使没有 executor 缓存也能清理 conversation 文件
+ *
+ * @param agentId 助手 ID
+ * @param chatRoomId 群聊 ID
+ */
+export function clearClaudeSdkFileSystemContext(agentId: string, chatRoomId: string): void {
+  const claudeConfigDir = path.join(os.homedir(), '.teamagentx', 'acp-config', agentId);
+
+  if (!fs.existsSync(claudeConfigDir)) {
+    return;
+  }
+
+  // 删除 sessions 目录下所有匹配该 chatRoomId 的 session 状态文件
+  const sessionsDir = path.join(claudeConfigDir, 'sessions');
+  if (fs.existsSync(sessionsDir)) {
+    const sessionFiles = fs.readdirSync(sessionsDir);
+    for (const file of sessionFiles) {
+      if (file.startsWith(`${chatRoomId}-`) && file.endsWith('.json')) {
+        const filePath = path.join(sessionsDir, file);
+        try {
+          // 读取 session 文件获取 sessionId，然后删除对应的 conversation 文件
+          const content = fs.readFileSync(filePath, 'utf-8');
+          const sessionState = JSON.parse(content);
+          const sessionId = sessionState.sessionId;
+
+          // 删除 conversation 文件
+          const workDir = getDefaultChatRoomWorkDir(chatRoomId);
+          const conversationPath = path.join(
+            claudeConfigDir,
+            'projects',
+            sanitizeClaudeProjectPath(workDir),
+            `${sessionId}.jsonl`
+          );
+          if (fs.existsSync(conversationPath)) {
+            fs.unlinkSync(conversationPath);
+            console.log(`[ClearClaudeContext] 已删除 conversation 文件: ${conversationPath}`);
+          }
+
+          // 删除 session 状态文件
+          fs.unlinkSync(filePath);
+          console.log(`[ClearClaudeContext] 已删除 session 状态文件: ${filePath}`);
+        } catch (error) {
+          console.warn(`[ClearClaudeContext] 清理 session 文件失败: ${filePath}`, error);
+        }
+      }
+    }
+  }
+
+  // 删除 projects 目录下与该 chatRoomId workDir 相关的所有 conversation 文件
+  const projectsDir = path.join(claudeConfigDir, 'projects');
+  if (fs.existsSync(projectsDir)) {
+    const workDir = getDefaultChatRoomWorkDir(chatRoomId);
+    const sanitizedWorkDir = sanitizeClaudeProjectPath(workDir);
+    const projectDir = path.join(projectsDir, sanitizedWorkDir);
+
+    if (fs.existsSync(projectDir)) {
+      const conversationFiles = fs.readdirSync(projectDir);
+      for (const file of conversationFiles) {
+        if (file.endsWith('.jsonl')) {
+          const filePath = path.join(projectDir, file);
+          try {
+            fs.unlinkSync(filePath);
+            console.log(`[ClearClaudeContext] 已删除 conversation 文件: ${filePath}`);
+          } catch (error) {
+            console.warn(`[ClearClaudeContext] 删除 conversation 文件失败: ${filePath}`, error);
+          }
+        }
+      }
+    }
+  }
+
+  console.log(`[ClearClaudeContext] 已清理 Claude SDK 上下文: agentId=${agentId}, chatRoomId=${chatRoomId}`);
 }

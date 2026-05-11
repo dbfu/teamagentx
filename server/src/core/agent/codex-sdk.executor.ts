@@ -985,3 +985,49 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     this.saveThreadId();
   }
 }
+
+/**
+ * 清理 ACP 助手（Codex SDK）的文件系统上下文
+ * 用于清空群聊消息时，即使没有 executor 缓存也能清理 session 状态文件
+ *
+ * @param agentId 助手 ID
+ * @param chatRoomId 群聊 ID
+ */
+export function clearCodexSdkFileSystemContext(agentId: string, chatRoomId: string): void {
+  const codexHome = path.join(os.homedir(), '.teamagentx', 'acp-config', agentId, 'codex');
+
+  if (!fs.existsSync(codexHome)) {
+    return;
+  }
+
+  // 计算 scope（与 getSessionStatePath 一致）
+  const workDir = path.join(os.homedir(), '.teamagentx', 'workspace', chatRoomId);
+  const scope = createHash('sha256')
+    .update(`${chatRoomId}:${workDir}`)
+    .digest('hex')
+    .slice(0, 16);
+
+  // 删除 session 状态文件
+  const sessionStatePath = path.join(codexHome, `teamagentx-codex-sdk-session-${scope}.json`);
+  if (fs.existsSync(sessionStatePath)) {
+    try {
+      fs.unlinkSync(sessionStatePath);
+      console.log(`[ClearCodexContext] 已删除 session 状态文件: ${sessionStatePath}`);
+    } catch (error) {
+      console.warn(`[ClearCodexContext] 删除 session 状态文件失败: ${sessionStatePath}`, error);
+    }
+  }
+
+  // 删除旧版 session 文件（兼容）
+  const legacySessionPath = path.join(codexHome, 'teamagentx-codex-sdk-session.json');
+  if (fs.existsSync(legacySessionPath)) {
+    try {
+      fs.unlinkSync(legacySessionPath);
+      console.log(`[ClearCodexContext] 已删除旧版 session 文件: ${legacySessionPath}`);
+    } catch (error) {
+      console.warn(`[ClearCodexContext] 删除旧版 session 文件失败: ${legacySessionPath}`, error);
+    }
+  }
+
+  console.log(`[ClearCodexContext] 已清理 Codex SDK 上下文: agentId=${agentId}, chatRoomId=${chatRoomId}`);
+}
