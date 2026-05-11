@@ -1168,7 +1168,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     () => getMentionAgents(chatRoomAgents),
     [getMentionAgents, chatRoomAgents]
   )
-  const replyCounts = useMemo(() => getReplyCounts(), [getReplyCounts])
+  const replyCounts = useMemo(() => getReplyCounts(), [messages, getReplyCounts])
 
   // 处理函数
   const handleSend = useCallback(() => {

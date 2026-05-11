@@ -6,13 +6,14 @@ import * as os from 'os';
 import * as path from 'path';
 import { agentMemoryService } from '../../modules/agent-memory/agent-memory.service.js';
 import { skillInstallService } from '../../modules/skill/skill-install.service.js';
+import { config as appConfig } from '../../config/index.js';
 import type { AttachmentData } from '../../modules/task-queue/task-queue.service.js';
 import { buildAgentLongTermMemorySection } from './agent-long-term-memory.js';
 import { debugLog } from './agent-handler/debug.js';
+import { getInternalAgentToolToken } from './agent-handler/internal-agent-tool-auth.js';
 import { buildAcpProviderEnv, type AcpProviderInfo } from './acp-provider.adapter.js';
 import {
   resolveAgentWorkDir,
-  resolveChatRoomAgentInfoWorkDir,
 } from './work-dir.js';
 import {
   buildInstalledSkillsInstructions,
@@ -250,6 +251,164 @@ ${systemPrompt}
     }
   }
 
+  private getTeamAgentXMcpServerPath(): string {
+    return path.join(this.getCodexHome(), 'teamagentx-agent-tools-mcp.mjs');
+  }
+
+  private ensureTeamAgentXMcpServerFile(): string {
+    const serverPath = this.getTeamAgentXMcpServerPath();
+    const script = `#!/usr/bin/env node
+const endpoint = process.env.TEAMAGENTX_SEND_MESSAGE_ENDPOINT;
+const token = process.env.TEAMAGENTX_INTERNAL_TOOL_TOKEN;
+const chatRoomId = process.env.TEAMAGENTX_CHAT_ROOM_ID;
+const sourceAgentId = process.env.TEAMAGENTX_SOURCE_AGENT_ID;
+
+function write(message) {
+  process.stdout.write(JSON.stringify(message) + "\\n");
+}
+
+function toolResult(text, structuredContent, isError = false) {
+  return {
+    content: [{ type: "text", text }],
+    structuredContent,
+    isError,
+  };
+}
+
+async function callSendMessage(args) {
+  if (!endpoint || !token || !chatRoomId || !sourceAgentId) {
+    return toolResult("TeamAgentX 工具环境不完整，无法发送助手消息。", {}, true);
+  }
+
+  const content = typeof args?.content === "string" ? args.content.trim() : "";
+  const targetAgentId = typeof args?.targetAgentId === "string" ? args.targetAgentId.trim() : "";
+  const targetAgentName = typeof args?.targetAgentName === "string" ? args.targetAgentName.trim() : "";
+  if (!content || (!targetAgentId && !targetAgentName)) {
+    return toolResult("参数错误：必须提供 content，以及 targetAgentId 或 targetAgentName。", {}, true);
+  }
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer " + token,
+      },
+      body: JSON.stringify({
+        chatRoomId,
+        sourceAgentId,
+        targetAgentId: targetAgentId || undefined,
+        targetAgentName: targetAgentName || undefined,
+        content,
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.success === false) {
+      return toolResult(payload.error || "发送助手消息失败。", payload, true);
+    }
+    return toolResult("已发送给目标助手并加入任务队列。", payload.data || payload, false);
+  } catch (error) {
+    return toolResult(error instanceof Error ? error.message : "发送助手消息失败。", {}, true);
+  }
+}
+
+async function handle(request) {
+  const { id, method, params } = request;
+  if (!method) return;
+
+  if (method === "notifications/initialized") {
+    return;
+  }
+
+  if (method === "initialize") {
+    write({
+      jsonrpc: "2.0",
+      id,
+      result: {
+        protocolVersion: params?.protocolVersion || "2024-11-05",
+        capabilities: { tools: {} },
+        serverInfo: { name: "tax", version: "1.0.0" },
+      },
+    });
+    return;
+  }
+
+  if (method === "tools/list") {
+    write({
+      jsonrpc: "2.0",
+      id,
+      result: {
+        tools: [{
+          name: "send_message",
+          description: "向当前 TeamAgentX 群聊中的另一个助手发送公开消息，并触发该助手处理任务。消息会以 @目标助手名 消息内容 的格式显示在群聊中。",
+          inputSchema: {
+            type: "object",
+            properties: {
+              targetAgentId: { type: "string", description: "目标助手 ID。已知 ID 时优先使用。" },
+              targetAgentName: { type: "string", description: "目标助手名称。未提供 ID 时使用。" },
+              content: { type: "string", description: "发送给目标助手的消息内容，不要包含 @目标助手名前缀。" },
+            },
+            required: ["content"],
+            additionalProperties: false,
+          },
+        }],
+      },
+    });
+    return;
+  }
+
+  if (method === "tools/call") {
+    const name = params?.name;
+    const args = params?.arguments || {};
+    if (name !== "send_message") {
+      write({
+        jsonrpc: "2.0",
+        id,
+        result: toolResult("未知工具：" + name, {}, true),
+      });
+      return;
+    }
+    const result = await callSendMessage(args);
+    write({ jsonrpc: "2.0", id, result });
+    return;
+  }
+
+  if (id !== undefined) {
+    write({
+      jsonrpc: "2.0",
+      id,
+      error: { code: -32601, message: "Method not found: " + method },
+    });
+  }
+}
+
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  let index;
+  while ((index = buffer.indexOf("\\n")) >= 0) {
+    const line = buffer.slice(0, index).trim();
+    buffer = buffer.slice(index + 1);
+    if (!line) continue;
+    Promise.resolve()
+      .then(() => handle(JSON.parse(line)))
+      .catch((error) => {
+        write({
+          jsonrpc: "2.0",
+          id: null,
+          error: { code: -32603, message: error instanceof Error ? error.message : String(error) },
+        });
+      });
+  }
+});
+`;
+
+    fs.mkdirSync(path.dirname(serverPath), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(serverPath, script, { mode: 0o700 });
+    return serverPath;
+  }
+
   private getSessionStatePath(): string {
     const scope = createHash('sha256')
       .update(`${this.chatRoomId}:${this.workDir}`)
@@ -399,22 +558,17 @@ ${historyText}
     if (this.chatRoomAgents.length > 0) {
       const agentsInfo = this.chatRoomAgents.map((agent) => agent.name).join('、');
       const otherAgents = this.chatRoomAgents.filter((agent) => agent.name !== this.name);
-      const otherAgentsDetail = otherAgents
-        .map((agent) => {
-          const workDir = resolveChatRoomAgentInfoWorkDir(this.chatRoomId, agent);
-          return `${agent.name}（工作目录：${workDir})`;
-        })
-        .join('\n  ');
-      const othersInfo = otherAgents.length > 0 ? otherAgentsDetail : '无';
+      const otherAgentsList = otherAgents.map((agent) => agent.name).join('、');
+      const othersInfo = otherAgents.length > 0 ? otherAgentsList : '无';
       const mentionTip = otherAgents.length > 0
-        ? '\n【提示】\n你可以通过 @助手名称 给其他助手发消息。'
+        ? '\n【提示】\n需要把任务交给其他助手时，调用 tax.send_message 工具。不要通过直接输出 @助手名称 来触发其他助手。'
         : '';
 
       fullMessage += `【群聊成员信息】
+群聊工作目录：${this.workDir}
 当前群聊中的助手有：${agentsInfo}
-你是：${this.name}（工作目录：${this.workDir})
-其他助手：
-  ${othersInfo}${mentionTip}
+你是：${this.name}
+其他助手：${othersInfo}${mentionTip}
 
 `;
     }
@@ -445,12 +599,27 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
 
   private getCodex(): Codex {
     const env = this.buildEnv();
+    const mcpServerPath = this.ensureTeamAgentXMcpServerFile();
+    const sendMessageEndpoint = `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/send-message-to-agent`;
     const config = {
       hide_agent_reasoning: false,
       show_raw_agent_reasoning: false,
       model_reasoning_summary: 'concise',
       skills: {
         include_instructions: false,
+      },
+      mcp_servers: {
+        tax: {
+          command: process.execPath,
+          args: [mcpServerPath],
+          env: {
+            TEAMAGENTX_SEND_MESSAGE_ENDPOINT: sendMessageEndpoint,
+            TEAMAGENTX_INTERNAL_TOOL_TOKEN: getInternalAgentToolToken(),
+            TEAMAGENTX_CHAT_ROOM_ID: this.chatRoomId,
+            TEAMAGENTX_SOURCE_AGENT_ID: this.agentId || '',
+            TEAMAGENTX_SOURCE_AGENT_NAME: this.name,
+          },
+        },
       },
       ...(this.llmProvider
         ? {

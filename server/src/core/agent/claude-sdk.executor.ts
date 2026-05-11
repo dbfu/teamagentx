@@ -1,20 +1,21 @@
 import type { LlmProvider } from '@prisma/client';
 import type { HookCallbackMatcher, HookEvent, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import { query } from '@anthropic-ai/claude-agent-sdk';
+import { createSdkMcpServer, query, tool as sdkTool } from '@anthropic-ai/claude-agent-sdk';
 import { createHash, randomUUID } from 'crypto';
 import * as fs from 'fs';
 import { createRequire } from 'module';
 import * as os from 'os';
 import * as path from 'path';
+import { z } from 'zod/v4';
 import { agentMemoryService } from '../../modules/agent-memory/agent-memory.service.js';
 import { skillInstallService } from '../../modules/skill/skill-install.service.js';
 import type { AttachmentData } from '../../modules/task-queue/task-queue.service.js';
 import { buildAgentLongTermMemorySection } from './agent-long-term-memory.js';
 import { debugLog } from './agent-handler/debug.js';
+import { sendMessageToAgent } from './agent-handler/agent-dispatch.service.js';
 import { buildAcpProviderEnv, type AcpProviderInfo } from './acp-provider.adapter.js';
 import {
   resolveAgentWorkDir,
-  resolveChatRoomAgentInfoWorkDir,
 } from './work-dir.js';
 import {
   buildInstalledSkillsInstructions,
@@ -652,22 +653,17 @@ ${historyText}
     if (this.chatRoomAgents.length > 0) {
       const agentsInfo = this.chatRoomAgents.map((agent) => agent.name).join('、');
       const otherAgents = this.chatRoomAgents.filter((agent) => agent.name !== this.name);
-      const otherAgentsDetail = otherAgents
-        .map((agent) => {
-          const workDir = resolveChatRoomAgentInfoWorkDir(this.chatRoomId, agent);
-          return `${agent.name}（工作目录：${workDir})`;
-        })
-        .join('\n  ');
-      const othersInfo = otherAgents.length > 0 ? otherAgentsDetail : '无';
+      const otherAgentsList = otherAgents.map((agent) => agent.name).join('、');
+      const othersInfo = otherAgents.length > 0 ? otherAgentsList : '无';
       const mentionTip = otherAgents.length > 0
-        ? '\n【提示】\n你可以通过 @助手名称 给其他助手发消息。'
+        ? '\n【提示】\n需要把任务交给其他助手时，必须调用 mcp__tax__send_message 工具。不要通过直接输出 @助手名称 来触发其他助手。'
         : '';
 
       fullMessage += `【群聊成员信息】
+群聊工作目录：${this.workDir}
 当前群聊中的助手有：${agentsInfo}
-你是：${this.name}（工作目录：${this.workDir})
-其他助手：
-  ${othersInfo}${mentionTip}
+你是：${this.name}
+其他助手：${othersInfo}${mentionTip}
 
 `;
     }
@@ -733,6 +729,57 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       agentId: this.agentId,
       newSessionId: this.sessionId,
       statePath: this.getSessionStatePath(),
+    });
+  }
+
+  private buildTeamAgentXMcpServer() {
+    return createSdkMcpServer({
+      name: 'tax',
+      version: '1.0.0',
+      alwaysLoad: true,
+      tools: [
+        sdkTool(
+          'send_message',
+          '向当前 TeamAgentX 群聊中的另一个助手发送公开消息，并触发该助手处理任务。消息会以 @目标助手名 消息内容 的格式显示在群聊中。需要给其他助手发消息时必须使用此工具，不要直接输出 @助手名。',
+          {
+            targetAgentId: z.string().optional().describe('目标助手 ID。已知 ID 时优先使用。'),
+            targetAgentName: z.string().optional().describe('目标助手名称。未提供 ID 时使用。'),
+            content: z.string().describe('发送给目标助手的消息内容，不要包含 @目标助手名前缀。'),
+          },
+          async (args) => {
+            if (!this.agentId) {
+              return {
+                content: [{ type: 'text', text: '当前助手缺少 agentId，无法发送助手消息。' }],
+                isError: true,
+              };
+            }
+
+            try {
+              const result = await sendMessageToAgent({
+                chatRoomId: this.chatRoomId,
+                sourceAgentId: this.agentId,
+                targetAgentId: args.targetAgentId,
+                targetAgentName: args.targetAgentName,
+                content: args.content,
+              });
+
+              return {
+                content: [{ type: 'text', text: '已发送给目标助手并加入任务队列。' }],
+                structuredContent: result,
+              };
+            } catch (error) {
+              return {
+                content: [{
+                  type: 'text',
+                  text: error instanceof Error ? error.message : '发送助手消息失败。',
+                }],
+                isError: true,
+              };
+            }
+          },
+          { alwaysLoad: true },
+        ),
+      ],
     });
   }
 
@@ -963,6 +1010,10 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
         thinking,
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
+        mcpServers: {
+          tax: this.buildTeamAgentXMcpServer(),
+        },
+        allowedTools: ['mcp__tax__send_message'],
         settingSources: ['user', 'project', 'local'],
         hooks: this.buildHooks(),
         sessionId: this.hasStartedSession ? undefined : this.sessionId,
