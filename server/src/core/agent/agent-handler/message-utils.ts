@@ -84,6 +84,61 @@ export async function broadcastCronTriggerMessage(
   return messageId;
 }
 
+// 广播助手加入群聊通知消息
+export async function broadcastAgentJoinedMessage(
+  chatRoomId: string,
+  agentName: string,
+  agentDescription?: string | null,
+): Promise<string> {
+  const messageId = randomUUID();
+  const descriptionText = agentDescription ? `\n描述: ${agentDescription}` : '';
+  const content = `🎉 新助手加入群聊\n\n**${agentName}** 已加入群聊${descriptionText}`;
+  const time = new Date();
+
+  // 创建消息对象
+  const message: Message = {
+    id: messageId,
+    type: 'message',
+    content,
+    time,
+    user: '系统',
+    agentId: undefined,
+    agentName: undefined,
+    avatar: undefined,
+    avatarColor: undefined,
+    chatRoomId,
+    replyMessageId: undefined,
+    isHuman: true, // 作为用户消息显示，可被注入到助手历史上下文
+  };
+
+  // 保存消息到数据库
+  await messageService.create({
+    id: messageId,
+    type: 'MESSAGE',
+    content,
+    time,
+    userId: null, // 系统消息，无用户 ID
+    agentId: null,
+    chatRoomId,
+    replyMessageId: null,
+    isHuman: true,
+  });
+
+  // 广播消息
+  if (globalEmit) {
+    await globalEmit(message, chatRoomId);
+  }
+
+  debugLog('agentJoinedMessage', {
+    chatRoomId,
+    messageId,
+    agentName,
+    content,
+  });
+
+  return messageId;
+}
+
 // Parse @mentions from message content
 export function parseMentions(content: string): string[] {
   const mentions: string[] = [];

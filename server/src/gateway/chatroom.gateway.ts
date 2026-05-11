@@ -4,7 +4,7 @@ import { Server } from 'socket.io';
 import { chatRoomService } from '../modules/chatroom/chatroom.service.js';
 import { checkpointService } from '../modules/checkpoint/checkpoint.service.js';
 import { quickChatSessionService } from '../modules/quick-chat-session/quick-chat-session.service.js';
-import { clearExecutorCache, getAgentDebugInfo, executorCache, getCacheKey } from '../core/agent/agent-handler/index.js';
+import { clearExecutorCache, getAgentDebugInfo, executorCache, getCacheKey, broadcastAgentJoinedMessage } from '../core/agent/agent-handler/index.js';
 import { agentService } from '../core/agent/agent.service.js';
 import { executionRecordService } from '../modules/execution-record/execution-record.service.js';
 import { taskQueueService } from '../modules/task-queue/task-queue.service.js';
@@ -317,7 +317,7 @@ export async function chatRoomGateway(app: FastifyInstance) {
     const { userId, agentId, role, injectGroupHistory } = request.body;
 
     try {
-      const agent = await chatRoomService.addAgent({
+      const chatRoomAgent = await chatRoomService.addAgent({
         chatRoomId: id,
         userId,
         agentId,
@@ -325,7 +325,22 @@ export async function chatRoomGateway(app: FastifyInstance) {
         injectGroupHistory,
       });
 
-      return reply.code(201).send({ success: true, data: agent });
+      // 如果添加的是助手，发送通知消息到群聊
+      if (agentId && chatRoomAgent.agent) {
+        const io = (app as any).io as Server;
+        // 广播助手加入通知消息
+        await broadcastAgentJoinedMessage(
+          id,
+          chatRoomAgent.agent.name,
+          chatRoomAgent.agent.description,
+        );
+        // 广播群聊成员更新事件
+        if (io) {
+          io.to(id).emit('chatroom:agents-updated', { chatRoomId: id });
+        }
+      }
+
+      return reply.code(201).send({ success: true, data: chatRoomAgent });
     } catch (error: any) {
       return reply.code(400).send({ success: false, error: error.message });
     }
