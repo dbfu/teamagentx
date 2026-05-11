@@ -102,6 +102,7 @@ model Agent {
   quickChatSessions QuickChatSession[] // 快速对话会话
   triggeredTodos    Todo[] // 该助手触发的待办
   externalChannels  ExternalChannel[] // 作为默认助手的外部频道
+  platformConfigs   PlatformConfig[]  // 作为平台全局默认助手
 
   @@index([name])
   @@index([categoryId])
@@ -440,6 +441,35 @@ model Todo {
 
   @@index([ownerUserId, status])
   @@index([chatRoomId])
+  @@index([createdAt])
+}
+
+// 外部平台全局配置（每个平台一条记录，存储全局 Bot Token 和默认助手）
+model PlatformConfig {
+  id             String   @id @default(uuid())
+  platform       String   @unique
+  botToken       String?  // 全局 Bot Token（加密存储）
+  config         String?  // 平台凭证配置（加密 JSON 存储）
+  defaultAgentId String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  defaultAgent Agent? @relation(fields: [defaultAgentId], references: [id], onDelete: SetNull)
+}
+
+// 桥接事件日志
+model BridgeEvent {
+  id          String   @id @default(uuid())
+  platform    String
+  externalId  String
+  direction   String   // inbound | outbound
+  status      String   // success | failed
+  messageId   String?
+  agentName   String?
+  errorMsg    String?
+  createdAt   DateTime @default(now())
+
+  @@index([platform, createdAt])
   @@index([createdAt])
 }
 

@@ -1,14 +1,44 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AcpToolInfo, Agent, agentApi, AgentCategory, acpToolsApi, categoryApi } from '@/lib/agent-api';
 import { AgentAvatarImage, agentAvatarOptions, normalizeAgentAvatarIndex } from '@/lib/agent-avatars';
+import { bridgeApi, type Platform, type PlatformConfig } from '@/lib/bridge-api';
 import { llmProviderApi, type LlmProvider } from '@/lib/llm-provider-api';
 import { getProviderProtocolHint, getRequiredProviderProtocol, isProviderCompatibleWithAgent } from '@/lib/llm-provider-compat';
 import { promptOptimizeApi } from '@/lib/prompt-optimize-api';
 import { InstalledSkill, skillApi } from '@/lib/skill-api';
 import { cn } from '@/lib/utils';
-import { Check, Loader2, Maximize2, Sparkles, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Loader2, Maximize2, Sparkles, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
+
+const BRIDGE_PLATFORMS: { key: Platform; label: string }[] = [
+  { key: 'telegram', label: 'Telegram' },
+  { key: 'feishu', label: '飞书' },
+  { key: 'dingtalk', label: '钉钉' },
+  { key: 'wecom', label: '企业微信' },
+  { key: 'qq', label: 'QQ' },
+]
+
+const PLATFORM_CONFIG_FIELDS: Record<Platform, { key: string; label: string; secret?: boolean }[]> = {
+  telegram: [{ key: 'botToken', label: 'Bot Token', secret: true }],
+  feishu: [
+    { key: 'appId', label: 'App ID' },
+    { key: 'appSecret', label: 'App Secret', secret: true },
+  ],
+  dingtalk: [
+    { key: 'appKey', label: 'App Key' },
+    { key: 'appSecret', label: 'App Secret', secret: true },
+    { key: 'robotCode', label: 'Robot Code' },
+  ],
+  wecom: [
+    { key: 'corpId', label: 'Corp ID' },
+    { key: 'agentSecret', label: 'Agent Secret', secret: true },
+  ],
+  qq: [
+    { key: 'appId', label: 'App ID' },
+    { key: 'clientSecret', label: 'Client Secret', secret: true },
+  ],
+}
 
 interface EditAssistantModalProps {
   isOpen: boolean
@@ -160,6 +190,13 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
   const [providerSelectionTouched, setProviderSelectionTouched] = useState(false)
   const [resolvedAssistant, setResolvedAssistant] = useState<Agent | null>(assistant)
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // 外部平台接入分区状态
+  const [bridgeSectionOpen, setBridgeSectionOpen] = useState(false)
+  const [bridgePlatform, setBridgePlatform] = useState<Platform>('telegram')
+  const [bridgeConfigForm, setBridgeConfigForm] = useState<Record<string, string>>({})
+  const [bridgePlatformConfig, setBridgePlatformConfig] = useState<PlatformConfig | null>(null)
+  const [isSavingBridge, setIsSavingBridge] = useState(false)
   const assistantForForm = resolvedAssistant || assistant
   const boundLlmProviderId = assistantForForm?.llmProviderId || assistantForForm?.llmProvider?.id || ''
   const effectiveLlmProviderId = providerSelectionTouched ? llmProviderId : (llmProviderId || boundLlmProviderId)
@@ -272,6 +309,17 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
     }
   }, [assistantForForm, assistantType, acpTool, llmProviderId, llmProviders])
 
+  // 加载外部平台配置
+  useEffect(() => {
+    if (!bridgeSectionOpen) return
+    setBridgeConfigForm({})
+    bridgeApi.getPlatformConfig(bridgePlatform).then(cfg => {
+      setBridgePlatformConfig(cfg)
+    }).catch(() => {
+      setBridgePlatformConfig(null)
+    })
+  }, [bridgeSectionOpen, bridgePlatform])
+
   // 获取已安装的 Skills
   const fetchInstalledSkills = async () => {
     if (!assistantForForm?.id) return
@@ -350,6 +398,48 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
   void isLoadingSkills
   void handleInstallSkill
   void handleUninstallSkill
+
+  const handleSaveBridgeConfig = async () => {
+    if (!assistantForForm?.id || isSavingBridge) return
+    setIsSavingBridge(true)
+    try {
+      if (bridgePlatform === 'telegram') {
+        await bridgeApi.setPlatformConfig('telegram', {
+          botToken: bridgeConfigForm.botToken || undefined,
+          defaultAgentId: assistantForForm.id,
+        })
+      } else {
+        const fields = PLATFORM_CONFIG_FIELDS[bridgePlatform]
+        const configData: Record<string, unknown> = {}
+        for (const field of fields) {
+          if (bridgeConfigForm[field.key]) {
+            configData[field.key] = bridgeConfigForm[field.key]
+          }
+        }
+        await bridgeApi.setPlatformConfig(bridgePlatform, {
+          config: Object.keys(configData).length > 0 ? configData : undefined,
+          defaultAgentId: assistantForForm.id,
+        })
+      }
+      const platformLabel = BRIDGE_PLATFORMS.find(p => p.key === bridgePlatform)?.label ?? bridgePlatform
+      toast.success(`已将此助手设为 ${platformLabel} 默认助手`)
+      // Refresh config
+      const updated = await bridgeApi.getPlatformConfig(bridgePlatform).catch(() => null)
+      if (updated) setBridgePlatformConfig(updated)
+      // Clear secret fields
+      setBridgeConfigForm(f => {
+        const next = { ...f }
+        for (const field of PLATFORM_CONFIG_FIELDS[bridgePlatform]) {
+          if (field.secret) next[field.key] = ''
+        }
+        return next
+      })
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : '保存失败')
+    } finally {
+      setIsSavingBridge(false)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -591,6 +681,81 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
                 className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
               />
             </div>
+
+            {/* 外部平台接入 - 仅在 edit 模式且有 assistant.id 时显示 */}
+            {mode === 'edit' && assistantForForm?.id && (
+              <div className="mt-4 rounded-lg border border-border">
+                <button
+                  type="button"
+                  onClick={() => setBridgeSectionOpen(v => !v)}
+                  className="flex w-full items-center justify-between px-4 py-3 text-sm font-medium text-foreground hover:bg-accent rounded-lg"
+                >
+                  <span>外部平台接入</span>
+                  {bridgeSectionOpen ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+                </button>
+                {bridgeSectionOpen && (
+                  <div className="border-t border-border px-4 pb-4 pt-3 space-y-3">
+                    {/* Platform tabs */}
+                    <div className="flex gap-1 flex-wrap">
+                      {BRIDGE_PLATFORMS.map(p => (
+                        <button
+                          key={p.key}
+                          type="button"
+                          onClick={() => setBridgePlatform(p.key)}
+                          className={cn(
+                            'rounded-lg px-3 py-1 text-xs font-medium transition-colors',
+                            bridgePlatform === p.key
+                              ? 'bg-blue-500 text-white'
+                              : 'border border-border text-muted-foreground hover:text-foreground'
+                          )}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* 当前默认助手状态 */}
+                    {bridgePlatformConfig?.defaultAgent && (
+                      <p className="text-xs text-muted-foreground">
+                        当前默认助手：<span className="font-medium text-foreground">{bridgePlatformConfig.defaultAgent.name}</span>
+                      </p>
+                    )}
+
+                    {/* 配置字段 */}
+                    {PLATFORM_CONFIG_FIELDS[bridgePlatform].map(field => (
+                      <div key={field.key}>
+                        <label className="mb-1 block text-xs font-medium text-gray-700">
+                          {field.label}
+                          {(bridgePlatformConfig?.hasConfig || (bridgePlatform === 'telegram' && bridgePlatformConfig?.botToken)) && field.secret && (
+                            <span className="ml-1 font-normal text-green-600">（已设置，留空不修改）</span>
+                          )}
+                        </label>
+                        <input
+                          type={field.secret ? 'password' : 'text'}
+                          value={bridgeConfigForm[field.key] ?? ''}
+                          onChange={e => setBridgeConfigForm(f => ({ ...f, [field.key]: e.target.value }))}
+                          placeholder={
+                            (field.secret && (bridgePlatformConfig?.hasConfig || (bridgePlatform === 'telegram' && bridgePlatformConfig?.botToken)))
+                              ? '留空不修改'
+                              : field.label
+                          }
+                          className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none"
+                        />
+                      </div>
+                    ))}
+
+                    <button
+                      type="button"
+                      onClick={handleSaveBridgeConfig}
+                      disabled={isSavingBridge}
+                      className="rounded-lg bg-blue-500 px-3 py-1.5 text-sm text-white hover:bg-blue-600 disabled:opacity-50"
+                    >
+                      {isSavingBridge ? '保存中...' : '设为默认助手'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Actions */}

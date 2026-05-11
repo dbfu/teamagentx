@@ -19,5 +19,6 @@ export const config = {
   bridge: {
     baseUrl: process.env.BRIDGE_BASE_URL || '',
     encryptionKey: process.env.BRIDGE_ENCRYPTION_KEY || '',
+    requireSignature: process.env.BRIDGE_REQUIRE_SIGNATURE === 'true',
   },
 };

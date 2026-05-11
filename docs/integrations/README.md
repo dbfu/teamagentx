@@ -25,6 +25,11 @@ TeamAgentX ChatRoom（含多个 AI 助手）
 | 企业微信 | [wecom.md](./wecom.md) | 企业微信应用 | ★★★☆☆ |
 | QQ | [qq.md](./qq.md) | QQ 开放平台 Bot | ★★☆☆☆ |
 
+## 专项建议
+
+- [bridge-recommendations.md](./bridge-recommendations.md)  
+  基于分支 `feat/external-platform-bridge` 当前代码现状整理的专项建议，包含产品方向、架构优化、可靠性、安全、接入体验和阶段性优先级。
+
 ## 消息流程
 
 ```

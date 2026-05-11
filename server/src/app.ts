@@ -23,7 +23,7 @@ import { tokenUsageGateway } from './gateway/token-usage.gateway.js';
 import { registerGateways } from './gateway/index.js';
 import { messageGateway } from './gateway/message.gateway.js';
 import { uploadGateway } from './modules/upload/upload.gateway.js';
-import { bridgeGateway } from './gateway/bridge.gateway.js';
+import { bridgeGateway, startTelegramPolling } from './gateway/bridge.gateway.js';
 import { uploadService } from './modules/upload/upload.service.js';
 import { setupSocket } from './socket/index.js';
 import { cronSchedulerService } from './core/cron/cron-scheduler.service.js';
@@ -160,6 +160,17 @@ export async function createApp(options?: { enableSwagger?: boolean }) {
 
   // 启动定时任务调度器
   await cronSchedulerService.start();
+
+  // Telegram polling：webhook 未注册或本地开发时自动启用
+  if (process.env.TELEGRAM_POLLING !== 'false') {
+    const { default: prisma } = await import('./lib/prisma.js');
+    const { decrypt } = await import('./modules/bridge/crypto.js');
+    const platformCfg = await prisma.platformConfig.findUnique({ where: { platform: 'telegram' } }).catch(() => null);
+    if (platformCfg?.botToken) {
+      const token = decrypt(platformCfg.botToken);
+      startTelegramPolling(token, app.log);
+    }
+  }
 
   // 清理所有运行中的后台任务（服务重启时中断）
   await backgroundTaskManager.cleanupRunningTasks();

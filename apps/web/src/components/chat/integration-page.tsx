@@ -1,7 +1,7 @@
 import { agentApi, chatRoomApi, type Agent, type ChatRoom } from '@/lib/agent-api'
-import { bridgeApi, type ExternalChannel, type Platform, type CreateChannelRequest } from '@/lib/bridge-api'
+import { bridgeApi, type BridgeEvent, type ExternalChannel, type Platform, type PlatformConfig, type CreateChannelRequest } from '@/lib/bridge-api'
 import { cn } from '@/lib/utils'
-import { Check, Copy, Globe, Plus, Settings, Trash2, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Copy, Globe, Plus, Settings, Trash2, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 
@@ -30,6 +30,30 @@ interface CreateFormData {
   defaultAgentId: string
 }
 
+// 支持自动建群的平台（只需全局填一次凭证）
+const AUTO_CREATE_PLATFORMS: Platform[] = ['telegram', 'feishu', 'dingtalk', 'wecom', 'qq']
+
+const PLATFORM_CONFIG_FIELDS: Record<Platform, { key: string; label: string; secret?: boolean }[]> = {
+  telegram: [{ key: 'botToken', label: 'Bot Token', secret: true }],
+  feishu: [
+    { key: 'appId', label: 'App ID' },
+    { key: 'appSecret', label: 'App Secret', secret: true },
+  ],
+  dingtalk: [
+    { key: 'appKey', label: 'App Key' },
+    { key: 'appSecret', label: 'App Secret', secret: true },
+    { key: 'robotCode', label: 'Robot Code' },
+  ],
+  wecom: [
+    { key: 'corpId', label: 'Corp ID' },
+    { key: 'agentSecret', label: 'Agent Secret', secret: true },
+  ],
+  qq: [
+    { key: 'appId', label: 'App ID' },
+    { key: 'clientSecret', label: 'Client Secret', secret: true },
+  ],
+}
+
 export function IntegrationPage() {
   const [activePlatform, setActivePlatform] = useState<Platform>('telegram')
   const [channels, setChannels] = useState<ExternalChannel[]>([])
@@ -47,6 +71,13 @@ export function IntegrationPage() {
     botToken: '',
     defaultAgentId: '',
   })
+  // 平台全局配置（自动建群用）
+  const [platformConfig, setPlatformConfig] = useState<PlatformConfig | null>(null)
+  const [configForm, setConfigForm] = useState<Record<string, string>>({ defaultAgentId: '' })
+  const [isSavingConfig, setIsSavingConfig] = useState(false)
+  // 最近事件
+  const [events, setEvents] = useState<BridgeEvent[]>([])
+  const [eventsOpen, setEventsOpen] = useState(false)
 
   useEffect(() => {
     loadInitial()
@@ -54,7 +85,18 @@ export function IntegrationPage() {
 
   useEffect(() => {
     loadChannels()
+    setConfigForm({ defaultAgentId: '' })
+    setPlatformConfig(null)
+    if (AUTO_CREATE_PLATFORMS.includes(activePlatform)) {
+      loadPlatformConfig()
+    }
+    loadEvents()
   }, [activePlatform])
+
+  const loadEvents = async () => {
+    const data = await bridgeApi.listEvents(activePlatform, 20).catch(() => [])
+    setEvents(data)
+  }
 
   const loadInitial = async () => {
     setIsLoading(true)
@@ -72,6 +114,55 @@ export function IntegrationPage() {
   const loadChannels = async () => {
     const data = await bridgeApi.listChannels(activePlatform)
     setChannels(data)
+  }
+
+  const loadPlatformConfig = async () => {
+    const cfg = await bridgeApi.getPlatformConfig(activePlatform).catch(() => null)
+    if (cfg) {
+      setPlatformConfig(cfg)
+      setConfigForm({ defaultAgentId: cfg.defaultAgentId ?? '' })
+    }
+  }
+
+  const handleSaveConfig = async () => {
+    setIsSavingConfig(true)
+    try {
+      const defaultAgentId = configForm.defaultAgentId || null
+      let cfg: PlatformConfig
+      if (activePlatform === 'telegram') {
+        cfg = await bridgeApi.setPlatformConfig('telegram', {
+          botToken: configForm.botToken || undefined,
+          defaultAgentId,
+        })
+      } else {
+        const fields = PLATFORM_CONFIG_FIELDS[activePlatform]
+        const configData: Record<string, unknown> = {}
+        for (const field of fields) {
+          if (configForm[field.key]) {
+            configData[field.key] = configForm[field.key]
+          }
+        }
+        cfg = await bridgeApi.setPlatformConfig(activePlatform, {
+          config: Object.keys(configData).length > 0 ? configData : undefined,
+          defaultAgentId,
+        })
+      }
+      setPlatformConfig(cfg)
+      // 清空 secret 字段
+      setConfigForm(f => {
+        const next = { ...f }
+        const fields = PLATFORM_CONFIG_FIELDS[activePlatform]
+        for (const field of fields) {
+          if (field.secret) next[field.key] = ''
+        }
+        return next
+      })
+      toast.success('配置已保存，将机器人拉入群后会自动建立连接')
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : '保存失败')
+    } finally {
+      setIsSavingConfig(false)
+    }
   }
 
   const handleCopyWebhook = async () => {
@@ -163,13 +254,15 @@ export function IntegrationPage() {
           <Globe className="size-5 text-primary" />
           <h1 className="text-base font-semibold">外部平台集成</h1>
         </div>
-        <button
-          onClick={openCreate}
-          className="flex items-center gap-1.5 rounded-lg bg-blue-500 px-3 py-1.5 text-sm text-white hover:bg-blue-600"
-        >
-          <Plus className="size-4" />
-          新增连接
-        </button>
+        {!AUTO_CREATE_PLATFORMS.includes(activePlatform) && (
+          <button
+            onClick={openCreate}
+            className="flex items-center gap-1.5 rounded-lg bg-blue-500 px-3 py-1.5 text-sm text-white hover:bg-blue-600"
+          >
+            <Plus className="size-4" />
+            新增连接
+          </button>
+        )}
       </div>
 
       {/* Platform tabs */}
@@ -222,6 +315,67 @@ export function IntegrationPage() {
               )}
             </div>
 
+            {/* 自动建群配置（所有平台） */}
+            {AUTO_CREATE_PLATFORMS.includes(activePlatform) && (
+              <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
+                <div className="mb-3">
+                  <p className="text-sm font-medium text-gray-800">🤖 自动建群配置</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    填写平台凭证后，将机器人拉入任意群，系统自动建立连接，无需手动填写群 ID。
+                    {(platformConfig?.botToken || platformConfig?.hasConfig) && (
+                      <span className="ml-1 font-medium text-green-600">✓ 已配置</span>
+                    )}
+                  </p>
+                </div>
+                <div className="space-y-3">
+                  {PLATFORM_CONFIG_FIELDS[activePlatform].map(field => (
+                    <div key={field.key}>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                        {field.label}
+                        {platformConfig?.hasConfig && field.secret && (
+                          <span className="ml-1 text-xs font-normal text-green-600">（已设置，留空不修改）</span>
+                        )}
+                        {activePlatform === 'telegram' && field.key === 'botToken' && platformConfig?.botToken && (
+                          <span className="ml-1 text-xs font-normal text-green-600">（已设置，留空不修改）</span>
+                        )}
+                      </label>
+                      <input
+                        type={field.secret ? 'password' : 'text'}
+                        value={configForm[field.key] ?? ''}
+                        onChange={e => setConfigForm(f => ({ ...f, [field.key]: e.target.value }))}
+                        placeholder={
+                          (field.secret && (platformConfig?.hasConfig || (activePlatform === 'telegram' && platformConfig?.botToken)))
+                            ? '留空不修改'
+                            : field.label
+                        }
+                        className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                      />
+                    </div>
+                  ))}
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700">默认助手</label>
+                    <select
+                      value={configForm.defaultAgentId ?? ''}
+                      onChange={e => setConfigForm(f => ({ ...f, defaultAgentId: e.target.value }))}
+                      className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                    >
+                      <option value="">不指定</option>
+                      {agents.filter(a => a.isActive).map(a => (
+                        <option key={a.id} value={a.id}>{a.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <button
+                    onClick={handleSaveConfig}
+                    disabled={isSavingConfig}
+                    className="rounded-lg bg-blue-500 px-4 py-2 text-sm text-white hover:bg-blue-600 disabled:opacity-50"
+                  >
+                    {isSavingConfig ? '保存中...' : '保存配置'}
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Channels */}
             <div>
               <div className="mb-3 flex items-center justify-between">
@@ -229,17 +383,19 @@ export function IntegrationPage() {
                   已连接的群组
                   <span className="ml-1.5 text-muted-foreground">({channels.length})</span>
                 </h2>
-                <button
-                  onClick={openCreate}
-                  className="flex items-center gap-1 text-sm text-blue-500 hover:text-blue-600"
-                >
-                  <Plus className="size-3.5" />
-                  添加新群组
-                </button>
+                {!AUTO_CREATE_PLATFORMS.includes(activePlatform) && (
+                  <button
+                    onClick={openCreate}
+                    className="flex items-center gap-1 text-sm text-blue-500 hover:text-blue-600"
+                  >
+                    <Plus className="size-3.5" />
+                    添加新群组
+                  </button>
+                )}
               </div>
 
               {channels.length === 0 ? (
-                <EmptyState platform={platformInfo} onAdd={openCreate} />
+                <EmptyState platform={platformInfo} isAutoCreate={AUTO_CREATE_PLATFORMS.includes(activePlatform)} onAdd={openCreate} />
               ) : (
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {channels.map(ch => (
@@ -252,6 +408,64 @@ export function IntegrationPage() {
                       onToggle={() => handleToggleEnabled(ch)}
                     />
                   ))}
+                </div>
+              )}
+            </div>
+
+            {/* Recent Events */}
+            <div className="border-t border-border pt-4">
+              <button
+                onClick={() => setEventsOpen(o => !o)}
+                className="flex w-full items-center justify-between text-sm font-medium text-gray-700 hover:text-gray-900"
+              >
+                <span>
+                  最近事件
+                  <span className="ml-1.5 font-normal text-muted-foreground">({events.length})</span>
+                </span>
+                {eventsOpen ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+              </button>
+              {eventsOpen && (
+                <div className="mt-3 overflow-x-auto rounded-lg border border-border">
+                  {events.length === 0 ? (
+                    <p className="py-6 text-center text-sm text-muted-foreground">暂无事件记录</p>
+                  ) : (
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-border bg-gray-50 text-left text-muted-foreground">
+                          <th className="px-3 py-2 font-medium">时间</th>
+                          <th className="px-3 py-2 font-medium">方向</th>
+                          <th className="px-3 py-2 font-medium">状态</th>
+                          <th className="px-3 py-2 font-medium">来源群组</th>
+                          <th className="px-3 py-2 font-medium">助手</th>
+                          <th className="px-3 py-2 font-medium">错误</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {events.map(ev => (
+                          <tr key={ev.id} className="border-b border-border last:border-0 hover:bg-gray-50">
+                            <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
+                              {new Date(ev.createdAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                            </td>
+                            <td className="px-3 py-2">
+                              {ev.direction === 'inbound' ? '入站' : '出站'}
+                            </td>
+                            <td className="px-3 py-2">
+                              {ev.status === 'success' ? '✅' : '❌'}
+                            </td>
+                            <td className="max-w-[120px] truncate px-3 py-2 text-muted-foreground" title={ev.externalId}>
+                              {ev.externalId}
+                            </td>
+                            <td className="px-3 py-2 text-muted-foreground">
+                              {ev.agentName ?? '—'}
+                            </td>
+                            <td className="max-w-[160px] truncate px-3 py-2 text-red-500" title={ev.errorMsg ?? ''}>
+                              {ev.errorMsg ?? '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
               )}
             </div>
@@ -369,25 +583,35 @@ export function IntegrationPage() {
 
 function EmptyState({
   platform,
+  isAutoCreate,
   onAdd,
 }: {
   platform: { emoji: string; label: string; key: Platform }
+  isAutoCreate: boolean
   onAdd: () => void
 }) {
   return (
     <div className="flex flex-col items-center rounded-xl border border-dashed border-border bg-card py-12 text-center">
       <div className="mb-3 text-4xl">{platform.emoji}</div>
       <p className="mb-1 font-medium text-gray-700">尚未连接任何 {platform.label} 群组</p>
-      <p className="mb-4 text-sm text-muted-foreground">
-        配置 Webhook 后，将群组连接到 TeamAgentX 即可开始收发消息
-      </p>
-      <button
-        onClick={onAdd}
-        className="flex items-center gap-1.5 rounded-lg bg-blue-500 px-4 py-2 text-sm text-white hover:bg-blue-600"
-      >
-        <Plus className="size-4" />
-        添加群组
-      </button>
+      {isAutoCreate ? (
+        <p className="text-sm text-muted-foreground">
+          保存凭证配置后，将机器人拉入群，群组会自动出现在这里
+        </p>
+      ) : (
+        <>
+          <p className="mb-4 text-sm text-muted-foreground">
+            配置 Webhook 后，将群组连接到 TeamAgentX 即可开始收发消息
+          </p>
+          <button
+            onClick={onAdd}
+            className="flex items-center gap-1.5 rounded-lg bg-blue-500 px-4 py-2 text-sm text-white hover:bg-blue-600"
+          >
+            <Plus className="size-4" />
+            添加群组
+          </button>
+        </>
+      )}
     </div>
   )
 }

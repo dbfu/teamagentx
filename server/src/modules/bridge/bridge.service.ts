@@ -45,6 +45,25 @@ export type Platform = 'telegram' | 'feishu' | 'dingtalk' | 'wecom' | 'qq';
 // 平台响应回调，由各平台适配器注册
 const platformSenders = new Map<string, (externalId: string, text: string, agentName: string) => Promise<void>>();
 
+// 记录"最近一次触发该房间的来源 channel"，用于防串音
+// key = chatRoomId, value = { channelId, expiresAt }
+const lastSourceChannel = new Map<string, { channelId: string; expiresAt: number }>();
+const SOURCE_CHANNEL_TTL_MS = 30 * 60 * 1000; // 30 分钟
+
+function setSourceChannel(chatRoomId: string, channelId: string) {
+  lastSourceChannel.set(chatRoomId, { channelId, expiresAt: Date.now() + SOURCE_CHANNEL_TTL_MS });
+}
+
+function getSourceChannelId(chatRoomId: string): string | null {
+  const entry = lastSourceChannel.get(chatRoomId);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    lastSourceChannel.delete(chatRoomId);
+    return null;
+  }
+  return entry.channelId;
+}
+
 export const bridgeService = {
   // ──────────────── ExternalChannel CRUD ────────────────
 
@@ -129,6 +148,9 @@ export const bridgeService = {
 
     const { chatRoomId } = channel;
 
+    // 记录本次触发的来源 channel，用于防串音
+    setSourceChannel(chatRoomId, channel.id);
+
     // 内容前缀标注来源，让 Agent 知道是谁发的
     const platformLabel: Record<Platform, string> = {
       telegram: 'TG', feishu: '飞书', dingtalk: '钉钉', wecom: '企微', qq: 'QQ',
@@ -172,7 +194,18 @@ export const bridgeService = {
     };
     messageEventEmitter.emit('receivedMessage', { message: msgWithUser, chatRoomId });
 
-    return { messageId: msgId, chatRoomId };
+    // 记录 inbound 事件
+    prisma.bridgeEvent.create({
+      data: {
+        platform: params.platform,
+        externalId: params.externalId,
+        direction: 'inbound',
+        status: 'success',
+        messageId: msgId,
+      },
+    }).catch(e => console.error('[Bridge] 写入 inbound success 事件失败:', e));
+
+    return { messageId: msgId, chatRoomId, channelId: channel.id };
   },
 
   // ──────────────── 响应回传 ────────────────
@@ -186,19 +219,46 @@ export const bridgeService = {
 
   /**
    * 将 Agent 响应发回对应的外部平台群聊
+   * 优先只发回触发本次对话的来源 channel，防止多平台绑定同一房间时串音
    */
   async sendAgentResponse(chatRoomId: string, agentName: string, content: string) {
+    const sourceChannelId = getSourceChannelId(chatRoomId);
+
     const channels = await prisma.externalChannel.findMany({
       where: { chatRoomId, enabled: true },
     });
 
-    for (const channel of channels) {
+    // 若能找到来源 channel，只发回那个 channel；否则广播（兼容旧行为）
+    const targets = sourceChannelId
+      ? channels.filter(c => c.id === sourceChannelId)
+      : channels;
+
+    for (const channel of targets) {
       const sender = platformSenders.get(channel.platform as Platform);
       if (!sender) continue;
       try {
         await sender(channel.externalId, content, agentName);
+        await prisma.bridgeEvent.create({
+          data: {
+            platform: channel.platform,
+            externalId: channel.externalId,
+            direction: 'outbound',
+            status: 'success',
+            agentName,
+          },
+        }).catch(e => console.error('[Bridge] 写入 outbound success 事件失败:', e));
       } catch (err) {
         console.error(`[Bridge] 发送响应到 ${channel.platform} 群 ${channel.externalId} 失败:`, err);
+        prisma.bridgeEvent.create({
+          data: {
+            platform: channel.platform,
+            externalId: channel.externalId,
+            direction: 'outbound',
+            status: 'failed',
+            agentName,
+            errorMsg: err instanceof Error ? err.message : String(err),
+          },
+        }).catch(e => console.error('[Bridge] 写入 outbound failed 事件失败:', e));
       }
     }
   },
@@ -233,7 +293,7 @@ export const bridgeService = {
       await chatRoomService.addAgent({ chatRoomId: room.id, agentId: params.defaultAgentId });
     }
 
-    return this.createChannel({
+    const newChannel = await this.createChannel({
       platform: params.platform,
       externalId: params.externalId,
       chatRoomId: room.id,
@@ -242,6 +302,20 @@ export const bridgeService = {
       defaultAgentId: params.defaultAgentId,
       config: params.config,
     });
+
+    // 建群成功后延迟发送欢迎消息（延迟 1s 等 sender 注册完成）
+    setTimeout(async () => {
+      try {
+        const sender = platformSenders.get(params.platform);
+        if (!sender) return;
+        const welcomeText = `✅ TeamAgentX 已就绪！\n• 呼叫默认助手：直接发消息即可\n• 指定助手：@助手名 你的问题\n• 示例：@claude 帮我分析这段代码`;
+        await sender(params.externalId, welcomeText, 'TeamAgentX');
+      } catch (e) {
+        console.error('[Bridge] 发送欢迎消息失败:', e);
+      }
+    }, 1000);
+
+    return newChannel;
   },
 };
 

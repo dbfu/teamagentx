@@ -1,12 +1,22 @@
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ChatRoom, chatRoomApi } from '@/lib/agent-api'
+import { bridgeApi, ExternalChannel, Platform } from '@/lib/bridge-api'
 import { groupAvatarOptions, GroupAvatarImage, normalizeGroupAvatarIndex } from '@/lib/group-avatars'
 import { cn } from '@/lib/utils'
 import { Eraser, Pencil, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { WorkDirCard, type FolderOpenTarget } from './work-dir-card'
+
+const PLATFORMS: { key: Platform; label: string; emoji: string }[] = [
+  { key: 'telegram', label: 'Telegram', emoji: '✈️' },
+  { key: 'feishu', label: '飞书', emoji: '🪶' },
+  { key: 'dingtalk', label: '钉钉', emoji: '📌' },
+  { key: 'wecom', label: '企业微信', emoji: '💬' },
+  { key: 'qq', label: 'QQ', emoji: '🐧' },
+]
+
 
 interface RoomSettingsPanelProps {
   chatRoom: ChatRoom
@@ -33,6 +43,12 @@ export function RoomSettingsPanel({
   const [selectedIconIndex, setSelectedIconIndex] = useState(currentIconIndex)
   const [saving, setSaving] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+
+  // 外部平台接入
+  const [channels, setChannels] = useState<ExternalChannel[]>([])
+  const [activePlatform, setActivePlatform] = useState<string | null>(null)
+  const [bindCode, setBindCode] = useState<{ code: string; expiresIn: number } | null>(null)
+  const [isGettingCode, setIsGettingCode] = useState(false)
 
   // 编辑状态
   const [editingName, setEditingName] = useState(false)
@@ -75,6 +91,14 @@ export function RoomSettingsPanel({
       rulesInputRef.current.focus()
     }
   }, [editingRules])
+
+  useEffect(() => {
+    bridgeApi.listChannels().then((all) => {
+      setChannels(all.filter((ch) => ch.chatRoomId === chatRoom.id))
+    }).catch(() => {})
+    setActivePlatform(null)
+    setBindCode(null)
+  }, [chatRoom.id])
 
   const handleSave = async (updates: { name?: string; avatar?: string; description?: string; rules?: string; workDir?: string | null; defaultAgentId?: string | null; agentTriggerMode?: 'auto' | 'manual' }) => {
     setSaving(true)
@@ -124,6 +148,31 @@ export function RoomSettingsPanel({
   const handleTriggerModeChange = (value: 'auto' | 'manual') => {
     setAgentTriggerMode(value)
     handleSave({ agentTriggerMode: value })
+  }
+
+  const handleGetBindCode = async () => {
+    if (!activePlatform) return
+    setIsGettingCode(true)
+    try {
+      const result = await bridgeApi.getBindCode(activePlatform as Platform, chatRoom.id)
+      setBindCode(result)
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : '生成失败')
+    } finally {
+      setIsGettingCode(false)
+    }
+  }
+
+  const handleDeleteChannel = async (channel: ExternalChannel) => {
+    const label = PLATFORMS.find((p) => p.key === channel.platform)?.label ?? channel.platform
+    if (!window.confirm(`确定要删除「${label}」的接入（${channel.externalId}）吗？`)) return
+    try {
+      await bridgeApi.deleteChannel(channel.id)
+      setChannels((prev) => prev.filter((ch) => ch.id !== channel.id))
+      toast.success(`已删除 ${label} 接入`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '删除失败')
+    }
   }
 
   const defaultWorkDir = `~/.teamagentx/workspace/${chatRoom.id}`
@@ -400,6 +449,86 @@ export function RoomSettingsPanel({
         {chatRoom.isQuickChatRoom && (
           <div className="rounded-lg bg-muted p-3 text-sm text-muted-foreground">
             这是一个快速对话群聊，消息会直接发送给助手，无需 @ 提及。
+          </div>
+        )}
+
+        {/* 外部平台接入 */}
+        {!chatRoom.isQuickChatRoom && (
+          <div className="border-t border-border pt-4 mt-4">
+            <label className="mb-2 block text-sm font-medium text-muted-foreground">外部平台接入</label>
+            <div className="flex flex-wrap gap-2">
+              {PLATFORMS.map((p) => {
+                const linked = channels.find((ch) => ch.platform === p.key)
+                const isActive = activePlatform === p.key
+                return (
+                  <button
+                    key={p.key}
+                    type="button"
+                    onClick={() => {
+                      if (linked) {
+                        handleDeleteChannel(linked)
+                      } else {
+                        setActivePlatform(isActive ? null : p.key)
+                        setBindCode(null)
+                      }
+                    }}
+                    className={cn(
+                      'flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs transition-colors',
+                      linked
+                        ? 'border-green-500 text-green-700 hover:bg-green-50'
+                        : isActive
+                        ? 'border-primary text-primary bg-primary/5'
+                        : 'border-border text-muted-foreground hover:bg-accent'
+                    )}
+                  >
+                    <span>{p.emoji}</span>
+                    <span>{p.label}</span>
+                    {linked && <span className="text-green-500">●</span>}
+                  </button>
+                )
+              })}
+            </div>
+
+            {activePlatform && !channels.find((ch) => ch.platform === activePlatform) && (
+              <div className="mt-3 space-y-2">
+                {!bindCode ? (
+                  <button
+                    type="button"
+                    onClick={handleGetBindCode}
+                    disabled={isGettingCode}
+                    className="w-full rounded-lg bg-blue-500 px-3 py-2 text-sm text-white hover:bg-blue-600 disabled:opacity-50"
+                  >
+                    {isGettingCode ? '生成中...' : '获取绑定码'}
+                  </button>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground">
+                      在 {PLATFORMS.find((p) => p.key === activePlatform)?.label} 群中发送以下命令完成绑定：
+                    </p>
+                    <div className="rounded-lg border border-border bg-muted px-3 py-3 text-center">
+                      <span className="font-mono text-lg font-bold tracking-widest select-all">
+                        /bind {bindCode.code}
+                      </span>
+                    </div>
+                    <p className="text-xs text-center text-muted-foreground">15 分钟内有效</p>
+                    <button
+                      type="button"
+                      onClick={() => setBindCode(null)}
+                      className="w-full text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      重新获取
+                    </button>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => { setActivePlatform(null); setBindCode(null) }}
+                  className="w-full rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+                >
+                  取消
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

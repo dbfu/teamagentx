@@ -39,9 +39,15 @@ async function feishuSend(externalId: string, text: string, agentName: string): 
   const channel = await prisma.externalChannel.findFirst({
     where: { platform: 'feishu', externalId, enabled: true },
   });
-  if (!channel?.config) return;
 
-  const cfg = JSON.parse(decrypt(channel.config)) as { appId: string; appSecret: string };
+  let configJson: string | null = channel?.config ?? null;
+  if (!configJson) {
+    const platformCfg = await prisma.platformConfig.findUnique({ where: { platform: 'feishu' } });
+    configJson = platformCfg?.config ?? null;
+  }
+  if (!configJson) return;
+
+  const cfg = JSON.parse(decrypt(configJson)) as { appId: string; appSecret: string };
   const token = await getFeishuToken(cfg.appId, cfg.appSecret);
 
   await fetch('https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id', {
@@ -75,9 +81,15 @@ async function dingtalkSend(externalId: string, text: string, agentName: string)
   const channel = await prisma.externalChannel.findFirst({
     where: { platform: 'dingtalk', externalId, enabled: true },
   });
-  if (!channel?.config) return;
 
-  const cfg = JSON.parse(decrypt(channel.config)) as { appKey: string; appSecret: string; robotCode?: string };
+  let configJson: string | null = channel?.config ?? null;
+  if (!configJson) {
+    const platformCfg = await prisma.platformConfig.findUnique({ where: { platform: 'dingtalk' } });
+    configJson = platformCfg?.config ?? null;
+  }
+  if (!configJson) return;
+
+  const cfg = JSON.parse(decrypt(configJson)) as { appKey: string; appSecret: string; robotCode?: string };
   const token = await getDingtalkToken(cfg.appKey, cfg.appSecret);
 
   await fetch('https://api.dingtalk.com/v1.0/robot/groupMessages/send', {
@@ -110,9 +122,15 @@ async function wecomSend(externalId: string, text: string, agentName: string): P
   const channel = await prisma.externalChannel.findFirst({
     where: { platform: 'wecom', externalId, enabled: true },
   });
-  if (!channel?.config) return;
 
-  const cfg = JSON.parse(decrypt(channel.config)) as { corpId: string; agentSecret: string };
+  let configJson: string | null = channel?.config ?? null;
+  if (!configJson) {
+    const platformCfg = await prisma.platformConfig.findUnique({ where: { platform: 'wecom' } });
+    configJson = platformCfg?.config ?? null;
+  }
+  if (!configJson) return;
+
+  const cfg = JSON.parse(decrypt(configJson)) as { corpId: string; agentSecret: string };
   const token = await getWecomToken(cfg.corpId, cfg.agentSecret);
 
   await fetch(`https://qyapi.weixin.qq.com/cgi-bin/appchat/send?access_token=${token}`, {
@@ -147,9 +165,15 @@ async function qqSend(externalId: string, text: string, agentName: string): Prom
   const channel = await prisma.externalChannel.findFirst({
     where: { platform: 'qq', externalId, enabled: true },
   });
-  if (!channel?.config) return;
 
-  const cfg = JSON.parse(decrypt(channel.config)) as { appId: string; clientSecret: string };
+  let configJson: string | null = channel?.config ?? null;
+  if (!configJson) {
+    const platformCfg = await prisma.platformConfig.findUnique({ where: { platform: 'qq' } });
+    configJson = platformCfg?.config ?? null;
+  }
+  if (!configJson) return;
+
+  const cfg = JSON.parse(decrypt(configJson)) as { appId: string; clientSecret: string };
   const token = await getQQToken(cfg.appId, cfg.clientSecret);
 
   await fetch(`https://api.sgroup.qq.com/v2/groups/${externalId}/messages`, {
