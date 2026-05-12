@@ -279,7 +279,7 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
                         </div>
                         <p className={cn(
                           "mt-1 truncate",
-                          isMobile ? "text-sm" : "text-xs",
+                          isMobile ? "text-xs" : "text-[11px]",
                           unreadCount > 0 ? "text-muted-foreground" : "text-muted-foreground/70"
                         )}>
                           {room.lastMessage ? (
