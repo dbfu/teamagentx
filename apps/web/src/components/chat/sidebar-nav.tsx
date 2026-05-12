@@ -55,6 +55,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
 
   // 检测是否在 Electron 环境中
   const isElectron = window.electronAPI?.isElectron ?? false
+  const platform = window.electronAPI?.platform ?? ''
   const modeOptions = [
     { value: 'light', label: '浅色', icon: Sun },
     { value: 'dark', label: '深色', icon: Moon },
@@ -121,7 +122,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
       {/* Logo area */}
       <div className={cn(
         "flex items-center justify-center",
-        isElectron ? "mt-[24px]" : "mt-3"
+        isElectron ? (platform === 'darwin' ? "mt-[34px]" : "mt-[24px]") : "mt-3"
       )}>
         <div className="flex size-10 items-center justify-center overflow-hidden rounded-lg bg-white">
           <img src={`${import.meta.env.BASE_URL}app-logo.png`} alt="TeamAgentX" className="size-full object-cover" />
