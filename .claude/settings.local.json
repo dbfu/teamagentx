@@ -9,7 +9,11 @@
       "Bash(/Users/zhangyang/spark_ai_project/teamagentx/start.sh electron *)",
       "Bash(pnpm add *)",
       "Bash(pnpm dev *)",
-      "Bash(npx electron *)"
+      "Bash(npx electron *)",
+      "Bash(timeout 15)",
+      "Bash(npx tsc *)",
+      "mcp__plugin_playwright_playwright__browser_navigate",
+      "mcp__plugin_playwright_playwright__browser_console_messages"
     ]
   }
 }

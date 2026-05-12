@@ -384,7 +384,7 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, typingAgent
             loading={deleting}
             icon={Trash2}
           />
-        )
+        )}
       </>
     )
   }
@@ -457,7 +457,7 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, typingAgent
           loading={deleting}
           icon={Trash2}
         />
-      )
+      )}
     </>
   )
 }
