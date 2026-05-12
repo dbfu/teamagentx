@@ -369,62 +369,62 @@ export function ModelPage() {
                       {provider.isActive ? '已启用' : '已停用'}
                     </span>
                   </div>
-                  <div className="flex items-center justify-end gap-1">
+                  <div className="flex items-center justify-end gap-0.5">
                       <button
                         onClick={() => handleTestConnection(provider)}
                         disabled={testingProvider === provider.id}
                         className={cn(
-                          'ta-icon-button-compact',
+                          'inline-flex size-7 items-center justify-center rounded-[calc(var(--radius-control)-0.125rem)] text-muted-foreground transition-colors hover:bg-[var(--surface-subtle)] hover:text-foreground',
                           testingProvider === provider.id && 'opacity-50 cursor-wait'
                         )}
                         title={testResults[provider.id]?.connected ? '连接正常' : '测试连接'}
                       >
                         {testingProvider === provider.id ? (
-                          <RefreshCw className="size-4 animate-spin" />
+                          <RefreshCw className="size-3.5 animate-spin" />
                         ) : testResults[provider.id]?.connected ? (
-                          <Wifi className="size-4 text-green-500" />
+                          <Wifi className="size-3.5 text-green-500" />
                         ) : testResults[provider.id] ? (
-                          <WifiOff className="size-4 text-red-500" />
+                          <WifiOff className="size-3.5 text-red-500" />
                         ) : (
-                          <Wifi className="size-4" />
+                          <Wifi className="size-3.5" />
                         )}
                       </button>
                       <button
                         onClick={() => openEditDialog(provider)}
-                        className="ta-icon-button-compact"
+                        className="inline-flex size-7 items-center justify-center rounded-[calc(var(--radius-control)-0.125rem)] text-muted-foreground transition-colors hover:bg-[var(--surface-subtle)] hover:text-foreground"
                         title="编辑"
                       >
-                        <Pencil className="size-4" />
+                        <Pencil className="size-3.5" />
                       </button>
                       <button
                         onClick={() => handleCopy(provider)}
-                        className="ta-icon-button-compact"
+                        className="inline-flex size-7 items-center justify-center rounded-[calc(var(--radius-control)-0.125rem)] text-muted-foreground transition-colors hover:bg-[var(--surface-subtle)] hover:text-foreground"
                         title="复制配置"
                       >
-                        <Copy className="size-4" />
+                        <Copy className="size-3.5" />
                       </button>
                       {!provider.isDefault && provider.isActive && (
                         <button
                           onClick={() => handleSetDefault(provider)}
-                          className="ta-icon-button-compact hover:text-primary"
+                          className="inline-flex size-7 items-center justify-center rounded-[calc(var(--radius-control)-0.125rem)] text-muted-foreground transition-colors hover:bg-[var(--surface-subtle)] hover:text-primary"
                           title="设为默认"
                         >
-                          <Star className="size-4" />
+                          <Star className="size-3.5" />
                         </button>
                       )}
                       <button
                         onClick={() => handleToggleActive(provider)}
-                        className="ta-icon-button-compact"
+                        className="inline-flex size-7 items-center justify-center rounded-[calc(var(--radius-control)-0.125rem)] text-muted-foreground transition-colors hover:bg-[var(--surface-subtle)] hover:text-foreground"
                         title={provider.isActive ? '停用' : '激活'}
                       >
-                        <Power className="size-4" />
+                        <Power className="size-3.5" />
                       </button>
                       <button
                         onClick={() => handleDelete(provider)}
-                        className="ta-icon-button-compact hover:bg-destructive/10 hover:text-destructive"
+                        className="inline-flex size-7 items-center justify-center rounded-[calc(var(--radius-control)-0.125rem)] text-destructive/70 transition-colors hover:bg-destructive/10 hover:text-destructive"
                         title="删除"
                       >
-                        <Trash2 className="size-4" />
+                        <Trash2 className="size-3.5" />
                       </button>
                   </div>
                 </div>
