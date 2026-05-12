@@ -30,7 +30,7 @@ interface ChatInputAreaProps {
 // 使用 memo 包装组件，避免因父组件其他状态更新而重渲染
 // 由于 inputValue 和 setInputValue 直接从 store 获取，输入状态不受父组件影响
 export const ChatInputArea = memo(function ChatInputArea({
-  chatRoomName,
+  chatRoomName: _chatRoomName,
   handleKeyDown,
   handleSend,
   mentionAgents,
@@ -121,8 +121,8 @@ export const ChatInputArea = memo(function ChatInputArea({
   return (
     <div
       className={cn(
-        "relative shrink-0",
-        isMobile ? "px-3 pt-2 pb-6 bg-background border-t border-border" : "px-4 pt-2 pb-5",
+        "relative shrink-0 border-t border-border bg-[var(--surface-raised)]",
+        isMobile ? "px-2.5 py-2.5" : "px-3.5 py-3",
         isDragging && "bg-primary/5"
       )}
       onDragOver={handleDragOver}
@@ -132,7 +132,7 @@ export const ChatInputArea = memo(function ChatInputArea({
     >
       {/* 拖拽提示 */}
       {isDragging && (
-        <div className="absolute inset-0 flex items-center justify-center bg-primary/5 border-2 border-dashed border-primary/50 rounded-lg z-10">
+        <div className="absolute inset-0 z-10 flex items-center justify-center rounded-md border-2 border-dashed border-primary/50 bg-primary/5">
           <p className="text-primary font-medium">拖放图片到这里上传</p>
         </div>
       )}
@@ -144,27 +144,24 @@ export const ChatInputArea = memo(function ChatInputArea({
         </div>
       )}
 
-      {/* 单行输入框 */}
-      <div className="flex items-center gap-2 rounded-lg border border-border px-3 py-2">
+      {/* Input area */}
+      <div className="flex min-h-11 items-center gap-2 rounded-md border border-border bg-[var(--surface)] px-2.5 py-2 transition-colors focus-within:border-primary focus-within:shadow-[0_0_0_2px_oklch(0.55_0.22_250/0.10)]">
         <MentionInput
           value={inputValue}
           onChange={setInputValue}
           onKeyDown={handleKeyDown}
-          placeholder={`发送至${chatRoomName}`}
+          placeholder={`发送消息或 @ 助手…`}
           agents={mentionAgents}
           className="flex-1 min-w-0"
           onMentionClick={onMentionClick}
         />
 
         {/* 工具按钮 */}
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex shrink-0 items-center gap-1 self-end">
           {/* 图片上传按钮 */}
           <button
             type="button"
-            className={cn(
-              "rounded transition-colors touch-manipulation",
-              isMobile ? "p-2.5 text-muted-foreground hover:text-foreground hover:bg-accent active:bg-accent" : "p-1.5 text-muted-foreground hover:text-foreground hover:bg-accent"
-            )}
+            className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[var(--surface-subtle)] hover:text-foreground"
             onClick={handleImageButtonClick}
             title="上传图片"
           >
@@ -185,19 +182,16 @@ export const ChatInputArea = memo(function ChatInputArea({
             type="button"
             disabled={!canSend || hasUploadingImages}
             className={cn(
-              "rounded transition-colors touch-manipulation",
-              isMobile ? "p-2.5" : "p-1.5",
+              "inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors",
               canSend && !hasUploadingImages
-                ? "text-blue-500 hover:bg-blue-500/10 active:bg-blue-500/20"
-                : "text-muted-foreground hover:bg-accent disabled:opacity-50"
+                ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                : "bg-[var(--surface-subtle)] text-muted-foreground disabled:opacity-50"
             )}
             title="发送"
             onMouseDown={(e) => {
-              // 阻止mousedown导致contentEditable blur
               e.preventDefault()
             }}
             onClick={() => {
-              // 直接从 store 获取最新值，避免渲染延迟问题
               const currentInputValue = useChatStore.getState().inputValue
               const currentPendingImages = useChatStore.getState().pendingImages
               const trimmedInput = currentInputValue.trim()
@@ -209,7 +203,8 @@ export const ChatInputArea = memo(function ChatInputArea({
               }
             }}
           >
-            <Send className="size-4" />
+            <Send className="size-3.5" />
+            发送
           </button>
         </div>
       </div>

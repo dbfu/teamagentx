@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 
+// ── 下载配置（构建时通过环境变量注入，版本更新只需改环境变量） ──
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || 'v1.2.0'
+const DOWNLOAD_URL_MAC = import.meta.env.VITE_DOWNLOAD_URL_MAC || '#'
+const DOWNLOAD_URL_WIN = import.meta.env.VITE_DOWNLOAD_URL_WIN || '#'
+
 const stripItems = [
   'Claude Sonnet',
   'DeepSeek Chat',
@@ -370,7 +375,7 @@ function App() {
             <h1>让 AI 团队<br /><span>替你完成工作</span></h1>
             <p>配置模型、创建 Agent 助手、组建 AI 团队。<strong>多个 Agent 实时协作</strong>，自动分解任务、并行执行、相互审查，完成复杂项目。</p>
             <div className="hero-actions">
-              <a href="#download" className="btn btn-primary btn-hero">{downloadIcon(15)} 下载 macOS 客户端</a>
+              <a href={DOWNLOAD_URL_MAC} className="btn btn-primary btn-hero">{downloadIcon(15)} 下载 macOS 客户端</a>
               <a href="#showcase" className="btn btn-outline btn-hero">查看演示</a>
             </div>
             <div className="hero-stats">
@@ -515,10 +520,10 @@ function App() {
         <h2 className="cta-title reveal">准备好构建你的 AI 团队了吗？</h2>
         <p className="cta-sub reveal">下载 TeamAgentX，5 分钟内完成首个多 Agent 工作流。</p>
         <div className="cta-actions reveal">
-          <a href="#" className="btn btn-primary btn-lg">{downloadIcon(16)}下载 macOS 客户端</a>
-          <a href="#" className="btn btn-outline btn-lg">下载 Windows 客户端</a>
+          <a href={DOWNLOAD_URL_MAC} className="btn btn-primary btn-lg">{downloadIcon(16)}下载 macOS 客户端</a>
+          <a href={DOWNLOAD_URL_WIN} className="btn btn-outline btn-lg">下载 Windows 客户端</a>
         </div>
-        <p className="download-note reveal">当前版本 v1.2.0 · 支持 macOS 12+ / Windows 10+</p>
+        <p className="download-note reveal">当前版本 {APP_VERSION} · 支持 macOS 12+ / Windows 10+</p>
       </section>
 
       <footer id="footer">

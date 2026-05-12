@@ -3,6 +3,8 @@ import { ExecutionEvent, ExecutionRecord, ThinkingRecord } from '@/lib/agent-api
 import { tokenUsageApi } from '@/lib/token-usage-api'
 import { cn, formatDateTime, truncateToolName } from '@/lib/utils'
 import { CheckCircle, ChevronDown, ChevronRight, CircleStop, XCircle } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 // 格式化耗时显示（1m40s 格式，分钟为0时只显示秒）
 function formatDuration(ms: number): string {
@@ -21,6 +23,19 @@ function CollapsibleStateIcon({ className }: { className?: string }) {
       <ChevronRight className={cn('size-3 text-muted-foreground group-data-[state=open]:hidden', className)} />
       <ChevronDown className={cn('hidden size-3 text-muted-foreground group-data-[state=open]:block', className)} />
     </>
+  )
+}
+
+function MarkdownLog({ content, className }: { content: string; className?: string }) {
+  return (
+    <div className={cn(
+      'prose prose-sm max-w-none break-words text-foreground prose-p:my-1.5 prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-headings:my-2 prose-headings:text-foreground prose-code:rounded prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:text-foreground prose-pre:my-2 prose-pre:max-w-full prose-pre:overflow-x-auto prose-pre:rounded-md prose-pre:bg-muted prose-pre:p-3 prose-pre:text-xs prose-pre:text-foreground',
+      className
+    )}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+        {content}
+      </ReactMarkdown>
+    </div>
   )
 }
 
@@ -187,8 +202,8 @@ export function RecordDetailPanel({ selectedRecord }: RecordDetailPanelProps) {
           </div>
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <div className="px-3 pb-3 whitespace-pre-wrap break-all text-sm text-foreground max-h-96 overflow-y-auto">
-            {selectedRecord.triggerMessage}
+          <div className="max-h-96 overflow-y-auto px-3 pb-3">
+            <MarkdownLog content={selectedRecord.triggerMessage} />
           </div>
         </CollapsibleContent>
       </Collapsible>
@@ -209,8 +224,8 @@ export function RecordDetailPanel({ selectedRecord }: RecordDetailPanelProps) {
                     </div>
                   </CollapsibleTrigger>
                   <CollapsibleContent>
-                    <div className="px-3 pb-3 whitespace-pre-wrap break-all text-sm text-foreground max-h-96 overflow-y-auto">
-                      {event.data.content}
+                    <div className="max-h-96 overflow-y-auto px-3 pb-3">
+                      <MarkdownLog content={event.data.content ?? ''} />
                     </div>
                   </CollapsibleContent>
                 </Collapsible>
@@ -253,11 +268,17 @@ export function RecordDetailPanel({ selectedRecord }: RecordDetailPanelProps) {
                       {event.data.output && (
                         <div>
                           <div className="text-xs text-muted-foreground mb-1">输出:</div>
-                          <div className="font-mono text-foreground bg-muted/50 rounded p-2 max-h-60 overflow-y-auto">
-                            <pre className="whitespace-pre-wrap text-xs" style={{ wordBreak: 'break-word' }}>
-                              {typeof event.data.output === 'string' ? event.data.output : JSON.stringify(event.data.output, null, 2)}
-                            </pre>
-                          </div>
+                          {typeof event.data.output === 'string' ? (
+                            <div className="max-h-60 overflow-y-auto rounded bg-muted/50 p-2">
+                              <MarkdownLog content={event.data.output} className="text-xs" />
+                            </div>
+                          ) : (
+                            <div className="font-mono text-foreground bg-muted/50 rounded p-2 max-h-60 overflow-y-auto">
+                              <pre className="whitespace-pre-wrap text-xs" style={{ wordBreak: 'break-word' }}>
+                                {JSON.stringify(event.data.output, null, 2)}
+                              </pre>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -281,8 +302,8 @@ export function RecordDetailPanel({ selectedRecord }: RecordDetailPanelProps) {
                     </div>
                   </CollapsibleTrigger>
                   <CollapsibleContent>
-                    <div className="px-3 pb-3 whitespace-pre-wrap break-all text-sm text-foreground">
-                      {event.data.content}
+                    <div className="px-3 pb-3">
+                      <MarkdownLog content={event.data.content ?? ''} />
                     </div>
                   </CollapsibleContent>
                 </Collapsible>
@@ -310,8 +331,8 @@ export function RecordDetailPanel({ selectedRecord }: RecordDetailPanelProps) {
             </div>
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <div className="px-3 pb-3 whitespace-pre-wrap break-all text-sm text-red-600 dark:text-red-400 max-h-96 overflow-y-auto">
-              {selectedRecord.errorMessage}
+            <div className="max-h-96 overflow-y-auto px-3 pb-3">
+              <MarkdownLog content={selectedRecord.errorMessage} className="text-red-600 dark:text-red-400" />
             </div>
           </CollapsibleContent>
         </Collapsible>

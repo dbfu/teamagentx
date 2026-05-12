@@ -133,7 +133,7 @@ export function MentionInput({
           span.setAttribute('data-mention-id', fragment.data.id)
           span.setAttribute('data-mention-name', fragment.data.agentName)
           span.setAttribute('contenteditable', 'false')
-          span.className = 'inline-flex items-center rounded px-0.5 text-primary cursor-pointer hover:bg-primary/10'
+          span.className = 'inline-flex items-center rounded bg-primary/10 px-1.5 py-0.5 font-medium text-primary cursor-pointer transition-colors hover:bg-primary/15'
           span.textContent = `@${fragment.data.agentName}`
           span.addEventListener('click', (ev) => {
             ev.stopPropagation()
@@ -667,7 +667,7 @@ export function MentionInput({
   }, [])
 
   return (
-    <div ref={containerRef} className={cn('relative', className)}>
+    <div ref={containerRef} className={cn('relative flex min-h-7 items-center', className)}>
       {/* 可编辑区域 */}
       <div
         ref={editorRef}
@@ -679,21 +679,21 @@ export function MentionInput({
         onCompositionStart={handleCompositionStart}
         onCompositionEnd={handleCompositionEnd}
         onPaste={handlePaste}
-        className="min-h-6 max-h-32 overflow-y-auto cursor-text whitespace-pre-wrap break-all text-foreground outline-none empty:before:text-muted-foreground empty:before:content-[attr(data-placeholder)]"
+        className="min-h-6 max-h-32 flex-1 overflow-y-auto cursor-text whitespace-pre-wrap break-words text-sm leading-6 text-foreground outline-none empty:before:text-muted-foreground empty:before:content-[attr(data-placeholder)]"
         data-placeholder={placeholder}
       />
 
       {/* Mention suggestions */}
       {showMentions && filteredAgents.length > 0 && (
         <div
-          className="absolute bottom-full z-20 mb-1 w-64 rounded-lg border border-border bg-popover shadow-lg animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-2 duration-200"
+          className="absolute bottom-full z-20 mb-1.5 w-64 rounded-md border border-border bg-popover p-1 shadow-lg animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-2 duration-200"
           style={{ left: `${mentionLeft}px` }}
         >
           {filteredAgents.map((agent, index) => (
             <div
               key={agent.id}
               className={cn(
-                'flex cursor-pointer items-center gap-2 px-3 py-2 first:rounded-t-lg last:rounded-b-lg hover:bg-primary/5',
+                'flex cursor-pointer items-center gap-2 rounded px-3 py-2 hover:bg-primary/5',
                 index === selectedIndex && 'bg-primary/5'
               )}
               onClick={() => handleSelectMention(agent)}

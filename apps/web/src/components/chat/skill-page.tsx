@@ -24,7 +24,7 @@ function SimpleTabs({
   return (
     <div className="flex flex-col flex-1 min-h-0">
       {/* Tab 标签 */}
-      <div className="flex items-center gap-6 px-4 pt-3 shrink-0 border-b">
+      <div className="flex shrink-0 items-center gap-6 border-b px-5 pt-4">
         {tabs.map((tab) => {
           const isActive = activeTab === tab.key;
           return (
@@ -52,7 +52,7 @@ function SimpleTabs({
         })}
       </div>
       {/* Tab 内容 */}
-      <div className="flex-1 min-h-0 overflow-hidden p-4 flex flex-col">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-5 pb-5 pt-6">
         {renderContent(activeTab, searchQuery, setSearchQuery)}
       </div>
     </div>
@@ -459,24 +459,24 @@ export function SkillPage() {
 
   return (
     <>
-      <div className="flex flex-1 flex-col bg-background">
+      <div className="flex flex-1 flex-col bg-[var(--surface)]">
         {/* Header */}
         <div
-          className="mb-6 flex items-center justify-between border-b border-border px-6 h-14"
+          className="flex h-[52px] items-center border-b border-border px-4 shrink-0 bg-[var(--surface-raised)]"
           style={window.electronAPI?.isElectron ? { WebkitAppRegion: 'drag' } as React.CSSProperties : {}}
         >
-          <div className="flex items-center gap-3">
-            <Package className="size-5 text-muted-foreground" />
-            <h2 className="text-xl font-semibold text-foreground">技能</h2>
+          <div className="flex items-center gap-2">
+            <Package className="size-4 text-primary" />
+            <span className="text-sm font-bold text-foreground">技能</span>
           </div>
           <div
-            className="flex items-center gap-3"
+            className="ml-auto flex items-center gap-1.5"
             style={window.electronAPI?.isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
           >
             {externalSkills.filter(s => !s.existsInShared).length > 0 && (
               <button
                 onClick={() => setImportModalOpen(true)}
-                className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm text-white hover:bg-primary/90"
+                className="ta-button-primary h-8 px-3 text-xs"
               >
                 <Import className="size-4" />
                 导入外部技能 ({externalSkills.filter(s => !s.existsInShared).length})
@@ -485,7 +485,7 @@ export function SkillPage() {
             <button
               onClick={loadData}
               disabled={loading}
-              className="flex items-center gap-1 rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent"
+              className="ta-button-secondary h-8 px-3 text-xs"
             >
               <RefreshCw className={cn('size-4', loading && 'animate-spin')} />
               刷新
@@ -494,20 +494,20 @@ export function SkillPage() {
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto px-6 pb-6">
+        <div className="flex-1 overflow-y-auto">
           {loading ? (
             <div className="flex items-center justify-center h-full text-muted-foreground">
               加载中...
             </div>
           ) : sharedSkills.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+            <div className="ta-page-section flex h-full flex-col items-center justify-center text-muted-foreground">
               <Package className="size-16 mb-3 opacity-50" />
               <p className="text-lg">暂无技能</p>
-              <p className="text-sm mt-2">在群聊中 @技能管理 创建技能</p>
+              <p className="mt-2 text-sm">在群聊中 @技能管理 创建技能</p>
               {externalSkills.filter(s => !s.existsInShared).length > 0 && (
                 <button
                   onClick={() => setImportModalOpen(true)}
-                  className="mt-4 flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm text-white hover:bg-primary/90"
+                  className="ta-button-primary mt-4"
                 >
                   <Import className="size-4" />
                   导入外部技能 ({externalSkills.filter(s => !s.existsInShared).length})
@@ -515,19 +515,19 @@ export function SkillPage() {
               )}
             </div>
           ) : (
-            <div className="space-y-4">
+            <div className="ta-page-section space-y-3">
               {/* 共享技能列表 */}
               <div>
                 <div className="mb-3 flex items-center justify-between gap-3">
                   {/* 搜索框 */}
-                  <div className="relative flex-1 max-w-64">
+                  <div className="relative max-w-72 flex-1">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
                     <input
                       type="text"
                       value={skillSearchQuery}
                       onChange={(e) => setSkillSearchQuery(e.target.value)}
                       placeholder="搜索技能..."
-                      className="w-full rounded-lg border border-border bg-background pl-9 pr-3 py-1.5 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+                      className="ta-input w-full pl-9"
                     />
                     {skillSearchQuery && (
                       <button
@@ -543,7 +543,7 @@ export function SkillPage() {
                       <button
                         onClick={handleOpenFolder}
                         disabled={openingFolder}
-                        className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50"
+                        className="ta-button-ghost h-9 px-3 text-xs"
                       >
                         <FolderOpen className="size-3.5" />
                         <span>打开目录</span>
@@ -551,7 +551,7 @@ export function SkillPage() {
                     )}
                     <button
                       onClick={handleCopyPath}
-                      className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                      className="ta-button-ghost h-9 px-3 text-xs"
                     >
                       <FolderOpen className="size-3.5" />
                       <span>{skillsPath}</span>
@@ -578,13 +578,17 @@ export function SkillPage() {
                       未找到匹配的技能
                     </div>
                   ) : (
-                    <div className="space-y-2">
-                      {filteredSkills.map((skill) => (
-                    <div key={skill.slug} className="rounded-lg gap-2 border bg-muted/30">
+                    <div className="overflow-hidden rounded-md border border-border bg-[var(--surface-raised)]">
+                      {filteredSkills.map((skill) => {
+                        const hasInstallDetails = skill.installedAgents.length > 0
+                        const isExpanded = hasInstallDetails && expandedSkills.has(skill.slug)
+                        return (
+                    <div key={skill.slug} className="border-b border-border/60 last:border-b-0">
                       {/* 技能标题 */}
-                      <div className="flex w-full items-center justify-between px-4 py-3 hover:bg-accent transition-colors">
+                      <div className="flex w-full items-center justify-between gap-3 px-3 py-2.5 transition-colors hover:bg-accent/70">
                         <button
                           onClick={() => {
+                            if (!hasInstallDetails) return
                             setExpandedSkills(prev => {
                               const next = new Set(prev);
                               if (next.has(skill.slug)) {
@@ -595,21 +599,28 @@ export function SkillPage() {
                               return next;
                             });
                           }}
-                          className="flex items-center gap-3 text-left flex-1"
+                          className={cn(
+                            "flex min-w-0 flex-1 items-center gap-2 text-left",
+                            hasInstallDetails ? "cursor-pointer" : "cursor-default"
+                          )}
                         >
-                          {expandedSkills.has(skill.slug) ? (
-                            <ChevronDown className="size-4 text-muted-foreground" />
+                          {hasInstallDetails ? (
+                            isExpanded ? (
+                              <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+                            ) : (
+                              <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                            )
                           ) : (
-                            <ChevronRight className="size-4 text-muted-foreground" />
+                            <Package className="size-4 shrink-0 text-muted-foreground/60" />
                           )}
                           <div className="flex-1 w-0">
-                            <div className="font-medium text-foreground">{skill.name}</div>
+                            <div className="truncate text-sm font-medium text-foreground">{skill.name}</div>
                             <div className="text-xs text-muted-foreground truncate">
                               {skill.description || '无描述'}
                             </div>
                           </div>
                         </button>
-                        <div className="flex items-center gap-2 ml-5">
+                        <div className="ml-3 flex shrink-0 items-center gap-1.5">
                           <span className="text-xs text-muted-foreground">
                             <span className="rounded bg-muted px-2 py-0.5">
                               {skill.source === 'user-created' ? '用户创建' : skill.source.startsWith('external:') ? '外部导入' : '外部'}
@@ -624,7 +635,7 @@ export function SkillPage() {
                           <button
                             onClick={() => handleViewSkill(skill.slug)}
                             disabled={loadingDetail}
-                            className="flex items-center gap-1 rounded border border-border px-3 py-1 text-xs text-muted-foreground hover:bg-accent disabled:opacity-50"
+                            className="ta-button-secondary h-7 px-2.5 text-xs"
                           >
                             <FileText className="size-3" />
                             查看
@@ -632,7 +643,7 @@ export function SkillPage() {
                           {/* 安装按钮 */}
                           <button
                             onClick={() => handleOpenInstallDialog(skill)}
-                            className="flex items-center gap-1 rounded bg-primary px-3 py-1 text-xs text-white hover:bg-primary/90"
+                            className="ta-button-primary h-7 px-2.5 text-xs"
                           >
                             <Download className="size-3" />
                             安装
@@ -641,8 +652,8 @@ export function SkillPage() {
                       </div>
 
                       {/* 展开的详情 */}
-                      {expandedSkills.has(skill.slug) && (
-                        <div className="border-t px-4 py-3">
+                      {isExpanded && (
+                        <div className="border-t border-border/60 bg-[var(--surface)] px-3 py-2.5">
                           {/* 已安装到 */}
                           {skill.installedAgents.length > 0 && (
                             <div>
@@ -653,7 +664,7 @@ export function SkillPage() {
                                   return (
                                     <span
                                       key={name}
-                                      className="flex items-center gap-1.5 rounded bg-primary/10 px-3 py-1 text-sm text-primary"
+                                      className="flex items-center gap-1.5 rounded bg-primary/10 px-2 py-1 text-xs text-primary"
                                     >
                                       <AgentAvatarImage avatar={agent?.avatar ?? null} className="size-4" />
                                       {name}
@@ -666,7 +677,7 @@ export function SkillPage() {
                         </div>
                       )}
                     </div>
-                  ))}
+                  )})}
                     </div>
                   );
                 })()}
@@ -701,7 +712,7 @@ export function SkillPage() {
             onClick={() => setViewingSkill(null)}
           />
           {/* Modal */}
-          <div className="relative z-10 flex max-h-[85vh] w-225 flex-col rounded-lg bg-card shadow-xl">
+          <div className="relative z-10 flex max-h-[85vh] w-225 flex-col rounded-[var(--radius-panel)] bg-card shadow-xl">
             {/* Header */}
             <div className="flex items-center justify-between border-b px-6 py-4">
               <div>
@@ -779,7 +790,7 @@ export function SkillPage() {
               </div>
               <button
                 onClick={() => setViewingSkill(null)}
-                className="rounded bg-muted px-4 py-1.5 text-sm text-muted-foreground hover:bg-accent"
+                className="ta-button-secondary"
               >
                 关闭
               </button>
@@ -800,7 +811,7 @@ export function SkillPage() {
             }}
           />
           {/* Modal */}
-          <div className="relative z-10 flex max-h-[85vh] w-[900px] flex-col rounded-lg bg-card shadow-xl">
+          <div className="relative z-10 flex max-h-[85vh] w-[900px] flex-col rounded-[var(--radius-panel)] bg-card shadow-xl">
             {/* Header */}
             <div className="flex items-center justify-between border-b px-6 py-4">
               <div>
@@ -850,14 +861,14 @@ export function SkillPage() {
                       <div className="flex flex-col flex-1 min-h-0">
                         {/* 搜索框和全选按钮 - 固定 */}
                         <div className="flex items-center justify-between gap-3 shrink-0 pb-3">
-                          <div className="relative flex-1 max-w-64">
+                          <div className="relative max-w-72 flex-1">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
                             <input
                               type="text"
                               value={searchQuery}
                               onChange={(e) => setSearchQuery(e.target.value)}
                               placeholder="搜索技能..."
-                              className="w-full rounded-lg border border-border bg-background pl-9 pr-3 py-1.5 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+                              className="ta-input w-full pl-9"
                             />
                             {searchQuery && (
                               <button
@@ -882,7 +893,7 @@ export function SkillPage() {
                                 return next;
                               });
                             }}
-                            className="rounded border border-border px-3 py-1 text-xs text-muted-foreground hover:bg-accent transition-colors shrink-0"
+                            className="ta-button-secondary h-8 shrink-0 px-3 text-xs"
                           >
                             {filteredSkills.filter(s => !s.existsInShared).every(s => selectedExternalSkills.has(s.sourcePath))
                               ? '取消全选'
@@ -956,7 +967,7 @@ export function SkillPage() {
                     setImportModalOpen(false);
                     setSelectedExternalSkills(new Set());
                   }}
-                  className="rounded border border-border px-4 py-1.5 text-sm text-muted-foreground hover:bg-accent"
+                  className="ta-button-secondary"
                 >
                   取消
                 </button>
@@ -966,7 +977,7 @@ export function SkillPage() {
                       <button
                         onClick={() => handleBatchImport('symlink')}
                         disabled={selectedExternalSkills.size === 0 || importingSkill !== null}
-                        className="flex items-center gap-1 rounded border border-primary px-4 py-1.5 text-sm text-primary hover:bg-primary/10 disabled:opacity-50"
+                        className="ta-button-secondary border-primary text-primary hover:bg-primary/10"
                       >
                         <Import className="size-3" />
                         软连接
@@ -987,7 +998,7 @@ export function SkillPage() {
                     <button
                       onClick={() => handleBatchImport('copy')}
                       disabled={selectedExternalSkills.size === 0 || importingSkill !== null}
-                      className="flex items-center gap-1 rounded bg-primary px-4 py-1.5 text-sm text-white hover:bg-primary/90 disabled:opacity-50"
+                      className="ta-button-primary"
                     >
                       <Download className="size-3" />
                       {isWindows ? '导入' : '复制'}
