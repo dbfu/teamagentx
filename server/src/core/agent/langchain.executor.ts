@@ -38,9 +38,11 @@ import {
   AGENT_CREATOR_AGENT_ID,
   CHATROOM_HELPER_AGENT_ID,
   CRON_TASK_HELPER_AGENT_ID,
+  EXTERNAL_PLATFORM_HELPER_AGENT_ID,
   SKILL_MANAGER_AGENT_ID,
   agentCreatorTools,
   chatroomHelperTools,
+  createExternalPlatformHelperTools,
   cronTaskHelperTools,
   skillManagerTools,
   webFetchTools,
@@ -243,6 +245,7 @@ ${modelInfo}
     const isCronTaskHelper = this.agentId === CRON_TASK_HELPER_AGENT_ID;
     const isSkillManager = this.agentId === SKILL_MANAGER_AGENT_ID;
     const isChatroomHelper = this.agentId === CHATROOM_HELPER_AGENT_ID;
+    const isExternalPlatformHelper = this.agentId === EXTERNAL_PLATFORM_HELPER_AGENT_ID;
 
     // 专用工具（根据 agent ID 选择）
     const specializedTools = isAgentCreator
@@ -253,6 +256,8 @@ ${modelInfo}
           ? (skillManagerTools as any)
           : isChatroomHelper
             ? (chatroomHelperTools as any)
+            : isExternalPlatformHelper
+              ? (createExternalPlatformHelperTools(this.chatRoomId) as any)
             : [];
 
     // 合并专用工具和通用工具（web fetch 等）

@@ -3,6 +3,17 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
 const ALGORITHM = 'aes-256-gcm';
 const KEY_ENV = process.env.BRIDGE_ENCRYPTION_KEY;
 
+if (!KEY_ENV) {
+  console.warn('[Bridge] BRIDGE_ENCRYPTION_KEY 未设置，凭证将以明文存储。生产环境请务必配置。');
+} else {
+  const keyByteLen = Buffer.byteLength(KEY_ENV, 'utf8');
+  if (keyByteLen !== 32) {
+    console.warn(
+      `[Bridge] BRIDGE_ENCRYPTION_KEY 长度应为 32 字节，当前为 ${keyByteLen} 字节。密钥将被截断或零填充，安全性降低。`,
+    );
+  }
+}
+
 // Key must be 32 bytes for AES-256. Derive from env var with padding/truncation.
 function getKey(): Buffer | null {
   if (!KEY_ENV) return null;

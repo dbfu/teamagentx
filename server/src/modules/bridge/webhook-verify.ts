@@ -2,26 +2,11 @@ import { createHmac, createHash } from 'crypto';
 import { decrypt } from './crypto.js';
 
 // Returns true if verification passes or if webhookSecret is not set (dev mode)
+// TODO: 当 BRIDGE_BASE_URL 配置后，应通过 x-telegram-bot-api-secret-token header 校验
 export async function verifyTelegram(headers: Record<string, string | string[] | undefined>, secret?: string | null): Promise<boolean> {
   if (!secret) return true; // no secret configured → allow all (dev)
   const headerSecret = headers['x-telegram-bot-api-secret-token'];
   return headerSecret === decrypt(secret);
-}
-
-export async function verifyFeishu(body: unknown, headers: Record<string, string | string[] | undefined>, webhookSecret?: string | null): Promise<boolean> {
-  if (!webhookSecret) return true;
-  // 飞书签名: HMAC-SHA256(timestamp + '\n' + nonce + '\n' + body_string, appSecret)
-  // Header: X-Lark-Signature
-  const signature = headers['x-lark-signature'] as string | undefined;
-  if (!signature) return false;
-  const timestamp = headers['x-lark-request-timestamp'] as string;
-  const nonce = headers['x-lark-request-nonce'] as string;
-  const bodyStr = typeof body === 'string' ? body : JSON.stringify(body);
-  const secret = decrypt(webhookSecret);
-  const expected = createHmac('sha256', secret)
-    .update(`${timestamp}\n${nonce}\n${bodyStr}`)
-    .digest('hex');
-  return expected === signature;
 }
 
 export function verifyDingtalk(query: Record<string, string>, webhookSecret?: string | null): boolean {
@@ -37,6 +22,7 @@ export function verifyDingtalk(query: Record<string, string>, webhookSecret?: st
 }
 
 // 企业微信签名验证
+// 签名校验依赖 webhookSecret（来自 channel 级配置），全局 token 在 gateway 中通过 parseStoredBridgeConfig 提供
 export function verifyWecom(query: Record<string, string>, webhookSecret?: string | null): boolean {
   if (!webhookSecret) return true;
   // 企微: sort([token, timestamp, nonce]) → SHA1

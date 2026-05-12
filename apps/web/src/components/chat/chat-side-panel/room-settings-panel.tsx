@@ -1,22 +1,13 @@
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ChatRoom, chatRoomApi } from '@/lib/agent-api'
-import { bridgeApi, ExternalChannel, Platform } from '@/lib/bridge-api'
+import { bridgeApi, BridgePlatformDefinition, ExternalChannel, Platform } from '@/lib/bridge-api'
 import { groupAvatarOptions, GroupAvatarImage, normalizeGroupAvatarIndex } from '@/lib/group-avatars'
 import { cn } from '@/lib/utils'
 import { Eraser, Pencil, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { WorkDirCard, type FolderOpenTarget } from './work-dir-card'
-
-const PLATFORMS: { key: Platform; label: string; emoji: string }[] = [
-  { key: 'telegram', label: 'Telegram', emoji: '✈️' },
-  { key: 'feishu', label: '飞书', emoji: '🪶' },
-  { key: 'dingtalk', label: '钉钉', emoji: '📌' },
-  { key: 'wecom', label: '企业微信', emoji: '💬' },
-  { key: 'qq', label: 'QQ', emoji: '🐧' },
-]
-
 
 interface RoomSettingsPanelProps {
   chatRoom: ChatRoom
@@ -45,6 +36,7 @@ export function RoomSettingsPanel({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
   // 外部平台接入
+  const [platforms, setPlatforms] = useState<BridgePlatformDefinition[]>([])
   const [channels, setChannels] = useState<ExternalChannel[]>([])
   const [activePlatform, setActivePlatform] = useState<string | null>(null)
   const [bindCode, setBindCode] = useState<{ code: string; expiresIn: number } | null>(null)
@@ -93,8 +85,12 @@ export function RoomSettingsPanel({
   }, [editingRules])
 
   useEffect(() => {
-    bridgeApi.listChannels().then((all) => {
-      setChannels(all.filter((ch) => ch.chatRoomId === chatRoom.id))
+    Promise.all([
+      bridgeApi.listPlatforms().catch(() => []),
+      bridgeApi.listChannels().catch(() => []),
+    ]).then(([platformDefs, allChannels]) => {
+      setPlatforms(platformDefs)
+      setChannels(allChannels.filter((ch) => ch.chatRoomId === chatRoom.id))
     }).catch(() => {})
     setActivePlatform(null)
     setBindCode(null)
@@ -164,7 +160,7 @@ export function RoomSettingsPanel({
   }
 
   const handleDeleteChannel = async (channel: ExternalChannel) => {
-    const label = PLATFORMS.find((p) => p.key === channel.platform)?.label ?? channel.platform
+    const label = platforms.find((p) => p.key === channel.platform)?.label ?? channel.platform
     if (!window.confirm(`确定要删除「${label}」的接入（${channel.externalId}）吗？`)) return
     try {
       await bridgeApi.deleteChannel(channel.id)
@@ -455,9 +451,9 @@ export function RoomSettingsPanel({
         {/* 外部平台接入 */}
         {!chatRoom.isQuickChatRoom && (
           <div className="border-t border-border pt-4 mt-4">
-            <label className="mb-2 block text-sm font-medium text-muted-foreground">外部平台接入</label>
+            <label className="mb-2 block text-sm font-medium text-muted-foreground">外部平台映射</label>
             <div className="flex flex-wrap gap-2">
-              {PLATFORMS.map((p) => {
+              {platforms.filter((p) => p.supportsBindCode).map((p) => {
                 const linked = channels.find((ch) => ch.platform === p.key)
                 const isActive = activePlatform === p.key
                 return (
@@ -502,9 +498,9 @@ export function RoomSettingsPanel({
                   </button>
                 ) : (
                   <div className="space-y-2">
-                    <p className="text-xs text-muted-foreground">
-                      在 {PLATFORMS.find((p) => p.key === activePlatform)?.label} 群中发送以下命令完成绑定：
-                    </p>
+                      <p className="text-xs text-muted-foreground">
+                        将机器人加入目标 {platforms.find((p) => p.key === activePlatform)?.label} 群后，在群中发送以下命令完成与当前房间的绑定：
+                      </p>
                     <div className="rounded-lg border border-border bg-muted px-3 py-3 text-center">
                       <span className="font-mono text-lg font-bold tracking-widest select-all">
                         /bind {bindCode.code}

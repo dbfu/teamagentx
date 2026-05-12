@@ -10,6 +10,7 @@ import { ensureAgentCreatorExists } from './scripts/init-agent-creator.js';
 import { ensureSkillsHelperExists } from './scripts/init-skills-helper.js';
 import { ensureCronTaskHelperExists } from './scripts/init-cron-task-helper.js';
 import { ensureChatroomHelperExists } from './scripts/init-chatroom-helper.js';
+import { ensureExternalPlatformHelperExists } from './scripts/init-external-platform-helper.js';
 import { migrateAgentAvatars } from './scripts/migrate-agent-avatars.js';
 import { migrateChatRoomAvatars } from './scripts/migrate-chatroom-avatars.js';
 import { agentGateway } from './gateway/agent.gateway.js';
@@ -24,14 +25,16 @@ import { internalAgentToolsGateway } from './gateway/internal-agent-tools.gatewa
 import { registerGateways } from './gateway/index.js';
 import { messageGateway } from './gateway/message.gateway.js';
 import { uploadGateway } from './modules/upload/upload.gateway.js';
-import { bridgeGateway, startTelegramPolling } from './gateway/bridge.gateway.js';
+import { bridgeGateway, startTelegramPolling, handleBindCode } from './gateway/bridge.gateway.js';
+import { initFeishuWSFromDB, setFeishuBindCodeHandler } from './modules/bridge/feishu-ws-client.js';
+import { initDingtalkStreamFromDB, setDingtalkBindCodeHandler } from './modules/bridge/dingtalk-stream-client.js';
 import { uploadService } from './modules/upload/upload.service.js';
 import { setupSocket } from './socket/index.js';
 import { cronSchedulerService } from './core/cron/cron-scheduler.service.js';
 import { backgroundTaskManager } from './core/shell/background-task-manager.js';
 import { taskQueueService } from './modules/task-queue/task-queue.service.js';
 import { checkpointService } from './modules/checkpoint/checkpoint.service.js';
-import { registerAllPlatformSenders } from './modules/bridge/platform-senders.js';
+import { registerBridgePlatformAdapters } from './modules/bridge/platform-senders.js';
 
 function findLocalIps() {
   const interfaces = os.networkInterfaces();
@@ -101,7 +104,7 @@ export async function createApp(options?: { enableSwagger?: boolean }) {
   );
 
   // 注册平台消息发送器
-  registerAllPlatformSenders();
+  registerBridgePlatformAdapters();
 
   // 注册网关
   await registerGateways(app, [
@@ -154,6 +157,9 @@ export async function createApp(options?: { enableSwagger?: boolean }) {
   // 确保群聊管理助手存在
   await ensureChatroomHelperExists();
 
+  // 确保外部平台接入助手存在
+  await ensureExternalPlatformHelperExists();
+
   // 迁移助手头像为数字索引
   await migrateAgentAvatars();
 
@@ -163,16 +169,39 @@ export async function createApp(options?: { enableSwagger?: boolean }) {
   // 启动定时任务调度器
   await cronSchedulerService.start();
 
-  // Telegram polling：webhook 未注册或本地开发时自动启用
+  // Telegram polling：仅当未注册 webhook 时启用（webhook 注册后自动停止轮询）
   if (process.env.TELEGRAM_POLLING !== 'false') {
     const { default: prisma } = await import('./lib/prisma.js');
     const { decrypt } = await import('./modules/bridge/crypto.js');
     const platformCfg = await prisma.platformConfig.findUnique({ where: { platform: 'telegram' } }).catch(() => null);
     if (platformCfg?.botToken) {
       const token = decrypt(platformCfg.botToken);
-      startTelegramPolling(token, app.log);
+      // 检查 webhook 是否已注册，已注册则不启动 polling
+      // 若 webhook 注册了但最近持续出错（如 ngrok 过期），自动删除并回退 polling
+      const webhookRes = await fetch(`https://api.telegram.org/bot${token}/getWebhookInfo`).then(r => r.json() as Promise<{ ok: boolean; result?: { url?: string; last_error_date?: number; last_error_message?: string } }>).catch(() => null);
+      const webhookUrl = webhookRes?.result?.url;
+      const lastErrorDate = webhookRes?.result?.last_error_date;
+      // 若 webhook 注册但近 5 分钟内有错误（过期的 ngrok 等），清除并改用 polling
+      const webhookStale = webhookUrl && lastErrorDate && (Date.now() / 1000 - lastErrorDate < 300);
+      if (webhookUrl && !webhookStale) {
+        app.log.info('[Bridge] Telegram webhook 已注册，跳过 polling');
+      } else {
+        if (webhookUrl && webhookStale) {
+          app.log.warn({ url: webhookUrl }, '[Bridge] Telegram webhook 近期出错，自动清除并切换为 polling');
+          await fetch(`https://api.telegram.org/bot${token}/deleteWebhook`).catch(() => {});
+        }
+        startTelegramPolling(token, app.log);
+      }
     }
   }
+
+  // 飞书 WebSocket 长连接（无需公网地址）
+  setFeishuBindCodeHandler(handleBindCode);
+  await initFeishuWSFromDB(app.log);
+
+  // 钉钉 Stream 长连接（无需公网地址）
+  setDingtalkBindCodeHandler(handleBindCode);
+  await initDingtalkStreamFromDB(app.log);
 
   // 清理所有运行中的后台任务（服务重启时中断）
   await backgroundTaskManager.cleanupRunningTasks();

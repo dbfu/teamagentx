@@ -6,7 +6,7 @@ import { createDecipheriv } from 'crypto';
  * encryptedMsg: 加密的消息内容（Base64）
  * returns: 解密后的 XML 字符串
  */
-export function decryptWecomMessage(encodingAESKey: string, encryptedMsg: string): string {
+export function decryptWecomMessage(encodingAESKey: string, encryptedMsg: string, expectedCorpId?: string): string {
   // AESKey = Base64Decode(encodingAESKey + '=')
   const aesKey = Buffer.from(encodingAESKey + '=', 'base64');
   const iv = aesKey.slice(0, 16);
@@ -19,11 +19,17 @@ export function decryptWecomMessage(encodingAESKey: string, encryptedMsg: string
 
   // Remove PKCS7 padding
   const padLen = decrypted[decrypted.length - 1];
+  if (padLen < 1 || padLen > 32) throw new Error('Invalid WeCom padding');
   const unpadded = decrypted.slice(0, decrypted.length - padLen);
 
   // Format: 16 bytes random + 4 bytes msg length (big-endian) + msg content + appid
   const msgLen = unpadded.readUInt32BE(16);
   const msgContent = unpadded.slice(20, 20 + msgLen).toString('utf8');
+
+  if (expectedCorpId !== undefined) {
+    const appId = unpadded.slice(20 + msgLen).toString('utf8');
+    if (appId !== expectedCorpId) throw new Error('WeCom corpId mismatch');
+  }
 
   return msgContent;
 }

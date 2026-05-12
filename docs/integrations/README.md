@@ -30,6 +30,9 @@ TeamAgentX ChatRoom（含多个 AI 助手）
 - [bridge-recommendations.md](./bridge-recommendations.md)  
   基于分支 `feat/external-platform-bridge` 当前代码现状整理的专项建议，包含产品方向、架构优化、可靠性、安全、接入体验和阶段性优先级。
 
+- [external-platform-helper-design.md](./external-platform-helper-design.md)
+  外部平台接入系统助手的详细设计，覆盖平台说明模型、聊天式配置流程、绑定码共享、运行态同步和当前边界。
+
 ## 消息流程
 
 ```

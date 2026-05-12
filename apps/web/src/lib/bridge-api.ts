@@ -2,6 +2,23 @@ import { getApiBaseUrl } from './config'
 
 export type Platform = 'telegram' | 'feishu' | 'dingtalk' | 'wecom' | 'qq'
 
+export interface BridgePlatformConfigFieldDefinition {
+  key: string
+  label: string
+  secret?: boolean
+}
+
+export interface BridgePlatformDefinition {
+  key: Platform
+  label: string
+  emoji: string
+  color: string
+  groupIdHint: string
+  supportsBindCode: boolean
+  supportsManualChannelCreate: boolean
+  configFields: BridgePlatformConfigFieldDefinition[]
+}
+
 export interface ExternalChannel {
   id: string
   platform: Platform
@@ -11,7 +28,7 @@ export interface ExternalChannel {
   botToken?: string
   webhookSecret?: string
   defaultAgentId?: string
-  defaultAgent?: { id: string; name: string }
+  defaultAgent?: { id: string; name: string; avatar?: string | null; avatarColor?: string | null }
   config?: string
   enabled: boolean
   createdAt: string
@@ -34,7 +51,7 @@ export interface UpdateChannelRequest {
   enabled?: boolean
 }
 
-export type WebhookUrls = Record<Platform, string>
+export type WebhookUrls = Partial<Record<Platform, string>>
 
 export interface BridgeEvent {
   id: string
@@ -48,12 +65,24 @@ export interface BridgeEvent {
   createdAt: string
 }
 
+export interface BridgePlatformPlaybook {
+  platform: Platform
+  title: string
+  consoleName: string
+  prerequisites: string[]
+  requiredCredentials: { key: string; label: string; howToGet: string; secret?: boolean }[]
+  consoleSteps: string[]
+  bindSteps: string[]
+  notes: string[]
+}
+
 export interface PlatformConfig {
   platform: Platform
-  botToken: string  // 脱敏后的值，非空表示已配置
-  hasConfig: boolean  // config 字段是否已设置
+  botToken: string       // 脱敏后的值，非空表示已配置
+  hasConfig: boolean     // config 字段是否已设置
   defaultAgentId: string | null
   defaultAgent: { id: string; name: string } | null
+  configValues: Record<string, string>  // 非密字段明文值，供展示
 }
 
 async function request<T>(
@@ -61,23 +90,35 @@ async function request<T>(
   options?: RequestInit
 ): Promise<{ success: boolean; data?: T; error?: string }> {
   const baseUrl = await getApiBaseUrl()
+  const token = localStorage.getItem('auth_token')
   const hasBody = options?.body !== undefined
   const headers: HeadersInit = {
-    ...(hasBody && { 'Content-Type': 'application/json' }),
+    ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...options?.headers,
   }
 
-  const response = await fetch(`${baseUrl}${endpoint}`, {
-    ...options,
-    headers,
-    cache: 'no-store',
-  })
+  try {
+    const response = await fetch(`${baseUrl}${endpoint}`, {
+      ...options,
+      headers,
+      cache: 'no-store',
+    })
 
-  const data = await response.json()
-  return data
+    const data = await response.json()
+    return data
+  } catch (err) {
+    console.error('[bridge-api] 请求失败', err)
+    return { success: false as const, error: err instanceof Error ? err.message : '网络错误' }
+  }
 }
 
 export const bridgeApi = {
+  listPlatforms: async (): Promise<BridgePlatformDefinition[]> => {
+    const res = await request<BridgePlatformDefinition[]>('/api/bridge/platforms')
+    return res.success && res.data ? res.data : []
+  },
+
   listChannels: async (platform?: Platform): Promise<ExternalChannel[]> => {
     const query = platform ? `?platform=${platform}` : ''
     const res = await request<ExternalChannel[]>(`/api/bridge/channels${query}`)
@@ -103,7 +144,8 @@ export const bridgeApi = {
   },
 
   deleteChannel: async (id: string): Promise<void> => {
-    await request<void>(`/api/bridge/channels/${id}`, { method: 'DELETE' })
+    const res = await request<void>(`/api/bridge/channels/${id}`, { method: 'DELETE' })
+    if (res && 'success' in res && !res.success) throw new Error((res as { error?: string }).error || '删除失败')
   },
 
   getWebhookUrls: async (): Promise<WebhookUrls> => {
@@ -134,6 +176,25 @@ export const bridgeApi = {
     })
     if (!res.success || !res.data) throw new Error(res.error || '生成绑定码失败')
     return res.data
+  },
+
+  getSystemConfig: async (): Promise<{ baseUrl: string }> => {
+    const res = await request<{ baseUrl: string }>('/api/bridge/system-config')
+    return res.data ?? { baseUrl: '' }
+  },
+
+  setSystemConfig: async (baseUrl: string): Promise<{ baseUrl: string }> => {
+    const res = await request<{ baseUrl: string }>('/api/bridge/system-config', {
+      method: 'PUT',
+      body: JSON.stringify({ baseUrl }),
+    })
+    if (!res.success || !res.data) throw new Error(res.error || '保存失败')
+    return res.data
+  },
+
+  getPlaybook: async (platform: Platform): Promise<BridgePlatformPlaybook | null> => {
+    const res = await request<BridgePlatformPlaybook>(`/api/bridge/playbooks/${platform}`)
+    return res.success && res.data ? res.data : null
   },
 
   listEvents: async (platform?: Platform, limit = 20): Promise<BridgeEvent[]> => {

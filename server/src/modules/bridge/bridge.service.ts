@@ -1,7 +1,6 @@
 import { randomUUID } from 'crypto';
 import prisma from '../../lib/prisma.js';
 import { messageService } from '../message/message.service.js';
-import { chatRoomService } from '../chatroom/chatroom.service.js';
 import { messageEventEmitter } from '../../core/agent/agent-handler/index.js';
 import { encrypt, decrypt } from './crypto.js';
 
@@ -12,35 +11,10 @@ function decryptChannel<T extends { botToken?: string | null; webhookSecret?: st
   return ch;
 }
 
-function splitMessage(text: string, maxLen: number): string[] {
-  if (text.length <= maxLen) return [text];
-  const chunks: string[] = [];
-  for (let i = 0; i < text.length; i += maxLen) {
-    chunks.push(text.slice(i, i + maxLen));
-  }
-  return chunks;
-}
-
-async function telegramSend(externalId: string, text: string, agentName: string): Promise<void> {
-  const channel = await prisma.externalChannel.findFirst({
-    where: { platform: 'telegram', externalId, enabled: true },
-  });
-  if (!channel?.botToken) return;
-
-  const botToken = decrypt(channel.botToken);
-  const formattedText = `[${agentName}] ${text}`;
-  const chunks = splitMessage(formattedText, 4096);
-
-  for (const chunk of chunks) {
-    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: externalId, text: chunk }),
-    });
-  }
-}
-
 export type Platform = 'telegram' | 'feishu' | 'dingtalk' | 'wecom' | 'qq';
+
+// 去重 Set，防止重复消息被多次处理
+const seenDedupeKeys = new Set<string>();
 
 // 平台响应回调，由各平台适配器注册
 const platformSenders = new Map<string, (externalId: string, text: string, agentName: string) => Promise<void>>();
@@ -101,7 +75,7 @@ export const bridgeService = {
   async listChannels(platform?: Platform) {
     const channels = await prisma.externalChannel.findMany({
       where: platform ? { platform } : undefined,
-      include: { chatRoom: { select: { id: true, name: true } }, defaultAgent: { select: { id: true, name: true } } },
+      include: { chatRoom: { select: { id: true, name: true } }, defaultAgent: { select: { id: true, name: true, avatar: true, avatarColor: true } } },
       orderBy: { createdAt: 'desc' },
     });
     return channels.map(decryptChannel);
@@ -142,7 +116,20 @@ export const bridgeService = {
     externalId: string;   // 平台侧群 ID
     senderName: string;
     content: string;
+    dedupeKey?: string;
   }) {
+    if (params.dedupeKey) {
+      if (seenDedupeKeys.has(params.dedupeKey)) {
+        console.info(`[Bridge] 重复消息已过滤: ${params.dedupeKey}`);
+        return null;
+      }
+      seenDedupeKeys.add(params.dedupeKey);
+      if (seenDedupeKeys.size > 5000) {
+        const oldest = seenDedupeKeys.values().next().value;
+        if (oldest) seenDedupeKeys.delete(oldest);
+      }
+    }
+
     const channel = await this.findChannelByExternal(params.platform, params.externalId);
     if (!channel || !channel.enabled) return null;
 
@@ -159,9 +146,10 @@ export const bridgeService = {
 
     // 若内容未 @ 任何 Agent，自动注入默认 Agent
     const hasAgentMention = /@\S+/.test(params.content);
-    const defaultAgent = channel.defaultAgent ?? channel.chatRoom.defaultAgentId
-      ? await prisma.agent.findUnique({ where: { id: channel.chatRoom.defaultAgentId! } })
-      : null;
+    const defaultAgent = channel.defaultAgent
+      ?? (channel.chatRoom.defaultAgentId
+        ? await prisma.agent.findUnique({ where: { id: channel.chatRoom.defaultAgentId } })
+        : null);
 
     const finalContent = (!hasAgentMention && defaultAgent)
       ? `${prefixedContent} @${defaultAgent.name}`
@@ -262,62 +250,4 @@ export const bridgeService = {
       }
     }
   },
-
-  // ──────────────── 房间自动创建 ────────────────
-
-  /**
-   * Bot 被拉入新群时，自动创建 TeamAgentX ChatRoom 并绑定频道
-   */
-  async autoCreateRoom(params: {
-    platform: Platform;
-    externalId: string;
-    groupName: string;
-    botToken?: string;
-    webhookSecret?: string;
-    defaultAgentId?: string;
-    config?: Record<string, unknown>;
-  }) {
-    // 幂等：若已存在则直接返回
-    const existing = await this.findChannelByExternal(params.platform, params.externalId);
-    if (existing) return existing;
-
-    const room = await chatRoomService.create({
-      name: params.groupName,
-      description: `来自 ${params.platform} 的外部群聊`,
-    });
-
-    if (!room) throw new Error(`创建 ChatRoom 失败：${params.groupName}`);
-
-    // 若有默认 Agent，加入群聊
-    if (params.defaultAgentId) {
-      await chatRoomService.addAgent({ chatRoomId: room.id, agentId: params.defaultAgentId });
-    }
-
-    const newChannel = await this.createChannel({
-      platform: params.platform,
-      externalId: params.externalId,
-      chatRoomId: room.id,
-      botToken: params.botToken,
-      webhookSecret: params.webhookSecret,
-      defaultAgentId: params.defaultAgentId,
-      config: params.config,
-    });
-
-    // 建群成功后延迟发送欢迎消息（延迟 1s 等 sender 注册完成）
-    setTimeout(async () => {
-      try {
-        const sender = platformSenders.get(params.platform);
-        if (!sender) return;
-        const welcomeText = `✅ TeamAgentX 已就绪！\n• 呼叫默认助手：直接发消息即可\n• 指定助手：@助手名 你的问题\n• 示例：@claude 帮我分析这段代码`;
-        await sender(params.externalId, welcomeText, 'TeamAgentX');
-      } catch (e) {
-        console.error('[Bridge] 发送欢迎消息失败:', e);
-      }
-    }, 1000);
-
-    return newChannel;
-  },
 };
-
-// 注册 Telegram 发送器
-bridgeService.registerSender('telegram', telegramSend);
