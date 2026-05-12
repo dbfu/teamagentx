@@ -22,6 +22,16 @@ import {
   buildInstalledSkillsInstructions,
   buildInstalledSkillsSignature,
 } from './skill-instructions.js';
+import {
+  AGENT_CREATOR_AGENT_ID,
+  agentCreatorTools,
+  CHATROOM_HELPER_AGENT_ID,
+  chatroomHelperTools,
+  CRON_TASK_HELPER_AGENT_ID,
+  cronTaskHelperTools,
+  SKILL_MANAGER_AGENT_ID,
+  skillManagerTools,
+} from './tools/index.js';
 import type {
   AgentDebugInfo,
   AgentExecResult,
@@ -91,6 +101,16 @@ function normalizeUsage(usage: any): TokenUsage | undefined {
     cacheReadTokens,
     cacheCreationTokens,
   };
+}
+
+function stringifyMcpToolResult(result: unknown): string {
+  if (typeof result === 'string') return result;
+  if (result === undefined) return '';
+  try {
+    return JSON.stringify(result, null, 2);
+  } catch {
+    return String(result);
+  }
 }
 
 const requireFromServerBundle = createRequire(import.meta.url);
@@ -746,6 +766,60 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     });
   }
 
+  private getSystemAssistantTools(): any[] {
+    switch (this.agentId) {
+      case AGENT_CREATOR_AGENT_ID:
+        return agentCreatorTools;
+      case SKILL_MANAGER_AGENT_ID:
+        return skillManagerTools;
+      case CRON_TASK_HELPER_AGENT_ID:
+        return cronTaskHelperTools;
+      case CHATROOM_HELPER_AGENT_ID:
+        return chatroomHelperTools;
+      default:
+        return [];
+    }
+  }
+
+  private buildSystemAssistantMcpTools(): any[] {
+    return this.getSystemAssistantTools().map((systemTool) => {
+      const name = systemTool.name;
+      return sdkTool(
+        name,
+        systemTool.description || name,
+        systemTool.schema,
+        async (args) => {
+          try {
+            const result = await systemTool.invoke(args ?? {});
+            return {
+              content: [{ type: 'text' as const, text: stringifyMcpToolResult(result) }],
+            };
+          } catch (error) {
+            return {
+              content: [{
+                type: 'text' as const,
+                text: error instanceof Error ? error.message : '工具执行失败。',
+              }],
+              isError: true,
+            };
+          }
+        },
+        { alwaysLoad: true },
+      );
+    });
+  }
+
+  private getAllowedTaxTools(): string[] {
+    const systemToolNames = this.getSystemAssistantTools()
+      .map((tool) => tool.name)
+      .filter((name): name is string => typeof name === 'string' && name.length > 0);
+
+    return [
+      'mcp__tax__send_message',
+      ...systemToolNames.map((name) => `mcp__tax__${name}`),
+    ];
+  }
+
   private buildTeamAgentXMcpServer() {
     return createSdkMcpServer({
       name: 'tax',
@@ -793,6 +867,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
           },
           { alwaysLoad: true },
         ),
+        ...this.buildSystemAssistantMcpTools(),
       ],
     });
   }
@@ -1027,7 +1102,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
         mcpServers: {
           tax: this.buildTeamAgentXMcpServer(),
         },
-        allowedTools: ['mcp__tax__send_message'],
+        allowedTools: this.getAllowedTaxTools(),
         settingSources: ['user', 'project', 'local'],
         hooks: this.buildHooks(),
         sessionId: this.hasStartedSession ? undefined : this.sessionId,

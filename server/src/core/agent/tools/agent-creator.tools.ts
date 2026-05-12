@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { tool } from 'langchain';
+import { createSystemTool as tool } from './system-tool.js';
 import { agentService } from '../../../core/agent/agent.service.js';
 import { llmProviderService } from '../../../modules/llm-provider/llm-provider.service.js';
 import { installSkillFromSourceTool } from './skills-helper.tools.js';
@@ -30,6 +30,17 @@ type AgentConfig = {
   categoryId?: string;
 };
 
+function normalizeAgentTypeConfig(config: Pick<AgentConfig, 'type' | 'acpTool'>): {
+  type: 'builtin' | 'acp';
+  acpTool?: AcpToolValue;
+} {
+  const type = config.type || 'acp';
+  return {
+    type,
+    acpTool: type === 'acp' ? (config.acpTool || 'claude') : undefined,
+  };
+}
+
 // 创建助手工具
 export const createAgentTool = tool(
   async ({
@@ -45,6 +56,8 @@ export const createAgentTool = tool(
     categoryId,
   }: AgentConfig) => {
     try {
+      const normalizedType = normalizeAgentTypeConfig({ type, acpTool });
+
       // 检查名称是否已存在
       const existing = await agentService.findByName(name);
       if (existing) {
@@ -57,8 +70,8 @@ export const createAgentTool = tool(
         prompt,
         avatar: avatar || 'Bot',
         avatarColor: avatarColor || 'bg-blue-500',
-        type: type || 'builtin',
-        acpTool,
+        type: normalizedType.type,
+        acpTool: normalizedType.acpTool,
         workDir,
         llmProviderId,
         categoryId,
@@ -96,8 +109,8 @@ export const createAgentTool = tool(
       type: z
         .enum(['builtin', 'acp'])
         .optional()
-        .describe('助手类型，默认 builtin'),
-      acpTool: z.enum(ACP_TOOL_VALUES).optional().describe('ACP 工具名称（仅 type=acp 时需要）'),
+        .describe('助手类型，默认 acp'),
+      acpTool: z.enum(ACP_TOOL_VALUES).optional().describe('ACP 工具名称（type=acp 时默认 claude）'),
       workDir: z.string().optional().describe('工作目录路径，可选'),
       llmProviderId: z
         .string()
@@ -130,6 +143,8 @@ export const createAgentsTool = tool(
 
     for (const config of agents) {
       try {
+        const normalizedType = normalizeAgentTypeConfig(config);
+
         // 检查名称是否已存在
         const existing = await agentService.findByName(config.name);
         if (existing) {
@@ -148,8 +163,8 @@ export const createAgentsTool = tool(
           prompt: config.prompt,
           avatar: config.avatar || 'Bot',
           avatarColor: config.avatarColor || 'bg-blue-500',
-          type: config.type || 'builtin',
-          acpTool: config.acpTool,
+          type: normalizedType.type,
+          acpTool: normalizedType.acpTool,
           workDir: config.workDir,
           llmProviderId: config.llmProviderId,
           categoryId: config.categoryId,
@@ -194,8 +209,8 @@ export const createAgentsTool = tool(
             prompt: z.string().describe('系统提示词，定义助手的行为和能力'),
             avatar: z.string().optional().describe('头像图标名称'),
             avatarColor: z.string().optional().describe('头像背景颜色'),
-            type: z.enum(['builtin', 'acp']).optional().describe('助手类型，默认 builtin'),
-            acpTool: z.enum(ACP_TOOL_VALUES).optional().describe('ACP 工具名称'),
+            type: z.enum(['builtin', 'acp']).optional().describe('助手类型，默认 acp'),
+            acpTool: z.enum(ACP_TOOL_VALUES).optional().describe('ACP 工具名称（type=acp 时默认 claude）'),
             workDir: z.string().optional().describe('工作目录路径'),
             llmProviderId: z
               .string()

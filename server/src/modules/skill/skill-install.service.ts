@@ -54,12 +54,6 @@ const KNOWN_SKILL_REPOS: Array<{
     keywords: ['claude-code', 'agent', 'eval', 'engineering', 'debugging', 'payment', 'sort', 'cli'],
     skills: ['agent-eval', 'agentic-engineering', 'agent-introspection-debugging', 'agent-payment-x402', 'agent-sort', 'bun-runtime', 'mcp-server-patterns', 'nextjs-turbopack', 'investor-outreach', 'market-research'],
   },
-  {
-    repo: 'langchain-ai/langgraph',
-    description: 'LangGraph 框架和 agent 构建技巧',
-    keywords: ['langgraph', 'agent', 'workflow', 'graph', 'langchain', '框架', '工作流'],
-    skills: [],
-  },
 ];
 
 // 发现的 Skill（用于用户选择）
@@ -841,8 +835,8 @@ export const skillInstallService = {
   },
 
   /**
-   * 获取 Skill source 路径列表（用于 deepagents，参数是 skills 根目录路径）。
-   * deepagents 需要的是根目录，例如 /skills/{agentId}/，它会自行扫描子目录中的 SKILL.md。
+   * 获取 Skill source 路径列表。
+   * 返回包含 SKILL.md 子目录的 skills 根目录，例如 /skills/{agentId}/。
    */
   getSkillsPaths(skillsDir: string): string[] {
     if (!fs.existsSync(skillsDir)) {

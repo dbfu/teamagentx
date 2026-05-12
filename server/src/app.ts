@@ -122,7 +122,7 @@ export async function createApp(options?: { enableSwagger?: boolean }) {
     bridgeGateway,
   ]);
 
-  // 确保 LangGraph checkpoint 表存在
+  // 确保历史 checkpoint 表存在
   await checkpointService.ensureTablesExist();
 
   // 标记所有 executing 状态的 Agent 任务为 interrupted（服务重启时保留）

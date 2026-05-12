@@ -1,7 +1,6 @@
 import { FastifyInstance } from 'fastify';
+import { createLlmClient } from '../lib/llm-client.js';
 import { llmProviderService } from '../modules/llm-provider/llm-provider.service.js';
-import { ChatAnthropic } from '@langchain/anthropic';
-import { ChatOpenAI } from '@langchain/openai';
 
 // 所有支持的 LLM 供应商类型 - 仅支持自定义
 const LLM_PROVIDER_TYPES = ['custom'] as const;
@@ -507,28 +506,10 @@ export async function llmProviderGateway(app: FastifyInstance) {
           return reply.code(404).send({ success: false, error: 'LLM 供应商不存在' });
         }
 
-        // 根据 apiProtocol 创建对应的客户端
-        const apiProtocol = (provider as any).apiProtocol || 'anthropic';
-        let model: ChatAnthropic | ChatOpenAI;
-
-        if (apiProtocol === 'anthropic') {
-          model = new ChatAnthropic({
-            model: provider.model,
-            apiKey: provider.apiKey,
-            maxTokens: 10,
-            ...(provider.apiUrl && { anthropicApiUrl: provider.apiUrl }),
-          });
-        } else {
-          model = new ChatOpenAI({
-            model: provider.model,
-            apiKey: provider.apiKey,
-            maxTokens: 10,
-            ...(provider.apiUrl && { configuration: { baseURL: provider.apiUrl } }),
-          });
-        }
+        const model = createLlmClient(provider, { maxTokens: 10 });
 
         // 发送简单的测试请求
-        const response = await model.invoke('Hi');
+        await model.invoke('Hi');
 
         return reply.send({
           success: true,

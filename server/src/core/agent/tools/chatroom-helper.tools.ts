@@ -3,7 +3,7 @@
  * 用于创建群聊、管理群成员等
  */
 import { z } from 'zod';
-import { tool } from 'langchain';
+import { createSystemTool as tool } from './system-tool.js';
 import { chatRoomService } from '../../../modules/chatroom/chatroom.service.js';
 import { agentService } from '../../../core/agent/agent.service.js';
 import { broadcastAgentJoinedMessage } from '../agent-handler/message-utils.js';

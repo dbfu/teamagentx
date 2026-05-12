@@ -1,8 +1,7 @@
-import { ChatAnthropic } from '@langchain/anthropic';
-import { ChatOpenAI } from '@langchain/openai';
 import type { Message } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { config } from '../../config/index.js';
+import { createLlmClient } from '../../lib/llm-client.js';
 import prisma from '../../lib/prisma.js';
 import { llmProviderService } from '../llm-provider/llm-provider.service.js';
 import type { HistoryMessage } from '../task-queue/task-queue.service.js';
@@ -97,22 +96,10 @@ async function createSummary(oldSummary: string, messages: MessageWithSender[]):
     throw new Error('未找到默认 LLM Provider，无法压缩群历史摘要');
   }
 
-  const apiProtocol = provider.apiProtocol || 'anthropic';
-  const model =
-    apiProtocol === 'anthropic'
-      ? new ChatAnthropic({
-          model: provider.model,
-          apiKey: provider.apiKey,
-          temperature: 0.2,
-          maxTokens: config.agent.memorySummaryTargetTokens,
-          ...(provider.apiUrl && { anthropicApiUrl: provider.apiUrl }),
-        })
-      : new ChatOpenAI({
-          model: provider.model,
-          apiKey: provider.apiKey,
-          temperature: 0.2,
-          ...(provider.apiUrl && { configuration: { baseURL: provider.apiUrl } }),
-        });
+  const model = createLlmClient(provider, {
+    temperature: 0.2,
+    maxTokens: config.agent.memorySummaryTargetTokens,
+  });
 
   const prompt = `你是群聊长期记忆压缩器。请把旧摘要和新增群聊消息合并为新的长期记忆摘要。
 
@@ -162,14 +149,10 @@ ${formatMessages(messages)}
 
 请直接输出新的长期记忆摘要。`;
 
-  const response = await model.invoke([
+  const content = await model.invoke([
     { role: 'system', content: '你负责把群聊历史压缩成可持续滚动更新的长期记忆。' },
     { role: 'user', content: prompt },
   ]);
-  const content =
-    typeof response.content === 'string'
-      ? response.content
-      : JSON.stringify(response.content);
 
   return content.trim();
 }

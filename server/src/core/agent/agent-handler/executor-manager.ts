@@ -3,7 +3,6 @@ import { chatRoomService } from '../../../modules/chatroom/chatroom.service.js';
 import { llmProviderService } from '../../../modules/llm-provider/llm-provider.service.js';
 import type { IAgentExecutor, AgentDebugInfo, ChatRoomAgentInfo } from '../executor.interface.js';
 import { createExecutor } from '../executor.factory.js';
-import { LangChainAgentExecutor } from '../langchain.executor.js';
 import { clearAgentLog } from '../agent-log.js';
 import { agentService } from '../agent.service.js';
 import { clearExecutorCacheEntries, executorCache, getCacheKey } from './cache.js';
@@ -16,6 +15,22 @@ import type { HistoryMessage } from '../../../modules/task-queue/task-queue.serv
 import { globalEmit, globalEmitDone } from './status.js';
 import { buildAIMessage } from './message-utils.js';
 import { DEBUG_LOG_PATH } from './debug.js';
+
+function getRequiredAcpProviderProtocol(acpTool?: string | null): 'anthropic' | 'openai' | null {
+  if ((acpTool || 'claude') === 'claude') return 'anthropic';
+  if (acpTool === 'codex') return 'openai';
+  return null;
+}
+
+async function findCompatibleDefaultProvider(requiredProtocol: 'anthropic' | 'openai') {
+  const defaultProvider = await llmProviderService.findDefault();
+  if (((defaultProvider as any)?.apiProtocol || 'anthropic') === requiredProtocol) {
+    return defaultProvider;
+  }
+
+  const activeProviders = await llmProviderService.findActive();
+  return activeProviders.find((provider) => ((provider as any).apiProtocol || 'anthropic') === requiredProtocol) ?? null;
+}
 
 // Get or create Agent executor for a specific chatRoom
 export async function getExecutor(
@@ -62,8 +77,8 @@ export async function getExecutor(
     }))
     .filter((info) => info.name && info.agentId);
 
-  // 获取 LLM Provider：优先使用助手绑定的；builtin 未绑定时使用默认供应商
-  // ACP 未绑定时沿用 CLI 自身配置，避免改变已有外部助手行为
+  // 获取 LLM Provider：优先使用助手绑定的；builtin 和系统 ACP 未绑定时使用兼容默认供应商。
+  // 普通 ACP 未绑定时沿用 CLI 自身配置，避免改变已有外部助手行为。
   let llmProvider = agent.llmProvider;
   if (!llmProvider && agent.type === 'builtin') {
     // builtin 类型助手如果没有绑定供应商，尝试获取默认供应商
@@ -72,6 +87,17 @@ export async function getExecutor(
       console.log(`${agentName}: 使用默认 LLM Provider ${llmProvider.name}`);
     } else {
       console.warn(`${agentName}: 未找到 LLM Provider 配置`);
+    }
+  }
+  if (!llmProvider && agent.type === 'acp' && agent.agentLevel === 'system') {
+    const requiredProtocol = getRequiredAcpProviderProtocol(agent.acpTool);
+    if (requiredProtocol) {
+      llmProvider = await findCompatibleDefaultProvider(requiredProtocol);
+      if (llmProvider) {
+        console.log(`${agentName}: 系统助手使用 ${requiredProtocol} LLM Provider ${llmProvider.name}`);
+      } else {
+        console.warn(`${agentName}: 未找到 ${requiredProtocol} 协议 LLM Provider，将沿用本地 ${agent.acpTool || 'claude'} 配置`);
+      }
     }
   }
 
@@ -122,20 +148,38 @@ export function _testInjectDebugInfo(
 ): void {
   const cacheKey = getCacheKey(chatRoomId, agentName);
 
-  // Create a minimal executor with test data (using LangChain executor for testing)
-  const executor = new LangChainAgentExecutor(
-    debugInfo.name ?? agentName,
-    debugInfo.systemPrompt ?? 'test prompt',
-    cacheKey,
+  const executor: IAgentExecutor = {
+    name: debugInfo.name ?? agentName,
     chatRoomId,
-    debugInfo.injectGroupHistory ?? true,
-    debugInfo.chatRoomAgents ?? [],
-  );
-
-  // Inject the test data
-  (executor as any).lastContext = debugInfo.lastContext ?? null;
-  (executor as any).lastInvokeResult = debugInfo.lastInvokeResult ?? null;
-  (executor as any).lastHistory = debugInfo.lastHistory ?? null;
+    injectGroupHistory: debugInfo.injectGroupHistory ?? true,
+    workDir: debugInfo.workDir,
+    lastInjectedMessageId: undefined,
+    async exec() {
+      return { actions: [] };
+    },
+    getDebugInfo(): AgentDebugInfo {
+      return {
+        name: debugInfo.name ?? agentName,
+        systemPrompt: debugInfo.systemPrompt ?? 'test prompt',
+        lastContext: debugInfo.lastContext ?? null,
+        lastInvokeResult: debugInfo.lastInvokeResult ?? null,
+        lastResponse: debugInfo.lastResponse ?? null,
+        lastHistory: debugInfo.lastHistory ?? null,
+        threadId: debugInfo.threadId ?? cacheKey,
+        chatRoomId,
+        injectGroupHistory: debugInfo.injectGroupHistory ?? true,
+        chatRoomAgents: debugInfo.chatRoomAgents ?? [],
+        type: debugInfo.type ?? 'acp',
+        acpTool: debugInfo.acpTool,
+        workDir: debugInfo.workDir,
+        agentId: debugInfo.agentId ?? null,
+        llmProvider: debugInfo.llmProvider,
+      };
+    },
+    setLastInjectedMessageId() {
+      // Test helper only needs debug info injection.
+    },
+  };
 
   executorCache.set(cacheKey, executor);
 }

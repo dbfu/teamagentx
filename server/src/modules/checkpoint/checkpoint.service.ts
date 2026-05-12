@@ -20,7 +20,7 @@ export interface CheckpointDetail {
 
 /**
  * Checkpoint 服务
- * 管理 LangGraph checkpoint 数据的清理和查询
+ * 管理历史 checkpoint 数据的清理和查询
  */
 export const checkpointService = {
   /**
