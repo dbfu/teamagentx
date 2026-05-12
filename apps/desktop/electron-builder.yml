@@ -30,6 +30,9 @@ extraResources:
       - "!**/claude-agent-sdk-darwin-*/**"
       - "!**/claude-agent-sdk-linux-*/**"
       - "!**/claude-agent-sdk-win32-*/**"
+      - "!**/@openai+codex@*-darwin-*/**"
+      - "!**/@openai+codex@*-linux-*/**"
+      - "!**/@openai+codex@*-win32-*/**"
 
 # Windows 特殊配置 - server 目录不解压到 asar，保持为普通文件
 asar: true

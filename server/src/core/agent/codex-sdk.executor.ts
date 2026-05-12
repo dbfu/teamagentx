@@ -1,6 +1,7 @@
 import type { LlmProvider } from '@prisma/client';
 import { Codex, type Thread, type ThreadEvent, type ThreadItem, type Usage } from '@openai/codex-sdk';
 import { createHash, randomUUID } from 'crypto';
+import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -67,6 +68,32 @@ function attachmentExtension(mimeType: string): string {
   if (mimeType === 'image/webp') return '.webp';
   if (mimeType === 'image/gif') return '.gif';
   return '.jpg';
+}
+
+/**
+ * 查找本地安装的 Codex CLI 可执行文件路径（TOOLS_DIR 或系统 PATH）。
+ * 当 electron-builder 排除了 @openai/codex 原生二进制包时作为回退。
+ */
+function findLocalCodexBinary(): string | undefined {
+  // 1. TOOLS_DIR 本地安装（npm install --prefix TOOLS_DIR @openai/codex）
+  const toolsDir = process.env.TOOLS_DIR;
+  if (toolsDir) {
+    const extension = process.platform === 'win32' ? '.exe' : '';
+    const localBin = path.join(toolsDir, 'node_modules', '.bin', 'codex' + extension);
+    if (fs.existsSync(localBin)) return localBin;
+  }
+
+  // 2. 系统 PATH
+  try {
+    const which = process.platform === 'win32' ? 'where' : 'which';
+    const result = execSync(`${which} codex 2>/dev/null`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+    if (result) {
+      const binPath = result.split('\n')[0].trim();
+      if (binPath && fs.existsSync(binPath)) return binPath;
+    }
+  } catch {}
+
+  return undefined;
 }
 
 function getDefaultCodexAuthStatus(): { available: boolean; path: string } {
@@ -634,6 +661,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       apiKey: this.llmProvider?.apiKey,
       baseUrl: this.llmProvider?.apiUrl || undefined,
       config,
+      codexPathOverride: findLocalCodexBinary(),
     });
   }
 
