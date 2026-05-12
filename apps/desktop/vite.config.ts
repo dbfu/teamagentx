@@ -10,21 +10,14 @@ export default defineConfig({
   root: webRoot,
   base: './',
   plugins: [
-    react({
-      babel: {
-        plugins: [
-          [
-            '@locator/babel-jsx/dist',
-            {
-              env: 'development',
-            },
-          ],
-        ],
-      },
-    }),
+    react(),
     electron({
       main: {
         entry: path.resolve(desktopRoot, 'electron/main.ts'),
+        onstart({ startup }) {
+          // Spawn Electron with the correct cwd (desktop dir), not the Vite root (web dir)
+          startup([desktopRoot, '--no-sandbox'], { cwd: desktopRoot });
+        },
         vite: {
           build: {
             outDir: path.resolve(desktopRoot, 'dist-electron'),

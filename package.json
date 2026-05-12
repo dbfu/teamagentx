@@ -1,1 +1,11 @@
-{}
+{
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/engines",
+      "electron",
+      "electron-winstaller",
+      "esbuild",
+      "prisma"
+    ]
+  }
+}

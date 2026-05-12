@@ -128,6 +128,16 @@ exports.default = async function (context) {
 
   // Windows 不支持 Unix 软链接，需要将所有软链接转换为实际文件
   if (targetPlatform === 'win32') {
+    // pnpm .pnpm dir has mutually-referencing symlink node_modules subdirs.
+    // Expanding them causes packages to be copied dozens of times (GBs -> tens of GBs).
+    // Delete .pnpm/node_modules bridge dirs first, keeping only top-level symlinks.
+    const pnpmInternalNm = path.join(nodeModulesDir, '.pnpm', 'node_modules');
+    if (fs.existsSync(pnpmInternalNm)) {
+      const size = getPathSize(pnpmInternalNm);
+      fs.rmSync(pnpmInternalNm, { recursive: true, force: true });
+      console.log(`[afterPack] Removed .pnpm/node_modules bridge dir (${formatBytes(size)})`);
+    }
+
     const convertedSymlinks = convertSymlinksToFiles(serverDir);
     if (convertedSymlinks.length > 0) {
       console.log(`[afterPack] Converted ${convertedSymlinks.length} symlink(s) to files for Windows`);
