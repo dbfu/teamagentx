@@ -121,9 +121,9 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
       {/* Logo area */}
       <div className={cn(
         "flex items-center justify-center",
-        isElectron ? "mt-[30px]" : "mt-3"
+        isElectron ? "mt-[24px]" : "mt-3"
       )}>
-        <div className="flex size-8 items-center justify-center overflow-hidden rounded-md">
+        <div className="flex size-10 items-center justify-center overflow-hidden rounded-lg bg-white">
           <img src={`${import.meta.env.BASE_URL}app-logo.png`} alt="TeamAgentX" className="size-full object-cover" />
         </div>
       </div>
@@ -132,7 +132,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
-            className="mt-1.5 mb-1 flex size-7 items-center justify-center rounded bg-primary text-primary-foreground shadow-[0_2px_8px_oklch(0.55_0.22_250/0.18)] hover:opacity-90 transition-opacity"
+            className="mt-4 mb-1 flex size-7 items-center justify-center rounded bg-primary text-primary-foreground shadow-[0_2px_8px_oklch(0.55_0.22_250/0.18)] hover:opacity-90 transition-opacity"
             style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
           >
             <Plus className="size-3.5" strokeWidth={2.5} />
