@@ -25,6 +25,8 @@ import { WindowTitleBar } from './components/ui/window-title-bar'
 import { useIsMobile } from './hooks/use-mobile'
 import { playMessageSound } from './lib/message-sound'
 import { cn } from './lib/utils'
+import { SetupWizard } from './components/setup/setup-wizard'
+import { isElectron, waitForServer } from './lib/config'
 import { ChatRoom } from './lib/agent-api'
 import { useAuthStore, useChatRoomStore, useSocketStore, useUIStore } from './stores'
 import { useChatStore } from './stores/chat-store'
@@ -500,7 +502,7 @@ function AppContent() {
 }
 
 export default function App() {
-  const { state, isFirstUse, login, register, token, checkAuth } = useAuthStore()
+  const { state, isFirstUse, setupCompleted, login, register, token, checkAuth, setupLogin, setSetupCompleted } = useAuthStore()
   const { connect, disconnect, isConnected } = useSocketStore()
   const { showLogin, showRegister, setShowLogin, setShowRegister } = useUIStore()
 
@@ -509,10 +511,28 @@ export default function App() {
   // Track if connection was lost after being connected
   const [showDisconnectedBanner, setShowDisconnectedBanner] = useState(false)
 
-  // Check auth on mount
+  // Electron 环境下等待后端服务就绪
+  const [serverState, setServerState] = useState<'waiting' | 'ready' | 'error'>(
+    isElectron() ? 'waiting' : 'ready'
+  )
+  const [serverError, setServerError] = useState('')
+
   useEffect(() => {
-    checkAuth()
-  }, [checkAuth])
+    if (serverState !== 'waiting') return
+    waitForServer()
+      .then(() => setServerState('ready'))
+      .catch((err) => {
+        setServerError(err.message || '服务启动失败')
+        setServerState('error')
+      })
+  }, [serverState])
+
+  // Check auth once server is ready
+  useEffect(() => {
+    if (serverState === 'ready') {
+      checkAuth()
+    }
+  }, [serverState, checkAuth])
 
   // Connect socket when authenticated
   useEffect(() => {
@@ -566,6 +586,45 @@ export default function App() {
     setShowRegister(true)
   }
 
+  const forceSetup = typeof window !== 'undefined' && localStorage.getItem('force_setup_wizard') === 'true'
+  const showSetupWizard = isElectron() && state !== 'checking' && (forceSetup || (isFirstUse && !setupCompleted))
+
+  // Electron: 等待后端服务启动
+  if (serverState === 'waiting') {
+    return (
+      <div className="flex flex-col h-screen w-full bg-background">
+        <WindowTitleBar />
+        <div className="flex flex-1 flex-col items-center justify-center">
+          <div className="flex flex-col items-center gap-4">
+            <Loader2 className="size-6 animate-spin text-primary" />
+            正在启动服务...
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Electron: 服务启动失败
+  if (serverState === 'error') {
+    return (
+      <div className="flex flex-col h-screen w-full bg-background">
+        <WindowTitleBar />
+        <div className="flex flex-1 flex-col items-center justify-center">
+          <div className="flex flex-col items-center gap-4 max-w-md text-center">
+            <div className="text-lg font-semibold text-foreground">服务启动失败</div>
+            <div className="text-sm text-muted-foreground">{serverError}</div>
+            <button
+              onClick={() => { setServerError(''); setServerState('waiting') }}
+              className="rounded-lg bg-blue-500 px-4 py-2 text-sm text-white hover:bg-blue-600"
+            >
+              重试
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   // Show loading state while checking auth
   if (state === 'checking') {
     return (
@@ -578,6 +637,25 @@ export default function App() {
             加载中...
           </div>
         </div>
+      </div>
+    )
+  }
+
+  // 桌面版首次引导
+  if (showSetupWizard) {
+    return (
+      <div className="flex flex-col h-screen w-full bg-background">
+        <WindowTitleBar />
+        <SetupWizard
+          onComplete={(data) => {
+            setupLogin(data)
+            localStorage.removeItem('force_setup_wizard')
+          }}
+          onSkip={() => {
+            setSetupCompleted(true)
+            localStorage.removeItem('force_setup_wizard')
+          }}
+        />
       </div>
     )
   }

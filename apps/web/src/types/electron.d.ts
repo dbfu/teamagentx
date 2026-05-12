@@ -17,6 +17,10 @@ interface ElectronAPI {
   windowMaximize: () => Promise<void>;
   windowClose: () => Promise<void>;
   windowIsMaximized: () => Promise<boolean>;
+  // 服务启动状态监听
+  onServerReady: (callback: (port: number) => void) => () => void;
+  onServerError: (callback: (error: string) => void) => () => void;
+  getServerStatus: () => Promise<{ ready: boolean; port: number | null; error: string | null }>;
 }
 
 // Flutter WebView Channel 接口

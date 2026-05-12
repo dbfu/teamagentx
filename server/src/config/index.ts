@@ -10,6 +10,7 @@ export const config = {
   database: {
     url: process.env.DATABASE_URL || 'file:./dev.db',
   },
+  toolsDir: process.env.TOOLS_DIR || '',
   agent: {
     historyThreshold: parseInt(process.env.AGENT_HISTORY_THRESHOLD || '20', 10),
     memoryRecentMessages: parseInt(process.env.AGENT_MEMORY_RECENT_MESSAGES || '10', 10),

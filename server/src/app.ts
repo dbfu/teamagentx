@@ -29,6 +29,7 @@ import { bridgeGateway, startTelegramPolling, handleBindCode } from './gateway/b
 import { initFeishuWSFromDB, setFeishuBindCodeHandler } from './modules/bridge/feishu-ws-client.js';
 import { initDingtalkStreamFromDB, setDingtalkBindCodeHandler } from './modules/bridge/dingtalk-stream-client.js';
 import { uploadService } from './modules/upload/upload.service.js';
+import { setupGateway } from './gateway/setup.gateway.js';
 import { setupSocket } from './socket/index.js';
 import { cronSchedulerService } from './core/cron/cron-scheduler.service.js';
 import { backgroundTaskManager } from './core/shell/background-task-manager.js';
@@ -109,6 +110,7 @@ export async function createApp(options?: { enableSwagger?: boolean }) {
   // 注册网关
   await registerGateways(app, [
     authGateway,
+    setupGateway,
     categoryGateway,
     llmProviderGateway,
     agentGateway,

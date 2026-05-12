@@ -720,3 +720,28 @@ export function getExternalPlatformHelperDefinition(
     llmProviderId: llmProviderId ?? undefined,
   };
 }
+
+/** 系统助手 ID 列表，用于批量更新 */
+export const SYSTEM_AGENT_IDS = [
+  AGENT_CREATOR_ID,
+  SKILL_MANAGER_ID,
+  CRON_TASK_HELPER_ID,
+  CHATROOM_HELPER_ID,
+  EXTERNAL_PLATFORM_HELPER_ID,
+];
+
+/**
+ * 将所有系统助手的 acpTool 更新为指定值。
+ * 首次引导完成后调用。
+ */
+export async function updateSystemAgentsAcpTool(acpTool: string): Promise<void> {
+  const { default: prisma } = await import('../lib/prisma.js');
+  await prisma.agent.updateMany({
+    where: {
+      id: { in: SYSTEM_AGENT_IDS },
+      agentLevel: 'system',
+    },
+    data: { acpTool, updatedAt: new Date() },
+  });
+  console.log(`[system-agent-definitions] 已将系统助手 acpTool 更新为: ${acpTool}`);
+}

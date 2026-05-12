@@ -339,7 +339,7 @@ ${systemPrompt}
     // 如果全局目录不存在（没有安装过 skills），不需要创建 symlink
     if (!fs.existsSync(globalSkillsDir)) return;
 
-    // CLAUDE_CONFIG_DIR 下的 skills 路径（claude-agent-acp 会从这里读取）
+    // CLAUDE_CONFIG_DIR 下的 skills 路径（Claude-compatible ACP runtimes 会从这里读取）
     // 与 acp-provider.adapter.ts 中的路径保持一致
     const claudeConfigDir = path.join(os.homedir(), '.teamagentx', 'acp-config', this.agentId);
     const configSkillsDir = path.join(claudeConfigDir, 'skills');

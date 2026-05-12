@@ -22,4 +22,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   windowMaximize: () => ipcRenderer.invoke('window:maximize'),
   windowClose: () => ipcRenderer.invoke('window:close'),
   windowIsMaximized: () => ipcRenderer.invoke('window:is-maximized'),
+  // 服务启动状态监听（渲染器用于判断后端何时就绪）
+  onServerReady: (callback: (port: number) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, port: number) => callback(port);
+    ipcRenderer.on('server-ready', handler);
+    return () => ipcRenderer.removeListener('server-ready', handler);
+  },
+  onServerError: (callback: (error: string) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, error: string) => callback(error);
+    ipcRenderer.on('server-error', handler);
+    return () => ipcRenderer.removeListener('server-error', handler);
+  },
+  getServerStatus: () => ipcRenderer.invoke('get-server-status'),
 });

@@ -9,11 +9,13 @@ export const ACP_TOOLS = [
     id: 'claude',
     name: 'Claude',
     description: 'Anthropic Claude Agent SDK',
+    checkCommand: 'claude --version',
   },
   {
     id: 'codex',
     name: 'Codex',
     description: 'OpenAI Codex SDK',
+    checkCommand: 'codex --version',
   },
   { id: 'cursor', name: 'Cursor', description: 'Cursor Agent', checkCommand: 'cursor-agent --version' },
   { id: 'copilot', name: 'Copilot', description: 'GitHub Copilot CLI', checkCommand: 'copilot --version' },
@@ -110,11 +112,22 @@ function checkLocalConfig(toolId: string): Pick<AcpToolInfo, 'localConfigAvailab
  * 检测单个 CLI 工具是否已安装
  */
 function checkToolInstalled(checkCommand: string): { installed: boolean; version?: string } {
+  // 构建 PATH：包含 TOOLS_DIR/node_modules/.bin
+  const toolsDir = process.env.TOOLS_DIR;
+  let envPath = process.env.PATH || '';
+  if (toolsDir) {
+    const toolsBin = path.join(toolsDir, 'node_modules', '.bin');
+    if (fs.existsSync(toolsBin)) {
+      envPath = `${toolsBin}${path.delimiter}${envPath}`;
+    }
+  }
+
   try {
     const output = execSync(checkCommand, {
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 5000,
+      env: { ...process.env, PATH: envPath },
     });
 
     // 尝试提取版本号（取第一行）
@@ -130,7 +143,9 @@ function checkToolInstalled(checkCommand: string): { installed: boolean; version
  */
 export function checkAllAcpTools(): AcpToolInfo[] {
   return ACP_TOOLS.filter((tool) => VISIBLE_ACP_TOOL_IDS.has(tool.id)).map(tool => {
-    if (!('checkCommand' in tool)) {
+    const checkCmd = 'checkCommand' in tool ? tool.checkCommand : undefined;
+
+    if (!checkCmd) {
       return {
         id: tool.id,
         name: tool.name,
@@ -140,7 +155,7 @@ export function checkAllAcpTools(): AcpToolInfo[] {
       };
     }
 
-    const result = checkToolInstalled(tool.checkCommand);
+    const result = checkToolInstalled(checkCmd);
     return {
       id: tool.id,
       name: tool.name,

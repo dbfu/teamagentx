@@ -2,6 +2,7 @@ import type { LlmProvider } from '@prisma/client';
 import type { HookCallbackMatcher, HookEvent, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { createSdkMcpServer, query, tool as sdkTool } from '@anthropic-ai/claude-agent-sdk';
 import { createHash, randomUUID } from 'crypto';
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import { createRequire } from 'module';
 import * as os from 'os';
@@ -239,12 +240,36 @@ function resolveClaudeCodeExecutable(): string | undefined {
       ]
     : [`@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`];
 
+  // 1. 查找 SDK 自带的原生二进制
   for (const packageName of packageNames) {
     try {
       return requireFromClaudeSdk.resolve(`${packageName}/claude${extension}`);
     } catch {
       // Optional native package for another platform/arch is expected to be absent.
     }
+  }
+
+  // 2. 查找应用本地安装目录（TOOLS_DIR/node_modules/.bin/claude）
+  const toolsDir = process.env.TOOLS_DIR;
+  if (toolsDir) {
+    const localBin = path.join(toolsDir, 'node_modules', '.bin', 'claude' + extension);
+    if (fs.existsSync(localBin)) {
+      return localBin;
+    }
+  }
+
+  // 3. 在 PATH 中查找系统安装的 claude CLI
+  try {
+    const whichCmd = process.platform === 'win32' ? 'where claude' : 'which claude';
+    const result = execFileSync('sh', ['-c', whichCmd], {
+      encoding: 'utf-8',
+      timeout: 3000,
+    }).trim();
+    if (result && result.split('\n')[0]) {
+      return result.split('\n')[0];
+    }
+  } catch {
+    // claude not found in PATH
   }
 
   return undefined;
