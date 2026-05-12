@@ -1,6 +1,6 @@
 import { Message } from '@/lib/agent-api'
 import { tokenUsageApi } from '@/lib/token-usage-api'
-import { cn, formatDateTime, agentBorder, agentText } from '@/lib/utils'
+import { cn, formatDateTime } from '@/lib/utils'
 import { copyToClipboard } from '@/lib/copy-utils'
 import { Bot, MessageSquareMore, Info, Copy, XCircle } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
@@ -72,9 +72,6 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, typingAgent
   const [isNameHovered, setIsNameHovered] = useState(false)
   const [viewerImage, setViewerImage] = useState<{ url: string; name: string } | null>(null)
 
-  // Agent color for this message
-  const borderColor = message.isHuman ? 'var(--primary)' : agentBorder(senderName)
-  const textColor = message.isHuman ? 'var(--primary)' : agentText(senderName)
   const mentionClassName = message.isHuman
     ? 'inline-flex items-center rounded bg-white/15 px-1.5 py-0.5 font-semibold text-white transition-colors hover:bg-white/25'
     : 'inline-flex items-center rounded bg-primary/10 px-1.5 py-0.5 font-medium text-primary transition-colors hover:bg-primary/15 hover:text-primary/90'
@@ -349,14 +346,13 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, typingAgent
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2 mb-1">
             <span
-              className={cn("text-xs font-bold", !message.isHuman && "cursor-pointer group")}
-              style={{ color: textColor }}
+              className={cn("text-xs font-bold text-primary", !message.isHuman && "cursor-pointer group")}
               onMouseEnter={() => !message.isHuman && setIsNameHovered(true)}
               onMouseLeave={() => !message.isHuman && setIsNameHovered(false)}
               onClick={handleNameClick}
             >
               {!message.isHuman && (
-                <span className={cn("text-primary -ml-3 mr-px transition-opacity text-xs", isNameHovered ? "opacity-100" : "opacity-0 group-hover:opacity-100")}>@</span>
+                <span className={cn("-ml-3 mr-px transition-opacity text-xs", isNameHovered ? "opacity-100" : "opacity-0 group-hover:opacity-100")}>@</span>
               )}
               {senderName}
             </span>
@@ -368,7 +364,7 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, typingAgent
               "max-w-[min(38rem,78vw)] overflow-x-auto rounded-md border border-border/80 bg-[var(--surface-raised)] px-3 py-2.5 text-sm leading-relaxed shadow-[var(--control-shadow)] cursor-text",
               isMobile ? "select-none" : "select-text"
             )}
-            style={{ borderLeft: `3px solid ${borderColor}` }}
+            style={{ borderLeft: '3px solid var(--primary)' }}
             onContextMenu={handleContextMenu} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}
           >
             {renderReplyPreview()}
