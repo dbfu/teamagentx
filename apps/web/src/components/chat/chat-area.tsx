@@ -80,7 +80,7 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
 
   if (!chatRoom) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-background text-muted-foreground">
+      <div className="flex flex-1 items-center justify-center bg-[var(--surface)] text-muted-foreground">
         选择一个群聊开始对话
       </div>
     )
@@ -145,7 +145,7 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
   const isTaskBoardOpen = sidePanelMode === 'task-board'
 
   return (
-    <div className={cn("flex flex-1 flex-col", isMobile ? "min-h-0" : "")}>
+    <div className={cn("flex flex-1 flex-col bg-background", isMobile ? "min-h-0" : "")}>
       {/* Header - 移动端不显示，由 MobileChatDetailPage 提供 */}
       {!isMobile && (
         <ChatAreaHeader
@@ -167,7 +167,7 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
       <div className={cn("flex flex-1", isMobile ? "min-h-0" : "overflow-hidden")}>
         {/* Messages and Input area */}
         {!isTaskBoardOpen && (
-          <div className="flex flex-1 flex-col min-w-0">
+          <div className="flex flex-1 flex-col min-w-0 bg-background">
             {/* Messages */}
             <ChatMessagesList
               chatRoomId={chatRoom.id}

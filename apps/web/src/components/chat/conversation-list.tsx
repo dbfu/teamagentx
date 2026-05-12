@@ -112,11 +112,11 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
   }
 
   return (
-    <div className={cn("flex h-full select-none flex-col bg-background overflow-x-hidden", isMobile ? "w-full border-0" : "w-72 shrink-0 border-r border-border")}>
+    <div className={cn("flex h-full select-none flex-col bg-[var(--surface)] overflow-x-hidden", isMobile ? "w-full border-0" : "w-72 shrink-0 border-r border-border")}>
       {/* Header - 支持拖动 */}
       {!isMobile && (
         <div
-          className={cn("flex items-center justify-between px-4 py-3", isElectron ? "mt-1" : "")}
+          className={cn("flex items-center justify-between border-b border-border/70 bg-[var(--surface-raised)] px-4 py-3 shadow-[var(--control-shadow)]", isElectron ? "mt-1" : "")}
           style={isElectron ? { WebkitAppRegion: 'drag' } as React.CSSProperties : {}}
         >
           <div className="flex items-center gap-3">
@@ -177,8 +177,8 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
                 className={cn(
                   'flex shrink-0 cursor-pointer flex-col items-center gap-1 rounded-lg px-2 py-1 transition-colors',
                   selectedId === room.id
-                    ? 'bg-primary/10 ring-1 ring-primary/20'
-                    : 'bg-muted/50 hover:bg-accent'
+                    ? 'bg-[var(--brand-soft)] ring-1 ring-[var(--nav-active-border)]'
+                    : 'bg-[var(--surface-raised)] hover:bg-accent'
                 )}
               >
                 <div className="relative shrink-0">
@@ -240,7 +240,7 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
                         'mx-2 flex cursor-pointer items-start gap-3 rounded-lg transition-colors',
                         isMobile ? 'px-4 py-4' : 'px-3 py-3',
                         selectedId === room.id
-                          ? 'bg-primary/10'
+                          ? 'bg-[var(--brand-soft)] shadow-[var(--control-shadow)] ring-1 ring-[var(--nav-active-border)]'
                           : 'hover:bg-accent'
                       )}
                     >

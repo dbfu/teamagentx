@@ -37,6 +37,18 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.55 0.22 250);
+  --surface: oklch(0.985 0.003 260);
+  --surface-raised: oklch(1 0 0);
+  --surface-subtle: oklch(0.965 0.004 260);
+  --nav-active: oklch(0.55 0.22 250 / 0.12);
+  --nav-active-border: oklch(0.55 0.22 250 / 0.32);
+  --brand-soft: oklch(0.55 0.22 250 / 0.1);
+  --brand-muted: oklch(0.48 0.14 250);
+  --success: oklch(0.58 0.16 155);
+  --warning: oklch(0.7 0.16 72);
+  --app-shell: linear-gradient(135deg, oklch(0.99 0.004 260), oklch(0.96 0.012 245));
+  --panel-shadow: 0 20px 55px oklch(0.2 0.04 260 / 0.09);
+  --control-shadow: 0 1px 2px oklch(0.2 0.04 260 / 0.08);
 }
 
 .dark {
@@ -72,6 +84,90 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(0.269 0 0);
   --sidebar-ring: oklch(0.60 0.20 250);
+  --surface: oklch(0.18 0.012 260);
+  --surface-raised: oklch(0.215 0.014 260);
+  --surface-subtle: oklch(0.25 0.014 260);
+  --nav-active: oklch(0.6 0.2 250 / 0.18);
+  --nav-active-border: oklch(0.6 0.2 250 / 0.42);
+  --brand-soft: oklch(0.6 0.2 250 / 0.16);
+  --brand-muted: oklch(0.72 0.12 250);
+  --success: oklch(0.7 0.16 155);
+  --warning: oklch(0.78 0.15 72);
+  --app-shell: linear-gradient(135deg, oklch(0.15 0.012 260), oklch(0.205 0.018 245));
+  --panel-shadow: 0 24px 65px oklch(0 0 0 / 0.28);
+  --control-shadow: 0 1px 2px oklch(0 0 0 / 0.22);
+}
+
+:root[data-brand-theme='graphite'] {
+  --primary: oklch(0.36 0.018 260);
+  --ring: oklch(0.36 0.018 260);
+  --sidebar-primary: oklch(0.36 0.018 260);
+  --sidebar-ring: oklch(0.36 0.018 260);
+  --nav-active: oklch(0.36 0.018 260 / 0.1);
+  --nav-active-border: oklch(0.36 0.018 260 / 0.3);
+  --brand-soft: oklch(0.36 0.018 260 / 0.09);
+  --brand-muted: oklch(0.38 0.018 260);
+  --app-shell: linear-gradient(135deg, oklch(0.99 0.002 260), oklch(0.945 0.004 260));
+}
+
+.dark[data-brand-theme='graphite'] {
+  --primary: oklch(0.76 0.02 260);
+  --primary-foreground: oklch(0.16 0.008 260);
+  --ring: oklch(0.76 0.02 260);
+  --sidebar-primary: oklch(0.76 0.02 260);
+  --nav-active: oklch(0.76 0.02 260 / 0.15);
+  --nav-active-border: oklch(0.76 0.02 260 / 0.32);
+  --brand-soft: oklch(0.76 0.02 260 / 0.14);
+  --brand-muted: oklch(0.78 0.02 260);
+  --app-shell: linear-gradient(135deg, oklch(0.135 0.006 260), oklch(0.205 0.01 260));
+}
+
+:root[data-brand-theme='emerald'] {
+  --primary: oklch(0.55 0.16 158);
+  --ring: oklch(0.55 0.16 158);
+  --sidebar-primary: oklch(0.55 0.16 158);
+  --sidebar-ring: oklch(0.55 0.16 158);
+  --nav-active: oklch(0.55 0.16 158 / 0.12);
+  --nav-active-border: oklch(0.55 0.16 158 / 0.34);
+  --brand-soft: oklch(0.55 0.16 158 / 0.1);
+  --brand-muted: oklch(0.46 0.13 158);
+  --app-shell: linear-gradient(135deg, oklch(0.99 0.004 158), oklch(0.955 0.016 176));
+}
+
+.dark[data-brand-theme='emerald'] {
+  --primary: oklch(0.72 0.15 158);
+  --primary-foreground: oklch(0.13 0.02 158);
+  --ring: oklch(0.72 0.15 158);
+  --sidebar-primary: oklch(0.72 0.15 158);
+  --nav-active: oklch(0.72 0.15 158 / 0.16);
+  --nav-active-border: oklch(0.72 0.15 158 / 0.36);
+  --brand-soft: oklch(0.72 0.15 158 / 0.14);
+  --brand-muted: oklch(0.76 0.12 158);
+  --app-shell: linear-gradient(135deg, oklch(0.14 0.014 172), oklch(0.2 0.02 158));
+}
+
+:root[data-brand-theme='ruby'] {
+  --primary: oklch(0.55 0.2 18);
+  --ring: oklch(0.55 0.2 18);
+  --sidebar-primary: oklch(0.55 0.2 18);
+  --sidebar-ring: oklch(0.55 0.2 18);
+  --nav-active: oklch(0.55 0.2 18 / 0.12);
+  --nav-active-border: oklch(0.55 0.2 18 / 0.32);
+  --brand-soft: oklch(0.55 0.2 18 / 0.1);
+  --brand-muted: oklch(0.5 0.15 18);
+  --app-shell: linear-gradient(135deg, oklch(0.99 0.004 18), oklch(0.96 0.015 35));
+}
+
+.dark[data-brand-theme='ruby'] {
+  --primary: oklch(0.7 0.18 18);
+  --primary-foreground: oklch(0.15 0.014 18);
+  --ring: oklch(0.7 0.18 18);
+  --sidebar-primary: oklch(0.7 0.18 18);
+  --nav-active: oklch(0.7 0.18 18 / 0.16);
+  --nav-active-border: oklch(0.7 0.18 18 / 0.36);
+  --brand-soft: oklch(0.7 0.18 18 / 0.14);
+  --brand-muted: oklch(0.76 0.13 18);
+  --app-shell: linear-gradient(135deg, oklch(0.14 0.015 18), oklch(0.2 0.018 35));
 }
 
 /* 截图容器 - 强制使用亮色主题 */
@@ -197,7 +293,10 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply text-foreground;
+    background: var(--app-shell);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    text-rendering: optimizeLegibility;
   }
 
   /* Global scrollbar - hidden by default, show on hover */

@@ -4,7 +4,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { authApi } from '@/lib/auth-api';
 import { cn } from '@/lib/utils';
 import { useAuthStore, useUIStore } from '@/stores';
-import { Check, ExternalLink, Loader2, LogOut, Monitor, Moon, RefreshCw, Settings, Smartphone, Sun, Volume2, VolumeX, X } from 'lucide-react';
+import { Check, ExternalLink, Loader2, LogOut, Monitor, Moon, Palette, RefreshCw, Settings, Smartphone, Sun, Volume2, VolumeX, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -116,7 +116,7 @@ interface SettingsPageProps {
 
 export function SettingsPage({ isMobile }: SettingsPageProps) {
   const navigate = useNavigate()
-  const { theme, setTheme } = useTheme()
+  const { theme, setTheme, brandTheme, setBrandTheme } = useTheme()
   const { user, token, logout, setUser } = useAuthStore()
   const { soundEnabled, setSoundEnabled } = useUIStore()
   const [username, setUsername] = useState(user?.username || '')
@@ -267,6 +267,32 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
     { value: 'dark', label: '深色', icon: Moon },
     { value: 'system', label: '跟随系统', icon: Monitor },
   ] as const
+  const brandOptions = [
+    {
+      value: 'enterprise',
+      label: '商务蓝',
+      description: '稳健、清晰，适合默认团队协作场景',
+      swatches: ['oklch(0.55 0.22 250)', 'oklch(0.72 0.12 250)', 'oklch(0.96 0.012 245)'],
+    },
+    {
+      value: 'graphite',
+      label: '石墨灰',
+      description: '克制、中性，适合正式办公与长时间使用',
+      swatches: ['oklch(0.36 0.018 260)', 'oklch(0.72 0.02 260)', 'oklch(0.945 0.004 260)'],
+    },
+    {
+      value: 'emerald',
+      label: '翡翠绿',
+      description: '专业、冷静，适合运营和增长团队',
+      swatches: ['oklch(0.55 0.16 158)', 'oklch(0.72 0.15 158)', 'oklch(0.955 0.016 176)'],
+    },
+    {
+      value: 'ruby',
+      label: '曜石红',
+      description: '精致、有决策感，适合高层汇报环境',
+      swatches: ['oklch(0.55 0.2 18)', 'oklch(0.7 0.18 18)', 'oklch(0.96 0.015 35)'],
+    },
+  ] as const
 
   return (
     <div className="flex flex-1 flex-col bg-background">
@@ -336,10 +362,13 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
         </div>
 
         {/* 主题设置部分 */}
-        <div className="mb-6 rounded-xl border border-border bg-card p-4">
-          <h2 className="mb-4 text-sm font-medium text-muted-foreground">外观</h2>
+        <div className="mb-6 rounded-xl border border-border bg-card p-4 shadow-[var(--control-shadow)]">
+          <div className="mb-4 flex items-center gap-2">
+            <Palette className="size-4 text-primary" />
+            <h2 className="text-sm font-medium text-muted-foreground">外观</h2>
+          </div>
 
-          <div className="flex flex-col gap-2">
+          <div className="mb-4 grid grid-cols-3 gap-2">
             {themeOptions.map((option) => {
               const Icon = option.icon
               return (
@@ -347,22 +376,45 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
                   key={option.value}
                   onClick={() => setTheme(option.value)}
                   className={cn(
-                    'flex items-center justify-between rounded-lg border border-border px-3 py-2 transition-colors',
+                    'flex min-h-20 flex-col items-center justify-center gap-2 rounded-lg border px-3 py-3 text-center transition-colors',
                     theme === option.value
-                      ? 'bg-primary/10 border-primary'
-                      : 'hover:bg-accent'
+                      ? 'border-primary bg-[var(--brand-soft)] text-primary shadow-[var(--control-shadow)]'
+                      : 'border-border hover:bg-accent'
                   )}
                 >
-                  <div className="flex items-center gap-2">
-                    <Icon className="size-4" />
-                    <span className="text-sm">{option.label}</span>
-                  </div>
-                  {theme === option.value && (
-                    <Check className="size-4 text-primary" />
-                  )}
+                  <Icon className="size-4" />
+                  <span className="text-xs font-medium">{option.label}</span>
                 </button>
               )
             })}
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2">
+            {brandOptions.map((option) => (
+              <button
+                key={option.value}
+                onClick={() => setBrandTheme(option.value)}
+                className={cn(
+                  'rounded-lg border p-3 text-left transition-colors',
+                  brandTheme === option.value
+                    ? 'border-primary bg-[var(--brand-soft)] shadow-[var(--control-shadow)]'
+                    : 'border-border hover:bg-accent'
+                )}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <div className="flex overflow-hidden rounded-full border border-border">
+                      {option.swatches.map((color) => (
+                        <span key={color} className="size-4" style={{ background: color }} />
+                      ))}
+                    </div>
+                    <span className="text-sm font-medium text-foreground">{option.label}</span>
+                  </div>
+                  {brandTheme === option.value && <Check className="size-4 text-primary" />}
+                </div>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">{option.description}</p>
+              </button>
+            ))}
           </div>
         </div>
 
