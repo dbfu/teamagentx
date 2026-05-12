@@ -15,7 +15,7 @@ import { cn } from '@/lib/utils'
 import { useAuthStore, useSocketStore } from '@/stores'
 import { useChatStore } from '@/stores/chat-store'
 import { TodoData } from '@/stores/socket-store'
-import { Bot, Cpu, ListTodo, MessageSquare, Package, Plus, Users } from 'lucide-react'
+import { Bot, Cpu, Globe, ListTodo, MessageSquare, Package, Plus, Users } from 'lucide-react'
 import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -43,7 +43,9 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
         ? 'skill'
         : location.pathname.startsWith('/model')
           ? 'model'
-          : 'message'
+          : location.pathname.startsWith('/integration')
+            ? 'integration'
+            : 'message'
   const currentUser = user || socketUser
 
   // 待办数量
@@ -52,7 +54,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
   // 检测是否在 Electron 环境中
   const isElectron = window.electronAPI?.isElectron ?? false
 
-  const handleTabChange = (tab: 'message' | 'assistant' | 'skill' | 'model') => {
+  const handleTabChange = (tab: 'message' | 'assistant' | 'skill' | 'model' | 'integration') => {
     // 切换 Tab 时关闭侧拉框
     setSidePanelMode(null)
     if (tab === 'message') {
@@ -203,6 +205,21 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
         >
           <Cpu className="size-5" />
           <span className="text-xs">模型</span>
+        </button>
+
+        {/* 集成 Tab */}
+        <button
+          onClick={() => handleTabChange('integration')}
+          className={cn(
+            'relative flex w-full flex-col items-center gap-1 rounded-lg py-2 transition-colors',
+            activeTab === 'integration'
+              ? 'bg-card text-primary shadow-sm'
+              : 'text-muted-foreground hover:bg-sidebar-accent'
+          )}
+          style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+        >
+          <Globe className="size-5" />
+          <span className="text-xs">集成</span>
         </button>
 
         {/* 待办按钮 */}
