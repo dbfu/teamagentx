@@ -123,6 +123,43 @@ export async function messageGateway(app: FastifyInstance) {
     return reply.send({ success: true, data: message });
   });
 
+  // Delete single message by ID
+  app.delete<{ Params: { id: string } }>('/messages/:id', {
+    schema: {
+      description: '根据 ID 删除单条消息',
+      tags: ['Messages'],
+      params: {
+        type: 'object',
+        properties: { id: { type: 'string' } },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+          },
+        },
+        404: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const message = await messageService.findById(id);
+
+    if (!message) {
+      return reply.code(404).send({ success: false, error: '消息不存在' });
+    }
+
+    await messageService.deleteById(id);
+    return reply.send({ success: true });
+  });
+
   // Get execution record for a message
   app.get<{ Params: { id: string } }>('/messages/:id/execution', {
     schema: {

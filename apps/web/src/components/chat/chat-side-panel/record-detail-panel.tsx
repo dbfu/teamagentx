@@ -244,7 +244,7 @@ export function RecordDetailPanel({ selectedRecord }: RecordDetailPanelProps) {
                   <CollapsibleTrigger asChild>
                     <div className="group flex items-center gap-2 p-2 cursor-pointer hover:opacity-80 flex-nowrap">
                       <CollapsibleStateIcon className="shrink-0" />
-                      <span className="inline-flex items-center px-2 py-0.5 rounded bg-purple-500/20 text-purple-700 dark:text-purple-400 font-medium truncate max-w-40 shrink-0">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded bg-purple-500/20 text-purple-700 dark:text-purple-400 font-medium truncate max-w-50 shrink-0">
                         🔧 {truncateToolName(event.data.name)}
                       </span>
                       {toolStatus === 'completed' && (

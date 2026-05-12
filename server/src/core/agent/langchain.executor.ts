@@ -29,7 +29,6 @@ import type {
 import { createModel, isThinkingUnsupportedError } from './model.factory.js';
 import {
   resolveAgentWorkDir,
-  resolveChatRoomAgentInfoWorkDir,
 } from './work-dir.js';
 import {
   buildInstalledSkillsInstructions,
@@ -39,9 +38,11 @@ import {
   AGENT_CREATOR_AGENT_ID,
   CHATROOM_HELPER_AGENT_ID,
   CRON_TASK_HELPER_AGENT_ID,
+  EXTERNAL_PLATFORM_HELPER_AGENT_ID,
   SKILL_MANAGER_AGENT_ID,
   agentCreatorTools,
   chatroomHelperTools,
+  createExternalPlatformHelperTools,
   cronTaskHelperTools,
   skillManagerTools,
   webFetchTools,
@@ -234,7 +235,7 @@ ${modelInfo}
 
 ## 群聊协作场景
 你正在群聊 ${this.chatRoomId} 中与一群同事协作工作。
-- 你可以通过在消息中使用 @{同事名称} 的方式给其他同事发消息
+- 直接输出 @{同事名称} 不会触发其他助手任务；需要协作时，请让用户在群聊中 @ 对应助手，或使用当前执行器支持的平台协作工具
 - 你必须遵守群规则，与同事友好协作
 - 当收到 @{你的名称} 的消息时，请积极响应并完成任务
 `;
@@ -244,6 +245,7 @@ ${modelInfo}
     const isCronTaskHelper = this.agentId === CRON_TASK_HELPER_AGENT_ID;
     const isSkillManager = this.agentId === SKILL_MANAGER_AGENT_ID;
     const isChatroomHelper = this.agentId === CHATROOM_HELPER_AGENT_ID;
+    const isExternalPlatformHelper = this.agentId === EXTERNAL_PLATFORM_HELPER_AGENT_ID;
 
     // 专用工具（根据 agent ID 选择）
     const specializedTools = isAgentCreator
@@ -254,6 +256,8 @@ ${modelInfo}
           ? (skillManagerTools as any)
           : isChatroomHelper
             ? (chatroomHelperTools as any)
+            : isExternalPlatformHelper
+              ? (createExternalPlatformHelperTools(this.chatRoomId) as any)
             : [];
 
     // 合并专用工具和通用工具（web fetch 等）
@@ -439,7 +443,7 @@ ${this.chatRoomRules.trim()}
 ${contextMessage}`;
     }
 
-    // 注入群内助手列表信息（包含工作目录）
+    // 注入群内助手列表信息
     if (this.chatRoomAgents.length > 0) {
       const agentsInfo = this.chatRoomAgents.map((a) => a.name).join('、');
       const selfInfo = this.name;
@@ -447,26 +451,19 @@ ${contextMessage}`;
         (agent) => agent.name !== this.name,
       );
 
-      // 构建其他助手详细信息（包含工作目录）
-      const otherAgentsDetail = otherAgents
-        .map((agent) => {
-          const workDir = resolveChatRoomAgentInfoWorkDir(this.chatRoomId, agent);
-          return `${agent.name}（工作目录：${workDir})`;
-        })
-        .join('\n  ');
-
-      const othersInfo = otherAgents.length > 0 ? otherAgentsDetail : '无';
+      const otherAgentsList = otherAgents.map((agent) => agent.name).join('、');
+      const othersInfo = otherAgents.length > 0 ? otherAgentsList : '无';
       const mentionTip =
         otherAgents.length > 0
           ? `\n【协作提示】
-你正在与 ${otherAgents.length} 位同事协作工作。如果需要给同事发消息，请在消息中使用 @{同事名称} 格式，例如：@${otherAgents[0]?.name || '同事名称'} 请帮我...`
+你正在与 ${otherAgents.length} 位同事协作工作。直接输出 @{同事名称} 不会触发其他助手任务；需要协作时，请让用户在群聊中 @ 对应助手，或使用当前执行器支持的平台协作工具。`
           : '';
 
       contextMessage = `【群聊协作信息】
+群聊工作目录：${this.workDir}
 当前群聊成员：${agentsInfo}
-你是：${selfInfo}（工作目录：${this.workDir}）
-其他同事：
-  ${othersInfo}${mentionTip}
+你是：${selfInfo}
+其他同事：${othersInfo}${mentionTip}
 
 ${contextMessage}`;
     }

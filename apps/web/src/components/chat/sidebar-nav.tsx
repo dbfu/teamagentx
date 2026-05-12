@@ -45,7 +45,9 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
         ? 'skill'
         : location.pathname.startsWith('/model')
           ? 'model'
-          : 'message'
+          : location.pathname.startsWith('/integration')
+            ? 'integration'
+            : 'message'
   const currentUser = user || socketUser
 
   // 待办数量
@@ -65,7 +67,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
     { value: 'ruby', label: '曜石红', color: 'oklch(0.55 0.2 18)' },
   ] as const
 
-  const handleTabChange = (tab: 'message' | 'assistant' | 'skill' | 'model') => {
+  const handleTabChange = (tab: 'message' | 'assistant' | 'skill' | 'model' | 'integration') => {
     // 切换 Tab 时关闭侧拉框
     setSidePanelMode(null)
     if (tab === 'message') {
@@ -200,6 +202,21 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
             </button>
           )
         })}
+
+        {/* 集成 Tab */}
+        <button
+          onClick={() => handleTabChange('integration')}
+          className={cn(
+            'relative flex w-full flex-col items-center gap-1 rounded-lg py-2 transition-colors',
+            activeTab === 'integration'
+              ? 'bg-card text-primary shadow-sm'
+              : 'text-muted-foreground hover:bg-sidebar-accent'
+          )}
+          style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+        >
+          <Globe className="size-5" />
+          <span className="text-xs">集成</span>
+        </button>
 
         {/* 待办按钮 */}
         <button

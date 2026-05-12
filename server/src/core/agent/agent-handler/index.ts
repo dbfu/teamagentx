@@ -47,6 +47,7 @@ export {
 export {
   buildAIMessage,
   broadcastCronTriggerMessage,
+  broadcastAgentJoinedMessage,
   parseMentions,
 } from './message-utils.js';
 

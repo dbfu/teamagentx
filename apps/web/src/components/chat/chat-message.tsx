@@ -2,7 +2,7 @@ import { Message } from '@/lib/agent-api'
 import { tokenUsageApi } from '@/lib/token-usage-api'
 import { cn, formatDateTime } from '@/lib/utils'
 import { copyToClipboard } from '@/lib/copy-utils'
-import { Bot, MessageSquareMore, Info, Copy, XCircle } from 'lucide-react'
+import { Bot, MessageSquareMore, Info, Copy, XCircle, Trash2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw'
@@ -14,6 +14,7 @@ import type { StreamEvent } from '@/stores/socket-store'
 import { AgentAvatar } from './agent-avatar'
 import { UserAvatar } from './user-avatar'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 // 格式化耗时显示
 function formatDuration(ms: number): string {
@@ -58,9 +59,10 @@ interface ChatMessageProps {
   onReplyClick?: (messageId: string) => void
   onExecutionDetailClick?: (messageId: string, executionRecordId: string) => void
   onMentionAgent?: (agentId: string, agentName: string) => void
+  onDeleteMessage?: (messageId: string) => Promise<void> | void
 }
 
-export function ChatMessage({ message, isRight, replyTo, replyCount, typingAgents, mentionAgents, currentUser, onAgentAvatarClick, onTypingAgentClick, onMentionClick, onReplyClick, onExecutionDetailClick, onMentionAgent }: ChatMessageProps) {
+export function ChatMessage({ message, isRight, replyTo, replyCount, typingAgents, mentionAgents, currentUser, onAgentAvatarClick, onTypingAgentClick, onMentionClick, onReplyClick, onExecutionDetailClick, onMentionAgent, onDeleteMessage }: ChatMessageProps) {
   const isMobile = useIsMobile()
   const senderName = message.isHuman
     ? (message.user?.username ?? '用户')
@@ -69,6 +71,10 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, typingAgent
   const [showContextMenu, setShowContextMenu] = useState(false)
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 })
   const [longPressTimer, setLongPressTimer] = useState<ReturnType<typeof setTimeout> | null>(null)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  // 助手名称 hover 状态
   const [isNameHovered, setIsNameHovered] = useState(false)
   const [viewerImage, setViewerImage] = useState<{ url: string; name: string } | null>(null)
 
@@ -118,7 +124,31 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, typingAgent
     setShowContextMenu(false)
   }, [message.isHuman, message.agentId, message.agent?.name, onMentionAgent])
 
-  const handleClickOutside = useCallback(() => setShowContextMenu(false), [])
+  // 删除消息
+  const handleDelete = useCallback(async () => {
+    if (!onDeleteMessage) return
+    setDeleting(true)
+    try {
+      await onDeleteMessage(message.id)
+      toast.success('消息已删除')
+      setDeleteDialogOpen(false)
+    } catch (error) {
+      console.error('Failed to delete message:', error)
+      toast.error('删除失败')
+    } finally {
+      setDeleting(false)
+    }
+  }, [message.id, onDeleteMessage])
+
+  const openDeleteDialog = useCallback(() => {
+    setShowContextMenu(false)
+    setDeleteDialogOpen(true)
+  }, [])
+
+  // 点击其他地方关闭菜单
+  const handleClickOutside = useCallback(() => {
+    setShowContextMenu(false)
+  }, [])
 
   const handleAvatarClick = () => {
     if (!message.isHuman && message.agentId && message.agent?.name) {
@@ -289,6 +319,15 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, typingAgent
             <MessageSquareMore className="size-3.5" />回复
           </button>
         )}
+        {onDeleteMessage && (
+          <button
+            onClick={openDeleteDialog}
+            className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+          >
+            <Trash2 className="size-4" />
+            删除消息
+          </button>
+        )}
       </div>
     )
   }
@@ -325,7 +364,27 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, typingAgent
             </div>
           </div>
         </div>
-        <ImageViewerModal isOpen={viewerImage !== null} imageUrl={viewerImage?.url || ''} imageName={viewerImage?.name || 'image'} onClose={() => setViewerImage(null)} />
+
+
+        {/* 图片查看器 */}
+        <ImageViewerModal
+          isOpen={viewerImage !== null}
+          imageUrl={viewerImage?.url || ''}
+          imageName={viewerImage?.name || 'image'}
+          onClose={() => setViewerImage(null)}
+        />
+        {onDeleteMessage && (
+          <ConfirmDialog
+            open={deleteDialogOpen}
+            onOpenChange={setDeleteDialogOpen}
+            title="删除消息"
+            description="确定要删除这条消息吗？此操作无法撤销。"
+            confirmText="删除"
+            onConfirm={handleDelete}
+            loading={deleting}
+            icon={Trash2}
+          />
+        )
       </>
     )
   }
@@ -378,7 +437,27 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, typingAgent
           </div>
         </div>
       </div>
-      <ImageViewerModal isOpen={viewerImage !== null} imageUrl={viewerImage?.url || ''} imageName={viewerImage?.name || 'image'} onClose={() => setViewerImage(null)} />
+
+
+      {/* 图片查看器 */}
+      <ImageViewerModal
+        isOpen={viewerImage !== null}
+        imageUrl={viewerImage?.url || ''}
+        imageName={viewerImage?.name || 'image'}
+        onClose={() => setViewerImage(null)}
+      />
+      {onDeleteMessage && (
+        <ConfirmDialog
+          open={deleteDialogOpen}
+          onOpenChange={setDeleteDialogOpen}
+          title="删除消息"
+          description="确定要删除这条消息吗？此操作无法撤销。"
+          confirmText="删除"
+          onConfirm={handleDelete}
+          loading={deleting}
+          icon={Trash2}
+        />
+      )
     </>
   )
 }
