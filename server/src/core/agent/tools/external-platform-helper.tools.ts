@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { tool } from 'langchain';
+import { createSystemTool as tool } from './system-tool.js';
 import prisma from '../../../lib/prisma.js';
 import { chatRoomService } from '../../../modules/chatroom/chatroom.service.js';
 import { bridgeService } from '../../../modules/bridge/bridge.service.js';
