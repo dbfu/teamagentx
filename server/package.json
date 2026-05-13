@@ -7,7 +7,7 @@
     "start": "tsx src/index.ts",
     "dev": "tsx watch src/index.ts",
     "db:migrate": "prisma migrate dev",
-    "prebuild:electron": "bash scripts/pre-build-check.sh",
+    "prebuild:electron": "node scripts/pre-build-check.cjs",
     "db:generate": "prisma generate",
     "sync:prisma:prod": "node scripts/sync-prisma-client.cjs",
     "db:studio": "prisma studio",
