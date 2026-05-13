@@ -1,6 +1,7 @@
 import { cn } from '@/lib/utils'
-import { X, Download, ExternalLink } from 'lucide-react'
-import { useState } from 'react'
+import { X, Download, Copy, Check } from 'lucide-react'
+import { useState, useCallback } from 'react'
+import { toast } from 'sonner'
 
 interface ImageViewerModalProps {
   isOpen: boolean
@@ -20,8 +21,7 @@ export function ImageViewerModal({
   onClose,
 }: ImageViewerModalProps) {
   const [isLoading, setIsLoading] = useState(true)
-
-  if (!isOpen) return null
+  const [copied, setCopied] = useState(false)
 
   const handleDownload = () => {
     const link = document.createElement('a')
@@ -33,9 +33,22 @@ export function ImageViewerModal({
     document.body.removeChild(link)
   }
 
-  const handleOpenExternal = () => {
-    window.open(imageUrl, '_blank')
-  }
+  const handleCopy = useCallback(async () => {
+    try {
+      const response = await fetch(imageUrl)
+      const blob = await response.blob()
+      await navigator.clipboard.write([
+        new ClipboardItem({ [blob.type]: blob }),
+      ])
+      setCopied(true)
+      toast.success('图片已复制到剪贴板')
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      toast.error('复制失败')
+    }
+  }, [imageUrl])
+
+  if (!isOpen) return null
 
   return (
     <div
@@ -64,11 +77,15 @@ export function ImageViewerModal({
               <Download className="size-5 text-white" />
             </button>
             <button
-              onClick={handleOpenExternal}
+              onClick={handleCopy}
               className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
-              title="在新窗口打开"
+              title="复制图片"
             >
-              <ExternalLink className="size-5 text-white" />
+              {copied ? (
+                <Check className="size-5 text-green-400" />
+              ) : (
+                <Copy className="size-5 text-white" />
+              )}
             </button>
             <button
               onClick={onClose}
