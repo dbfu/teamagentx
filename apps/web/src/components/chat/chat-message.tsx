@@ -481,20 +481,20 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
         <button
           onClick={handleSpeakMessage}
           className={cn(
-            "group inline-flex h-8 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-all",
+            "group inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs transition-colors",
             isCurrentlyPlaying
-              ? "border-blue-300 bg-blue-50 text-blue-700 shadow-[0_6px_18px_-12px_rgba(59,130,246,0.9)] hover:border-blue-400 hover:bg-blue-100 dark:border-blue-700/70 dark:bg-blue-900/30 dark:text-blue-200 dark:hover:bg-blue-900/40"
-              : "border-blue-200/80 bg-white/85 text-blue-600 shadow-sm hover:border-blue-300 hover:bg-blue-50 dark:border-blue-800/70 dark:bg-slate-900/60 dark:text-blue-300 dark:hover:bg-slate-900/80"
+              ? "bg-primary/10 text-primary hover:bg-primary/15"
+              : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground"
           )}
           title={isCurrentlyPlaying ? '停止播报' : '语音播报'}
           aria-label={isCurrentlyPlaying ? '停止播报' : '语音播报'}
         >
           <span
             className={cn(
-              "flex size-5 items-center justify-center rounded-full transition-colors",
+              "flex size-3.5 items-center justify-center transition-colors",
               isCurrentlyPlaying
-                ? "bg-blue-600 text-white dark:bg-blue-500"
-                : "bg-blue-100 text-blue-600 group-hover:bg-blue-200 dark:bg-blue-950/80 dark:text-blue-200"
+                ? "text-primary"
+                : "text-muted-foreground group-hover:text-foreground"
             )}
           >
             {isCurrentlyPlaying ? (
@@ -504,15 +504,15 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
                 <span className="w-[2px] rounded-full bg-current origin-bottom" style={{ height: '62%', animation: 'sound-bar 0.7s ease-in-out infinite', animationDelay: '360ms' }} />
               </span>
             ) : (
-              <Volume2 className="size-3.5" strokeWidth={2.2} />
+              <Volume2 className="size-3.5" strokeWidth={2} />
             )}
           </span>
-          <span className="pr-0.5 tracking-[0.01em]">
+          <span>
             {isCurrentlyPlaying ? '播放中' : '播报'}
           </span>
         </button>
         {!hasBeenPlayed && !isCurrentlyPlaying && (
-          <span className="absolute -right-0.5 top-0 size-2.5 rounded-full bg-red-500 ring-2 ring-background dark:ring-slate-900" />
+          <span className="absolute -right-0.5 top-0 size-2 rounded-full bg-orange-500/90 ring-2 ring-background dark:ring-slate-900" />
         )}
       </span>
     )

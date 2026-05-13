@@ -1,7 +1,7 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AcpToolInfo, Agent, AgentSpeechConfig, agentApi, AgentCategory, acpToolsApi, categoryApi } from '@/lib/agent-api';
 import { AgentAvatarImage, agentAvatarOptions, normalizeAgentAvatarIndex } from '@/lib/agent-avatars';
-import { createDefaultAgentSpeechConfig, normalizeAgentSpeechConfig } from '@/lib/agent-speech';
+import { normalizeAgentSpeechConfig } from '@/lib/agent-speech';
 import { llmProviderApi, type LlmProvider } from '@/lib/llm-provider-api';
 import { getProviderProtocolHint, getRequiredProviderProtocol, isProviderCompatibleWithAgent } from '@/lib/llm-provider-compat';
 import { promptOptimizeApi } from '@/lib/prompt-optimize-api';
@@ -23,7 +23,7 @@ interface EditAssistantModalProps {
     acpTool: string
     categoryId: string | null
     llmProviderId: string | null
-    speechConfig: AgentSpeechConfig
+    speechConfig: AgentSpeechConfig | null
   }) => Promise<boolean>  // 返回是否成功
   assistant: Agent | null
   mode?: 'edit' | 'copy'  // 编辑模式或复制模式
@@ -373,7 +373,7 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
         llmProviderId: submittedLlmProviderId,
         speechConfig: assistantForForm.speechConfig
           ? normalizeAgentSpeechConfig(assistantForForm.speechConfig)
-          : createDefaultAgentSpeechConfig(),
+          : null,
       })
 
       if (success) {

@@ -32,6 +32,7 @@ export function AssistantVoiceTab({ agent, onUpdate }: AssistantVoiceTabProps) {
   const [saveError, setSaveError] = useState<string | null>(null)
   const lastSavedConfigRef = useRef(JSON.stringify(toVoicePanelConfig(agent.speechConfig || createDefaultAgentSpeechConfig())))
   const hasHydratedRef = useRef(false)
+  const saveRequestIdRef = useRef(0)
 
   useEffect(() => {
     const incoming = toVoicePanelConfig(agent.speechConfig || createDefaultAgentSpeechConfig())
@@ -61,13 +62,18 @@ export function AssistantVoiceTab({ agent, onUpdate }: AssistantVoiceTabProps) {
     if (!hasHydratedRef.current || !hasChanges) return
 
     const timer = window.setTimeout(async () => {
+      const requestId = ++saveRequestIdRef.current
       setSaveState('saving')
       setSaveError(null)
 
       try {
+        const nextSpeechConfig = fromVoicePanelConfig(voiceConfig)
         const response = await agentApi.update(agent.id, {
-          speechConfig: fromVoicePanelConfig(voiceConfig),
+          speechConfig: nextSpeechConfig,
         })
+        if (requestId !== saveRequestIdRef.current) {
+          return
+        }
         if (!response.success || !response.data) {
           throw new Error(response.error || '语音设置保存失败')
         }
@@ -75,6 +81,9 @@ export function AssistantVoiceTab({ agent, onUpdate }: AssistantVoiceTabProps) {
         setSaveState('saved')
         await onUpdate?.(response.data)
       } catch (error) {
+        if (requestId !== saveRequestIdRef.current) {
+          return
+        }
         const message = error instanceof Error ? error.message : '语音设置保存失败'
         setSaveState('error')
         setSaveError(message)

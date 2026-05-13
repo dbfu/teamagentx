@@ -79,6 +79,7 @@ export function ChatMessagesList({
   // 语音播报队列：上一条播完再播下一条
   const speechQueueRef = useRef<Array<{ messageId: string; agentId: string; text: string; voiceConfig: AgentVoicePanelConfig }>>([])
   const queuedVoiceMessageIdsRef = useRef<Set<string>>(new Set())
+  const deferredVoiceMessageIdsRef = useRef<Set<string>>(new Set())
   const isSpeakingRef = useRef(false)
   const speechRunIdRef = useRef(0)
   const [visibilityVersion, setVisibilityVersion] = useState(0)
@@ -227,6 +228,7 @@ export function ChatMessagesList({
     speechRunIdRef.current += 1
     speechQueueRef.current = []
     queuedVoiceMessageIdsRef.current.clear()
+    deferredVoiceMessageIdsRef.current.clear()
     stopSpeechPlayback()
     setPlayingVoiceMessageId(null)
   }, [chatRoomId, setPlayingVoiceMessageId])
@@ -235,17 +237,22 @@ export function ChatMessagesList({
     if (loading) return
     if (document.hidden) return
 
+    deferredVoiceMessageIdsRef.current.clear()
+
     // 找出未播报的新消息
     const newMessages = messages.filter(
-      (message) => !handledIds.has(message.id) && !queuedVoiceMessageIdsRef.current.has(message.id),
+      (message) => message.chatRoomId === chatRoomId
+        && !handledIds.has(message.id)
+        && !queuedVoiceMessageIdsRef.current.has(message.id)
+        && !deferredVoiceMessageIdsRef.current.has(message.id),
     )
     if (newMessages.length === 0) return
-    const skippedMessageIds: string[] = []
+    const permanentlySkippedMessageIds: string[] = []
 
     // 收集所有需要播报的新消息，按顺序入队
     const toSpeak = newMessages.filter((message) => {
       if (message.isHuman || !message.agentId || !message.content.trim()) {
-        skippedMessageIds.push(message.id)
+        permanentlySkippedMessageIds.push(message.id)
         return false
       }
       const agent = allAgents.find((item) => item.id === message.agentId)
@@ -258,15 +265,16 @@ export function ChatMessagesList({
         && supportsSpeechPlayback(voiceConfig)
         && !playedIds.has(message.id)
 
-      if (!shouldAutoPlay) {
-        skippedMessageIds.push(message.id)
+      if (playedIds.has(message.id)) {
+        permanentlySkippedMessageIds.push(message.id)
+        return false
       }
 
       return shouldAutoPlay
     })
 
-    if (skippedMessageIds.length > 0) {
-      markVoiceMessagesHandled(chatRoomId, skippedMessageIds)
+    if (permanentlySkippedMessageIds.length > 0) {
+      markVoiceMessagesHandled(chatRoomId, permanentlySkippedMessageIds)
     }
 
     if (toSpeak.length === 0) return
@@ -292,8 +300,6 @@ export function ChatMessagesList({
           break
         }
         const item = speechQueueRef.current.shift()!
-        queuedVoiceMessageIdsRef.current.delete(item.messageId)
-        markVoiceMessagesHandled(chatRoomId, [item.messageId])
         setPlayingVoiceMessageId(item.messageId)
         let playedSuccessfully = false
         await speakText({
@@ -318,11 +324,16 @@ export function ChatMessagesList({
         }).then(() => {
           playedSuccessfully = true
         }).catch(() => {})
+        queuedVoiceMessageIdsRef.current.delete(item.messageId)
         if (runId !== speechRunIdRef.current) {
+          deferredVoiceMessageIdsRef.current.add(item.messageId)
           break
         }
         if (playedSuccessfully) {
+          markVoiceMessagesHandled(chatRoomId, [item.messageId])
           markVoiceMessagesPlayed(chatRoomId, [item.messageId])
+        } else {
+          deferredVoiceMessageIdsRef.current.add(item.messageId)
         }
         setPlayingVoiceMessageId(null)
       }

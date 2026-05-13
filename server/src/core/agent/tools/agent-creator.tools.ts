@@ -4,7 +4,11 @@ import { agentService } from '../../../core/agent/agent.service.js';
 import { llmProviderService } from '../../../modules/llm-provider/llm-provider.service.js';
 import { installSkillFromSourceTool } from './skills-helper.tools.js';
 import { getChatHistoryTool } from './skill-manager.tools.js';
-import { normalizeAgentSpeechConfig, type AgentSpeechConfig } from '../../../modules/speech/speech-config.js';
+import {
+  deserializeAgentSpeechConfig,
+  normalizeAgentSpeechConfig,
+  type AgentSpeechConfig,
+} from '../../../modules/speech/speech-config.js';
 import {
   inferSpeechPresetId,
   resolveSpeechConfigInput,
@@ -108,7 +112,8 @@ export const createAgentTool = tool(
         categoryId,
         speechConfig: resolveSpeechConfigInput({
           speechPresetId,
-          speechConfig: speechConfig ? normalizeAgentSpeechConfig(speechConfig) : null,
+          speechConfig: speechConfig ?? null,
+          currentSpeechConfig: null,
         }),
       });
 
@@ -205,7 +210,8 @@ export const createAgentsTool = tool(
           categoryId: config.categoryId,
           speechConfig: resolveSpeechConfigInput({
             speechPresetId: config.speechPresetId,
-            speechConfig: config.speechConfig ? normalizeAgentSpeechConfig(config.speechConfig) : null,
+            speechConfig: config.speechConfig ?? null,
+            currentSpeechConfig: null,
           }),
         });
 
@@ -365,21 +371,18 @@ export const createLlmProviderTool = tool(
 export const listAgentsTool = tool(
   async () => {
     const agents = await agentService.findAll();
-    const custom = agents.filter((a) => a.agentLevel !== 'system');
-    if (custom.length === 0) return '暂无自定义助手。';
-    return custom
+    if (agents.length === 0) return '暂无助手。';
+    return agents
       .map((a) => {
-        const parsedSpeechConfig = a.speechConfig
-          ? JSON.parse(String(a.speechConfig)) as AgentSpeechConfig
-          : null;
+        const parsedSpeechConfig = deserializeAgentSpeechConfig(a.speechConfig);
         const inferredPresetId = inferSpeechPresetId(parsedSpeechConfig);
-        return `ID: ${a.id}\n名称: ${a.name}\n描述: ${a.description || '无'}\n语音预设: ${inferredPresetId || '自定义/未匹配'}\n语音: ${a.speechConfig ? String(a.speechConfig) : '未配置'}`;
+        return `ID: ${a.id}\n名称: ${a.name}\n级别: ${a.agentLevel === 'system' ? '系统助手' : '自定义助手'}\n描述: ${a.description || '无'}\n语音预设: ${inferredPresetId || '自定义/未匹配'}\n语音: ${a.speechConfig ? String(a.speechConfig) : '未配置'}`;
       })
       .join('\n\n');
   },
   {
     name: 'list_agents',
-    description: '列出所有自定义助手及其当前配置（含语音配置），用于查找需要更新的助手 ID。',
+    description: '列出所有助手及其当前配置（含系统助手与语音配置），用于查找需要更新的助手 ID。',
     schema: z.object({}),
   },
 );
@@ -419,6 +422,14 @@ export const updateAgentTool = tool(
     categoryId?: string;
   }) => {
     try {
+      const currentAgent = await agentService.findById(agentId);
+      if (!currentAgent) {
+        return JSON.stringify({
+          success: false,
+          error: '助手不存在',
+        });
+      }
+
       const agent = await agentService.update(agentId, {
         ...(name !== undefined && { name }),
         ...(description !== undefined && { description }),
@@ -428,7 +439,8 @@ export const updateAgentTool = tool(
         ...((speechPresetId !== undefined || speechConfig !== undefined) && {
           speechConfig: resolveSpeechConfigInput({
             speechPresetId,
-            speechConfig: speechConfig ? normalizeAgentSpeechConfig(speechConfig) : null,
+            speechConfig: speechConfig ?? null,
+            currentSpeechConfig: deserializeAgentSpeechConfig(currentAgent.speechConfig),
           }),
         }),
       });
@@ -496,6 +508,17 @@ export const updateAgentsTool = tool(
 
     for (const config of agents) {
       try {
+        const currentAgent = await agentService.findById(config.agentId);
+        if (!currentAgent) {
+          results.push({
+            agentId: config.agentId,
+            success: false,
+            error: '助手不存在',
+          });
+          failCount++;
+          continue;
+        }
+
         const agent = await agentService.update(config.agentId, {
           ...(config.name !== undefined && { name: config.name }),
           ...(config.description !== undefined && { description: config.description }),
@@ -505,7 +528,8 @@ export const updateAgentsTool = tool(
           ...((config.speechPresetId !== undefined || config.speechConfig !== undefined) && {
             speechConfig: resolveSpeechConfigInput({
               speechPresetId: config.speechPresetId,
-              speechConfig: config.speechConfig ? normalizeAgentSpeechConfig(config.speechConfig) : null,
+              speechConfig: config.speechConfig ?? null,
+              currentSpeechConfig: deserializeAgentSpeechConfig(currentAgent.speechConfig),
             }),
           }),
         });

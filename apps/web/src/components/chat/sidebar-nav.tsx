@@ -73,7 +73,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
     acpTool: string
     categoryId: string | null
     llmProviderId: string | null
-    speechConfig: AgentSpeechConfig
+    speechConfig: AgentSpeechConfig | null
   }): Promise<boolean> => {
     const response = await agentApi.create({
       name: data.name,

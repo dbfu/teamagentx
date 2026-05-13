@@ -195,6 +195,72 @@ describe('ChatRoom Gateway API', () => {
         },
       });
     });
+
+    test('应该返回虚拟系统助手的 speechConfig', async () => {
+      const systemAgents = await agentService.findAll();
+      const systemAgent = systemAgents.find((agent) => agent.agentLevel === 'system');
+      assert.ok(systemAgent);
+
+      await agentService.update(systemAgent.id, {
+        speechConfig: {
+          behavior: {
+            enabled: true,
+            outputMode: 'manual',
+            autoPlay: false,
+          },
+          profile: {
+            provider: 'browser-local',
+            speed: 1,
+            volume: 1,
+            style: 'professional',
+          },
+        },
+      });
+
+      const chatRoomResponse = await app.inject({
+        method: 'POST',
+        url: '/chatrooms',
+        payload: {
+          name: 'System Voice Room ' + Date.now(),
+          workDir: path.join(workDirRoot, 'system-voice-room'),
+        },
+      });
+      assert.strictEqual(chatRoomResponse.statusCode, 201);
+      const createdRoom = chatRoomResponse.json();
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/chatrooms/${createdRoom.data.id}`,
+      });
+
+      assert.strictEqual(response.statusCode, 200);
+      const body = response.json();
+      const roomAgent = body.data.chatRoomAgents.find((item: any) => item.agent?.id === systemAgent.id);
+      assert.ok(roomAgent);
+      assert.deepStrictEqual(roomAgent.agent.speechConfig, {
+        behavior: {
+          enabled: true,
+          outputMode: 'manual',
+          autoPlay: false,
+        },
+        profile: {
+          provider: 'browser-local',
+          model: null,
+          voice: null,
+          fallbackProvider: null,
+          speed: 1,
+          volume: 1,
+          pitch: null,
+          emotion: null,
+          style: 'professional',
+          format: null,
+          sampleRate: null,
+          temperature: null,
+          prompt: null,
+          vendorOptions: null,
+        },
+      });
+    });
   });
 
   describe('DELETE /chatrooms/:id', () => {

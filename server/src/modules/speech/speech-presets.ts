@@ -135,18 +135,27 @@ export function getSpeechPresetById(presetId?: string | null): SpeechPresetDefin
 export function resolveSpeechConfigInput(options: {
   speechPresetId?: string | null;
   speechConfig?: AgentSpeechConfig | null;
+  currentSpeechConfig?: AgentSpeechConfig | null;
 }): AgentSpeechConfig | null {
   const preset = getSpeechPresetById(options.speechPresetId);
+  const current = options.currentSpeechConfig
+    ? normalizeAgentSpeechConfig(options.currentSpeechConfig)
+    : null;
+  const override = options.speechConfig ?? null;
 
-  if (!preset && !options.speechConfig) {
+  if (!preset && !override && !current) {
     return null;
   }
 
-  if (!preset) {
-    return normalizeAgentSpeechConfig(options.speechConfig);
+  if (preset) {
+    return mergeSpeechConfig(preset.speechConfig, override);
   }
 
-  return mergeSpeechConfig(preset.speechConfig, options.speechConfig ?? null);
+  if (current) {
+    return mergeSpeechConfig(current, override);
+  }
+
+  return override ? normalizeAgentSpeechConfig(override) : null;
 }
 
 export function inferSpeechPresetId(config?: AgentSpeechConfig | null): SpeechPresetId | null {

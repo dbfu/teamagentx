@@ -91,15 +91,12 @@ type SystemAgentInfo = {
   description: string | null;
   type: string;
   agentLevel: string;
+  speechConfig: string | null;
 };
-
-// 缓存系统助手列表
-let cachedSystemAgents: SystemAgentInfo[] | null = null;
 
 // 获取系统助手列表
 async function getSystemAgents(): Promise<SystemAgentInfo[]> {
-  if (cachedSystemAgents) return cachedSystemAgents;
-  cachedSystemAgents = await prisma.agent.findMany({
+  return prisma.agent.findMany({
     where: { agentLevel: 'system', isActive: true },
     select: {
       id: true,
@@ -109,9 +106,9 @@ async function getSystemAgents(): Promise<SystemAgentInfo[]> {
       description: true,
       type: true,
       agentLevel: true,
+      speechConfig: true,
     },
   });
-  return cachedSystemAgents;
 }
 
 async function normalizeDefaultAgentId(chatRoomId: string, defaultAgentId: string | null): Promise<string | null> {
@@ -180,7 +177,7 @@ function addVirtualSystemAgents<T extends { id: string; chatRoomAgents: any[] }>
         description: agent.description,
         type: agent.type,
         agentLevel: agent.agentLevel,
-        speechConfig: null,
+        speechConfig: agent.speechConfig,
       },
     }));
 

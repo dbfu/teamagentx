@@ -292,7 +292,7 @@ export function AssistantDetailPage() {
     acpTool: string
     categoryId: string | null
     llmProviderId: string | null
-    speechConfig: AgentSpeechConfig
+    speechConfig: AgentSpeechConfig | null
   }): Promise<boolean> => {
     if (!agent) return false
     const response = await agentApi.update(agent.id, {
@@ -346,6 +346,8 @@ export function AssistantDetailPage() {
     return <ErrorState error={error || '助手不存在'} onBack={handleBack} />
   }
 
+  const showVoiceSettings = agent.agentLevel !== 'system'
+
   return (
     <div className="flex flex-1 flex-col bg-muted overflow-hidden">
       {/* 头部信息区域 */}
@@ -366,10 +368,12 @@ export function AssistantDetailPage() {
               <Settings className="size-4" />
               配置信息
             </TabsTrigger>
-            <TabsTrigger value="voice" className="gap-2">
-              <Volume2 className="size-4" />
-              语音
-            </TabsTrigger>
+            {showVoiceSettings && (
+              <TabsTrigger value="voice" className="gap-2">
+                <Volume2 className="size-4" />
+                语音
+              </TabsTrigger>
+            )}
             <TabsTrigger value="skills" className="gap-2">
               <Bot className="size-4" />
               Skills
@@ -392,9 +396,11 @@ export function AssistantDetailPage() {
             <AssistantConfigTab agent={agent} onUpdate={refreshAgent} />
           </TabsContent>
 
-          <TabsContent value="voice" className="flex-1 overflow-y-auto p-4 m-0">
-            <AssistantVoiceTab agent={agent} onUpdate={refreshAgent} />
-          </TabsContent>
+          {showVoiceSettings && (
+            <TabsContent value="voice" className="flex-1 overflow-y-auto p-4 m-0">
+              <AssistantVoiceTab agent={agent} onUpdate={refreshAgent} />
+            </TabsContent>
+          )}
 
           <TabsContent value="skills" className="flex-1 overflow-y-auto p-8 m-0">
             <AssistantSkillsTab
