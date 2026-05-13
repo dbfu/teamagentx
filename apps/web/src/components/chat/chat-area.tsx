@@ -50,7 +50,7 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
 
     showAddAgent,
     setShowAddAgent,
-    addingAgentId,
+    addingAgentIds,
     showClearConfirm,
     setShowClearConfirm,
     clearing,
@@ -58,7 +58,7 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
 
     handleSend,
     handleKeyDown,
-    handleAddAgent,
+    handleAddAgents,
     handleClearMessages,
     handleAgentAvatarClick,
     handleTypingAgentClick,
@@ -243,8 +243,8 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
         open={showAddAgent}
         onClose={() => setShowAddAgent(false)}
         availableAgents={availableAgents}
-        addingAgentId={addingAgentId}
-        onAddAgent={handleAddAgent}
+        addingAgentIds={addingAgentIds}
+        onAddAgents={handleAddAgents}
       />
 
       {/* Clear Messages Confirm Dialog */}

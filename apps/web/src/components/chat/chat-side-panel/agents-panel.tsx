@@ -181,7 +181,7 @@ export function AgentsPanel({ chatRoom, agentStatuses, onSelectAgent, onAgentSet
   // Add agent dialog state
   const [addDialogOpen, setAddDialogOpen] = useState(false)
   const [availableAgents, setAvailableAgents] = useState<Agent[]>([])
-  const [addingAgentId, setAddingAgentId] = useState<string | null>(null)
+  const [addingAgentIds, setAddingAgentIds] = useState<Set<string>>(new Set())
 
   // 分类助手：群主、系统助手、普通助手
   const categorizeAgents = (chatRoomAgents: ChatRoomAgent[] | undefined) => {
@@ -263,23 +263,27 @@ export function AgentsPanel({ chatRoom, agentStatuses, onSelectAgent, onAgentSet
   }
 
   // 添加助手
-  const handleAddAgent = async (agentId: string, settings: { injectGroupHistory: boolean }) => {
-    setAddingAgentId(agentId)
+  const handleAddAgents = async (agentIds: string[]) => {
+    setAddingAgentIds(new Set(agentIds))
     try {
-      const response = await chatRoomApi.addAgent(chatRoom.id, {
-        agentId,
-        role: 'MEMBER',
-        injectGroupHistory: settings.injectGroupHistory,
-      })
-      if (response.success) {
-        toast.success('助手已添加')
-        onAgentSettingsChange?.()
-        setAddDialogOpen(false)
-      } else {
-        toast.error(response.error || '添加失败')
+      for (const agentId of agentIds) {
+        const response = await chatRoomApi.addAgent(chatRoom.id, {
+          agentId,
+          role: 'MEMBER',
+          injectGroupHistory: true,
+        })
+
+        if (!response.success) {
+          toast.error(response.error || '添加失败')
+          return
+        }
       }
+
+      toast.success(agentIds.length > 1 ? `已添加 ${agentIds.length} 个助手` : '助手已添加')
+      onAgentSettingsChange?.()
+      setAddDialogOpen(false)
     } finally {
-      setAddingAgentId(null)
+      setAddingAgentIds(new Set())
     }
   }
 
@@ -358,8 +362,8 @@ export function AgentsPanel({ chatRoom, agentStatuses, onSelectAgent, onAgentSet
         open={addDialogOpen}
         onClose={() => setAddDialogOpen(false)}
         availableAgents={availableAgents}
-        addingAgentId={addingAgentId}
-        onAddAgent={handleAddAgent}
+        addingAgentIds={addingAgentIds}
+        onAddAgents={handleAddAgents}
       />
     </>
   )
