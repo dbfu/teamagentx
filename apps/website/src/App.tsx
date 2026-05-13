@@ -1,75 +1,314 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 
-// ── 下载配置（构建时通过环境变量注入，版本更新只需改环境变量） ──
-const APP_VERSION = import.meta.env.VITE_APP_VERSION || 'v1.2.0'
-const DOWNLOAD_URL_MAC = import.meta.env.VITE_DOWNLOAD_URL_MAC || '#'
-const DOWNLOAD_URL_WIN = import.meta.env.VITE_DOWNLOAD_URL_WIN || '#'
+const GITHUB_URL = 'https://github.com/dbfu/teamagentx'
 
+// 下载配置：运行时从 /update.json 获取（支持容器环境变量动态注入），
+// 构建时环境变量作为初始默认值，避免首屏闪烁。
+interface SiteConfig {
+  version: string
+  macUrl: string
+  winUrl: string
+}
+
+const BUILD_TIME_CONFIG: SiteConfig = {
+  version: import.meta.env.VITE_APP_VERSION || 'v1.2.0',
+  macUrl: import.meta.env.VITE_DOWNLOAD_URL_MAC || '#',
+  winUrl: import.meta.env.VITE_DOWNLOAD_URL_WIN || '#',
+}
+
+function useSiteConfig(): SiteConfig {
+  const [config, setConfig] = useState<SiteConfig>(BUILD_TIME_CONFIG)
+
+  useEffect(() => {
+    fetch('/update.json')
+      .then((res) => res.json())
+      .then((data) => {
+        setConfig({
+          version: data.version || BUILD_TIME_CONFIG.version,
+          macUrl: data.macUrl || data.downloads?.mac || data.url || BUILD_TIME_CONFIG.macUrl,
+          winUrl: data.winUrl || data.downloads?.win || BUILD_TIME_CONFIG.winUrl,
+        })
+      })
+      .catch(() => {
+        // 请求失败时保留构建时默认值，不影响页面显示
+      })
+  }, [])
+
+  return config
+}
+
+// ── 模型滚动条 ──
 const stripItems = [
-  'Claude Sonnet',
-  'DeepSeek Chat',
-  'GPT-4o',
-  'GLM-4',
-  'Qwen Plus',
-  'Codex',
-  'Gemini Pro',
-  'Hunyuan',
-  'Spark',
-  'Llama 3',
-  'Claude Haiku',
-  'Mistral',
-  'Yi-34B',
-  'Baichuan',
+  'Claude Sonnet', 'DeepSeek Chat', 'GPT-4o', 'GLM-4', 'Qwen Plus',
+  'Codex', 'Gemini Pro', 'Hunyuan', 'Spark', 'Llama 3',
+  'Claude Haiku', 'Mistral', 'Yi-34B', 'Baichuan',
 ]
 
+// ── 功能特性 ──
 const features = [
-  ['多模型统一接入', '支持 Anthropic、OpenAI、DeepSeek、智谱 AI、阿里云等 50+ 模型供应商，统一 API 格式管理。', '50+ 模型', 'blue'],
-  ['智能 Agent 助手', '为每个 Agent 配置专属系统提示词、工具权限和执行策略，打造专业化 AI 团队成员。', '自定义能力', 'purple'],
-  ['多 Agent 实时协作', '在群聊中召唤多个 Agent 同时工作，Team Leader 自动分配任务，成员并行执行、相互审查。', '并行执行', 'green'],
-  ['任务看板追踪', '实时查看每个 Agent 的执行状态，待办、执行中、已完成、失败任务一览无余。', '实时状态', 'amber'],
-  ['Skills 插件生态', '200+ 预置 Skills 涵盖代码审查、网页搜索、文档处理等场景，支持自定义扩展。', '200+ Skills', 'blue'],
-  ['执行全链路日志', '树状结构展示每一步 Agent 思考过程、工具调用、输出结果，完整追踪任务执行链路。', '透明可溯', 'purple'],
+  ['多模型统一接入', '支持 Claude、GPT、DeepSeek、Qwen、GLM 等 50+ 主流模型，填入 API Key 即可接入，统一管理并发与权限。', '50+ 模型', 'blue'],
+  ['专属 Agent 角色', '为每个助手定制系统提示词、工具权限和执行策略，打造具备专业能力的 AI 团队成员。', '角色定制', 'purple'],
+  ['多 Agent 实时协作', '在群聊中 @ 任意 Agent，多个助手同时工作——调研、撰写、审核，自动接力完成复杂任务。', '并行执行', 'green'],
+  ['任务队列 & 定时任务', '任务自动入队顺序执行，Cron 定时触发，中断后可恢复。Agent 在后台持续自动运转，无需人工守候。', '全自动化', 'amber'],
+  ['长期房间记忆', '每个 Agent 在每个聊天室维护独立记忆，跨会话积累上下文，持续学习房间背景与偏好。', '持续学习', 'blue'],
+  ['全链路透明追踪', '实时查看 Agent 思考过程、工具调用链路、执行状态和 Token 消耗，完整可溯每一步链路。', '透明可控', 'purple'],
 ] as const
 
+// ── 工作流程 ──
 const workflow = [
-  ['01', '接入模型', '填入 API Key，即接入任意 AI 模型供应商，统一管理并发与权限。', 'blue'],
-  ['02', '创建 Agent', '为 Agent 配置系统提示词、绑定模型与 Skills，定义其角色与能力边界。', 'purple'],
-  ['03', '组建群聊', '创建项目群组，邀请多个 Agent 加入，指定 Team Leader 统筹协调。', 'green'],
+  ['01', '接入模型', '填入任意 AI 模型的 API Key，支持 Anthropic、OpenAI 协议及国内主流供应商，统一管理。', 'blue'],
+  ['02', '创建 Agent', '为助手配置角色、提示词和工具权限，定义其专业领域和能力边界。', 'purple'],
+  ['03', '组建聊天室', '创建群聊或快捷对话，邀请多个 Agent 加入，设定协作规则和工作目录。', 'green'],
   ['04', '下达任务', '发送一条消息，AI 团队自动拆解、分配、并行执行，实时汇报进展。', 'amber'],
 ] as const
 
+// ── 协作演示列表 ──
 const showcase = [
-  'Agent 颜色系统：每个 Agent 有专属色，消息、卡片、状态全局一致，一眼识别执行者',
-  '实时活动指示：执行中的 Agent 头像脉冲动画 + 思考点阵，感受 AI 在线工作',
-  '工具调用透明：消息卡片内嵌工具调用标签，Read / Bash / Search 一目了然',
-  '任务看板实时同步：已完成 / 执行中 / 失败任务按列分组，随时掌握整体进度',
+  '场景无限制：代码开发、内容创作、数据分析、竞品调研、文档整理——大模型能做的，Agent 都能自动化',
+  '多 Agent 接力协作：一个负责调研，一个负责撰写，一个负责审核，流水线式自动完成复杂工作',
+  '全程透明可控：实时查看每个 Agent 的思考过程和工具调用，随时干预或调整方向',
+  '定时自动运行：配置 Cron 定时任务，让 Agent 定期生成报表、监控数据、推送摘要，7×24 小时运转',
 ]
 
-const pricing = [
-  ['基础版', '免费', '永久免费，无需信用卡', ['3 个 Agent 助手', '5 个群聊项目', '20 Skills', '社区支持'], '开始使用', false],
-  ['专业版', '99', '每月 / 按年付享 8 折', ['无限 Agent 助手', '无限群聊项目', '200+ Skills 全量', '执行日志 30 天', '优先技术支持'], '立即订阅', true],
-  ['团队版', '299', '每月 / 最多 10 席位', ['专业版全部功能', '团队共享 Agent', '权限与角色管理', '执行日志永久保存', '专属客户经理'], '联系销售', false],
+// ── 开源免费卡片 ──
+const openSourceItems = [
+  { icon: 'free', title: '永久免费', desc: '所有功能完全免费使用，无功能限制，无试用期，无隐藏收费，当前阶段不设任何付费计划。', tag: '0 元', tone: 'green' },
+  { icon: 'opensource', title: 'MIT 开源', desc: '完整源代码在 GitHub 公开，MIT 协议授权，可自由部署、二次开发和商业使用，欢迎 PR 贡献。', tag: 'MIT License', tone: 'blue' },
+  { icon: 'selfhost', title: '私有化部署', desc: '本地 SQLite 数据库，数据完全存储在自己的设备上，也支持桌面端一键安装，无需服务器。', tag: '数据自主', tone: 'purple' },
 ] as const
 
+// ── showcase 静态卡片（用在协作展示区） ──
 const demoCards = [
-  { avatar: 'T', name: 'Team Leader', time: '18:40', text: '已将任务拆分为 M1-M6，分配给各 Agent，请按序执行。', tone: 'blue', tools: [], running: false },
-  { avatar: '科', name: '业务人员', time: '19:08', text: '收到 M1-M3，现在开始执行修改，读取关键文件...', tone: 'green', tools: ['Read', 'Bash'], running: true },
-  { avatar: 'G', name: '高级开发', time: '19:07', text: '收到任务 M6，查看 sdk-runner.ts 兼容性...', tone: 'purple', tools: ['Read', 'Read'], running: true },
-  { avatar: 'D', name: '前端开发', time: '18:56', text: '已完成 M4-M7 修复，共修改 12 个文件。', tone: 'amber', tools: [], running: false },
+  { avatar: 'T', name: 'Team Leader', time: '14:20', text: '已将「Q3 竞品分析」拆分为 3 个子任务，分配给调研助手、撰写助手和审核助手，请依次执行。', tone: 'blue', tools: [], running: false },
+  { avatar: '调', name: '调研助手', time: '14:21', text: '收到任务，正在搜索行业数据、分析竞品动态...', tone: 'green', tools: ['Search', 'Read'], running: true },
+  { avatar: '撰', name: '撰写助手', time: '14:35', text: '已完成 3200 字分析报告，结构清晰，数据引用充分，待审核。', tone: 'purple', tools: [], running: false },
+  { avatar: '审', name: '审核助手', time: '14:36', text: '正在审阅报告质量，检查数据准确性和逻辑完整性...', tone: 'amber', tools: ['Read'], running: true },
 ] as const
 
-const agents = [
-  { name: 'Team Leader', hue: 220 },
-  { name: '产品经理', hue: 190 },
-  { name: '业务人员', hue: 270 },
-  { name: '前端开发', hue: 160 },
-  { name: 'UI设计', hue: 35 },
-  { name: '服务开发', hue: 330 },
-  { name: '测试专家', hue: 50 },
+// ══════════════════════════════════════════════════════
+//  Hero 动画：仿真聊天室 UI
+// ══════════════════════════════════════════════════════
+interface DemoMsg {
+  id: number
+  agent: string
+  avatar: string
+  tone: 'blue' | 'green' | 'purple' | 'amber'
+  time: string
+  text: string
+  tools: string[]
+}
+
+const DEMO_MSGS: DemoMsg[] = [
+  {
+    id: 1, agent: 'Team Leader', avatar: 'T', tone: 'blue', time: '14:20',
+    text: '已将「Q3 竞品分析」拆分为调研、撰写、审核 3 个子任务，分配给各助手，请按序执行。',
+    tools: [],
+  },
+  {
+    id: 2, agent: '调研助手', avatar: '调', tone: 'green', time: '14:22',
+    text: '已完成行业数据搜索，整理了 12 家竞品的核心指标与近期动态，供撰写参考。',
+    tools: ['Search', 'Read'],
+  },
+  {
+    id: 3, agent: '撰写助手', avatar: '撰', tone: 'purple', time: '14:35',
+    text: '基于调研数据，已完成 3200 字竞品分析报告，涵盖市场格局、功能对比和策略建议。',
+    tools: ['Read'],
+  },
+  {
+    id: 4, agent: '审核助手', avatar: '审', tone: 'amber', time: '14:37',
+    text: '报告审核通过，数据引用准确，逻辑结构清晰，已标注 3 处可补充的数据点供优化。',
+    tools: ['Read'],
+  },
 ]
 
-const edges = [[0, 1], [0, 2], [0, 3], [0, 4], [1, 2], [2, 5], [3, 6], [4, 5], [1, 6]]
+const SIDEBAR_ROOMS = [
+  { icon: '📊', name: '竞品分析', active: true, unread: 4 },
+  { icon: '💻', name: '产品开发', active: false, unread: 0 },
+  { icon: '📝', name: '内容创作', active: false, unread: 0 },
+  { icon: '📈', name: '数据报表', active: false, unread: 0 },
+]
 
+const SIDEBAR_AGENTS = [
+  { avatar: 'T', name: 'Team Leader', tone: 'blue', online: true },
+  { avatar: '调', name: '调研助手', tone: 'green', online: true },
+  { avatar: '撰', name: '撰写助手', tone: 'purple', online: true },
+  { avatar: '审', name: '审核助手', tone: 'amber', online: true },
+]
+
+// 动画状态机
+function useHeroSequence() {
+  const [visibleCount, setVisibleCount] = useState(1)
+  const [typingIdx, setTypingIdx] = useState<number | null>(null)
+  const [toolsIdx, setToolsIdx] = useState<number | null>(null)
+
+  useEffect(() => {
+    const timers: ReturnType<typeof setTimeout>[] = []
+    const s = (fn: () => void, ms: number) => { timers.push(setTimeout(fn, ms)) }
+
+    const run = () => {
+      setVisibleCount(1)
+      setTypingIdx(null)
+      setToolsIdx(null)
+
+      // Msg 2 — 调研助手
+      s(() => setTypingIdx(1), 1200)
+      s(() => setToolsIdx(1), 2400)
+      s(() => { setVisibleCount(2); setTypingIdx(null); setToolsIdx(null) }, 4200)
+
+      // Msg 3 — 撰写助手
+      s(() => setTypingIdx(2), 5200)
+      s(() => setToolsIdx(2), 6400)
+      s(() => { setVisibleCount(3); setTypingIdx(null); setToolsIdx(null) }, 8200)
+
+      // Msg 4 — 审核助手
+      s(() => setTypingIdx(3), 9200)
+      s(() => setToolsIdx(3), 10400)
+      s(() => { setVisibleCount(4); setTypingIdx(null); setToolsIdx(null) }, 12200)
+
+      // 重新循环
+      s(run, 16500)
+    }
+
+    run()
+    return () => timers.forEach(clearTimeout)
+  }, [])
+
+  return { visibleCount, typingIdx, toolsIdx }
+}
+
+function HeroDemoWindow() {
+  const { visibleCount, typingIdx, toolsIdx } = useHeroSequence()
+
+  return (
+    <div className="hero-visual">
+      {/* 背景光晕 */}
+      <div className="hero-visual-glow" />
+      <div className="hero-visual-glow2" />
+
+      {/* 窗口 + 角标整体容器（角标相对此定位） */}
+      <div className="hero-win-wrap">
+      {/* 主窗口 */}
+      <div className="hero-win">
+        {/* macOS 窗口栏 */}
+        <div className="win-chrome">
+          <div className="win-chrome-dots">
+            <span className="wcd-close" />
+            <span className="wcd-min" />
+            <span className="wcd-max" />
+          </div>
+          <span className="win-chrome-title">TeamAgentX</span>
+        </div>
+
+        {/* 侧边栏 + 聊天区 */}
+        <div className="win-body">
+          {/* 侧边栏 */}
+          <div className="win-sidebar">
+            <div className="wsb-label">聊天室</div>
+            {SIDEBAR_ROOMS.map((room) => (
+              <div key={room.name} className={`wsb-room${room.active ? ' wsb-room-active' : ''}`}>
+                <span className="wsb-room-icon">{room.icon}</span>
+                <span className="wsb-room-name">{room.name}</span>
+                {room.unread > 0 && <span className="wsb-badge">{room.unread}</span>}
+              </div>
+            ))}
+            <div className="wsb-label wsb-label-mt">Agents</div>
+            {SIDEBAR_AGENTS.map((a) => (
+              <div key={a.name} className="wsb-agent">
+                <span className={`wsb-agent-av tone-bg-${a.tone}`}>{a.avatar}</span>
+                <span className="wsb-agent-name">{a.name}</span>
+                {a.online && <span className="wsb-online-dot" />}
+              </div>
+            ))}
+          </div>
+
+          {/* 聊天主区 */}
+          <div className="win-chat">
+            {/* 聊天头部 */}
+            <div className="wchat-hd">
+              <span className="wchat-hd-icon">📊</span>
+              <span className="wchat-hd-name">竞品分析</span>
+              <div className="wchat-hd-members">
+                {SIDEBAR_AGENTS.map((a) => (
+                  <span key={a.name} className={`wchat-member tone-bg-${a.tone}`}>{a.avatar}</span>
+                ))}
+              </div>
+            </div>
+
+            {/* 消息列表 */}
+            <div className="wchat-msgs">
+              {DEMO_MSGS.slice(0, visibleCount).map((msg) => (
+                <div key={msg.id} className="wchat-msg msg-in">
+                  <div className={`wchat-av tone-bg-${msg.tone}`}>{msg.avatar}</div>
+                  <div className="wchat-msg-body">
+                    <div className="wchat-msg-meta">
+                      <span className={`wchat-msg-name tone-text-${msg.tone}`}>{msg.agent}</span>
+                      <span className="wchat-msg-time">{msg.time}</span>
+                    </div>
+                    {msg.tools.length > 0 && (
+                      <div className="wchat-tools">
+                        {msg.tools.map((t) => <span key={t} className="wchat-tool">{t}</span>)}
+                      </div>
+                    )}
+                    <div className="wchat-msg-text">{msg.text}</div>
+                  </div>
+                </div>
+              ))}
+
+              {/* 打字 / 工具调用指示器 */}
+              {typingIdx !== null && (
+                <div className="wchat-msg msg-in" key={`typing-${typingIdx}-${toolsIdx}`}>
+                  <div className={`wchat-av tone-bg-${DEMO_MSGS[typingIdx].tone}`}>
+                    {DEMO_MSGS[typingIdx].avatar}
+                  </div>
+                  <div className="wchat-msg-body">
+                    <div className="wchat-msg-meta">
+                      <span className={`wchat-msg-name tone-text-${DEMO_MSGS[typingIdx].tone}`}>
+                        {DEMO_MSGS[typingIdx].agent}
+                      </span>
+                      <span className="wchat-thinking-label">思考中…</span>
+                    </div>
+                    {toolsIdx === typingIdx ? (
+                      <div className="wchat-tools wchat-tools-active">
+                        {DEMO_MSGS[typingIdx].tools.map((t) => (
+                          <span key={t} className="wchat-tool wchat-tool-live">{t}</span>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="wchat-typing-dots">
+                        <span /><span /><span />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 输入框 */}
+            <div className="wchat-input">
+              <span className="wchat-input-at">@</span>
+              <span className="wchat-input-ph">提及 Agent，发送任务...</span>
+              <span className="wchat-input-hint">⏎</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+        {/* 浮动角标 — 右下 */}
+        <div className="hbadge hbadge-br">
+          <div className="hbadge-check-icon">✓</div>
+          <div>
+            <div className="hbadge-title">分析报告已完成</div>
+            <div className="hbadge-sub">3200 字 · 刚刚生成</div>
+          </div>
+        </div>
+      </div>{/* /hero-win-wrap */}
+    </div>
+  )
+}
+
+// ══════════════════════════════════════════════════════
+//  公共 SVG 组件
+// ══════════════════════════════════════════════════════
 function LogoMark() {
   return (
     <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
@@ -77,6 +316,14 @@ function LogoMark() {
       <path d="M9 12L14 15L19 12" stroke="#4F7BFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M14 15V21" stroke="#4F7BFF" strokeWidth="1.5" strokeLinecap="round" />
       <circle cx="14" cy="9" r="2" fill="#4F7BFF" />
+    </svg>
+  )
+}
+
+function GitHubIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2z" />
     </svg>
   )
 }
@@ -99,6 +346,18 @@ function iconSvg(kind: string) {
   }
 }
 
+function openSourceIconSvg(kind: string) {
+  const common = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
+  switch (kind) {
+    case 'free':
+      return <svg width="22" height="22" viewBox="0 0 24 24" {...common}><circle cx="12" cy="12" r="10" /><path d="M9.5 9a3 3 0 0 1 5 1c0 2-3 3-3 3" /><line x1="12" y1="17" x2="12.01" y2="17" strokeWidth="2.5" strokeLinecap="round" /></svg>
+    case 'opensource':
+      return <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2z" /></svg>
+    default:
+      return <svg width="22" height="22" viewBox="0 0 24 24" {...common}><rect width="18" height="11" x="3" y="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
+  }
+}
+
 function sectionIcon(kind: string) {
   const common = { fill: 'none', stroke: 'currentColor', strokeWidth: 2.5 }
   switch (kind) {
@@ -108,6 +367,8 @@ function sectionIcon(kind: string) {
       return <svg width="12" height="12" viewBox="0 0 24 24" {...common}><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
     case 'showcase':
       return <svg width="12" height="12" viewBox="0 0 24 24" {...common}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>
+    case 'opensource':
+      return <svg width="12" height="12" viewBox="0 0 24 24" {...common}><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22" /></svg>
     default:
       return <svg width="12" height="12" viewBox="0 0 24 24" {...common}><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" /><line x1="7" y1="7" x2="7.01" y2="7" /></svg>
   }
@@ -128,33 +389,34 @@ function toneToHue(tone: string) {
   return '#4F7BFF'
 }
 
+// ══════════════════════════════════════════════════════
+//  主应用
+// ══════════════════════════════════════════════════════
 function App() {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
+  const { version: APP_VERSION, macUrl: DOWNLOAD_URL_MAC, winUrl: DOWNLOAD_URL_WIN } = useSiteConfig()
 
+  // 滚动导航样式
   useEffect(() => {
-    const onScroll = () => {
-      document.body.classList.toggle('nav-scrolled', window.scrollY > 20)
-    }
+    const onScroll = () => { document.body.classList.toggle('nav-scrolled', window.scrollY > 20) }
     onScroll()
     window.addEventListener('scroll', onScroll, { passive: true })
     return () => window.removeEventListener('scroll', onScroll)
   }, [])
 
+  // Intersection Observer reveal
   useEffect(() => {
     const reveals = Array.from(document.querySelectorAll<HTMLElement>('.reveal'))
     const observer = new IntersectionObserver((entries) => {
       entries.forEach((entry) => {
-        if (entry.isIntersecting) {
-          entry.target.classList.add('in')
-          observer.unobserve(entry.target)
-        }
+        if (entry.isIntersecting) { entry.target.classList.add('in'); observer.unobserve(entry.target) }
       })
     }, { threshold: 0.12 })
     reveals.forEach((item) => observer.observe(item))
     return () => observer.disconnect()
   }, [])
 
+  // 数字计数动画
   useEffect(() => {
     const counters = Array.from(document.querySelectorAll<HTMLElement>('[data-count]'))
     const animateCounter = (el: HTMLElement, target: number) => {
@@ -183,158 +445,11 @@ function App() {
     return () => observer.disconnect()
   }, [])
 
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-
-    let width = 0
-    let height = 0
-    let animationFrame = 0
-    let lastSpawn = 0
-    let nodes: Array<{ x: number; y: number; name: string; hue: number; r: number; pulse: number; pulseDir: number; active: boolean; initials: string }> = []
-    let packets: Array<{ from: number; to: number; t: number; speed: number; hue: number }> = []
-
-    const hslColor = (h: number, s = 70, l = 62, a = 1) => a < 1 ? `hsla(${h},${s}%,${l}%,${a})` : `hsl(${h},${s}%,${l}%)`
-
-    const buildNodes = () => {
-      const cx = width / 2
-      const cy = height / 2
-      const orbit = Math.min(width, height) * 0.34
-      nodes = agents.map((agent, index) => {
-        const angle = (index / agents.length) * Math.PI * 2 - Math.PI / 2
-        const radius = index === 0 ? 0 : orbit
-        return {
-          x: cx + Math.cos(angle) * radius,
-          y: cy + Math.sin(angle) * radius,
-          name: agent.name,
-          hue: agent.hue,
-          r: index === 0 ? 22 : 16,
-          pulse: 0,
-          pulseDir: 1,
-          active: index < 3,
-          initials: agent.name.slice(0, 1),
-        }
-      })
-    }
-
-    const resize = () => {
-      const parent = canvas.parentElement
-      if (!parent) return
-      const rect = parent.getBoundingClientRect()
-      width = canvas.width = Math.max(320, Math.min(860, rect.width + 32))
-      height = canvas.height = window.innerWidth <= 640 ? 320 : Math.max(440, Math.min(620, width * 0.72))
-      buildNodes()
-    }
-
-    const spawnPacket = () => {
-      const edge = edges[Math.floor(Math.random() * edges.length)]
-      const reversed = Math.random() > 0.5
-      const from = reversed ? edge[1] : edge[0]
-      const to = reversed ? edge[0] : edge[1]
-      packets.push({
-        from,
-        to,
-        t: 0,
-        speed: 0.004 + Math.random() * 0.004,
-        hue: nodes[from]?.hue ?? 220,
-      })
-    }
-
-    const draw = (ts: number) => {
-      ctx.clearRect(0, 0, width, height)
-
-      if (ts - lastSpawn > 600 + Math.random() * 400) {
-        spawnPacket()
-        lastSpawn = ts
-      }
-
-      edges.forEach(([a, b]) => {
-        const na = nodes[a]
-        const nb = nodes[b]
-        if (!na || !nb) return
-        ctx.beginPath()
-        ctx.moveTo(na.x, na.y)
-        ctx.lineTo(nb.x, nb.y)
-        ctx.strokeStyle = 'rgba(255,255,255,0.06)'
-        ctx.lineWidth = 1
-        ctx.stroke()
-      })
-
-      packets = packets.filter((packet) => packet.t <= 1)
-      packets.forEach((packet) => {
-        packet.t += packet.speed
-        const from = nodes[packet.from]
-        const to = nodes[packet.to]
-        if (!from || !to) return
-        const px = from.x + (to.x - from.x) * packet.t
-        const py = from.y + (to.y - from.y) * packet.t
-        const gradient = ctx.createRadialGradient(px, py, 0, px, py, 6)
-        gradient.addColorStop(0, hslColor(packet.hue, 80, 65, 0.9))
-        gradient.addColorStop(1, hslColor(packet.hue, 80, 65, 0))
-        ctx.beginPath()
-        ctx.arc(px, py, 4, 0, Math.PI * 2)
-        ctx.fillStyle = gradient
-        ctx.fill()
-      })
-
-      nodes.forEach((node) => {
-        if (node.active) {
-          node.pulse += node.pulseDir * 0.012
-          if (node.pulse > 1) { node.pulse = 1; node.pulseDir = -1 }
-          if (node.pulse < 0) { node.pulse = 0; node.pulseDir = 1 }
-          const ring = node.r + 6 + node.pulse * 5
-          ctx.beginPath()
-          ctx.arc(node.x, node.y, ring, 0, Math.PI * 2)
-          ctx.strokeStyle = hslColor(node.hue, 70, 60, 0.2 + node.pulse * 0.15)
-          ctx.lineWidth = 1.5
-          ctx.stroke()
-        }
-
-        const glow = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, node.r * 2.5)
-        glow.addColorStop(0, hslColor(node.hue, 70, 55, 0.25))
-        glow.addColorStop(1, hslColor(node.hue, 70, 55, 0))
-        ctx.beginPath()
-        ctx.arc(node.x, node.y, node.r * 2.5, 0, Math.PI * 2)
-        ctx.fillStyle = glow
-        ctx.fill()
-
-        ctx.beginPath()
-        ctx.arc(node.x, node.y, node.r, 0, Math.PI * 2)
-        ctx.fillStyle = hslColor(node.hue, 60, 30, 0.9)
-        ctx.fill()
-        ctx.strokeStyle = hslColor(node.hue, 70, 60, 0.7)
-        ctx.lineWidth = 1.5
-        ctx.stroke()
-
-        ctx.fillStyle = '#fff'
-        ctx.font = `${node.r < 18 ? 11 : 13}px system-ui, sans-serif`
-        ctx.textAlign = 'center'
-        ctx.textBaseline = 'middle'
-        ctx.fillText(node.initials, node.x, node.y)
-
-        ctx.fillStyle = hslColor(node.hue, 50, 72, 0.9)
-        ctx.font = '11px system-ui, sans-serif'
-        ctx.fillText(node.name, node.x, node.y + node.r + 13)
-      })
-
-      animationFrame = requestAnimationFrame(draw)
-    }
-
-    resize()
-    window.addEventListener('resize', resize)
-    animationFrame = requestAnimationFrame(draw)
-    return () => {
-      cancelAnimationFrame(animationFrame)
-      window.removeEventListener('resize', resize)
-    }
-  }, [])
-
   return (
     <div className="page-shell">
       <div className="grid-bg" />
 
+      {/* ── 顶部导航 ── */}
       <header className="top-nav">
         <a className="nav-logo" href="#top" aria-label="TeamAgentX Home">
           <LogoMark />
@@ -343,17 +458,16 @@ function App() {
         <nav className="nav-links">
           <a href="#features">功能特性</a>
           <a href="#workflow">工作流程</a>
-          <a href="#showcase">协作展示</a>
-          <a href="#pricing">定价方案</a>
-          <a href="#footer" className="nav-doc-link">文档</a>
+          <a href="#showcase">协作演示</a>
+          <a href="#opensource">开源免费</a>
         </nav>
         <div className="nav-actions">
-          <a href="#download" className="btn btn-outline">登录</a>
+          <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="btn btn-outline btn-github">
+            <GitHubIcon size={15} />Star on GitHub
+          </a>
           <a href="#download" className="btn btn-primary">{downloadIcon(13)} 下载应用</a>
-          <button type="button" className="menu-toggle" onClick={() => setMenuOpen((open) => !open)} aria-label="Toggle menu">
-            <span />
-            <span />
-            <span />
+          <button type="button" className="menu-toggle" onClick={() => setMenuOpen((o) => !o)} aria-label="Toggle menu">
+            <span /><span /><span />
           </button>
         </div>
       </header>
@@ -362,34 +476,41 @@ function App() {
         <div className="mobile-menu">
           <a href="#features" onClick={() => setMenuOpen(false)}>功能特性</a>
           <a href="#workflow" onClick={() => setMenuOpen(false)}>工作流程</a>
-          <a href="#showcase" onClick={() => setMenuOpen(false)}>协作展示</a>
-          <a href="#pricing" onClick={() => setMenuOpen(false)}>定价方案</a>
+          <a href="#showcase" onClick={() => setMenuOpen(false)}>协作演示</a>
+          <a href="#opensource" onClick={() => setMenuOpen(false)}>开源免费</a>
+          <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" onClick={() => setMenuOpen(false)}>GitHub 开源</a>
           <a href="#download" onClick={() => setMenuOpen(false)}>下载应用</a>
         </div>
       )}
 
       <main id="top">
+        {/* ── Hero ── */}
         <section className="hero">
           <div className="hero-content">
-            <div className="eyebrow"><span />多 Agent 智能协作平台</div>
-            <h1>让 AI 团队<br /><span>替你完成工作</span></h1>
-            <p>配置模型、创建 Agent 助手、组建 AI 团队。<strong>多个 Agent 实时协作</strong>，自动分解任务、并行执行、相互审查，完成复杂项目。</p>
+            <div className="eyebrow"><span />多模型 · 多 Agent · 开源免费</div>
+            <h1>让 AI 团队<br /><span>替你处理一切</span></h1>
+            <p>
+              发一条消息，AI 团队立刻行动：<strong>调研助手</strong>收集数据、<strong>策划助手</strong>撰写方案、<strong>代码助手</strong>完成开发、<strong>审核助手</strong>把关质量。
+              多个 Agent 并行推进、相互协作，竞品分析、内容创作、数据报告、软件开发——<strong>任何大模型能做的事，都能自动化完成。</strong>
+            </p>
             <div className="hero-actions">
               <a href={DOWNLOAD_URL_MAC} className="btn btn-primary btn-hero">{downloadIcon(15)} 下载 macOS 客户端</a>
-              <a href="#showcase" className="btn btn-outline btn-hero">查看演示</a>
+              <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="btn btn-outline btn-hero">
+                <GitHubIcon size={16} /> 开源 · 免费使用
+              </a>
             </div>
             <div className="hero-stats">
               <div><span data-count="50">0</span><small>支持 AI 模型</small></div>
-              <div><span data-count="200">0</span><small>Skills 生态</small></div>
-              <div><span data-count="10000">0</span><small>活跃用户</small></div>
+              <div><span className="stat-free">免费</span><small>永久免费使用</small></div>
+              <div><span className="stat-oss">开源</span><small>MIT License</small></div>
             </div>
           </div>
-          <div className="hero-canvas-wrap">
-            <div className="hero-canvas-glow" />
-            <canvas ref={canvasRef} id="hero-canvas" />
-          </div>
+
+          {/* 右侧：仿真聊天室动画 */}
+          <HeroDemoWindow />
         </section>
 
+        {/* ── 模型滚动条 ── */}
         <div className="strip">
           <div className="strip-inner">
             {[...stripItems, ...stripItems].map((item, index) => (
@@ -401,12 +522,16 @@ function App() {
           </div>
         </div>
 
+        {/* ── 功能特性 ── */}
         <section id="features" className="section">
           <div className="section-inner">
             <div className="section-head reveal">
               <div className="section-label">{sectionIcon('features')}产品特性</div>
               <h2 className="section-title">一个平台，驱动整个 AI 团队</h2>
-              <p className="section-sub">从模型接入到多 Agent 协作，TeamAgentX 提供完整的工作流，让复杂任务变得简单。</p>
+              <p className="section-sub">
+                从多模型接入到多 Agent 协作，TeamAgentX 提供完整的工作流，
+                让复杂任务自动化——无论是技术工作还是业务场景。
+              </p>
             </div>
             <div className="features-grid">
               {features.map(([title, desc, tag, tone], index) => {
@@ -424,11 +549,13 @@ function App() {
           </div>
         </section>
 
+        {/* ── 工作流程 ── */}
         <section id="workflow" className="section section-tight">
           <div className="section-inner">
             <div className="section-head reveal">
               <div className="section-label">{sectionIcon('workflow')}工作流程</div>
               <h2 className="section-title">四步，让 AI 团队高效运转</h2>
+              <p className="section-sub">无论什么任务场景，都能快速搭建属于你的 AI 协作团队。</p>
             </div>
             <div className="workflow-wrap reveal">
               <div className="workflow-steps">
@@ -444,12 +571,16 @@ function App() {
           </div>
         </section>
 
+        {/* ── 协作演示 ── */}
         <section id="showcase" className="section section-tight">
           <div className="section-inner">
             <div className="section-head reveal">
               <div className="section-label">{sectionIcon('showcase')}多 Agent 协作</div>
-              <h2 className="section-title">像管理团队一样管理 AI</h2>
-              <p className="section-sub">每个 Agent 都有专属颜色标识，任务状态实时可见，协作过程清晰透明。</p>
+              <h2 className="section-title">不只是代码，任何事都能自动化</h2>
+              <p className="section-sub">
+                写文案、做调研、整理数据、生成报告——只要是大模型能做的事，
+                交给 AI 团队协作都能完成。
+              </p>
             </div>
             <div className="showcase reveal">
               <div className="showcase-info">
@@ -461,12 +592,17 @@ function App() {
                     </li>
                   ))}
                 </ul>
-                <a href="#download" className="btn btn-primary showcase-btn">立即下载体验</a>
+                <div className="showcase-actions">
+                  <a href="#download" className="btn btn-primary showcase-btn">立即下载体验</a>
+                  <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="btn btn-outline showcase-btn">
+                    <GitHubIcon size={14} />查看源码
+                  </a>
+                </div>
               </div>
               <div className="showcase-visual">
                 <div className="agent-cards-demo">
                   {demoCards.map((card) => (
-                    <article key={`${card.name}-${card.time}`} className={`demo-card demo-border-accent ${card.running ? 'demo-running' : ''}`} style={{ borderLeftColor: toneToHue(card.tone) }}>
+                    <article key={`${card.name}-${card.time}`} className={`demo-card ${card.running ? 'demo-running' : ''}`} style={{ borderLeftColor: toneToHue(card.tone) }}>
                       <div className={`demo-avatar tone-bg-${card.tone}`}>{card.avatar}</div>
                       <div className="demo-card-content">
                         <div className="demo-card-header">
@@ -489,59 +625,104 @@ function App() {
           </div>
         </section>
 
-        <section id="pricing" className="section section-tight">
+        {/* ── 开源免费 ── */}
+        <section id="opensource" className="section section-tight">
           <div className="section-inner">
-            <div className="section-head reveal pricing-head">
-              <div className="section-label">{sectionIcon('pricing')}定价方案</div>
-              <h2 className="section-title">从个人到企业，按需选择</h2>
-              <p className="section-sub">所有方案均包含核心 Agent 协作功能，随时可升级。</p>
+            <div className="section-head reveal oss-head">
+              <div className="section-label">{sectionIcon('opensource')}开源免费</div>
+              <h2 className="section-title">完全免费，永久开源</h2>
+              <p className="section-sub oss-sub">
+                TeamAgentX 是开源项目，MIT 协议授权。当前阶段所有功能免费使用，无任何付费计划。
+              </p>
             </div>
-            <div className="pricing-grid reveal">
-              {pricing.map(([plan, amount, period, items, cta, featured]) => (
-                <article className={`price-card ${featured ? 'featured' : ''}`} key={plan}>
-                  {featured && <div className="price-badge">推荐</div>}
-                  <div className="price-plan">{plan}</div>
-                  <div className="price-amount">{amount === '免费' ? '免费' : <><span>¥</span>{amount}</>}</div>
-                  <div className="price-period">{period}</div>
-                  <ul className="price-features">
-                    {items.map((item) => (
-                      <li key={item}>{checkIcon()}{item}</li>
-                    ))}
-                  </ul>
-                  <a href="#download" className={`btn ${featured ? 'btn-primary' : 'btn-outline'} price-btn`}>{cta}</a>
+            <div className="oss-grid reveal">
+              {openSourceItems.map(({ icon, title, desc, tag, tone }) => (
+                <article className={`oss-card oss-card-${tone}`} key={title}>
+                  <div className={`feature-icon tone-${tone}`}>{openSourceIconSvg(icon)}</div>
+                  <h3 className="feature-title">{title}</h3>
+                  <p className="feature-desc">{desc}</p>
+                  <div className={`feature-tag tone-${tone}`}>{tag}</div>
                 </article>
               ))}
+            </div>
+            <div className="oss-github reveal">
+              <div className="oss-github-info">
+                <div className="oss-github-logo"><GitHubIcon size={28} /></div>
+                <div>
+                  <div className="oss-github-name">dbfu / teamagentx</div>
+                  <div className="oss-github-desc">多模型多 Agent 协作平台 · MIT License · 欢迎 Star & PR</div>
+                </div>
+              </div>
+              <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-github-cta">
+                <GitHubIcon size={16} />前往 GitHub 查看
+              </a>
             </div>
           </div>
         </section>
       </main>
 
+      {/* ── CTA Banner ── */}
       <section id="download" className="cta-banner">
-        <h2 className="cta-title reveal">准备好构建你的 AI 团队了吗？</h2>
-        <p className="cta-sub reveal">下载 TeamAgentX，5 分钟内完成首个多 Agent 工作流。</p>
+        <h2 className="cta-title reveal">准备好组建你的 AI 团队了吗？</h2>
+        <p className="cta-sub reveal">
+          下载 TeamAgentX，5 分钟内完成首个多 Agent 工作流。<br />
+          完全免费 · 开源无限制 · 数据本地存储
+        </p>
         <div className="cta-actions reveal">
           <a href={DOWNLOAD_URL_MAC} className="btn btn-primary btn-lg">{downloadIcon(16)}下载 macOS 客户端</a>
           <a href={DOWNLOAD_URL_WIN} className="btn btn-outline btn-lg">下载 Windows 客户端</a>
+          <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="btn btn-outline btn-lg">
+            <GitHubIcon size={16} />GitHub 开源
+          </a>
         </div>
-        <p className="download-note reveal">当前版本 {APP_VERSION} · 支持 macOS 12+ / Windows 10+</p>
+        <p className="download-note reveal">当前版本 {APP_VERSION} · 支持 macOS 12+ / Windows 10+ · MIT 开源协议</p>
       </section>
 
+      {/* ── Footer ── */}
       <footer id="footer">
         <div className="footer-inner">
           <div className="footer-brand">
             <div className="footer-logo"><LogoMark />TeamAgentX</div>
-            <p className="footer-tagline">多 Agent 智能协作平台，让 AI 团队替你工作。</p>
+            <p className="footer-tagline">多模型 · 多 Agent 智能协作平台，让 AI 团队替你处理一切。</p>
+            <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="footer-github-badge">
+              <GitHubIcon size={14} /><span>开源于 GitHub</span>
+            </a>
           </div>
           <div className="footer-links">
-            <div className="footer-col"><h4>产品</h4><a href="#features">功能特性</a><a href="#download">下载</a><a href="#pricing">定价</a><a href="#">路线图</a></div>
-            <div className="footer-col"><h4>开发者</h4><a href="#">文档</a><a href="#">API 参考</a><a href="#">Skills 开发</a><a href="#">GitHub</a></div>
-            <div className="footer-col"><h4>支持</h4><a href="#">帮助中心</a><a href="#">社区论坛</a><a href="#">联系我们</a><a href="#">反馈问题</a></div>
-            <div className="footer-col"><h4>公司</h4><a href="#">关于我们</a><a href="#">博客</a><a href="#">隐私政策</a><a href="#">服务条款</a></div>
+            <div className="footer-col">
+              <h4>产品</h4>
+              <a href="#features">功能特性</a>
+              <a href="#workflow">工作流程</a>
+              <a href="#showcase">协作演示</a>
+              <a href="#download">下载应用</a>
+            </div>
+            <div className="footer-col">
+              <h4>开源</h4>
+              <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">GitHub 仓库</a>
+              <a href={`${GITHUB_URL}/issues`} target="_blank" rel="noopener noreferrer">反馈问题</a>
+              <a href={`${GITHUB_URL}/pulls`} target="_blank" rel="noopener noreferrer">贡献代码</a>
+              <a href={`${GITHUB_URL}/releases`} target="_blank" rel="noopener noreferrer">版本发布</a>
+            </div>
+            <div className="footer-col">
+              <h4>资源</h4>
+              <a href={`${GITHUB_URL}#readme`} target="_blank" rel="noopener noreferrer">快速开始</a>
+              <a href={`${GITHUB_URL}/blob/main/README.md`} target="_blank" rel="noopener noreferrer">文档说明</a>
+              <a href={`${GITHUB_URL}/blob/main/README.md`} target="_blank" rel="noopener noreferrer">部署指南</a>
+              <a href={`${GITHUB_URL}/blob/main/README.md`} target="_blank" rel="noopener noreferrer">技术架构</a>
+            </div>
+            <div className="footer-col">
+              <h4>关于</h4>
+              <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">开源协议 (MIT)</a>
+              <a href={`${GITHUB_URL}/releases`} target="_blank" rel="noopener noreferrer">更新日志</a>
+              <a href={`${GITHUB_URL}/issues/new`} target="_blank" rel="noopener noreferrer">联系我们</a>
+            </div>
           </div>
         </div>
         <div className="footer-bottom">
           <span>© 2026 TeamAgentX. All rights reserved.</span>
-          <span>Made with AI orchestration in mind</span>
+          <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="footer-oss-link">
+            <GitHubIcon size={12} />GitHub 仓库
+          </a>
         </div>
       </footer>
     </div>
