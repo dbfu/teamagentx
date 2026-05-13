@@ -144,6 +144,17 @@ exports.default = async function (context) {
     if (convertedSymlinks.length > 0) {
       console.log(`[afterPack] Converted ${convertedSymlinks.length} symlink(s) to files for Windows`);
     }
+
+    cleanupLogs.push(
+      ...pruneNestedPlatformPackageCopies(nodeModulesDir, targetPlatform, targetArch),
+      ...hoistPnpmPackageCopies(nodeModulesDir),
+      ...removeFilesByPattern(nodeModulesDir, (fullPath) => (
+        fullPath.endsWith('.map')
+        || fullPath.endsWith('.d.ts')
+        || fullPath.endsWith('.d.mts')
+        || fullPath.endsWith('.d.cts')
+      )),
+    );
   }
 
   // Some filtered pnpm packages leave dangling symlinks behind in the bundled
@@ -301,6 +312,68 @@ function copyDirWithSymlinkConversion(src, dest, rootDir, converted) {
       fs.copyFileSync(srcPath, destPath);
     }
   }
+}
+
+function copyPackageDirForWindows(src, dest) {
+  if (!fs.existsSync(src) || fs.existsSync(dest)) {
+    return false;
+  }
+
+  copyDirWithSymlinkConversion(src, dest, path.dirname(dest), []);
+  return true;
+}
+
+function hoistPnpmPackageCopies(nodeModulesDir) {
+  const pnpmDir = path.join(nodeModulesDir, '.pnpm');
+  if (!fs.existsSync(pnpmDir)) {
+    return [];
+  }
+
+  let copiedCount = 0;
+  let copiedBytes = 0;
+
+  const copyPackage = (sourcePath, packageNameParts) => {
+    const destPath = path.join(nodeModulesDir, ...packageNameParts);
+    if (fs.existsSync(destPath)) {
+      return;
+    }
+
+    const beforeSize = getPathSize(destPath);
+    if (copyPackageDirForWindows(sourcePath, destPath)) {
+      copiedCount += 1;
+      copiedBytes += getPathSize(destPath) - beforeSize;
+    }
+  };
+
+  for (const storeEntry of fs.readdirSync(pnpmDir, { withFileTypes: true })) {
+    if (!storeEntry.isDirectory()) continue;
+
+    const packageNodeModules = path.join(pnpmDir, storeEntry.name, 'node_modules');
+    if (!fs.existsSync(packageNodeModules)) continue;
+
+    for (const entry of fs.readdirSync(packageNodeModules, { withFileTypes: true })) {
+      const entryPath = path.join(packageNodeModules, entry.name);
+
+      if (entry.name.startsWith('@') && entry.isDirectory()) {
+        const scopeDir = entryPath;
+        for (const scopedEntry of fs.readdirSync(scopeDir, { withFileTypes: true })) {
+          if (!scopedEntry.isDirectory() && !scopedEntry.isSymbolicLink()) continue;
+          copyPackage(path.join(scopeDir, scopedEntry.name), [entry.name, scopedEntry.name]);
+        }
+        continue;
+      }
+
+      if (entry.isDirectory() || entry.isSymbolicLink()) {
+        copyPackage(entryPath, [entry.name]);
+      }
+    }
+  }
+
+  if (copiedCount === 0) {
+    return [];
+  }
+
+  return [`hoisted ${copiedCount} pnpm package copy/copies for Windows ESM resolution (${formatBytes(copiedBytes)})`];
 }
 
 function removeIfExists(targetPath) {
@@ -547,6 +620,39 @@ function prunePlatformPackages(nodeModulesDir, targetPlatform, targetArch) {
       || packageName.startsWith('sharp@')
     )),
   );
+
+  return removed;
+}
+
+function pruneNestedPlatformPackageCopies(nodeModulesDir, targetPlatform, targetArch) {
+  const removed = [];
+  const codexNodeModules = findPnpmPackageNodeModules(nodeModulesDir, '@openai+codex@');
+  const claudeSdkNodeModules = findPnpmPackageNodeModules(nodeModulesDir, '@anthropic-ai+claude-agent-sdk@');
+  const targetPackagePlatforms = getTargetPackagePlatforms(targetPlatform, targetArch);
+
+  if (codexNodeModules) {
+    const openAiScope = path.join(codexNodeModules, '@openai');
+    if (fs.existsSync(openAiScope)) {
+      for (const entry of fs.readdirSync(openAiScope, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        if (!entry.name.startsWith('codex-')) continue;
+        if (targetPackagePlatforms.some(platform => entry.name === `codex-${platform}`)) continue;
+        removed.push(...removeIfExists(path.join(openAiScope, entry.name)));
+      }
+    }
+  }
+
+  if (claudeSdkNodeModules) {
+    const anthropicScope = path.join(claudeSdkNodeModules, '@anthropic-ai');
+    if (fs.existsSync(anthropicScope)) {
+      for (const entry of fs.readdirSync(anthropicScope, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        if (!entry.name.startsWith('claude-agent-sdk-')) continue;
+        if (targetPackagePlatforms.some(platform => entry.name === `claude-agent-sdk-${platform}`)) continue;
+        removed.push(...removeIfExists(path.join(anthropicScope, entry.name)));
+      }
+    }
+  }
 
   return removed;
 }
