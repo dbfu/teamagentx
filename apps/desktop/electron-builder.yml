@@ -16,6 +16,8 @@ extraResources:
     to: server/prisma/
     filter:
       - "**/*"
+  - from: ../../server/package.json
+    to: server/package.json
   - from: ../../server/node_modules-prod/node_modules/
     to: server/node_modules/
     filter:

@@ -54,6 +54,8 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
+    host: '127.0.0.1',
+    strictPort: true,
     proxy: {
       '/uploads': {
         target: 'http://localhost:11053',
