@@ -165,6 +165,7 @@ export interface ChatRoomAgent {
     type?: 'builtin' | 'acp'
     agentLevel?: 'normal' | 'system'
     workDir?: string | null
+    speechConfig?: AgentSpeechConfig | null
   }
   user?: {
     id: string

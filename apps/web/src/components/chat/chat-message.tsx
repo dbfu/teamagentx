@@ -204,7 +204,6 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
     const speechText = normalizeSpeechText(message.content)
     if (!speechText) return
 
-    onMarkPlayed?.()
     setPlayingVoiceMessageId(message.id)
     try {
       await speakText({
@@ -225,6 +224,7 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
         agentId: message.agentId ?? undefined,
         messageId: message.id,
       })
+      onMarkPlayed?.()
     } catch (error) {
       console.error('语音播报失败:', error)
       toast.error(error instanceof Error ? error.message : '语音播报失败')

@@ -32,6 +32,7 @@ export interface AgentVoicePreset {
   id: AgentVoicePresetId
   name: string
   description: string
+  recommendedFor: string[]
   patch: Partial<AgentVoicePanelConfig>
 }
 
@@ -40,6 +41,7 @@ export const AGENT_VOICE_PRESETS: AgentVoicePreset[] = [
     id: 'system-default',
     name: '自然默认',
     description: '最稳妥，适合日常对话和普通助手。',
+    recommendedFor: ['通用', '日常对话', '默认助手'],
     patch: {
       speed: 1,
       volume: 1,
@@ -53,6 +55,7 @@ export const AGENT_VOICE_PRESETS: AgentVoicePreset[] = [
     id: 'gentle-guide',
     name: '温和讲解',
     description: '适合客服、教学、引导类助手。',
+    recommendedFor: ['客服', '教学', '引导'],
     patch: {
       speed: 0.9,
       volume: 1,
@@ -66,6 +69,7 @@ export const AGENT_VOICE_PRESETS: AgentVoicePreset[] = [
     id: 'steady-pro',
     name: '沉稳专业',
     description: '适合法律、分析、咨询类助手。',
+    recommendedFor: ['法律', '分析', '咨询'],
     patch: {
       speed: 0.92,
       volume: 0.95,
@@ -79,6 +83,7 @@ export const AGENT_VOICE_PRESETS: AgentVoicePreset[] = [
     id: 'bright-host',
     name: '活力播报',
     description: '适合主持、热点播报、活跃氛围的助手。',
+    recommendedFor: ['主持', '热点播报', '娱乐'],
     patch: {
       speed: 1.1,
       volume: 1,
@@ -232,4 +237,8 @@ export function inferVoicePresetId(config: AgentVoicePanelConfig): AgentVoicePre
   }
 
   return null
+}
+
+export function getAgentVoicePresetById(presetId: AgentVoicePresetId): AgentVoicePreset | null {
+  return AGENT_VOICE_PRESETS.find((item) => item.id === presetId) ?? null
 }

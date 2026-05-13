@@ -78,8 +78,10 @@ export function ChatMessagesList({
   const containerRef = useRef<HTMLDivElement | null>(null)
   // 语音播报队列：上一条播完再播下一条
   const speechQueueRef = useRef<Array<{ messageId: string; agentId: string; text: string; voiceConfig: AgentVoicePanelConfig }>>([])
+  const queuedVoiceMessageIdsRef = useRef<Set<string>>(new Set())
   const isSpeakingRef = useRef(false)
   const speechRunIdRef = useRef(0)
+  const [visibilityVersion, setVisibilityVersion] = useState(0)
   const handledIds = useMemo(
     () => new Set(handledVoiceMessageIdsByRoom[chatRoomId] ?? []),
     [chatRoomId, handledVoiceMessageIdsByRoom],
@@ -192,6 +194,19 @@ export function ChatMessagesList({
     }
   }, [chatRoomId])
 
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        setVisibilityVersion((value) => value + 1)
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [])
+
   // 消息加载完成后恢复上次滚动位置（只在切换群聊后的首次加载时执行）
   useEffect(() => {
     if (!loading && messages.length > 0 && containerRef.current && !hasRestoredPositionRef.current) {
@@ -211,45 +226,54 @@ export function ChatMessagesList({
   useEffect(() => {
     speechRunIdRef.current += 1
     speechQueueRef.current = []
+    queuedVoiceMessageIdsRef.current.clear()
     stopSpeechPlayback()
     setPlayingVoiceMessageId(null)
   }, [chatRoomId, setPlayingVoiceMessageId])
 
   useEffect(() => {
     if (loading) return
-
-    const hasInitializedRoom = Object.prototype.hasOwnProperty.call(handledVoiceMessageIdsByRoom, chatRoomId)
-
-    // 首次进入该房间：把当前已加载消息标记为已处理/已播，刷新后不会从头再播
-    if (!hasInitializedRoom) {
-      const initialMessageIds = messages.map((message) => message.id)
-      markVoiceMessagesHandled(chatRoomId, initialMessageIds)
-      markVoiceMessagesPlayed(chatRoomId, initialMessageIds)
-      return
-    }
+    if (document.hidden) return
 
     // 找出未播报的新消息
-    const newMessages = messages.filter((message) => !handledIds.has(message.id))
+    const newMessages = messages.filter(
+      (message) => !handledIds.has(message.id) && !queuedVoiceMessageIdsRef.current.has(message.id),
+    )
     if (newMessages.length === 0) return
-
-    // 无论是否实际播报，先全部标记，不会重播
-    markVoiceMessagesHandled(chatRoomId, newMessages.map((message) => message.id))
-
-    // tab 在后台不播
-    if (document.hidden) return
+    const skippedMessageIds: string[] = []
 
     // 收集所有需要播报的新消息，按顺序入队
     const toSpeak = newMessages.filter((message) => {
-      if (message.isHuman || !message.agentId || !message.content.trim()) return false
+      if (message.isHuman || !message.agentId || !message.content.trim()) {
+        skippedMessageIds.push(message.id)
+        return false
+      }
       const agent = allAgents.find((item) => item.id === message.agentId)
+      if (!agent) {
+        return false
+      }
       const voiceConfig = agent?.speechConfig ? toVoicePanelConfig(agent.speechConfig) : null
-      return voiceConfig?.enabled && voiceConfig.outputMode === 'auto_final_only' && supportsSpeechPlayback(voiceConfig)
+      const shouldAutoPlay = voiceConfig?.enabled
+        && voiceConfig.outputMode === 'auto_final_only'
+        && supportsSpeechPlayback(voiceConfig)
+        && !playedIds.has(message.id)
+
+      if (!shouldAutoPlay) {
+        skippedMessageIds.push(message.id)
+      }
+
+      return shouldAutoPlay
     })
+
+    if (skippedMessageIds.length > 0) {
+      markVoiceMessagesHandled(chatRoomId, skippedMessageIds)
+    }
 
     if (toSpeak.length === 0) return
 
     for (const message of toSpeak) {
       const vc = toVoicePanelConfig(allAgents.find((item) => item.id === message.agentId)!.speechConfig)
+      queuedVoiceMessageIdsRef.current.add(message.id)
       speechQueueRef.current.push({
         messageId: message.id,
         agentId: message.agentId!,
@@ -268,8 +292,10 @@ export function ChatMessagesList({
           break
         }
         const item = speechQueueRef.current.shift()!
+        queuedVoiceMessageIdsRef.current.delete(item.messageId)
+        markVoiceMessagesHandled(chatRoomId, [item.messageId])
         setPlayingVoiceMessageId(item.messageId)
-        markVoiceMessagesPlayed(chatRoomId, [item.messageId])
+        let playedSuccessfully = false
         await speakText({
           text: item.text,
           provider: item.voiceConfig.provider,
@@ -289,9 +315,14 @@ export function ChatMessagesList({
           chatRoomId,
           messageId: item.messageId,
           source: 'assistant-auto-speak',
+        }).then(() => {
+          playedSuccessfully = true
         }).catch(() => {})
         if (runId !== speechRunIdRef.current) {
           break
+        }
+        if (playedSuccessfully) {
+          markVoiceMessagesPlayed(chatRoomId, [item.messageId])
         }
         setPlayingVoiceMessageId(null)
       }
@@ -299,7 +330,7 @@ export function ChatMessagesList({
     }
 
     void processQueue()
-  }, [allAgents, chatRoomId, handledIds, handledVoiceMessageIdsByRoom, loading, markVoiceMessagesHandled, markVoiceMessagesPlayed, messages, setPlayingVoiceMessageId])
+  }, [allAgents, chatRoomId, handledIds, loading, markVoiceMessagesHandled, markVoiceMessagesPlayed, messages, playedIds, setPlayingVoiceMessageId, visibilityVersion])
 
   // 组件卸载时保存当前滚动位置
   useEffect(() => {

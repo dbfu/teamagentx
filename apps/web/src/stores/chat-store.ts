@@ -732,10 +732,10 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     addMessage(newMessage)
   }, [addMessage])
 
-  // 加载所有助手 - 只在组件挂载时执行一次
+  // 进入群聊时刷新助手配置，确保系统助手或详情页更新后的语音配置能即时生效
   useEffect(() => {
     loadAllAgents()
-  }, [loadAllAgents])
+  }, [chatRoom?.id, loadAllAgents])
 
   // 监听新消息
   useEffect(() => {

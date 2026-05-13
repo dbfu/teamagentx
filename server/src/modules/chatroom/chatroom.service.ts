@@ -77,6 +77,7 @@ const agentInclude = {
       type: true,
       agentLevel: true,
       workDir: true,
+      speechConfig: true,
     },
   },
 };
@@ -179,6 +180,7 @@ function addVirtualSystemAgents<T extends { id: string; chatRoomAgents: any[] }>
         description: agent.description,
         type: agent.type,
         agentLevel: agent.agentLevel,
+        speechConfig: null,
       },
     }));
 
