@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { tool } from 'langchain';
+import { createSystemTool as tool } from './system-tool.js';
 import { cronTaskService } from '../../../modules/cron-task/cron-task.service.js';
 import { cronSchedulerService } from '../../cron/cron-scheduler.service.js';
 import { chatRoomService } from '../../../modules/chatroom/chatroom.service.js';

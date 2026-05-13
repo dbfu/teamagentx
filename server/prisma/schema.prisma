@@ -390,6 +390,13 @@ model User {
   @@index([username])
 }
 
+// 应用级 KV 设置（首次引导、默认 Agent 等）
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
 // 后台任务（长时间运行的 shell 命令）
 model BackgroundTask {
   id         String @id

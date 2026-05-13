@@ -120,7 +120,9 @@ export async function syncSystemAgent(
     where: { id: definition.id },
     data: {
       ...managedData,
-      ...(!existing.llmProviderId && definition.llmProviderId
+      ...(definition.llmProviderId === null
+        ? { llmProviderId: null }
+        : !existing.llmProviderId && definition.llmProviderId
         ? { llmProviderId: definition.llmProviderId }
         : {}),
     },

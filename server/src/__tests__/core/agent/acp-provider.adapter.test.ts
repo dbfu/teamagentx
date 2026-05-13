@@ -28,12 +28,12 @@ describe('ACP Provider Adapter', () => {
   test('未配置供应商时返回原始命令', () => {
     const result = createAcpProviderCommand({
       acpTool: 'claude',
-      agentCommand: 'claude-agent-acp',
+      agentCommand: 'embedded-claude-agent',
       agentName: 'Claude',
       wrapperRoot: path.join(os.tmpdir(), 'teamagentx-acp-test-unused'),
     });
 
-    assert.strictEqual(result.command, 'claude-agent-acp');
+    assert.strictEqual(result.command, 'embedded-claude-agent');
     assert.strictEqual(result.providerInfo, undefined);
   });
 
@@ -41,7 +41,7 @@ describe('ACP Provider Adapter', () => {
     const wrapperRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-acp-'));
     const result = createAcpProviderCommand({
       acpTool: 'claude',
-      agentCommand: 'claude-agent-acp --stdio',
+      agentCommand: 'embedded-claude-agent --stdio',
       provider: provider({ apiProtocol: 'anthropic' }),
       agentId: 'agent-1',
       agentName: 'Claude',
@@ -94,7 +94,7 @@ describe('ACP Provider Adapter', () => {
       () =>
         createAcpProviderCommand({
           acpTool: 'claude',
-          agentCommand: 'claude-agent-acp',
+          agentCommand: 'embedded-claude-agent',
           provider: provider({ apiProtocol: 'openai' }),
           agentName: 'Claude',
           wrapperRoot: path.join(os.tmpdir(), 'teamagentx-acp-test-unused'),

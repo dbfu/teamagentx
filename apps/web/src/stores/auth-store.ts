@@ -36,11 +36,14 @@ interface AuthStore {
   user: User | null
   token: string | null
   isFirstUse: boolean
+  setupCompleted: boolean
   login: (username: string, password: string) => Promise<{ success: boolean; error?: string }>
   register: (username: string, password: string, avatar?: string) => Promise<{ success: boolean; error?: string }>
   logout: () => void
   checkAuth: () => Promise<void>
   setUser: (user: User) => void
+  setSetupCompleted: (completed: boolean) => void
+  setupLogin: (data: { token: string; userId: string; username: string }) => void
 }
 
 export const useAuthStore = create<AuthStore>()(
@@ -50,6 +53,7 @@ export const useAuthStore = create<AuthStore>()(
       user: null,
       token: null,
       isFirstUse: false,
+      setupCompleted: false,
 
       checkAuth: async () => {
         // 移动端 WebView 需要等待 token 注入
@@ -155,6 +159,21 @@ export const useAuthStore = create<AuthStore>()(
 
       setUser: (user: User) => {
         set({ user })
+      },
+
+      setSetupCompleted: (completed: boolean) => {
+        set({ setupCompleted: completed })
+      },
+
+      setupLogin: (data: { token: string; userId: string; username: string }) => {
+        localStorage.setItem(TOKEN_KEY, data.token)
+        set({
+          token: data.token,
+          user: { id: data.userId, username: data.username, avatar: null, createdAt: new Date().toISOString() },
+          state: 'authenticated',
+          setupCompleted: true,
+          isFirstUse: false,
+        })
       },
     }),
     {

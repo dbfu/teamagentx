@@ -497,7 +497,6 @@ export async function chatRoomGateway(app: FastifyInstance) {
       // 根据助手类型清空上下文
       await agentMemoryService.clear(id, agent.id);
       if (agent.type === 'builtin') {
-        // LangChain 助手：清空 checkpoint 数据
         await checkpointService.clearChatRoomAgentContext(id, agent.name);
         // 清空执行器缓存（传入 chatRoomId 精确删除）
         clearExecutorCache(agent.name, id);

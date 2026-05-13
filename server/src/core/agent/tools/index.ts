@@ -1,5 +1,4 @@
 // Agent 工具导出
-// 将工具定义从 langchain.executor.ts 拆分到独立文件
 
 // Skills 安装助手工具
 export {
@@ -37,6 +36,3 @@ export {
   EXTERNAL_PLATFORM_HELPER_AGENT_ID,
   createExternalPlatformHelperTools,
 } from './external-platform-helper.tools.js';
-
-// Web Fetch 工具（通用工具，所有 LangChain Agent 都可用）
-export { webFetchTool, webFetchTools } from './web-fetch.tools.js';

@@ -1,8 +1,13 @@
 import type { AttachmentData } from '../../modules/task-queue/task-queue.service.js';
-import type { AgentAction } from './langchain.executor.js';
 
 // 重新导出 AttachmentData 供其他模块使用
 export type { AttachmentData } from '../../modules/task-queue/task-queue.service.js';
+
+export interface AgentAction {
+  type: 'message';
+  content: string;
+  target?: string;
+}
 
 // 历史消息类型
 export interface HistoryMessage {
@@ -71,7 +76,7 @@ export type AgentDebugInfo = {
   chatRoomId: string;
   injectGroupHistory: boolean;
   chatRoomAgents?: ChatRoomAgentInfo[];
-  type: 'langchain' | 'acp';
+  type: 'acp';
   acpTool?: string;
   workDir?: string; // 工作目录
   agentId?: string | null;

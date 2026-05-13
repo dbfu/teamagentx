@@ -1,6 +1,5 @@
-import { ChatAnthropic } from '@langchain/anthropic';
-import { ChatOpenAI } from '@langchain/openai';
 import type { FastifyReply } from 'fastify';
+import { createLlmClient } from '../../lib/llm-client.js';
 import { llmProviderService } from '../llm-provider/llm-provider.service.js';
 
 // 优化提示词的系统 prompt
@@ -25,23 +24,7 @@ export const promptOptimizeService = {
       throw new Error('未找到默认 LLM Provider，请先在设置中配置');
     }
 
-    const apiProtocol = provider.apiProtocol || 'anthropic';
-
-    // 创建模型实例
-    const model =
-      apiProtocol === 'anthropic'
-        ? new ChatAnthropic({
-            model: provider.model,
-            apiKey: provider.apiKey,
-            temperature: 0.7,
-            ...(provider.apiUrl && {anthropicApiUrl: provider.apiUrl}),
-          })
-        : new ChatOpenAI({
-            model: provider.model,
-            apiKey: provider.apiKey,
-            temperature: 0.7,
-            ...(provider.apiUrl && {configuration: {baseURL: provider.apiUrl}}),
-          });
+    const model = createLlmClient(provider, { temperature: 0.7 });
 
     // 构建消息
     const messages = [
@@ -50,11 +33,7 @@ export const promptOptimizeService = {
     ];
 
     // 调用 LLM
-    const response = await model.invoke(messages);
-    const content =
-      typeof response.content === 'string'
-        ? response.content
-        : JSON.stringify(response.content);
+    const content = await model.invoke(messages as any);
 
     return content.trim();
   },
@@ -75,25 +54,7 @@ export const promptOptimizeService = {
       return;
     }
 
-    const apiProtocol = provider.apiProtocol || 'anthropic';
-
-    // 创建模型实例（启用流式）
-    const model =
-      apiProtocol === 'anthropic'
-        ? new ChatAnthropic({
-            model: provider.model,
-            apiKey: provider.apiKey,
-            temperature: 0.7,
-            streaming: true,
-            ...(provider.apiUrl && {anthropicApiUrl: provider.apiUrl}),
-          })
-        : new ChatOpenAI({
-            model: provider.model,
-            apiKey: provider.apiKey,
-            temperature: 0.7,
-            streaming: true,
-            ...(provider.apiUrl && {configuration: {baseURL: provider.apiUrl}}),
-          });
+    const model = createLlmClient(provider, { temperature: 0.7 });
 
     // 构建消息
     const messages = [
@@ -109,14 +70,7 @@ export const promptOptimizeService = {
 
     try {
       // 流式调用 LLM
-      const stream = await model.stream(messages);
-
-      for await (const chunk of stream) {
-        const content =
-          typeof chunk.content === 'string'
-            ? chunk.content
-            : JSON.stringify(chunk.content);
-
+      for await (const content of model.stream(messages as any)) {
         if (content) {
           // 发送 SSE 事件
           reply.raw.write(`data: ${JSON.stringify({content})}\n\n`);

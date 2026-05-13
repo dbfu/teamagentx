@@ -1,8 +1,7 @@
 import prisma from '../../lib/prisma.js';
 import { LlmProvider, LlmProviderType } from '@prisma/client';
 import { randomUUID } from 'crypto';
-import { ChatAnthropic } from '@langchain/anthropic';
-import { ChatOpenAI } from '@langchain/openai';
+import { createLlmClient } from '../../lib/llm-client.js';
 
 export type CreateLlmProviderInput = {
   name: string;
@@ -159,33 +158,15 @@ export const llmProviderService = {
       return { error: '没有可用的默认模型配置，请先手动创建一个模型配置' };
     }
 
-    const apiProtocol = (defaultProvider as any).apiProtocol || 'anthropic';
-    let model: ChatAnthropic | ChatOpenAI;
-
-    if (apiProtocol === 'anthropic') {
-      model = new ChatAnthropic({
-        model: defaultProvider.model,
-        apiKey: defaultProvider.apiKey,
-        maxTokens: 500,
-        ...(defaultProvider.apiUrl && { anthropicApiUrl: defaultProvider.apiUrl }),
-      });
-    } else {
-      model = new ChatOpenAI({
-        model: defaultProvider.model,
-        apiKey: defaultProvider.apiKey,
-        maxTokens: 500,
-        ...(defaultProvider.apiUrl && { configuration: { baseURL: defaultProvider.apiUrl } }),
-      });
-    }
+    const model = createLlmClient(defaultProvider, { maxTokens: 500 });
 
     try {
-      const response = await model.invoke([
+      const content = await model.invoke([
         { role: 'system', content: PARSE_CONFIG_PROMPT },
         { role: 'user', content: description },
       ]);
 
       // 解析 AI 返回的 JSON
-      const content = response.content.toString();
       // 尝试提取 JSON（可能被 markdown 包裹）
       let jsonStr = content;
       const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);

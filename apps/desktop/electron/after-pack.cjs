@@ -92,7 +92,7 @@ exports.default = async function (context) {
   // Shrink bundled runtime payload by removing files that are not needed on
   // the shipped macOS arm64 runtime:
   // - test output and type/source-map artifacts
-  // - Prisma CLI/helper packages (runtime uses generated client + libsql only)
+  // - Prisma CLI/helper/studio packages (runtime uses generated client + libsql only)
   // - non-arm64-darwin vendor assets bundled with Claude SDK
   cleanupLogs.push(
     ...removeIfExists(path.join(serverDir, 'dist', '__tests__')),
@@ -103,6 +103,8 @@ exports.default = async function (context) {
       '@prisma+fetch-engine@',
       '@prisma+get-platform@',
       '@prisma+query-plan-executor@',
+      '@prisma+studio-core@',
+      '@prisma+dev@',
       '@electric-sql+pglite@',
       '@electric-sql+pglite-tools@',
       'tsx@',

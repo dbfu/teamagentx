@@ -55,3 +55,9 @@ export {
 export {
   debugLog,
 } from './debug.js';
+
+// 从 claude-sdk.executor 导出
+export { clearClaudeSdkFileSystemContext } from '../claude-sdk.executor.js';
+
+// 从 codex-sdk.executor 导出
+export { clearCodexSdkFileSystemContext } from '../codex-sdk.executor.js';

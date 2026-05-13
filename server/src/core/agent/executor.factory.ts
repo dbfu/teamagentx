@@ -1,6 +1,5 @@
 import type { Agent, LlmProvider } from '@prisma/client';
 import type { IAgentExecutor, ChatRoomAgentInfo } from './executor.interface.js';
-import { LangChainAgentExecutor } from './langchain.executor.js';
 import { AcpExecutor } from './acp.executor.js';
 import { ClaudeAgentSdkExecutor } from './claude-sdk.executor.js';
 import { CodexSdkExecutor } from './codex-sdk.executor.js';
@@ -43,7 +42,7 @@ export interface CreateExecutorOptions {
  * 根据助手类型创建对应的执行器
  */
 export function createExecutor(options: CreateExecutorOptions): IAgentExecutor {
-  const { agent, chatRoomId, threadId, injectGroupHistory, chatRoomAgents, sessionDir, customWorkDir, llmProvider, lastInjectedMessageId, chatRoomRules } = options;
+  const { agent, chatRoomId, injectGroupHistory, chatRoomAgents, sessionDir, customWorkDir, llmProvider, lastInjectedMessageId } = options;
 
   switch (agent.type) {
     case 'acp':
@@ -97,19 +96,18 @@ export function createExecutor(options: CreateExecutorOptions): IAgentExecutor {
 
     case 'builtin':
     default:
-      return new LangChainAgentExecutor(
+      return new ClaudeAgentSdkExecutor(
         agent.name,
         agent.prompt,
-        threadId,
         chatRoomId,
+        agent.workDir,
         injectGroupHistory,
-        chatRoomAgents,
-        customWorkDir || undefined,
-        llmProvider,
         agent.id,  // 传递 agentId 用于 skills 目录
-        agent.workDir || undefined,  // 传递 agent 原始 workDir（用于 skills 目录）
+        sessionDir,
+        customWorkDir,
         lastInjectedMessageId,  // 传递上次注入位置
-        chatRoomRules,  // 传递群规则
+        chatRoomAgents,
+        (llmProvider as any)?.apiProtocol === 'anthropic' ? llmProvider : undefined,
       );
   }
 }

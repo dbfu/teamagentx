@@ -3,8 +3,9 @@ import { messageService } from '../modules/message/message.service.js';
 import { executionRecordService } from '../modules/execution-record/execution-record.service.js';
 import { checkpointService } from '../modules/checkpoint/checkpoint.service.js';
 import { taskQueueService } from '../modules/task-queue/task-queue.service.js';
+import { agentMemoryService } from '../modules/agent-memory/agent-memory.service.js';
 import { abortControllers, processingMap } from '../core/agent/agent-handler/cache.js';
-import { clearExecutorCache, executorCache } from '../core/agent/agent-handler/index.js';
+import { clearExecutorCache, executorCache, clearClaudeSdkFileSystemContext, clearCodexSdkFileSystemContext } from '../core/agent/agent-handler/index.js';
 import { chatRoomService } from '../modules/chatroom/chatroom.service.js';
 import prisma from '../lib/prisma.js';
 
@@ -255,7 +256,7 @@ export async function messageGateway(app: FastifyInstance) {
       const chatRoomAgents = await prisma.chatRoomAgent.findMany({
         where: { chatRoomId },
         include: {
-          agent: { select: { id: true, name: true, type: true } },
+          agent: { select: { id: true, name: true, type: true, acpTool: true } },
         },
       });
 
@@ -263,12 +264,16 @@ export async function messageGateway(app: FastifyInstance) {
       for (const chatRoomAgent of chatRoomAgents) {
         if (!chatRoomAgent.agent) continue;
 
+        // 清空长期记忆摘要
+        await agentMemoryService.clear(chatRoomId, chatRoomAgent.agent.id);
+
         if (chatRoomAgent.agent.type === 'builtin') {
           await checkpointService.clearChatRoomAgentContext(
             chatRoomId,
             chatRoomAgent.agent.name
           );
         } else if (chatRoomAgent.agent.type === 'acp') {
+          // 清理 executor 缓存中的 executor（如果有）
           for (const [cacheKey, executor] of executorCache.entries()) {
             if (cacheKey.startsWith(`${chatRoomId}_`) && cacheKey.includes(`_${chatRoomAgent.agent.name}`)) {
               try {
@@ -277,6 +282,14 @@ export async function messageGateway(app: FastifyInstance) {
                 console.warn(`[MessageGateway] 清理 ACP executor 失败: ${cacheKey}`, cleanupError);
               }
             }
+          }
+          // 清理文件系统上下文（无论 executor 是否在缓存中）
+          const acpTool = (chatRoomAgent.agent as any).acpTool;
+          if (acpTool === 'codex') {
+            clearCodexSdkFileSystemContext(chatRoomAgent.agent.id, chatRoomId);
+          } else {
+            // 默认使用 Claude SDK 清理（包括 acpTool 为 null 或 'claude'）
+            clearClaudeSdkFileSystemContext(chatRoomAgent.agent.id, chatRoomId);
           }
         }
 

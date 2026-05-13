@@ -47,3 +47,46 @@ export async function getApiBaseUrl(): Promise<string> {
 export function isElectron(): boolean {
   return typeof window !== 'undefined' && !!(window as any).electronAPI;
 }
+
+/**
+ * 等待 Electron 后端服务就绪。
+ * 非 Electron 环境直接 resolve；Electron 环境下等待 server-ready 事件。
+ * 成功时缓存 server URL 到 cachedBaseUrl。
+ */
+export function waitForServer(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined' || !(window as any).electronAPI) {
+      resolve();
+      return;
+    }
+
+    const api = (window as any).electronAPI;
+
+    api.getServerStatus().then((status: { ready: boolean; port: number | null; error: string | null }) => {
+      if (status.ready && status.port) {
+        cachedBaseUrl = `http://localhost:${status.port}`;
+        resolve();
+        return;
+      }
+
+      if (status.error) {
+        reject(new Error(status.error));
+        return;
+      }
+
+      // 服务尚未就绪，监听事件
+      const unsubReady = api.onServerReady((port: number) => {
+        cachedBaseUrl = `http://localhost:${port}`;
+        unsubReady();
+        unsubError();
+        resolve();
+      });
+
+      const unsubError = api.onServerError((error: string) => {
+        unsubReady();
+        unsubError();
+        reject(new Error(error));
+      });
+    });
+  });
+}

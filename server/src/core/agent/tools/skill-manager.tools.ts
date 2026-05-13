@@ -6,7 +6,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { z } from 'zod';
-import { tool } from 'langchain';
+import { createSystemTool as tool } from './system-tool.js';
 import { agentService } from '../../../core/agent/agent.service.js';
 import { messageService } from '../../../modules/message/message.service.js';
 import { skillInstallService } from '../../../modules/skill/skill-install.service.js';

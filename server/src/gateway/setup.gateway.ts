@@ -1,0 +1,199 @@
+import type { FastifyInstance } from 'fastify';
+import { spawn } from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
+import { config } from '../config/index.js';
+import { appSettingService } from '../modules/app-setting/app-setting.service.js';
+import { checkAllAcpTools } from '../core/agent/acp-tools.service.js';
+
+// 工具包名映射
+const TOOL_PACKAGES: Record<string, string> = {
+  claude: '@anthropic-ai/claude-code',
+  codex: '@openai/codex',
+};
+
+/**
+ * 首次引导设置 Gateway
+ *
+ * 仅桌面版使用。提供：
+ * - GET /setup/status  — 获取引导状态 + 已安装工具
+ * - POST /setup/complete — 完成引导（注册 + 选默认 Agent）
+ */
+export async function setupGateway(app: FastifyInstance) {
+  // 获取引导状态
+  app.get('/setup/status', {
+    schema: {
+      description: '获取首次引导状态及 ACP 工具安装情况（桌面版专用）',
+      tags: ['Setup'],
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: {
+              type: 'object',
+              properties: {
+                setupCompleted: { type: 'boolean' },
+                defaultAcpTool: { type: 'string' },
+                installedTools: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      id: { type: 'string' },
+                      name: { type: 'string' },
+                      description: { type: 'string' },
+                      installed: { type: 'boolean' },
+                      version: { type: 'string', nullable: true },
+                      localConfigAvailable: { type: 'boolean', nullable: true },
+                      localConfigPath: { type: 'string', nullable: true },
+                      localConfigLabel: { type: 'string', nullable: true },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  }, async (_request, reply) => {
+    const [setupCompleted, defaultAcpTool, installedTools] = await Promise.all([
+      appSettingService.isSetupCompleted(),
+      appSettingService.getDefaultAcpTool(),
+      Promise.resolve(checkAllAcpTools()),
+    ]);
+
+    return reply.send({
+      success: true,
+      data: { setupCompleted, defaultAcpTool, installedTools },
+    });
+  });
+
+  // 完成引导
+  app.post<{
+    Body: {
+      username: string;
+      password: string;
+      avatar?: string;
+      defaultAcpTool: string;
+    };
+  }>('/setup/complete', {
+    schema: {
+      description: '完成首次引导（注册用户 + 设置默认 Agent）',
+      tags: ['Setup'],
+      body: {
+        type: 'object',
+        required: ['username', 'password', 'defaultAcpTool'],
+        properties: {
+          username: { type: 'string', minLength: 2, maxLength: 20 },
+          password: { type: 'string', minLength: 4 },
+          avatar: { type: 'string' },
+          defaultAcpTool: { type: 'string', enum: ['claude', 'codex'] },
+        },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: {
+              type: 'object',
+              properties: {
+                token: { type: 'string' },
+                userId: { type: 'string' },
+                username: { type: 'string' },
+              },
+            },
+          },
+        },
+        400: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { username, password, avatar, defaultAcpTool } = request.body;
+
+    // 幂等检查：已完成则返回错误
+    const alreadyDone = await appSettingService.isSetupCompleted();
+    if (alreadyDone) {
+      return reply.status(400).send({ success: false, error: '引导已完成' });
+    }
+
+    try {
+      const result = await appSettingService.completeSetup({
+        username,
+        password,
+        avatar,
+        defaultAcpTool,
+      });
+
+      return reply.send({ success: true, data: result });
+    } catch (error: any) {
+      return reply.status(400).send({ success: false, error: error.message || '引导设置失败' });
+    }
+  });
+
+  // 安装 ACP 工具
+  app.post<{
+    Body: { toolId: string };
+  }>('/setup/install-tool', {
+    schema: {
+      description: '自动安装 ACP 工具（桌面版专用）',
+      tags: ['Setup'],
+      body: {
+        type: 'object',
+        required: ['toolId'],
+        properties: {
+          toolId: { type: 'string', enum: ['claude', 'codex'] },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { toolId } = request.body;
+    const packageName = TOOL_PACKAGES[toolId];
+
+    if (!packageName) {
+      return reply.status(400).send({ success: false, error: '不支持的工具' });
+    }
+
+    // 安装到应用本地目录（TOOLS_DIR），而非系统全局
+    const toolsDir = config.toolsDir || path.join(process.cwd(), '.tools');
+    fs.mkdirSync(toolsDir, { recursive: true });
+
+    // 流式返回输出
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Transfer-Encoding': 'chunked',
+      'Cache-Control': 'no-cache',
+    });
+
+    const child = spawn('npm', ['install', '--prefix', `"${toolsDir}"`, packageName, '--force'], {
+      env: { ...process.env, FORCE_COLOR: '0' },
+      shell: true,
+    });
+
+    child.stdout?.on('data', (chunk: Buffer) => {
+      reply.raw.write(chunk.toString());
+    });
+
+    child.stderr?.on('data', (chunk: Buffer) => {
+      reply.raw.write(chunk.toString());
+    });
+
+    child.on('close', (code) => {
+      reply.raw.write(`\n__EXIT_CODE__:${code}`);
+      reply.raw.end();
+    });
+
+    child.on('error', (err) => {
+      reply.raw.write(`\n__ERROR__:${err.message}`);
+      reply.raw.end();
+    });
+  });
+}

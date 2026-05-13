@@ -2,6 +2,7 @@ import type { LlmProvider } from '@prisma/client';
 import type { HookCallbackMatcher, HookEvent, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { createSdkMcpServer, query, tool as sdkTool } from '@anthropic-ai/claude-agent-sdk';
 import { createHash, randomUUID } from 'crypto';
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import { createRequire } from 'module';
 import * as os from 'os';
@@ -13,6 +14,7 @@ import type { AttachmentData } from '../../modules/task-queue/task-queue.service
 import { buildAgentLongTermMemorySection } from './agent-long-term-memory.js';
 import { debugLog } from './agent-handler/debug.js';
 import { sendMessageToAgent } from './agent-handler/agent-dispatch.service.js';
+import { getDefaultChatRoomWorkDir } from './work-dir.js';
 import { buildAcpProviderEnv, type AcpProviderInfo } from './acp-provider.adapter.js';
 import {
   resolveAgentWorkDir,
@@ -21,6 +23,16 @@ import {
   buildInstalledSkillsInstructions,
   buildInstalledSkillsSignature,
 } from './skill-instructions.js';
+import {
+  AGENT_CREATOR_AGENT_ID,
+  agentCreatorTools,
+  CHATROOM_HELPER_AGENT_ID,
+  chatroomHelperTools,
+  CRON_TASK_HELPER_AGENT_ID,
+  cronTaskHelperTools,
+  SKILL_MANAGER_AGENT_ID,
+  skillManagerTools,
+} from './tools/index.js';
 import type {
   AgentDebugInfo,
   AgentExecResult,
@@ -90,6 +102,16 @@ function normalizeUsage(usage: any): TokenUsage | undefined {
     cacheReadTokens,
     cacheCreationTokens,
   };
+}
+
+function stringifyMcpToolResult(result: unknown): string {
+  if (typeof result === 'string') return result;
+  if (result === undefined) return '';
+  try {
+    return JSON.stringify(result, null, 2);
+  } catch {
+    return String(result);
+  }
 }
 
 const requireFromServerBundle = createRequire(import.meta.url);
@@ -218,12 +240,36 @@ function resolveClaudeCodeExecutable(): string | undefined {
       ]
     : [`@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`];
 
+  // 1. 查找 SDK 自带的原生二进制
   for (const packageName of packageNames) {
     try {
       return requireFromClaudeSdk.resolve(`${packageName}/claude${extension}`);
     } catch {
       // Optional native package for another platform/arch is expected to be absent.
     }
+  }
+
+  // 2. 查找应用本地安装目录（TOOLS_DIR/node_modules/.bin/claude）
+  const toolsDir = process.env.TOOLS_DIR;
+  if (toolsDir) {
+    const localBin = path.join(toolsDir, 'node_modules', '.bin', 'claude' + extension);
+    if (fs.existsSync(localBin)) {
+      return localBin;
+    }
+  }
+
+  // 3. 在 PATH 中查找系统安装的 claude CLI
+  try {
+    const whichCmd = process.platform === 'win32' ? 'where claude' : 'which claude';
+    const result = execFileSync('sh', ['-c', whichCmd], {
+      encoding: 'utf-8',
+      timeout: 3000,
+    }).trim();
+    if (result && result.split('\n')[0]) {
+      return result.split('\n')[0];
+    }
+  } catch {
+    // claude not found in PATH
   }
 
   return undefined;
@@ -721,6 +767,19 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
   }
 
   private resetSession(): void {
+    // 删除旧的 conversation 文件，避免垃圾文件累积
+    if (this.hasStartedSession && this.sessionId) {
+      const oldConversationPath = this.getClaudeConversationPath(this.sessionId);
+      try {
+        if (fs.existsSync(oldConversationPath)) {
+          fs.unlinkSync(oldConversationPath);
+          console.log(`${this.name}: 已删除旧 conversation 文件 ${oldConversationPath}`);
+        }
+      } catch (error) {
+        console.warn(`${this.name}: 删除旧 conversation 文件失败:`, error);
+      }
+    }
+
     this.sessionId = randomUUID();
     this.hasStartedSession = false;
     this.saveSessionId();
@@ -730,6 +789,60 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       newSessionId: this.sessionId,
       statePath: this.getSessionStatePath(),
     });
+  }
+
+  private getSystemAssistantTools(): any[] {
+    switch (this.agentId) {
+      case AGENT_CREATOR_AGENT_ID:
+        return agentCreatorTools;
+      case SKILL_MANAGER_AGENT_ID:
+        return skillManagerTools;
+      case CRON_TASK_HELPER_AGENT_ID:
+        return cronTaskHelperTools;
+      case CHATROOM_HELPER_AGENT_ID:
+        return chatroomHelperTools;
+      default:
+        return [];
+    }
+  }
+
+  private buildSystemAssistantMcpTools(): any[] {
+    return this.getSystemAssistantTools().map((systemTool) => {
+      const name = systemTool.name;
+      return sdkTool(
+        name,
+        systemTool.description || name,
+        systemTool.schema,
+        async (args) => {
+          try {
+            const result = await systemTool.invoke(args ?? {});
+            return {
+              content: [{ type: 'text' as const, text: stringifyMcpToolResult(result) }],
+            };
+          } catch (error) {
+            return {
+              content: [{
+                type: 'text' as const,
+                text: error instanceof Error ? error.message : '工具执行失败。',
+              }],
+              isError: true,
+            };
+          }
+        },
+        { alwaysLoad: true },
+      );
+    });
+  }
+
+  private getAllowedTaxTools(): string[] {
+    const systemToolNames = this.getSystemAssistantTools()
+      .map((tool) => tool.name)
+      .filter((name): name is string => typeof name === 'string' && name.length > 0);
+
+    return [
+      'mcp__tax__send_message',
+      ...systemToolNames.map((name) => `mcp__tax__${name}`),
+    ];
   }
 
   private buildTeamAgentXMcpServer() {
@@ -779,6 +892,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
           },
           { alwaysLoad: true },
         ),
+        ...this.buildSystemAssistantMcpTools(),
       ],
     });
   }
@@ -1013,7 +1127,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
         mcpServers: {
           tax: this.buildTeamAgentXMcpServer(),
         },
-        allowedTools: ['mcp__tax__send_message'],
+        allowedTools: this.getAllowedTaxTools(),
         settingSources: ['user', 'project', 'local'],
         hooks: this.buildHooks(),
         sessionId: this.hasStartedSession ? undefined : this.sessionId,
@@ -1215,4 +1329,80 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     this.currentAbortController = null;
     this.resetSession();
   }
+}
+
+/**
+ * 清理 ACP 助手（Claude SDK）的文件系统上下文
+ * 用于清空群聊消息时，即使没有 executor 缓存也能清理 conversation 文件
+ *
+ * @param agentId 助手 ID
+ * @param chatRoomId 群聊 ID
+ */
+export function clearClaudeSdkFileSystemContext(agentId: string, chatRoomId: string): void {
+  const claudeConfigDir = path.join(os.homedir(), '.teamagentx', 'acp-config', agentId);
+
+  if (!fs.existsSync(claudeConfigDir)) {
+    return;
+  }
+
+  // 删除 sessions 目录下所有匹配该 chatRoomId 的 session 状态文件
+  const sessionsDir = path.join(claudeConfigDir, 'sessions');
+  if (fs.existsSync(sessionsDir)) {
+    const sessionFiles = fs.readdirSync(sessionsDir);
+    for (const file of sessionFiles) {
+      if (file.startsWith(`${chatRoomId}-`) && file.endsWith('.json')) {
+        const filePath = path.join(sessionsDir, file);
+        try {
+          // 读取 session 文件获取 sessionId，然后删除对应的 conversation 文件
+          const content = fs.readFileSync(filePath, 'utf-8');
+          const sessionState = JSON.parse(content);
+          const sessionId = sessionState.sessionId;
+
+          // 删除 conversation 文件
+          const workDir = getDefaultChatRoomWorkDir(chatRoomId);
+          const conversationPath = path.join(
+            claudeConfigDir,
+            'projects',
+            sanitizeClaudeProjectPath(workDir),
+            `${sessionId}.jsonl`
+          );
+          if (fs.existsSync(conversationPath)) {
+            fs.unlinkSync(conversationPath);
+            console.log(`[ClearClaudeContext] 已删除 conversation 文件: ${conversationPath}`);
+          }
+
+          // 删除 session 状态文件
+          fs.unlinkSync(filePath);
+          console.log(`[ClearClaudeContext] 已删除 session 状态文件: ${filePath}`);
+        } catch (error) {
+          console.warn(`[ClearClaudeContext] 清理 session 文件失败: ${filePath}`, error);
+        }
+      }
+    }
+  }
+
+  // 删除 projects 目录下与该 chatRoomId workDir 相关的所有 conversation 文件
+  const projectsDir = path.join(claudeConfigDir, 'projects');
+  if (fs.existsSync(projectsDir)) {
+    const workDir = getDefaultChatRoomWorkDir(chatRoomId);
+    const sanitizedWorkDir = sanitizeClaudeProjectPath(workDir);
+    const projectDir = path.join(projectsDir, sanitizedWorkDir);
+
+    if (fs.existsSync(projectDir)) {
+      const conversationFiles = fs.readdirSync(projectDir);
+      for (const file of conversationFiles) {
+        if (file.endsWith('.jsonl')) {
+          const filePath = path.join(projectDir, file);
+          try {
+            fs.unlinkSync(filePath);
+            console.log(`[ClearClaudeContext] 已删除 conversation 文件: ${filePath}`);
+          } catch (error) {
+            console.warn(`[ClearClaudeContext] 删除 conversation 文件失败: ${filePath}`, error);
+          }
+        }
+      }
+    }
+  }
+
+  console.log(`[ClearClaudeContext] 已清理 Claude SDK 上下文: agentId=${agentId}, chatRoomId=${chatRoomId}`);
 }

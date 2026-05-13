@@ -1,6 +1,7 @@
 import type { LlmProvider } from '@prisma/client';
 import { Codex, type Thread, type ThreadEvent, type ThreadItem, type Usage } from '@openai/codex-sdk';
 import { createHash, randomUUID } from 'crypto';
+import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -67,6 +68,32 @@ function attachmentExtension(mimeType: string): string {
   if (mimeType === 'image/webp') return '.webp';
   if (mimeType === 'image/gif') return '.gif';
   return '.jpg';
+}
+
+/**
+ * 查找本地安装的 Codex CLI 可执行文件路径（TOOLS_DIR 或系统 PATH）。
+ * 当 electron-builder 排除了 @openai/codex 原生二进制包时作为回退。
+ */
+function findLocalCodexBinary(): string | undefined {
+  // 1. TOOLS_DIR 本地安装（npm install --prefix TOOLS_DIR @openai/codex）
+  const toolsDir = process.env.TOOLS_DIR;
+  if (toolsDir) {
+    const extension = process.platform === 'win32' ? '.exe' : '';
+    const localBin = path.join(toolsDir, 'node_modules', '.bin', 'codex' + extension);
+    if (fs.existsSync(localBin)) return localBin;
+  }
+
+  // 2. 系统 PATH
+  try {
+    const which = process.platform === 'win32' ? 'where' : 'which';
+    const result = execSync(`${which} codex 2>/dev/null`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+    if (result) {
+      const binPath = result.split('\n')[0].trim();
+      if (binPath && fs.existsSync(binPath)) return binPath;
+    }
+  } catch {}
+
+  return undefined;
 }
 
 function getDefaultCodexAuthStatus(): { available: boolean; path: string } {
@@ -634,6 +661,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       apiKey: this.llmProvider?.apiKey,
       baseUrl: this.llmProvider?.apiUrl || undefined,
       config,
+      codexPathOverride: findLocalCodexBinary(),
     });
   }
 
@@ -984,4 +1012,50 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     this.lastInvokeResult = null;
     this.saveThreadId();
   }
+}
+
+/**
+ * 清理 ACP 助手（Codex SDK）的文件系统上下文
+ * 用于清空群聊消息时，即使没有 executor 缓存也能清理 session 状态文件
+ *
+ * @param agentId 助手 ID
+ * @param chatRoomId 群聊 ID
+ */
+export function clearCodexSdkFileSystemContext(agentId: string, chatRoomId: string): void {
+  const codexHome = path.join(os.homedir(), '.teamagentx', 'acp-config', agentId, 'codex');
+
+  if (!fs.existsSync(codexHome)) {
+    return;
+  }
+
+  // 计算 scope（与 getSessionStatePath 一致）
+  const workDir = path.join(os.homedir(), '.teamagentx', 'workspace', chatRoomId);
+  const scope = createHash('sha256')
+    .update(`${chatRoomId}:${workDir}`)
+    .digest('hex')
+    .slice(0, 16);
+
+  // 删除 session 状态文件
+  const sessionStatePath = path.join(codexHome, `teamagentx-codex-sdk-session-${scope}.json`);
+  if (fs.existsSync(sessionStatePath)) {
+    try {
+      fs.unlinkSync(sessionStatePath);
+      console.log(`[ClearCodexContext] 已删除 session 状态文件: ${sessionStatePath}`);
+    } catch (error) {
+      console.warn(`[ClearCodexContext] 删除 session 状态文件失败: ${sessionStatePath}`, error);
+    }
+  }
+
+  // 删除旧版 session 文件（兼容）
+  const legacySessionPath = path.join(codexHome, 'teamagentx-codex-sdk-session.json');
+  if (fs.existsSync(legacySessionPath)) {
+    try {
+      fs.unlinkSync(legacySessionPath);
+      console.log(`[ClearCodexContext] 已删除旧版 session 文件: ${legacySessionPath}`);
+    } catch (error) {
+      console.warn(`[ClearCodexContext] 删除旧版 session 文件失败: ${legacySessionPath}`, error);
+    }
+  }
+
+  console.log(`[ClearCodexContext] 已清理 Codex SDK 上下文: agentId=${agentId}, chatRoomId=${chatRoomId}`);
 }

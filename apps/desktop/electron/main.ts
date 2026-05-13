@@ -589,6 +589,8 @@ function startServer(): Promise<number> {
     const dbPath = path.join(app.getPath('userData'), 'teamagentx.db');
     // Set UPLOADS_DIR to user data directory (not inside app)
     const uploadsDir = path.join(app.getPath('userData'), 'uploads', 'images');
+    // 本地工具安装目录
+    const toolsDir = path.join(app.getPath('userData'), 'tools');
 
     // Use Electron's utilityProcess to run the server
     // This is the correct way to spawn Node.js child processes in Electron
@@ -610,6 +612,7 @@ function startServer(): Promise<number> {
         PATH: fullPath,
         DATABASE_URL: `file:${dbPath}`,
         UPLOADS_DIR: uploadsDir,
+        TOOLS_DIR: toolsDir,
         NODE_PATH: nodeModulesPath,
         ELECTRON: 'true',
         ACPX_FALLBACK: 'true',
@@ -667,6 +670,35 @@ function startServer(): Promise<number> {
   });
 }
 
+/**
+ * 后台启动服务，成功/失败后通过 IPC 事件通知渲染进程。
+ * 窗口在调用此函数前已经创建，用户可以看到 loading 界面。
+ */
+function startServerInBackground(): void {
+  // 防止重复启动
+  if (serverProcess) {
+    writeLog('Server already starting, skip duplicate startServerInBackground call');
+    return;
+  }
+
+  writeLog('Starting server in background...');
+  startServer()
+    .then(async (port) => {
+      serverPort = port;
+      writeLog(`Server started on port: ${port}`);
+      if (app.isPackaged) {
+        await startMobileWebServer(port);
+      }
+      mainWindow?.webContents.send('server-ready', port);
+    })
+    .catch((error) => {
+      const msg = error instanceof Error ? error.message : String(error);
+      writeLog(`Server startup failed: ${msg}`);
+      console.error('Server startup failed:', error);
+      mainWindow?.webContents.send('server-error', msg);
+    });
+}
+
 function applyDefaultZoom(window: BrowserWindow) {
   const { webContents } = window;
 
@@ -690,9 +722,7 @@ function shouldOpenInExternalBrowser(url: string): boolean {
 
 function showMainWindow() {
   if (!mainWindow) {
-    if (serverPort) {
-      createWindow(serverPort);
-    }
+    createWindow();
     return;
   }
 
@@ -757,7 +787,7 @@ function createTray() {
   tray.on('double-click', showMainWindow);
 }
 
-function createWindow(_port: number) {
+function createWindow() {
   if (mainWindow) {
     showMainWindow();
     return;
@@ -768,6 +798,8 @@ function createWindow(_port: number) {
     height: 800,
     minWidth: 1100,
     minHeight: 600,
+    show: false,
+    backgroundColor: '#ffffff',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -787,6 +819,11 @@ function createWindow(_port: number) {
   }
 
   mainWindow = new BrowserWindow(windowOptions);
+
+  // 等渲染器第一帧画完再显示窗口，避免白屏闪烁
+  mainWindow.once('ready-to-show', () => {
+    mainWindow?.show();
+  });
 
   applyDefaultZoom(mainWindow);
 
@@ -947,43 +984,32 @@ app.whenReady().then(async () => {
     }
   });
 
-  try {
-    writeLog('Starting server...');
-    serverPort = await startServer();
-    if (app.isPackaged) {
-      await startMobileWebServer(serverPort);
-    }
-    writeLog('Server started, creating window...');
-    createTray();
-    createWindow(serverPort);
-    writeLog('Window created successfully');
-  } catch (error) {
-    writeLog(`Failed to start server: ${error}`);
-    console.error('Failed to start server:', error);
-    app.quit();
-  }
+  // 服务状态查询（供渲染器判断后端是否就绪）
+  ipcMain.handle('get-server-status', () => {
+    return {
+      ready: serverPort !== null,
+      port: serverPort,
+      error: serverPort === null && !serverProcess ? 'Server not running' : null,
+    };
+  });
 
-  app.on('activate', async () => {
+  // 先创建窗口和托盘（用户立即看到界面），再后台启动服务
+  createTray();
+  createWindow();
+  startServerInBackground();
+
+  app.on('activate', () => {
     if (mainWindow) {
       showMainWindow();
       return;
     }
 
     if (BrowserWindow.getAllWindows().length === 0) {
-      // Restart server if it was stopped (macOS: window closed but app still running)
-      if (serverPort === null) {
-        try {
-          serverPort = await startServer();
-          if (app.isPackaged) {
-            await startMobileWebServer(serverPort);
-          }
-        } catch (error) {
-          console.error('Failed to restart server:', error);
-          app.quit();
-          return;
-        }
+      createWindow();
+      // 如果服务未运行，在后台重新启动
+      if (serverPort === null && !serverProcess) {
+        startServerInBackground();
       }
-      createWindow(serverPort);
     }
   });
 });

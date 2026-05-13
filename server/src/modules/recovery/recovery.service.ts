@@ -1,9 +1,8 @@
-import { ChatOpenAI } from '@langchain/openai';
-import { ChatAnthropic } from '@langchain/anthropic';
+import { createLlmClient, type LlmClient } from '../../lib/llm-client.js';
 import { llmProviderService } from '../llm-provider/llm-provider.service.js';
 import { messageService } from '../message/message.service.js';
 import { chatRoomService } from '../chatroom/chatroom.service.js';
-import { AgentAction } from '../../core/agent/langchain.executor.js';
+import type { AgentAction } from '../../core/agent/executor.interface.js';
 
 /**
  * 群聊状态
@@ -26,7 +25,7 @@ class RecoveryService {
   private roomStates = new Map<string, ChatRoomState>();
   private recoverAttempts = new Map<string, number>();
   private checkInterval: NodeJS.Timeout | null = null;
-  private model: ChatOpenAI | ChatAnthropic | null = null;
+  private model: LlmClient | null = null;
 
   // 配置
   private readonly CHECK_INTERVAL_MS = 30000; // 每 30 秒检查一次
@@ -55,21 +54,7 @@ class RecoveryService {
     const apiProtocol = provider.apiProtocol || 'anthropic';
     console.log(`[恢复服务] 使用默认 LLM Provider ${provider.name} (${provider.type}, protocol=${apiProtocol})`);
 
-    if (apiProtocol === 'anthropic') {
-      this.model = new ChatAnthropic({
-        model: provider.model,
-        apiKey: provider.apiKey,
-        temperature: 0.1,
-        ...(provider.apiUrl && { anthropicApiUrl: provider.apiUrl }),
-      });
-    } else {
-      this.model = new ChatOpenAI({
-        model: provider.model,
-        apiKey: provider.apiKey,
-        temperature: 0.1,
-        ...(provider.apiUrl && { configuration: { baseURL: provider.apiUrl } }),
-      });
-    }
+    this.model = createLlmClient(provider, { temperature: 0.1 });
   }
 
   /**
@@ -326,11 +311,7 @@ ${historyText}
         };
       }
 
-      const response = await this.model.invoke(prompt);
-      const content =
-        typeof response.content === 'string'
-          ? response.content
-          : JSON.stringify(response.content);
+      const content = await this.model.invoke(prompt);
 
       // 提取 JSON
       const jsonMatch = content.match(/\{[\s\S]*\}/);
