@@ -1,4 +1,4 @@
-import { Agent, AgentVoiceConfig, agentApi } from '@/lib/agent-api'
+import { Agent, agentApi } from '@/lib/agent-api'
 import { Badge } from '@/components/ui/badge'
 import { cn, formatDateTime } from '@/lib/utils'
 import {
@@ -14,27 +14,11 @@ import {
   X,
   Loader2,
   FolderOpen,
-  Volume2,
 } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import { toast } from 'sonner'
 import { promptOptimizeApi } from '@/lib/prompt-optimize-api'
-import {
-  getBrowserSpeechVoices,
-  speakTextWithBrowserSpeech,
-  supportsBrowserSpeechSynthesis,
-} from '@/lib/browser-speech'
 
-const DEFAULT_VOICE_CONFIG: AgentVoiceConfig = {
-  enabled: false,
-  outputMode: 'off',
-  voiceId: null,
-  speed: 1,
-  volume: 1,
-  autoPlay: false,
-}
-
-// 全屏编辑模态框
 function FullscreenPromptModal({
   isOpen,
   prompt,
@@ -58,34 +42,28 @@ function FullscreenPromptModal({
     }
   }, [isOpen, prompt])
 
-  // AI 优化提示词（流式）
   const handleOptimize = async () => {
     if (!editPrompt.trim() || isOptimizing) return
 
     setIsOptimizing(true)
-    // 清空当前内容，准备接收流式输出
     setEditPrompt('')
 
     await promptOptimizeApi.optimizeStream(
       editPrompt,
-      // onChunk: 每次收到内容块时追加
       (content) => {
         setEditPrompt((prev) => prev + content)
-        // 自动滚动到底部
         if (textareaRef.current) {
           textareaRef.current.scrollTop = textareaRef.current.scrollHeight
         }
       },
-      // onDone: 完成时
       () => {
         setIsOptimizing(false)
         toast.success('提示词已优化')
       },
-      // onError: 错误时
       (error) => {
         setIsOptimizing(false)
         toast.error(error || '优化失败')
-      }
+      },
     )
   }
 
@@ -94,7 +72,6 @@ function FullscreenPromptModal({
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-8">
       <div className="flex h-[80vh] w-full max-w-4xl flex-col rounded-2xl bg-card shadow-2xl">
-        {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <h2 className="text-lg font-semibold text-foreground">编辑提示词</h2>
           <button
@@ -105,7 +82,6 @@ function FullscreenPromptModal({
           </button>
         </div>
 
-        {/* Editor */}
         <div className="flex-1 overflow-hidden p-6">
           <textarea
             ref={textareaRef}
@@ -116,13 +92,12 @@ function FullscreenPromptModal({
           />
         </div>
 
-        {/* Actions */}
         <div className="flex justify-between gap-3 border-t border-border px-6 py-4">
           <button
             type="button"
             onClick={handleOptimize}
             disabled={!editPrompt.trim() || isOptimizing}
-            className="flex items-center gap-2 rounded-lg border border-purple-200 bg-purple-50 px-4 py-2 text-sm text-purple-600 hover:bg-purple-100 disabled:opacity-50 disabled:cursor-not-allowed dark:border-purple-800 dark:bg-purple-950 dark:text-purple-300 dark:hover:bg-purple-900"
+            className="flex items-center gap-2 rounded-lg border border-purple-200 bg-purple-50 px-4 py-2 text-sm text-purple-600 hover:bg-purple-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-purple-800 dark:bg-purple-950 dark:text-purple-300 dark:hover:bg-purple-900"
           >
             {isOptimizing ? (
               <Loader2 className="size-4 animate-spin" />
@@ -163,66 +138,7 @@ interface AssistantConfigTabProps {
 export function AssistantConfigTab({ agent, onUpdate }: AssistantConfigTabProps) {
   const [isEditingPrompt, setIsEditingPrompt] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
-  const [voiceConfig, setVoiceConfig] = useState<AgentVoiceConfig>(agent.voiceConfig || DEFAULT_VOICE_CONFIG)
-  const [voiceOptions, setVoiceOptions] = useState(getBrowserSpeechVoices())
   const isSystemAgent = agent.agentLevel === 'system'
-  const savedVoiceConfigRef = useRef<AgentVoiceConfig>(agent.voiceConfig || DEFAULT_VOICE_CONFIG)
-  const voiceSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  useEffect(() => {
-    const incoming = agent.voiceConfig || DEFAULT_VOICE_CONFIG
-    savedVoiceConfigRef.current = incoming
-    setVoiceConfig(incoming)
-  }, [agent])
-
-  // voice config 变化时 debounce 自动保存（系统助手也允许修改语音配置）
-  useEffect(() => {
-    if (JSON.stringify(voiceConfig) === JSON.stringify(savedVoiceConfigRef.current)) return
-
-    if (voiceSaveTimerRef.current) clearTimeout(voiceSaveTimerRef.current)
-    voiceSaveTimerRef.current = setTimeout(async () => {
-      try {
-        await agentApi.update(agent.id, {
-          voiceConfig: {
-            ...voiceConfig,
-            outputMode: voiceConfig.enabled ? voiceConfig.outputMode : 'off',
-            voiceId: voiceConfig.voiceId?.trim() || null,
-            autoPlay: voiceConfig.enabled ? voiceConfig.autoPlay : false,
-          },
-        })
-        savedVoiceConfigRef.current = voiceConfig
-        onUpdate?.()
-      } catch {
-        toast.error('语音配置保存失败')
-      }
-    }, 600)
-
-    return () => {
-      if (voiceSaveTimerRef.current) clearTimeout(voiceSaveTimerRef.current)
-    }
-  }, [voiceConfig, agent.id, isSystemAgent, onUpdate])
-
-  useEffect(() => {
-    if (!supportsBrowserSpeechSynthesis()) {
-      setVoiceOptions([])
-      return
-    }
-
-    const updateVoices = () => {
-      const all = getBrowserSpeechVoices()
-      const primaryLang = (navigator.language || 'zh').split('-')[0].toLowerCase()
-      const filtered = all.filter((v) => v.lang.toLowerCase().startsWith(primaryLang))
-      setVoiceOptions(filtered.length > 0 ? filtered : all)
-    }
-    updateVoices()
-    window.speechSynthesis.onvoiceschanged = updateVoices
-
-    return () => {
-      if (window.speechSynthesis.onvoiceschanged === updateVoices) {
-        window.speechSynthesis.onvoiceschanged = null
-      }
-    }
-  }, [])
 
   const handleOpenWorkDir = async (workDir: string) => {
     if (!window.electronAPI?.isElectron) return
@@ -245,41 +161,17 @@ export function AssistantConfigTab({ agent, onUpdate }: AssistantConfigTabProps)
       toast.success('提示词已更新')
       setIsEditingPrompt(false)
       onUpdate?.()
-    } catch (error) {
+    } catch {
       toast.error('更新失败')
     } finally {
       setIsSaving(false)
     }
   }
 
-  const handlePreviewVoice = async () => {
-    if (!voiceConfig.enabled) {
-      toast.error('请先启用语音播报')
-      return
-    }
-
-    if (!supportsBrowserSpeechSynthesis()) {
-      toast.error('当前环境不支持浏览器语音播报')
-      return
-    }
-
-    try {
-      await speakTextWithBrowserSpeech({
-        text: `你好，我是 ${agent.name}，这是当前音色试听。`,
-        voiceId: voiceConfig.voiceId,
-        rate: voiceConfig.speed,
-        volume: voiceConfig.volume,
-      })
-    } catch {
-      toast.error('试听失败')
-    }
-  }
-
   return (
     <div className="space-y-6">
-      {/* 提示词卡片 */}
-      <div className="rounded-2xl border border-border bg-card overflow-hidden">
-        <div className="px-6 py-4 border-b border-border bg-muted/50">
+      <div className="overflow-hidden rounded-2xl border border-border bg-card">
+        <div className="border-b border-border bg-muted/50 px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <FileText className="size-5 text-primary" />
@@ -288,7 +180,7 @@ export function AssistantConfigTab({ agent, onUpdate }: AssistantConfigTabProps)
             {!isSystemAgent && (
               <button
                 onClick={() => setIsEditingPrompt(true)}
-                className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               >
                 <Pencil className="size-4" />
                 编辑
@@ -297,22 +189,20 @@ export function AssistantConfigTab({ agent, onUpdate }: AssistantConfigTabProps)
           </div>
         </div>
         <div className="p-6">
-          <div className="bg-muted rounded-xl border border-border p-4 text-sm text-foreground whitespace-pre-wrap max-h-100 overflow-y-auto leading-relaxed">
+          <div className="max-h-100 overflow-y-auto whitespace-pre-wrap rounded-xl border border-border bg-muted p-4 text-sm leading-relaxed text-foreground">
             {agent.prompt || '未设置提示词'}
           </div>
         </div>
       </div>
 
-      {/* 基本信息 */}
-      <div className="rounded-2xl border border-border bg-card overflow-hidden">
-        <div className="px-6 py-4 border-b border-border">
+      <div className="overflow-hidden rounded-2xl border border-border bg-card">
+        <div className="border-b border-border px-6 py-4">
           <h3 className="font-semibold text-foreground">基本信息</h3>
         </div>
         <div className="p-6">
           <div className="grid grid-cols-2 gap-6">
-            {/* 类型 */}
             <div className="flex items-center gap-4">
-              <div className="size-10 rounded-lg bg-primary/5 flex items-center justify-center">
+              <div className="flex size-10 items-center justify-center rounded-lg bg-primary/5">
                 {agent.type === 'builtin' ? (
                   <Sparkles className="size-5 text-primary" />
                 ) : (
@@ -321,16 +211,13 @@ export function AssistantConfigTab({ agent, onUpdate }: AssistantConfigTabProps)
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">助手类型</p>
-                <p className="font-medium text-foreground">
-                  {agent.type === 'builtin' ? '原生助手' : '外部工具'}
-                </p>
+                <p className="font-medium text-foreground">{agent.type === 'builtin' ? '原生助手' : '外部工具'}</p>
               </div>
             </div>
 
-            {/* ACP 工具 */}
             {agent.type === 'acp' && agent.acpTool && (
               <div className="flex items-center gap-4">
-                <div className="size-10 rounded-lg bg-purple-500/10 flex items-center justify-center">
+                <div className="flex size-10 items-center justify-center rounded-lg bg-purple-500/10">
                   <Globe className="size-5 text-purple-500" />
                 </div>
                 <div>
@@ -340,10 +227,9 @@ export function AssistantConfigTab({ agent, onUpdate }: AssistantConfigTabProps)
               </div>
             )}
 
-            {/* LLM 供应商 */}
             {agent.llmProvider && (
               <div className="flex items-center gap-4">
-                <div className="size-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+                <div className="flex size-10 items-center justify-center rounded-lg bg-emerald-500/10">
                   <Database className="size-5 text-emerald-500" />
                 </div>
                 <div>
@@ -358,10 +244,9 @@ export function AssistantConfigTab({ agent, onUpdate }: AssistantConfigTabProps)
               </div>
             )}
 
-            {/* 分类 */}
             {agent.category && (
               <div className="flex items-center gap-4">
-                <div className="size-10 rounded-lg bg-orange-500/10 flex items-center justify-center">
+                <div className="flex size-10 items-center justify-center rounded-lg bg-orange-500/10">
                   <Tag className="size-5 text-orange-500" />
                 </div>
                 <div>
@@ -371,16 +256,19 @@ export function AssistantConfigTab({ agent, onUpdate }: AssistantConfigTabProps)
               </div>
             )}
 
-            {/* 状态 */}
             <div className="flex items-center gap-4">
-              <div className={cn(
-                'size-10 rounded-lg flex items-center justify-center',
-                agent.isActive ? 'bg-green-500/10' : 'bg-muted'
-              )}>
-                <div className={cn(
-                  'size-2.5 rounded-full',
-                  agent.isActive ? 'bg-green-500' : 'bg-muted-foreground'
-                )} />
+              <div
+                className={cn(
+                  'flex size-10 items-center justify-center rounded-lg',
+                  agent.isActive ? 'bg-green-500/10' : 'bg-muted',
+                )}
+              >
+                <div
+                  className={cn(
+                    'size-2.5 rounded-full',
+                    agent.isActive ? 'bg-green-500' : 'bg-muted-foreground',
+                  )}
+                />
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">当前状态</p>
@@ -389,7 +277,7 @@ export function AssistantConfigTab({ agent, onUpdate }: AssistantConfigTabProps)
                   className={cn(
                     agent.isActive
                       ? 'bg-green-100 text-green-700 hover:bg-green-100 dark:bg-green-900/30 dark:text-green-400'
-                      : ''
+                      : '',
                   )}
                 >
                   {agent.isActive ? '已启用' : '已停用'}
@@ -400,155 +288,21 @@ export function AssistantConfigTab({ agent, onUpdate }: AssistantConfigTabProps)
         </div>
       </div>
 
-      <div className="rounded-2xl border border-border bg-card overflow-hidden">
-        <div className="px-6 py-4 border-b border-border bg-muted/50">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Volume2 className="size-5 text-primary" />
-              <h3 className="font-semibold text-foreground">语音播报</h3>
-            </div>
-          </div>
-        </div>
-        <div className="p-6 space-y-4">
-          <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-muted/40 p-4">
-            <div>
-              <p className="font-medium text-foreground">启用语音播报</p>
-              <p className="mt-1 text-sm text-muted-foreground">浏览器侧可用于自动或手动播报助手回答。</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setVoiceConfig((prev) => ({
-                ...prev,
-                enabled: !prev.enabled,
-                outputMode: !prev.enabled && prev.outputMode === 'off' ? 'manual' : prev.outputMode,
-              }))}
-              className={cn(
-                'relative h-5 w-10 rounded-full transition-colors',
-                voiceConfig.enabled ? 'bg-blue-500' : 'bg-gray-200'
-              )}
-            >
-              <span
-                className={cn(
-                  'absolute top-0.5 size-4 rounded-full bg-white transition-transform',
-                  voiceConfig.enabled ? 'translate-x-5' : 'translate-x-0.5'
-                )}
-              />
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-foreground">播报模式</label>
-              <select
-                value={voiceConfig.outputMode}
-                disabled={!voiceConfig.enabled}
-                onChange={(e) => setVoiceConfig((prev) => ({ ...prev, outputMode: e.target.value as AgentVoiceConfig['outputMode'] }))}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none disabled:opacity-60"
-              >
-                <option value="off">关闭</option>
-                <option value="manual">手动播放</option>
-                <option value="auto_final_only">自动播报最终回答</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-foreground">音色</label>
-              <select
-                value={voiceConfig.voiceId || '__auto__'}
-                disabled={!voiceConfig.enabled}
-                onChange={(e) => setVoiceConfig((prev) => ({
-                  ...prev,
-                  voiceId: e.target.value === '__auto__' ? null : e.target.value,
-                }))}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none disabled:opacity-60"
-              >
-                <option value="__auto__">自动选择</option>
-                {voiceOptions.map((voice) => (
-                  <option key={voice.id} value={voice.id}>
-                    {voice.name} · {voice.lang}
-                  </option>
-                ))}
-              </select>
-              <p className="mt-1 text-xs text-muted-foreground">
-                音色来源于当前浏览器或系统可用的本地语音。
-              </p>
-            </div>
-
-            <div>
-              <label className="mb-1.5 flex items-center justify-between text-sm font-medium text-foreground">
-                语速
-                <span className="font-normal text-muted-foreground">{voiceConfig.speed.toFixed(1)}x</span>
-              </label>
-              <input
-                type="range"
-                min="0.5"
-                max="2"
-                step="0.1"
-                value={voiceConfig.speed}
-                disabled={!voiceConfig.enabled}
-                onChange={(e) => setVoiceConfig((prev) => ({ ...prev, speed: Number(e.target.value) }))}
-                className="w-full cursor-pointer accent-blue-500 disabled:opacity-60"
-              />
-            </div>
-
-            <div>
-              <label className="mb-1.5 flex items-center justify-between text-sm font-medium text-foreground">
-                音量
-                <span className="font-normal text-muted-foreground">{Math.round(voiceConfig.volume * 100)}%</span>
-              </label>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.05"
-                value={voiceConfig.volume}
-                disabled={!voiceConfig.enabled}
-                onChange={(e) => setVoiceConfig((prev) => ({ ...prev, volume: Number(e.target.value) }))}
-                className="w-full cursor-pointer accent-blue-500 disabled:opacity-60"
-              />
-            </div>
-          </div>
-
-          <label className={cn('flex items-center gap-2 text-sm text-foreground', !voiceConfig.enabled && 'opacity-60')}>
-            <input
-              type="checkbox"
-              checked={voiceConfig.autoPlay}
-              disabled={!voiceConfig.enabled}
-              onChange={(e) => setVoiceConfig((prev) => ({ ...prev, autoPlay: e.target.checked }))}
-              className="size-4 rounded border border-input"
-            />
-            自动播放
-          </label>
-
-          <div>
-            <button
-              type="button"
-              disabled={!voiceConfig.enabled}
-              onClick={handlePreviewVoice}
-              className="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-            >
-              试听当前音色
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* 工作目录 */}
       {agent.workDir && (
-        <div className="rounded-2xl border border-border bg-card overflow-hidden">
-          <div className="px-6 py-4 border-b border-border">
+        <div className="overflow-hidden rounded-2xl border border-border bg-card">
+          <div className="border-b border-border px-6 py-4">
             <div className="flex items-center gap-2">
               <Folder className="size-5 text-amber-500" />
               <h3 className="font-semibold text-foreground">工作目录</h3>
             </div>
           </div>
           <div className="p-6">
-            <div className="bg-amber-500/10 rounded-xl p-3 text-sm text-foreground font-mono flex items-center justify-between gap-2">
+            <div className="flex items-center justify-between gap-2 rounded-xl bg-amber-500/10 p-3 font-mono text-sm text-foreground">
               <span className="break-all">{agent.workDir}</span>
               {window.electronAPI?.isElectron && (
                 <button
                   onClick={() => handleOpenWorkDir(agent.workDir!)}
-                  className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                  className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
                   title="打开目录"
                 >
                   <FolderOpen className="size-4" />
@@ -559,21 +313,19 @@ export function AssistantConfigTab({ agent, onUpdate }: AssistantConfigTabProps)
         </div>
       )}
 
-      {/* 描述 */}
       {agent.description && (
-        <div className="rounded-2xl border border-border bg-card overflow-hidden">
-          <div className="px-6 py-4 border-b border-border">
+        <div className="overflow-hidden rounded-2xl border border-border bg-card">
+          <div className="border-b border-border px-6 py-4">
             <h3 className="font-semibold text-foreground">描述</h3>
           </div>
           <div className="p-6">
-            <p className="text-foreground leading-relaxed">{agent.description}</p>
+            <p className="leading-relaxed text-foreground">{agent.description}</p>
           </div>
         </div>
       )}
 
-      {/* 时间信息 */}
-      <div className="rounded-2xl border border-border bg-card overflow-hidden">
-        <div className="px-6 py-4 border-b border-border">
+      <div className="overflow-hidden rounded-2xl border border-border bg-card">
+        <div className="border-b border-border px-6 py-4">
           <div className="flex items-center gap-2">
             <Clock className="size-5 text-muted-foreground" />
             <h3 className="font-semibold text-foreground">时间信息</h3>
@@ -582,18 +334,17 @@ export function AssistantConfigTab({ agent, onUpdate }: AssistantConfigTabProps)
         <div className="p-6">
           <div className="grid grid-cols-2 gap-6">
             <div>
-              <p className="text-sm text-muted-foreground mb-1">创建时间</p>
+              <p className="mb-1 text-sm text-muted-foreground">创建时间</p>
               <p className="text-foreground">{formatDateTime(agent.createdAt)}</p>
             </div>
             <div>
-              <p className="text-sm text-muted-foreground mb-1">更新时间</p>
+              <p className="mb-1 text-sm text-muted-foreground">更新时间</p>
               <p className="text-foreground">{formatDateTime(agent.updatedAt)}</p>
             </div>
           </div>
         </div>
       </div>
 
-      {/* 全屏编辑模态框 */}
       <FullscreenPromptModal
         isOpen={isEditingPrompt}
         prompt={agent.prompt || ''}

@@ -5,7 +5,8 @@ import type { StreamEvent } from '@/stores/socket-store'
 import { useChatStore } from '@/stores/chat-store'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { cn } from '@/lib/utils'
-import { normalizeSpeechText, speakTextWithBrowserSpeech, supportsBrowserSpeechSynthesis } from '@/lib/browser-speech'
+import { toVoicePanelConfig, type AgentVoicePanelConfig } from '@/lib/agent-speech'
+import { normalizeSpeechText, speakText, stopSpeechPlayback, supportsSpeechPlayback } from '@/lib/browser-speech'
 
 interface MentionAgent {
   id: string
@@ -76,8 +77,9 @@ export function ChatMessagesList({
   const messageRefs = useRef<Map<string, HTMLDivElement | null>>(new Map())
   const containerRef = useRef<HTMLDivElement | null>(null)
   // 语音播报队列：上一条播完再播下一条
-  const speechQueueRef = useRef<Array<{ messageId: string; text: string; voiceId: string | null; speed: number; volume: number }>>([])
+  const speechQueueRef = useRef<Array<{ messageId: string; agentId: string; text: string; voiceConfig: AgentVoicePanelConfig }>>([])
   const isSpeakingRef = useRef(false)
+  const speechRunIdRef = useRef(0)
   const handledIds = useMemo(
     () => new Set(handledVoiceMessageIdsByRoom[chatRoomId] ?? []),
     [chatRoomId, handledVoiceMessageIdsByRoom],
@@ -207,15 +209,14 @@ export function ChatMessagesList({
 
   // 切换房间时取消正在播报的语音（已播 ID 保留，不清空）
   useEffect(() => {
-    if (supportsBrowserSpeechSynthesis()) {
-      window.speechSynthesis.cancel()
-      setPlayingVoiceMessageId(null)
-    }
+    speechRunIdRef.current += 1
+    speechQueueRef.current = []
+    stopSpeechPlayback()
+    setPlayingVoiceMessageId(null)
   }, [chatRoomId, setPlayingVoiceMessageId])
 
   useEffect(() => {
     if (loading) return
-    if (!supportsBrowserSpeechSynthesis()) return
 
     const hasInitializedRoom = Object.prototype.hasOwnProperty.call(handledVoiceMessageIdsByRoom, chatRoomId)
 
@@ -241,20 +242,19 @@ export function ChatMessagesList({
     const toSpeak = newMessages.filter((message) => {
       if (message.isHuman || !message.agentId || !message.content.trim()) return false
       const agent = allAgents.find((item) => item.id === message.agentId)
-      const voiceConfig = agent?.voiceConfig
-      return voiceConfig?.enabled && voiceConfig.outputMode === 'auto_final_only'
+      const voiceConfig = agent?.speechConfig ? toVoicePanelConfig(agent.speechConfig) : null
+      return voiceConfig?.enabled && voiceConfig.outputMode === 'auto_final_only' && supportsSpeechPlayback(voiceConfig)
     })
 
     if (toSpeak.length === 0) return
 
     for (const message of toSpeak) {
-      const vc = allAgents.find((item) => item.id === message.agentId)!.voiceConfig!
+      const vc = toVoicePanelConfig(allAgents.find((item) => item.id === message.agentId)!.speechConfig)
       speechQueueRef.current.push({
         messageId: message.id,
+        agentId: message.agentId!,
         text: normalizeSpeechText(message.content),
-        voiceId: vc.voiceId,
-        speed: vc.speed,
-        volume: vc.volume,
+        voiceConfig: vc,
       })
     }
 
@@ -262,16 +262,37 @@ export function ChatMessagesList({
     const processQueue = async () => {
       if (isSpeakingRef.current) return
       isSpeakingRef.current = true
+      const runId = speechRunIdRef.current
       while (speechQueueRef.current.length > 0) {
+        if (runId !== speechRunIdRef.current) {
+          break
+        }
         const item = speechQueueRef.current.shift()!
         setPlayingVoiceMessageId(item.messageId)
         markVoiceMessagesPlayed(chatRoomId, [item.messageId])
-        await speakTextWithBrowserSpeech({
+        await speakText({
           text: item.text,
-          voiceId: item.voiceId,
-          rate: item.speed,
-          volume: item.volume,
+          provider: item.voiceConfig.provider,
+          model: item.voiceConfig.model,
+          voiceId: item.voiceConfig.voiceId,
+          fallbackProvider: item.voiceConfig.fallbackProvider,
+          rate: item.voiceConfig.speed,
+          volume: item.voiceConfig.volume,
+          pitch: item.voiceConfig.pitch ?? undefined,
+          emotion: item.voiceConfig.emotion,
+          style: item.voiceConfig.style,
+          format: item.voiceConfig.format,
+          sampleRate: item.voiceConfig.sampleRate,
+          temperature: item.voiceConfig.temperature,
+          prompt: item.voiceConfig.prompt,
+          agentId: item.agentId,
+          chatRoomId,
+          messageId: item.messageId,
+          source: 'assistant-auto-speak',
         }).catch(() => {})
+        if (runId !== speechRunIdRef.current) {
+          break
+        }
         setPlayingVoiceMessageId(null)
       }
       isSpeakingRef.current = false

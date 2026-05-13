@@ -475,12 +475,16 @@ export function setupSocket(io: Server) {
               replyMessageId: message.replyMessageId || null,
               isHuman: message.isHuman ?? true,
               attachments: message.attachments.map(att => ({
+                type: att.type,
                 filename: att.filename,
                 mimeType: att.mimeType,
                 size: att.size,
                 url: att.url,
                 width: att.width,
                 height: att.height,
+                durationMs: att.durationMs,
+                transcript: att.transcript,
+                waveform: att.waveform,
               })),
             });
           } else {

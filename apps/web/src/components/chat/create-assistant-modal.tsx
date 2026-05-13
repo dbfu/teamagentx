@@ -1,6 +1,7 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { AcpToolInfo, acpToolsApi, AgentCategory, categoryApi } from '@/lib/agent-api';
+import { AcpToolInfo, AgentSpeechConfig, acpToolsApi, AgentCategory, categoryApi } from '@/lib/agent-api';
 import { AgentAvatarImage, agentAvatarOptions } from '@/lib/agent-avatars';
+import { createDefaultAgentSpeechConfig } from '@/lib/agent-speech';
 import { llmProviderApi, type LlmProvider } from '@/lib/llm-provider-api';
 import { getProviderProtocolHint, isProviderCompatibleWithAgent } from '@/lib/llm-provider-compat';
 import { promptOptimizeApi } from '@/lib/prompt-optimize-api';
@@ -21,6 +22,7 @@ interface CreateAssistantModalProps {
     acpTool: string
     categoryId: string | null
     llmProviderId: string | null
+    speechConfig: AgentSpeechConfig
   }) => Promise<boolean>  // 返回是否成功
   defaultCategoryId?: string  // 预设分类ID
 }
@@ -231,6 +233,7 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
         acpTool: assistantType === 'acp' ? acpTool : '',
         categoryId: categoryId || null,
         llmProviderId: llmProviderId || null,
+        speechConfig: createDefaultAgentSpeechConfig(),
       })
 
       if (success) {

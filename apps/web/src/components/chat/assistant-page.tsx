@@ -40,7 +40,7 @@ import {
   Check,
   X,
 } from 'lucide-react'
-import { agentApi, categoryApi, Agent, AgentCategory, AgentsGrouped } from '@/lib/agent-api'
+import { agentApi, categoryApi, Agent, AgentCategory, AgentSpeechConfig, AgentsGrouped } from '@/lib/agent-api'
 import { cn } from '@/lib/utils'
 import { CreateAssistantModal } from './create-assistant-modal'
 import { EditAssistantModal } from './edit-assistant-modal'
@@ -352,6 +352,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     acpTool: string
     categoryId: string | null
     llmProviderId: string | null
+    speechConfig: AgentSpeechConfig
   }): Promise<boolean> => {
     const response = await agentApi.create({
       name: data.name,
@@ -362,6 +363,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
       acpTool: data.acpTool || undefined,
       categoryId: data.categoryId || undefined,
       llmProviderId: data.llmProviderId,
+      speechConfig: data.speechConfig,
     })
     if (response.success) {
       await fetchData()
@@ -384,6 +386,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     acpTool: string
     categoryId: string | null
     llmProviderId: string | null
+    speechConfig: AgentSpeechConfig
   }): Promise<boolean> => {
     if (!editingAssistant) return false
     const response = await agentApi.update(editingAssistant.id, {
@@ -395,6 +398,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
       acpTool: data.acpTool || undefined,
       categoryId: data.categoryId,
       llmProviderId: data.llmProviderId,
+      speechConfig: data.speechConfig,
     })
     if (response.success) {
       await fetchData()

@@ -8,7 +8,7 @@ test('saveBridgePlatformConfig clears bot token and config when explicit empty v
   const originalUpsert = prisma.platformConfig.upsert;
 
   let upsertArgs: unknown;
-  (prisma.platformConfig as { upsert: typeof prisma.platformConfig.upsert }).upsert = (async (args) => {
+  (prisma.platformConfig as unknown as { upsert: typeof prisma.platformConfig.upsert }).upsert = (async (args: unknown) => {
     upsertArgs = args;
     return {
       platform: 'telegram',
@@ -19,7 +19,7 @@ test('saveBridgePlatformConfig clears bot token and config when explicit empty v
       createdAt: new Date(),
       updatedAt: new Date(),
     };
-  }) as typeof prisma.platformConfig.upsert;
+  }) as unknown as typeof prisma.platformConfig.upsert;
 
   try {
     const result = await saveBridgePlatformConfig('telegram', {
@@ -39,6 +39,6 @@ test('saveBridgePlatformConfig clears bot token and config when explicit empty v
     assert.equal(result.botToken, null);
     assert.equal(result.config, null);
   } finally {
-    (prisma.platformConfig as { upsert: typeof prisma.platformConfig.upsert }).upsert = originalUpsert;
+    (prisma.platformConfig as unknown as { upsert: typeof prisma.platformConfig.upsert }).upsert = originalUpsert;
   }
 });

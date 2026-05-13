@@ -18,6 +18,7 @@ import { authGateway } from './gateway/auth.gateway.js';
 import { categoryGateway } from './gateway/category.gateway.js';
 import { chatRoomGateway } from './gateway/chatroom.gateway.js';
 import { llmProviderGateway } from './gateway/llm-provider.gateway.js';
+import { speechGateway } from './gateway/speech.gateway.js';
 import { skillGateway } from './gateway/skill.gateway.js';
 import { cronTaskGateway } from './gateway/cron-task.gateway.js';
 import { tokenUsageGateway } from './gateway/token-usage.gateway.js';
@@ -35,6 +36,7 @@ import { backgroundTaskManager } from './core/shell/background-task-manager.js';
 import { taskQueueService } from './modules/task-queue/task-queue.service.js';
 import { checkpointService } from './modules/checkpoint/checkpoint.service.js';
 import { registerBridgePlatformAdapters } from './modules/bridge/platform-senders.js';
+import { initDb } from './lib/prisma.js';
 
 function findLocalIps() {
   const interfaces = os.networkInterfaces();
@@ -66,10 +68,13 @@ export async function createApp(options?: { enableSwagger?: boolean }) {
 
   // 注册静态文件服务（用于图片访问）
   await app.register(staticPlugin, {
-    root: path.join(process.cwd(), 'uploads'),
+    root: process.env.UPLOADS_DIR || path.join(process.cwd(), 'uploads'),
     prefix: '/uploads/',
     maxAge: '7d',
   });
+
+  // 初始化数据库（WAL 模式 + busy_timeout 避免并发写锁）
+  await initDb();
 
   // 初始化上传目录
   await uploadService.init();
@@ -114,6 +119,7 @@ export async function createApp(options?: { enableSwagger?: boolean }) {
     agentGateway,
     messageGateway,
     chatRoomGateway,
+    speechGateway,
     skillGateway,
     cronTaskGateway,
     tokenUsageGateway,

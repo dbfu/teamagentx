@@ -10,7 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { agentApi } from '@/lib/agent-api'
+import { agentApi, AgentSpeechConfig } from '@/lib/agent-api'
 import { cn } from '@/lib/utils'
 import { useAuthStore, useSocketStore } from '@/stores'
 import { useChatStore } from '@/stores/chat-store'
@@ -73,6 +73,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
     acpTool: string
     categoryId: string | null
     llmProviderId: string | null
+    speechConfig: AgentSpeechConfig
   }): Promise<boolean> => {
     const response = await agentApi.create({
       name: data.name,
@@ -83,6 +84,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
       acpTool: data.acpTool || undefined,
       categoryId: data.categoryId || undefined,
       llmProviderId: data.llmProviderId || undefined,
+      speechConfig: data.speechConfig,
     })
     if (response.success) {
       setIsCreateAssistantOpen(false)

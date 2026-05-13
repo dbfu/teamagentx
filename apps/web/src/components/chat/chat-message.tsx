@@ -17,7 +17,8 @@ import { UserAvatar } from './user-avatar'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useChatStore, VOICE_MESSAGE_PLACEHOLDER } from '@/stores/chat-store'
-import { normalizeSpeechText, speakTextWithBrowserSpeech, supportsBrowserSpeechSynthesis } from '@/lib/browser-speech'
+import { toVoicePanelConfig } from '@/lib/agent-speech'
+import { normalizeSpeechText, speakText, stopSpeechPlayback, supportsSpeechPlayback } from '@/lib/browser-speech'
 
 function formatDuration(ms: number): string {
   const totalSeconds = Math.round(ms / 1000)
@@ -86,7 +87,7 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
     ? (message.user?.username ?? '用户')
     : (message.agent?.name ?? '助手')
   const currentAgent = message.agentId ? allAgents.find((agent) => agent.id === message.agentId) : null
-  const voiceConfig = currentAgent?.voiceConfig
+  const voiceConfig = currentAgent?.speechConfig ? toVoicePanelConfig(currentAgent.speechConfig) : null
   const hasAudioAttachment = message.attachments?.some((attachment) => getAttachmentType(attachment) === 'audio') ?? false
   const shouldHideContent = hasAudioAttachment && message.content.trim() === VOICE_MESSAGE_PLACEHOLDER
   // 纯语音消息：只有音频附件、无文字内容，气泡样式退化为透明
@@ -195,7 +196,7 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
     if (!voiceConfig?.enabled || !message.content.trim()) return
 
     if (isCurrentlyPlaying) {
-      window.speechSynthesis.cancel()
+      stopSpeechPlayback()
       setPlayingVoiceMessageId(null)
       return
     }
@@ -206,11 +207,23 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
     onMarkPlayed?.()
     setPlayingVoiceMessageId(message.id)
     try {
-      await speakTextWithBrowserSpeech({
+      await speakText({
         text: speechText,
+        provider: voiceConfig.provider,
+        model: voiceConfig.model,
         voiceId: voiceConfig.voiceId,
+        fallbackProvider: voiceConfig.fallbackProvider,
         rate: voiceConfig.speed,
         volume: voiceConfig.volume,
+        pitch: voiceConfig.pitch ?? undefined,
+        emotion: voiceConfig.emotion,
+        style: voiceConfig.style,
+        format: voiceConfig.format,
+        sampleRate: voiceConfig.sampleRate,
+        temperature: voiceConfig.temperature,
+        prompt: voiceConfig.prompt,
+        agentId: message.agentId ?? undefined,
+        messageId: message.id,
       })
     } catch (error) {
       console.error('语音播报失败:', error)
@@ -461,7 +474,7 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
 
   const renderSpeechButton = () => {
     if (message.isHuman || !showSpeechButton) return null
-    if (!voiceConfig?.enabled || !normalizeSpeechText(message.content) || !supportsBrowserSpeechSynthesis()) return null
+    if (!voiceConfig?.enabled || !normalizeSpeechText(message.content) || !supportsSpeechPlayback(voiceConfig)) return null
 
     return (
       <span className="relative inline-flex">

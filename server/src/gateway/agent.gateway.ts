@@ -8,6 +8,7 @@ import {chatRoomService} from '../modules/chatroom/chatroom.service.js';
 import {quickChatSessionService} from '../modules/quick-chat-session/quick-chat-session.service.js';
 import {checkpointService} from '../modules/checkpoint/checkpoint.service.js';
 import {promptOptimizeService} from '../modules/prompt-optimize/prompt-optimize.service.js';
+import { deserializeAgentSpeechConfig } from '../modules/speech/speech-config.js';
 
 // 所有支持的 LLM 供应商类型（与 Prisma 保持一致）
 const LLM_PROVIDER_TYPES = [
@@ -24,25 +25,18 @@ function isSystemAgentMutationError(error: unknown): error is Error {
   return error instanceof Error && error.message.startsWith('系统助手不允许');
 }
 
-function serializeAgentForResponse<T extends { voiceConfig?: string | null }>(agent: T): Omit<T, 'voiceConfig'> & { voiceConfig: unknown | null } {
-  if (!agent.voiceConfig) {
+function serializeAgentForResponse<T extends { speechConfig?: string | null }>(agent: T): Omit<T, 'speechConfig'> & { speechConfig: unknown | null } {
+  if (!agent.speechConfig) {
     return {
       ...agent,
-      voiceConfig: null,
+      speechConfig: null,
     };
   }
 
-  try {
-    return {
-      ...agent,
-      voiceConfig: JSON.parse(agent.voiceConfig),
-    };
-  } catch {
-    return {
-      ...agent,
-      voiceConfig: null,
-    };
-  }
+  return {
+    ...agent,
+    speechConfig: deserializeAgentSpeechConfig(agent.speechConfig),
+  };
 }
 
 // JSON Schema for response
@@ -60,18 +54,38 @@ const agentResponseSchema = {
     agentLevel: { type: 'string', enum: ['normal', 'system'] },
     acpTool: { type: 'string', nullable: true },
     workDir: { type: 'string', nullable: true },
-    voiceConfig: {
+    speechConfig: {
       type: 'object',
       nullable: true,
-      additionalProperties: true,
       properties: {
-        enabled: { type: 'boolean' },
-        outputMode: { type: 'string', enum: ['off', 'manual', 'auto_final_only'] },
-        voiceId: { type: 'string', nullable: true },
-        speed: { type: 'number' },
-        volume: { type: 'number' },
-        autoPlay: { type: 'boolean' },
-        provider: { type: 'string', nullable: true },
+        behavior: {
+          type: 'object',
+          properties: {
+            enabled: { type: 'boolean' },
+            outputMode: { type: 'string', enum: ['off', 'manual', 'auto_final_only'] },
+            autoPlay: { type: 'boolean' },
+          },
+        },
+        profile: {
+          type: 'object',
+          additionalProperties: true,
+          properties: {
+            provider: { type: 'string', nullable: true },
+            model: { type: 'string', nullable: true },
+            voice: { type: 'string', nullable: true },
+            fallbackProvider: { type: 'string', nullable: true },
+            speed: { type: 'number', nullable: true },
+            volume: { type: 'number', nullable: true },
+            pitch: { type: 'number', nullable: true },
+            emotion: { type: 'string', nullable: true },
+            style: { type: 'string', nullable: true },
+            format: { type: 'string', nullable: true },
+            sampleRate: { type: 'number', nullable: true },
+            temperature: { type: 'number', nullable: true },
+            prompt: { type: 'string', nullable: true },
+            vendorOptions: { type: 'object', nullable: true, additionalProperties: true },
+          },
+        },
       },
     },
     isActive: { type: 'boolean' },
@@ -121,17 +135,38 @@ const createAgentBodySchema = {
     type: { type: 'string', enum: ['builtin', 'acp'], description: '助手类型' },
     acpTool: { type: 'string', description: 'ACP 工具名称（仅 type=acp 时有效，如 claude, codex）' },
     workDir: { type: 'string', description: '工作目录（适用于所有类型）' },
-    voiceConfig: {
+    speechConfig: {
       type: 'object',
       description: '助手语音配置',
       properties: {
-        enabled: { type: 'boolean' },
-        outputMode: { type: 'string', enum: ['off', 'manual', 'auto_final_only'] },
-        voiceId: { type: 'string', nullable: true },
-        speed: { type: 'number' },
-        volume: { type: 'number' },
-        autoPlay: { type: 'boolean' },
-        provider: { type: 'string' },
+        behavior: {
+          type: 'object',
+          properties: {
+            enabled: { type: 'boolean' },
+            outputMode: { type: 'string', enum: ['off', 'manual', 'auto_final_only'] },
+            autoPlay: { type: 'boolean' },
+          },
+        },
+        profile: {
+          type: 'object',
+          additionalProperties: true,
+          properties: {
+            provider: { type: 'string', nullable: true },
+            model: { type: 'string', nullable: true },
+            voice: { type: 'string', nullable: true },
+            fallbackProvider: { type: 'string', nullable: true },
+            speed: { type: 'number', nullable: true },
+            volume: { type: 'number', nullable: true },
+            pitch: { type: 'number', nullable: true },
+            emotion: { type: 'string', nullable: true },
+            style: { type: 'string', nullable: true },
+            format: { type: 'string', nullable: true },
+            sampleRate: { type: 'number', nullable: true },
+            temperature: { type: 'number', nullable: true },
+            prompt: { type: 'string', nullable: true },
+            vendorOptions: { type: 'object', nullable: true, additionalProperties: true },
+          },
+        },
       },
     },
     categoryId: { type: 'string', description: '分类 ID' },
@@ -150,16 +185,37 @@ const updateAgentBodySchema = {
     type: { type: 'string', enum: ['builtin', 'acp'] },
     acpTool: { type: 'string' },
     workDir: { type: 'string' },
-    voiceConfig: {
+    speechConfig: {
       type: 'object',
       properties: {
-        enabled: { type: 'boolean' },
-        outputMode: { type: 'string', enum: ['off', 'manual', 'auto_final_only'] },
-        voiceId: { type: 'string', nullable: true },
-        speed: { type: 'number' },
-        volume: { type: 'number' },
-        autoPlay: { type: 'boolean' },
-        provider: { type: 'string' },
+        behavior: {
+          type: 'object',
+          properties: {
+            enabled: { type: 'boolean' },
+            outputMode: { type: 'string', enum: ['off', 'manual', 'auto_final_only'] },
+            autoPlay: { type: 'boolean' },
+          },
+        },
+        profile: {
+          type: 'object',
+          additionalProperties: true,
+          properties: {
+            provider: { type: 'string', nullable: true },
+            model: { type: 'string', nullable: true },
+            voice: { type: 'string', nullable: true },
+            fallbackProvider: { type: 'string', nullable: true },
+            speed: { type: 'number', nullable: true },
+            volume: { type: 'number', nullable: true },
+            pitch: { type: 'number', nullable: true },
+            emotion: { type: 'string', nullable: true },
+            style: { type: 'string', nullable: true },
+            format: { type: 'string', nullable: true },
+            sampleRate: { type: 'number', nullable: true },
+            temperature: { type: 'number', nullable: true },
+            prompt: { type: 'string', nullable: true },
+            vendorOptions: { type: 'object', nullable: true, additionalProperties: true },
+          },
+        },
       },
     },
     isActive: { type: 'boolean' },
@@ -177,7 +233,7 @@ interface CreateAgentBody {
   type?: 'builtin' | 'acp';
   acpTool?: string;
   workDir?: string;
-  voiceConfig?: UpdateAgentInput['voiceConfig'];
+  speechConfig?: UpdateAgentInput['speechConfig'];
   categoryId?: string;
   llmProviderId?: string;
 }
@@ -191,7 +247,7 @@ interface UpdateAgentBody {
   type?: 'builtin' | 'acp';
   acpTool?: string;
   workDir?: string;
-  voiceConfig?: UpdateAgentInput['voiceConfig'];
+  speechConfig?: UpdateAgentInput['speechConfig'];
   isActive?: boolean;
   categoryId?: string | null;
   llmProviderId?: string | null;
@@ -408,7 +464,7 @@ export async function agentGateway(app: FastifyInstance) {
       },
     },
     async (request, reply) => {
-      const {name, avatar, avatarColor, description, prompt, type, acpTool, workDir, voiceConfig, categoryId, llmProviderId} = request.body;
+      const {name, avatar, avatarColor, description, prompt, type, acpTool, workDir, speechConfig, categoryId, llmProviderId} = request.body;
 
       try {
         const agent = await agentService.create({
@@ -420,7 +476,7 @@ export async function agentGateway(app: FastifyInstance) {
           type,
           acpTool,
           workDir,
-          voiceConfig,
+          speechConfig,
           categoryId,
           llmProviderId,
         });

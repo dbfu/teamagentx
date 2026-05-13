@@ -1,158 +1,89 @@
+import { webSpeechService } from '@/speech/default-service'
+import type { SpeechProfile } from '@/speech'
+import {
+  getBrowserSpeechVoices as getBrowserLocalSpeechVoices,
+  supportsBrowserSpeechRecognition as supportsBrowserLocalSpeechRecognition,
+  supportsBrowserSpeechSynthesis as supportsBrowserLocalSpeechSynthesis,
+  type BrowserSpeechRecognitionSession,
+  type BrowserSpeechVoiceOption,
+} from '@/speech/providers/browser-local-provider'
+import type { SpeechTask } from '@/speech'
+import { stopRemoteTtsPlayback } from '@/speech/providers/remote-tts-provider'
+
 export type SpeechOutputMode = 'off' | 'manual' | 'auto_final_only'
 
-export interface BrowserSpeechVoiceOption {
-  id: string
-  name: string
-  lang: string
-  voiceURI: string
-  default: boolean
-}
+export type { BrowserSpeechRecognitionSession, BrowserSpeechVoiceOption }
 
-type BrowserSpeechRecognitionApi = new () => SpeechRecognition
-
-interface SpeechRecognitionResultLike {
-  0: {
-    transcript: string
-  }
-  isFinal: boolean
-  length: number
-}
-
-interface SpeechRecognitionEventLike extends Event {
-  results: ArrayLike<SpeechRecognitionResultLike>
-  resultIndex: number
-}
-
-interface SpeechRecognitionErrorEventLike extends Event {
-  error: string
-}
-
-declare global {
-  interface Window {
-    webkitSpeechRecognition?: BrowserSpeechRecognitionApi
-    SpeechRecognition?: BrowserSpeechRecognitionApi
-  }
-
-  interface SpeechRecognition extends EventTarget {
-    continuous: boolean
-    interimResults: boolean
-    lang: string
-    onresult: ((event: SpeechRecognitionEventLike) => void) | null
-    onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null
-    onend: (() => void) | null
-    start: () => void
-    stop: () => void
-    abort: () => void
-  }
-}
-
-export interface BrowserSpeechRecognitionSession {
-  stop: () => Promise<string>
-  cancel: () => void
-}
-
-function getSpeechRecognitionCtor(): BrowserSpeechRecognitionApi | null {
-  if (typeof window === 'undefined') return null
-  return window.SpeechRecognition || window.webkitSpeechRecognition || null
+export interface SpeakTextOptions {
+  text: string
+  provider?: string | null
+  model?: string | null
+  voiceId?: string | null
+  fallbackProvider?: string | null
+  rate?: number
+  volume?: number
+  pitch?: number
+  emotion?: string | null
+  style?: string | null
+  format?: string | null
+  sampleRate?: number | null
+  temperature?: number | null
+  prompt?: string | null
+  vendorOptions?: Record<string, unknown> | null
+  agentId?: string
+  chatRoomId?: string
+  messageId?: string
+  source?: NonNullable<SpeechTask['context']>['source']
 }
 
 export function supportsBrowserSpeechRecognition(): boolean {
-  return !!getSpeechRecognitionCtor()
+  return supportsBrowserLocalSpeechRecognition()
 }
 
 export function startBrowserSpeechRecognition(language = 'zh-CN'): BrowserSpeechRecognitionSession | null {
-  const SpeechRecognitionCtor = getSpeechRecognitionCtor()
-  if (!SpeechRecognitionCtor) return null
+  if (!supportsBrowserLocalSpeechRecognition()) return null
 
-  const recognition = new SpeechRecognitionCtor()
-  recognition.continuous = true
-  recognition.interimResults = true
-  recognition.lang = language
+  const sessionPromise = webSpeechService.execute({
+    type: 'stt',
+    profile: {
+      provider: 'browser-local',
+    },
+    input: {
+      mode: 'session-start',
+      language,
+    },
+  })
 
-  const finalChunks: string[] = []
-  let resolved = false
-  let resolveStop: ((value: string) => void) | null = null
-
-  const finish = () => {
-    if (resolved) return
-    resolved = true
-    resolveStop?.(finalChunks.join('').trim())
-  }
-
-  recognition.onresult = (event) => {
-    for (let i = event.resultIndex; i < event.results.length; i += 1) {
-      const result = event.results[i]
-      const transcript = result[0]?.transcript?.trim()
-      if (result.isFinal && transcript) {
-        finalChunks.push(transcript)
-      }
+  const getSession = async (): Promise<BrowserSpeechRecognitionSession> => {
+    const result = await sessionPromise
+    if (!('kind' in result) || result.kind !== 'transcript') {
+      throw new Error('语音识别会话启动失败')
     }
-  }
 
-  recognition.onerror = () => {
-    finish()
+    const session = result.metadata?.session
+    if (!session || typeof session !== 'object') {
+      throw new Error('语音识别会话启动失败')
+    }
+    return session as BrowserSpeechRecognitionSession
   }
-
-  recognition.onend = () => {
-    finish()
-  }
-
-  recognition.start()
 
   return {
-    stop: () => {
-      if (resolved) {
-        return Promise.resolve(finalChunks.join('').trim())
-      }
-
-      return new Promise<string>((resolve) => {
-        resolveStop = resolve
-        recognition.stop()
-      })
+    stop: async () => {
+      const session = await getSession()
+      return session.stop()
     },
     cancel: () => {
-      recognition.abort()
-      finish()
+      void getSession().then((session) => session.cancel()).catch(() => {})
     },
   }
 }
 
 export function supportsBrowserSpeechSynthesis(): boolean {
-  return typeof window !== 'undefined' && 'speechSynthesis' in window
+  return supportsBrowserLocalSpeechSynthesis()
 }
 
 export function getBrowserSpeechVoices(): BrowserSpeechVoiceOption[] {
-  if (!supportsBrowserSpeechSynthesis()) return []
-
-  return window.speechSynthesis.getVoices().map((voice) => ({
-    id: voice.voiceURI || voice.name,
-    name: voice.name,
-    lang: voice.lang,
-    voiceURI: voice.voiceURI,
-    default: voice.default,
-  }))
-}
-
-function pickVoice(voiceId?: string | null): SpeechSynthesisVoice | null {
-  if (!supportsBrowserSpeechSynthesis()) return null
-  const voices = window.speechSynthesis.getVoices()
-  if (!voiceId) {
-    return voices.find((voice) => voice.lang.toLowerCase().startsWith('zh')) || voices[0] || null
-  }
-
-  const normalizedVoiceId = voiceId.trim().toLowerCase()
-  return voices.find((voice) =>
-    voice.name.toLowerCase().includes(normalizedVoiceId)
-    || voice.voiceURI.toLowerCase().includes(normalizedVoiceId)
-    || voice.lang.toLowerCase() === normalizedVoiceId
-  ) || voices.find((voice) => voice.lang.toLowerCase().startsWith('zh')) || voices[0] || null
-}
-
-export interface SpeakTextOptions {
-  text: string
-  voiceId?: string | null
-  rate?: number
-  volume?: number
+  return getBrowserLocalSpeechVoices()
 }
 
 export function normalizeSpeechText(text: string): string {
@@ -169,36 +100,69 @@ export function normalizeSpeechText(text: string): string {
     .trim()
 }
 
-export function speakTextWithBrowserSpeech(options: SpeakTextOptions): Promise<void> {
-  if (!supportsBrowserSpeechSynthesis()) {
-    return Promise.reject(new Error('当前环境不支持语音播报'))
+export function supportsSpeechPlayback(profile?: Pick<SpeechProfile, 'provider'> | null): boolean {
+  if (profile?.provider && profile.provider !== 'browser-local') {
+    return true
   }
+  return supportsBrowserLocalSpeechSynthesis()
+}
 
+export function stopSpeechPlayback(): void {
+  if (supportsBrowserLocalSpeechSynthesis()) {
+    window.speechSynthesis.cancel()
+  }
+  stopRemoteTtsPlayback()
+}
+
+export async function speakText(options: SpeakTextOptions): Promise<void> {
   const trimmedText = normalizeSpeechText(options.text)
-  if (!trimmedText) {
-    return Promise.resolve()
+  if (!trimmedText) return
+
+  const provider = options.provider ?? 'browser-local'
+  if (provider === 'browser-local' && !supportsBrowserLocalSpeechSynthesis()) {
+    throw new Error('当前环境不支持语音播报')
   }
 
-  return new Promise<void>((resolve, reject) => {
-    const utterance = new SpeechSynthesisUtterance(trimmedText)
-    const voice = pickVoice(options.voiceId)
-    if (voice) {
-      utterance.voice = voice
-      utterance.lang = voice.lang
-    } else {
-      utterance.lang = 'zh-CN'
-    }
-    utterance.rate = options.rate ?? 1
-    utterance.volume = options.volume ?? 1
-    utterance.onend = () => resolve()
-    utterance.onerror = (e) => {
-      // 主动取消（cancel() 调用）不视为错误
-      if ((e as SpeechSynthesisErrorEvent).error === 'interrupted' || (e as SpeechSynthesisErrorEvent).error === 'canceled') {
-        resolve()
-        return
-      }
-      reject(new Error('语音播报失败'))
-    }
-    window.speechSynthesis.speak(utterance)
+  await webSpeechService.execute({
+    type: 'tts',
+    profile: {
+      provider,
+      model: options.model ?? null,
+      voice: options.voiceId ?? null,
+      fallbackProvider: options.fallbackProvider ?? null,
+      speed: options.rate ?? 1,
+      volume: options.volume ?? 1,
+      pitch: options.pitch ?? null,
+      emotion: options.emotion ?? null,
+      style: options.style ?? null,
+      format: options.format ?? null,
+      sampleRate: options.sampleRate ?? null,
+      temperature: options.temperature ?? null,
+      prompt: options.prompt ?? null,
+      vendorOptions: options.vendorOptions ?? null,
+    },
+    input: {
+      text: trimmedText,
+    },
+    context: {
+      agentId: options.agentId,
+      chatRoomId: options.chatRoomId,
+      messageId: options.messageId,
+      source: options.source,
+    },
+    preferences: {
+      allowFallback: Boolean(options.fallbackProvider),
+    },
+  })
+}
+
+export async function speakTextWithBrowserSpeech(options: SpeakTextOptions): Promise<void> {
+  if (!supportsBrowserLocalSpeechSynthesis()) {
+    throw new Error('当前环境不支持语音播报')
+  }
+
+  await speakText({
+    ...options,
+    provider: 'browser-local',
   })
 }

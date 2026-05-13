@@ -84,6 +84,9 @@ export class LibSqlCheckpointer extends BaseCheckpointSaver {
   protected async setup(): Promise<void> {
     if (this.isSetup) return;
 
+    await this.client.execute('PRAGMA journal_mode=WAL');
+    await this.client.execute('PRAGMA busy_timeout=5000');
+
     // 创建 checkpoints 表
     await this.client.execute(`
       CREATE TABLE IF NOT EXISTS checkpoints (
@@ -579,5 +582,4 @@ export class LibSqlCheckpointer extends BaseCheckpointSaver {
   }
 }
 
-// 导出单例
 export const checkpointer = LibSqlCheckpointer.getInstance();

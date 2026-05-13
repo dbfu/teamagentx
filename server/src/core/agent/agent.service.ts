@@ -1,21 +1,15 @@
 import prisma from '../../lib/prisma.js';
 import { Agent, AgentType, LlmProvider, AgentCategory, AgentLevel } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import {
+  type AgentSpeechConfig,
+  serializeAgentSpeechConfig,
+} from '../../modules/speech/speech-config.js';
 
 // 包含关联的 Agent 类型
 export type AgentWithRelations = Agent & {
   category: AgentCategory | null;
   llmProvider: LlmProvider | null;
-};
-
-export type AgentVoiceConfig = {
-  enabled: boolean;
-  outputMode: 'off' | 'manual' | 'auto_final_only';
-  voiceId: string | null;
-  speed: number;
-  volume: number;
-  autoPlay: boolean;
-  provider?: string;
 };
 
 export type CreateAgentInput = {
@@ -31,19 +25,13 @@ export type CreateAgentInput = {
   workDir?: string;
   categoryId?: string;
   llmProviderId?: string;
-  voiceConfig?: AgentVoiceConfig | null;
+  speechConfig?: AgentSpeechConfig | null;
 };
 
 export type UpdateAgentInput = Partial<CreateAgentInput> & {
   categoryId?: string | null; // 允许 null 来移除分类
   llmProviderId?: string | null; // 允许 null 来移除 LLM 供应商
 };
-
-function serializeVoiceConfig(voiceConfig?: AgentVoiceConfig | null): string | null | undefined {
-  if (voiceConfig === undefined) return undefined;
-  if (voiceConfig === null) return null;
-  return JSON.stringify(voiceConfig);
-}
 
 async function assertAgentIsUserEditable(id: string, action: string): Promise<void> {
   const agent = await prisma.agent.findUnique({
@@ -136,7 +124,7 @@ export const agentService = {
         workDir: data.workDir,
         categoryId,
         llmProviderId,
-        voiceConfig: serializeVoiceConfig(data.voiceConfig),
+        speechConfig: serializeAgentSpeechConfig(data.speechConfig),
         updatedAt: now,
       },
       include: {
@@ -189,9 +177,9 @@ export const agentService = {
 
   async update(id: string, data: UpdateAgentInput): Promise<AgentWithRelations> {
     // 处理外键字段：空字符串转换为 undefined（表示不更新），'null' 字符串转换为 null（表示移除）
-    const { categoryId, llmProviderId, voiceConfig, ...restData } = data;
+    const { categoryId, llmProviderId, speechConfig, ...restData } = data;
 
-    // voiceConfig 是本机展示偏好，系统助手也允许修改；其他字段仍受保护
+    // speechConfig 是本机展示偏好，系统助手也允许修改；其他字段仍受保护
     const hasNonVoiceFields =
       Object.keys(restData).length > 0 ||
       categoryId !== undefined ||
@@ -226,7 +214,7 @@ export const agentService = {
         ...restData,
         ...(processedCategoryId !== undefined && { categoryId: processedCategoryId }),
         ...(processedLlmProviderId !== undefined && { llmProviderId: processedLlmProviderId }),
-        ...(voiceConfig !== undefined && { voiceConfig: serializeVoiceConfig(voiceConfig) }),
+        ...(speechConfig !== undefined && { speechConfig: serializeAgentSpeechConfig(speechConfig) }),
         updatedAt: new Date(),
       },
       include: {

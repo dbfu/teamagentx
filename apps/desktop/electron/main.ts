@@ -588,7 +588,7 @@ function startServer(): Promise<number> {
     // Set DATABASE_URL to user data directory
     const dbPath = path.join(app.getPath('userData'), 'teamagentx.db');
     // Set UPLOADS_DIR to user data directory (not inside app)
-    const uploadsDir = path.join(app.getPath('userData'), 'uploads', 'images');
+    const uploadsDir = path.join(app.getPath('userData'), 'uploads');
 
     // Use Electron's utilityProcess to run the server
     // This is the correct way to spawn Node.js child processes in Electron

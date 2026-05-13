@@ -10,4 +10,9 @@ const adapter = new PrismaLibSql({
 
 const prisma = new PrismaClient({ adapter });
 
+export async function initDb(): Promise<void> {
+  await prisma.$executeRawUnsafe('PRAGMA journal_mode=WAL');
+  await prisma.$executeRawUnsafe('PRAGMA busy_timeout=5000');
+}
+
 export default prisma;

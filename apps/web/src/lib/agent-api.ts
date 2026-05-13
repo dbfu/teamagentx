@@ -1,4 +1,5 @@
 import { getApiBaseUrl } from './config'
+import type { SpeechProfile } from '@/speech'
 
 // 分类相关类型
 export interface AgentCategory {
@@ -36,7 +37,7 @@ export interface Agent {
   agentLevel: 'normal' | 'system'
   acpTool: string | null
   workDir: string | null
-  voiceConfig: AgentVoiceConfig | null
+  speechConfig: AgentSpeechConfig | null
   isActive: boolean
   categoryId: string | null
   category: AgentCategory | null
@@ -55,14 +56,15 @@ export interface Agent {
   updatedAt: string
 }
 
-export interface AgentVoiceConfig {
+export interface AgentSpeechBehaviorConfig {
   enabled: boolean
   outputMode: 'off' | 'manual' | 'auto_final_only'
-  voiceId: string | null
-  speed: number
-  volume: number
   autoPlay: boolean
-  provider?: string
+}
+
+export interface AgentSpeechConfig {
+  behavior: AgentSpeechBehaviorConfig
+  profile: SpeechProfile
 }
 
 export interface CreateAgentRequest {
@@ -74,7 +76,7 @@ export interface CreateAgentRequest {
   type?: 'builtin' | 'acp'
   acpTool?: string
   workDir?: string
-  voiceConfig?: AgentVoiceConfig | null
+  speechConfig?: AgentSpeechConfig | null
   categoryId?: string
   llmProviderId?: string | null
   sortOrder?: number
@@ -90,7 +92,7 @@ export interface UpdateAgentRequest {
   type?: 'builtin' | 'acp'
   acpTool?: string
   workDir?: string
-  voiceConfig?: AgentVoiceConfig | null
+  speechConfig?: AgentSpeechConfig | null
   categoryId?: string | null
   llmProviderId?: string | null
   sortOrder?: number

@@ -4,6 +4,7 @@ import { agentService } from '../../../core/agent/agent.service.js';
 import { llmProviderService } from '../../../modules/llm-provider/llm-provider.service.js';
 import { installSkillFromSourceTool } from './skills-helper.tools.js';
 import { getChatHistoryTool } from './skill-manager.tools.js';
+import { normalizeAgentSpeechConfig, type AgentSpeechConfig } from '../../../modules/speech/speech-config.js';
 
 // 助手生成助手的专用 ID
 export const AGENT_CREATOR_AGENT_ID = '29ffb519-82d2-4c32-8bc8-0b8d814a4eee';
@@ -15,27 +16,6 @@ export const ACP_TOOL_VALUES = [
 ] as const;
 
 export type AcpToolValue = (typeof ACP_TOOL_VALUES)[number];
-
-// 语音配置类型
-type VoiceConfigInput = {
-  enabled: boolean;
-  outputMode: 'off' | 'manual' | 'auto_final_only';
-  voiceId?: string | null | undefined;
-  speed?: number;
-  volume?: number;
-  autoPlay?: boolean;
-};
-
-function normalizeVoiceConfig(v: VoiceConfigInput) {
-  return {
-    enabled: v.enabled,
-    outputMode: v.outputMode,
-    voiceId: v.voiceId ?? null,
-    speed: v.speed ?? 1,
-    volume: v.volume ?? 1,
-    autoPlay: v.autoPlay ?? false,
-  };
-}
 
 // 单个助手配置类型
 type AgentConfig = {
@@ -49,20 +29,33 @@ type AgentConfig = {
   workDir?: string;
   llmProviderId?: string;
   categoryId?: string;
-  voiceConfig?: VoiceConfigInput;
+  speechConfig?: AgentSpeechConfig;
 };
 
-// voiceConfig zod schema（复用）
-const voiceConfigSchema = z
+// speechConfig zod schema（复用）
+const speechConfigSchema = z
   .object({
-    enabled: z.boolean().describe('是否启用语音播报'),
-    outputMode: z
-      .enum(['off', 'manual', 'auto_final_only'])
-      .describe('播报模式：off 关闭，manual 手动播放，auto_final_only 自动播报最终回答'),
-    voiceId: z.string().nullable().optional().describe('音色 ID，null 表示自动选择'),
-    speed: z.number().min(0.5).max(2).optional().describe('语速，0.5-2，默认 1'),
-    volume: z.number().min(0).max(1).optional().describe('音量，0-1，默认 1'),
-    autoPlay: z.boolean().optional().describe('是否自动播放，默认 false'),
+    behavior: z.object({
+      enabled: z.boolean().describe('是否启用语音播报'),
+      outputMode: z.enum(['off', 'manual', 'auto_final_only']).describe('播报模式：off 关闭，manual 手动播放，auto_final_only 自动播报最终回答'),
+      autoPlay: z.boolean().optional().describe('是否自动播放，默认 false'),
+    }),
+    profile: z.object({
+      provider: z.string().nullable().optional().describe('provider，默认 browser-local'),
+      model: z.string().nullable().optional().describe('模型标识'),
+      voice: z.string().nullable().optional().describe('音色 ID，null 表示自动选择'),
+      fallbackProvider: z.string().nullable().optional().describe('回退 provider'),
+      speed: z.number().min(0.5).max(2).optional().describe('语速，0.5-2，默认 1'),
+      volume: z.number().min(0).max(1).optional().describe('音量，0-1，默认 1'),
+      pitch: z.number().nullable().optional().describe('音高'),
+      emotion: z.string().nullable().optional().describe('情绪'),
+      style: z.string().nullable().optional().describe('风格'),
+      format: z.string().nullable().optional().describe('输出格式'),
+      sampleRate: z.number().nullable().optional().describe('采样率'),
+      temperature: z.number().nullable().optional().describe('采样温度'),
+      prompt: z.string().nullable().optional().describe('语音风格提示词'),
+      vendorOptions: z.record(z.string(), z.unknown()).nullable().optional().describe('厂商扩展参数'),
+    }),
   })
   .optional()
   .describe('语音播报配置，不填则不设置语音');
@@ -80,7 +73,7 @@ export const createAgentTool = tool(
     workDir,
     llmProviderId,
     categoryId,
-    voiceConfig,
+    speechConfig,
   }: AgentConfig) => {
     try {
       // 检查名称是否已存在
@@ -100,7 +93,7 @@ export const createAgentTool = tool(
         workDir,
         llmProviderId,
         categoryId,
-        voiceConfig: voiceConfig ? normalizeVoiceConfig(voiceConfig) : null,
+        speechConfig: speechConfig ? normalizeAgentSpeechConfig(speechConfig) : null,
       });
 
       return JSON.stringify({
@@ -143,7 +136,7 @@ export const createAgentTool = tool(
         .optional()
         .describe('LLM供应商ID，可选；ACP 仅支持 claude/anthropic 和 codex/openai'),
       categoryId: z.string().optional().describe('分类ID，可选'),
-      voiceConfig: voiceConfigSchema,
+      speechConfig: speechConfigSchema,
     }),
   },
 );
@@ -193,7 +186,7 @@ export const createAgentsTool = tool(
           workDir: config.workDir,
           llmProviderId: config.llmProviderId,
           categoryId: config.categoryId,
-          voiceConfig: config.voiceConfig ? normalizeVoiceConfig(config.voiceConfig) : null,
+          speechConfig: config.speechConfig ? normalizeAgentSpeechConfig(config.speechConfig) : null,
         });
 
         results.push({
@@ -243,7 +236,7 @@ export const createAgentsTool = tool(
               .optional()
               .describe('LLM供应商ID；ACP 仅支持 claude/anthropic 和 codex/openai'),
             categoryId: z.string().optional().describe('分类ID'),
-            voiceConfig: voiceConfigSchema,
+            speechConfig: speechConfigSchema,
           }),
         )
         .describe('助手配置数组'),
@@ -356,7 +349,7 @@ export const listAgentsTool = tool(
     return custom
       .map(
         (a) =>
-          `ID: ${a.id}\n名称: ${a.name}\n描述: ${a.description || '无'}\n语音: ${a.voiceConfig ? JSON.stringify(a.voiceConfig) : '未配置'}`,
+          `ID: ${a.id}\n名称: ${a.name}\n描述: ${a.description || '无'}\n语音: ${a.speechConfig ? JSON.stringify(a.speechConfig) : '未配置'}`,
       )
       .join('\n\n');
   },
@@ -374,7 +367,7 @@ export const updateAgentTool = tool(
     name,
     description,
     prompt,
-    voiceConfig,
+    speechConfig,
     llmProviderId,
     categoryId,
   }: {
@@ -382,7 +375,7 @@ export const updateAgentTool = tool(
     name?: string;
     description?: string;
     prompt?: string;
-    voiceConfig?: VoiceConfigInput;
+    speechConfig?: AgentSpeechConfig;
     llmProviderId?: string;
     categoryId?: string;
   }) => {
@@ -393,7 +386,7 @@ export const updateAgentTool = tool(
         ...(prompt !== undefined && { prompt }),
         ...(llmProviderId !== undefined && { llmProviderId }),
         ...(categoryId !== undefined && { categoryId }),
-        ...(voiceConfig !== undefined && { voiceConfig: normalizeVoiceConfig(voiceConfig) }),
+        ...(speechConfig !== undefined && { speechConfig: normalizeAgentSpeechConfig(speechConfig) }),
       });
 
       return JSON.stringify({
@@ -401,7 +394,7 @@ export const updateAgentTool = tool(
         agent: {
           id: agent.id,
           name: agent.name,
-          voiceConfig: agent.voiceConfig,
+          speechConfig: agent.speechConfig,
         },
         message: `成功更新助手 "${agent.name}"。`,
       });
@@ -420,7 +413,7 @@ export const updateAgentTool = tool(
       name: z.string().optional().describe('新名称（可选）'),
       description: z.string().optional().describe('新描述（可选）'),
       prompt: z.string().optional().describe('新系统提示词（可选）'),
-      voiceConfig: voiceConfigSchema,
+      speechConfig: speechConfigSchema,
       llmProviderId: z.string().optional().describe('新 LLM 供应商 ID（可选）'),
       categoryId: z.string().optional().describe('新分类 ID（可选）'),
     }),
@@ -437,7 +430,7 @@ export const updateAgentsTool = tool(
       name?: string;
       description?: string;
       prompt?: string;
-      voiceConfig?: VoiceConfigInput;
+      speechConfig?: AgentSpeechConfig;
       llmProviderId?: string;
       categoryId?: string;
     }>;
@@ -463,8 +456,8 @@ export const updateAgentsTool = tool(
           ...(config.prompt !== undefined && { prompt: config.prompt }),
           ...(config.llmProviderId !== undefined && { llmProviderId: config.llmProviderId }),
           ...(config.categoryId !== undefined && { categoryId: config.categoryId }),
-          ...(config.voiceConfig !== undefined && {
-            voiceConfig: normalizeVoiceConfig(config.voiceConfig),
+          ...(config.speechConfig !== undefined && {
+            speechConfig: normalizeAgentSpeechConfig(config.speechConfig),
           }),
         });
         results.push({ agentId: config.agentId, name: agent.name, success: true });
@@ -497,7 +490,7 @@ export const updateAgentsTool = tool(
             name: z.string().optional().describe('新名称（可选）'),
             description: z.string().optional().describe('新描述（可选）'),
             prompt: z.string().optional().describe('新系统提示词（可选）'),
-            voiceConfig: voiceConfigSchema,
+            speechConfig: speechConfigSchema,
             llmProviderId: z.string().optional().describe('新 LLM 供应商 ID（可选）'),
             categoryId: z.string().optional().describe('新分类 ID（可选）'),
           }),

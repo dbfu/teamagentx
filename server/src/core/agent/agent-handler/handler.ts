@@ -162,14 +162,15 @@ export function setupAIHandlers(
         return;
       }
 
-      // 普通群聊：群主无 @ 发言时，触发默认接收助手
+      // 普通群聊：无 @ 发言时，触发默认接收助手
+      // 若群有群主，仅群主消息触发；未设置群主则任意成员均可触发
       if (!hasMentions) {
         if (
           chatRoom &&
           !chatRoom.isQuickChatRoom &&
           chatRoom.defaultAgentId &&
           message.userId &&
-          message.userId === chatRoom.ownerId
+          (!chatRoom.ownerId || message.userId === chatRoom.ownerId)
         ) {
           const agent = await agentService.findById(chatRoom.defaultAgentId);
 

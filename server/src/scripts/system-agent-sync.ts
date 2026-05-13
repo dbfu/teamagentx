@@ -1,6 +1,6 @@
 import type { Agent, AgentType } from '@prisma/client';
 import prisma from '../lib/prisma.js';
-import type { AgentVoiceConfig } from '../core/agent/agent.service.js';
+import { normalizeAgentSpeechConfig, type AgentSpeechConfig } from '../modules/speech/speech-config.js';
 
 // 系统分类 ID（固定值，便于启动同步和前端分组）
 export const SYSTEM_CATEGORY_ID =
@@ -17,7 +17,7 @@ export interface SystemAgentDefinition {
   acpTool?: string | null;
   workDir?: string | null;
   llmProviderId?: string | null;
-  voiceConfig?: AgentVoiceConfig | null;
+  speechConfig?: AgentSpeechConfig | null;
 }
 
 export async function ensureSystemCategory() {
@@ -104,9 +104,9 @@ export async function syncSystemAgent(
     categoryId: SYSTEM_CATEGORY_ID,
     isActive: true,
     updatedAt: new Date(),
-    // 只在 definition 明确提供时才同步 voiceConfig，不覆盖用户已配置的值
-    ...(definition.voiceConfig !== undefined && {
-      voiceConfig: definition.voiceConfig ? JSON.stringify(definition.voiceConfig) : null,
+    // 只在 definition 明确提供时才同步 speechConfig，不覆盖用户已配置的值
+    ...(definition.speechConfig !== undefined && {
+      speechConfig: definition.speechConfig ? JSON.stringify(normalizeAgentSpeechConfig(definition.speechConfig)) : null,
     }),
   };
 

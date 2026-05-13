@@ -2,7 +2,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Agent, agentApi } from '@/lib/agent-api'
+import { Agent, AgentSpeechConfig, agentApi } from '@/lib/agent-api'
 import { cn } from '@/lib/utils'
 import { useAuthStore, useChatRoomStore } from '@/stores'
 import {
@@ -17,6 +17,7 @@ import {
   PowerOff,
   Settings,
   Sparkles,
+  Volume2,
   Zap,
 } from 'lucide-react'
 import { useState } from 'react'
@@ -29,6 +30,7 @@ import { QuickChatStartDialog } from '../quick-chat-start-dialog'
 import { AssistantConfigTab } from './assistant-config-tab'
 import { AssistantHistoryTab } from './assistant-history-tab'
 import { AssistantSkillsTab } from './assistant-skills-tab'
+import { AssistantVoiceTab } from './assistant-voice-tab'
 import { useAssistantDetail } from './hooks/use-assistant-detail'
 
 // 加载骨架屏
@@ -290,6 +292,7 @@ export function AssistantDetailPage() {
     acpTool: string
     categoryId: string | null
     llmProviderId: string | null
+    speechConfig: AgentSpeechConfig
   }): Promise<boolean> => {
     if (!agent) return false
     const response = await agentApi.update(agent.id, {
@@ -301,6 +304,7 @@ export function AssistantDetailPage() {
       acpTool: data.acpTool || undefined,
       categoryId: data.categoryId,
       llmProviderId: data.llmProviderId,
+      speechConfig: data.speechConfig,
     })
     if (response.success) {
       refreshAgent()
@@ -362,6 +366,10 @@ export function AssistantDetailPage() {
               <Settings className="size-4" />
               配置信息
             </TabsTrigger>
+            <TabsTrigger value="voice" className="gap-2">
+              <Volume2 className="size-4" />
+              语音
+            </TabsTrigger>
             <TabsTrigger value="skills" className="gap-2">
               <Bot className="size-4" />
               Skills
@@ -382,6 +390,10 @@ export function AssistantDetailPage() {
 
           <TabsContent value="config" className="flex-1 overflow-y-auto p-4 m-0">
             <AssistantConfigTab agent={agent} onUpdate={refreshAgent} />
+          </TabsContent>
+
+          <TabsContent value="voice" className="flex-1 overflow-y-auto p-4 m-0">
+            <AssistantVoiceTab agent={agent} onUpdate={refreshAgent} />
           </TabsContent>
 
           <TabsContent value="skills" className="flex-1 overflow-y-auto p-8 m-0">
