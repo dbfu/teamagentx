@@ -48,11 +48,11 @@ export function ChatRoomOpenMenu({ chatRoom, isElectron }: ChatRoomOpenMenuProps
       <Tooltip>
         <TooltipTrigger asChild>
           <button
-            className="ta-icon-button"
+            className="rounded-lg p-2 text-muted-foreground hover:bg-blue-500/10 hover:text-blue-500"
             type="button"
             onClick={() => handleOpenFolder('system')}
           >
-            <FolderOpen className="size-4" />
+            <FolderOpen className="size-5" />
           </button>
         </TooltipTrigger>
         <TooltipContent side="bottom">复制群工作目录路径</TooltipContent>
@@ -67,10 +67,10 @@ export function ChatRoomOpenMenu({ chatRoom, isElectron }: ChatRoomOpenMenuProps
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
             <button
-              className="ta-icon-button"
+              className="rounded-lg p-2 text-muted-foreground hover:bg-blue-500/10 hover:text-blue-500"
               type="button"
             >
-              <FolderOpen className="size-4" />
+              <FolderOpen className="size-5" />
             </button>
           </DropdownMenuTrigger>
         </TooltipTrigger>

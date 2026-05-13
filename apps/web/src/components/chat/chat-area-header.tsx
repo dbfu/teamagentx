@@ -34,40 +34,46 @@ export function ChatAreaHeader({
   onOpenRoomRules,
   onScreenshot,
 }: ChatAreaHeaderProps) {
+  // 检测是否在 Electron 环境中
   const isElectron = window.electronAPI?.isElectron ?? false
+  // 检测是否在移动端
   const isMobile = useIsMobile()
 
   return (
     <div
-      className="flex h-[52px] items-center border-b border-border bg-[var(--surface-raised)] px-4 shrink-0"
+      className="flex items-center border-b border-border/80 bg-[var(--surface-raised)] px-6 py-3 shadow-[var(--control-shadow)]"
       style={isElectron ? { WebkitAppRegion: 'drag' } as React.CSSProperties : {}}
     >
       {/* Left content */}
       <div
-        className="flex shrink-0 items-center gap-2.5"
+        className="flex shrink-0 items-center gap-3"
         style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
       >
-        <button onClick={onOpenRoomSettings} className="transition-transform hover:scale-105">
+        <button
+          onClick={onOpenRoomSettings}
+          className="transition-transform hover:scale-105"
+        >
+          {/* 快速对话群聊使用助手头像，普通群聊使用群聊头像 */}
           {chatRoom.isQuickChatRoom ? (
-            <AgentAvatarImage avatar={chatRoom.avatar ?? null} className="size-6 rounded-full" />
+            <AgentAvatarImage avatar={chatRoom.avatar ?? null} className="size-8 rounded-full" />
           ) : (
-            <GroupAvatarImage avatar={chatRoom.avatar ?? null} className="size-6 rounded-full" />
+            <GroupAvatarImage avatar={chatRoom.avatar ?? null} className="size-8 rounded-full" />
           )}
         </button>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2 whitespace-nowrap">
           <button
             onClick={onOpenRoomSettings}
-            className="text-sm font-bold text-foreground hover:text-primary transition-colors"
+            className="text-lg font-semibold text-foreground hover:text-primary transition-colors"
           >
             {chatRoom.name}
           </button>
           <Tooltip>
             <TooltipTrigger asChild>
               <button
-                className="flex h-7 cursor-pointer items-center gap-1 rounded-full bg-[var(--surface-subtle)] px-2 text-[11px] font-medium text-muted-foreground hover:bg-accent"
+                className="flex cursor-pointer items-center gap-1 rounded px-1 text-sm text-muted-foreground hover:bg-accent"
                 onClick={onToggleAgentsPanel}
               >
-                <Users className="size-3" />
+                <Users className="size-4" />
                 {chatRoom.chatRoomAgents?.length ?? 0}
               </button>
             </TooltipTrigger>
@@ -78,65 +84,139 @@ export function ChatAreaHeader({
 
       {/* Right actions */}
       <div
-        className="ml-auto flex shrink-0 items-center gap-0.5"
+        className="ml-auto flex shrink-0 items-center gap-2"
         style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
       >
+        {/* 移动端只显示任务看板和清空消息 */}
         {isMobile ? (
           <>
-            <HeaderIconButton icon={ClipboardList} tip="任务看板" active={taskBoardActive} onClick={onOpenTaskBoard} />
-            <HeaderIconButton icon={Eraser} tip="清空消息" danger onClick={onClearMessages} />
+            {/* 任务看板按钮 */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className={cn(
+                    'rounded-lg p-2 transition-colors',
+                    taskBoardActive
+                      ? 'bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:text-primary-foreground'
+                      : 'text-muted-foreground hover:text-primary hover:bg-primary/10'
+                  )}
+                  onClick={onOpenTaskBoard}
+                >
+                  <ClipboardList className="size-5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">任务看板</TooltipContent>
+            </Tooltip>
+            {/* 清空消息按钮 */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className="rounded-lg p-2 text-muted-foreground hover:text-orange-500 hover:bg-orange-500/10"
+                  onClick={onClearMessages}
+                >
+                  <Eraser className="size-5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">清空消息</TooltipContent>
+            </Tooltip>
           </>
         ) : (
           <>
             <ChatRoomOpenMenu chatRoom={chatRoom} isElectron={isElectron} />
+            {/* 快速对话群聊不允许添加新助手 */}
             {!chatRoom.isQuickChatRoom && (
-              <HeaderIconButton icon={UserPlus} tip="添加助手" onClick={() => onShowAddAgent(true)} />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    className="group rounded-lg p-2 text-muted-foreground transition-all duration-200 hover:bg-primary/10 hover:text-primary active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2"
+                    onClick={() => onShowAddAgent(true)}
+                  >
+                    <UserPlus className="size-5 transition-transform duration-200 group-hover:scale-110" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">添加助手</TooltipContent>
+              </Tooltip>
             )}
-            <HeaderIconButton icon={ClipboardList} tip="任务看板" active={taskBoardActive} onClick={onOpenTaskBoard} />
-            <HeaderIconButton icon={Scroll} tip="群规则" onClick={onOpenRoomRules} />
-            <HeaderIconButton icon={Camera} tip="截图" onClick={onScreenshot} />
-            <HeaderIconButton icon={Clock} tip="定时任务" onClick={onOpenCronTasks} />
-            <HeaderIconButton icon={Eraser} tip="清空消息" danger onClick={onClearMessages} />
-            <HeaderIconButton icon={Settings} tip="群设置" onClick={onOpenRoomSettings} />
+            {/* 任务看板按钮 */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className={cn(
+                    'rounded-lg p-2 transition-colors',
+                    taskBoardActive
+                      ? 'bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:text-primary-foreground'
+                      : 'text-muted-foreground hover:text-primary hover:bg-primary/10'
+                  )}
+                  onClick={onOpenTaskBoard}
+                >
+                  <ClipboardList className="size-5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">任务看板</TooltipContent>
+            </Tooltip>
+            {/* 群规则按钮 */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className="rounded-lg p-2 text-muted-foreground hover:bg-accent"
+                  onClick={onOpenRoomRules}
+                >
+                  <Scroll className="size-5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">群规则</TooltipContent>
+            </Tooltip>
+            {/* 截图按钮 */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className="rounded-lg p-2 text-muted-foreground hover:text-primary hover:bg-primary/10"
+                  onClick={onScreenshot}
+                >
+                  <Camera className="size-5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">截图聊天记录</TooltipContent>
+            </Tooltip>
+            {/* 定时任务按钮 */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className="rounded-lg p-2 text-muted-foreground hover:text-primary hover:bg-primary/10"
+                  onClick={onOpenCronTasks}
+                >
+                  <Clock className="size-5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">定时任务</TooltipContent>
+            </Tooltip>
+            {/* 清空消息按钮 */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className="rounded-lg p-2 text-muted-foreground hover:text-orange-500 hover:bg-orange-500/10"
+                  onClick={onClearMessages}
+                >
+                  <Eraser className="size-5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">清空消息</TooltipContent>
+            </Tooltip>
+            {/* 群设置按钮 */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className="rounded-lg p-2 text-muted-foreground hover:bg-accent"
+                  onClick={onOpenRoomSettings}
+                >
+                  <Settings className="size-5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">群设置</TooltipContent>
+            </Tooltip>
           </>
         )}
       </div>
     </div>
-  )
-}
-
-/** Compact icon button matching the new design */
-function HeaderIconButton({
-  icon: Icon,
-  tip,
-  active,
-  danger,
-  onClick,
-}: {
-  icon: React.ComponentType<{ className?: string }>
-  tip: string
-  active?: boolean
-  danger?: boolean
-  onClick?: () => void
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          className={cn(
-            'flex size-8 items-center justify-center rounded-[calc(var(--radius-control)-0.125rem)] transition-colors',
-            active
-              ? 'bg-primary text-primary-foreground hover:bg-primary/90'
-              : danger
-                ? 'text-muted-foreground hover:text-orange-500 hover:bg-orange-500/10'
-                : 'text-muted-foreground hover:text-foreground hover:bg-[var(--surface-subtle)]'
-          )}
-          onClick={onClick}
-        >
-          <Icon className="size-4" />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom">{tip}</TooltipContent>
-    </Tooltip>
   )
 }

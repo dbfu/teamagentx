@@ -93,34 +93,6 @@ export function formatDateTime(dateStr: string | Date): string {
  * - 7天内：x天前
  * - 其他：formatDateTime
  */
-/**
- * Agent color system - deterministic hue from agent name
- * Each agent gets a persistent color used for avatar bg, message border, presence chips, etc.
- */
-const AGENT_HUES = [220, 155, 270, 35, 190, 330, 50, 300, 170, 240, 20, 290]
-
-function getAgentHue(name: string): number {
-  const code = [...(name || '')].reduce((a, c) => a + c.charCodeAt(0), 0)
-  return AGENT_HUES[code % AGENT_HUES.length]
-}
-
-export function agentColor(name: string, l = 62, s = 72, a = 1): string {
-  const h = getAgentHue(name)
-  return a < 1 ? `hsla(${h},${s}%,${l}%,${a})` : `hsl(${h},${s}%,${l}%)`
-}
-
-export function agentBg(name: string): string {
-  return agentColor(name, 60, 70, 0.14)
-}
-
-export function agentBorder(name: string): string {
-  return agentColor(name, 60, 70, 0.40)
-}
-
-export function agentText(name: string): string {
-  return agentColor(name, 68, 75, 1)
-}
-
 export function formatRelativeTime(dateStr: string | Date): string {
   const date = dayjs(dateStr)
   const now = dayjs()

@@ -157,7 +157,7 @@ export function AgentDetailPanel({
       {/* 注入群历史 */}
       <div>
         <div className="text-xs text-muted-foreground mb-1">注入群历史</div>
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center justify-between">
           <span className="text-sm text-muted-foreground">
             开启后助手可以查看群聊历史消息
           </span>
@@ -165,14 +165,14 @@ export function AgentDetailPanel({
             onClick={handleToggleInjectHistory}
             disabled={savingSettings}
             className={cn(
-              'relative h-4 w-8 shrink-0 rounded transition-colors disabled:opacity-60',
+              'relative h-5 w-10 rounded-full transition-colors',
               selectedRoomAgent?.injectGroupHistory ? 'bg-primary' : 'bg-muted'
             )}
           >
             <div
               className={cn(
-                'absolute left-0.5 top-0.5 size-3 rounded-sm bg-background transition-transform',
-                selectedRoomAgent?.injectGroupHistory ? 'translate-x-4' : 'translate-x-0'
+                'absolute top-0.5 size-4 rounded-full bg-background transition-transform',
+                selectedRoomAgent?.injectGroupHistory ? 'translate-x-5.5 left-0.5' : 'translate-x-0.5 left-0.5'
               )}
             />
             {savingSettings && (
@@ -183,14 +183,14 @@ export function AgentDetailPanel({
       </div>
 
       {/* 操作按钮 */}
-      <div className="grid grid-cols-2 gap-2 pt-2">
+      <div className="space-y-2 pt-2">
         {/* 查看任务队列按钮 */}
         {onViewTaskQueue && (
           <button
-            className="flex h-8 items-center justify-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+            className="w-full flex items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 py-2.5 text-sm font-medium text-foreground hover:bg-accent transition-colors"
             onClick={onViewTaskQueue}
           >
-            <List className="size-3.5" />
+            <List className="size-4" />
             查看任务队列{totalTaskCount > 0 && <span className="text-muted-foreground">({totalTaskCount})</span>}
           </button>
         )}
@@ -198,37 +198,37 @@ export function AgentDetailPanel({
         {/* 查看执行任务按钮 - 只有正在执行或有执行记录时才显示 */}
         {onViewStream && (isActive || hasExecutionRecords) && (
           <button
-            className="flex h-8 items-center justify-center gap-1.5 rounded-md bg-green-500 px-2.5 text-xs font-medium text-white transition-colors hover:bg-green-600"
+            className="w-full flex items-center justify-center gap-2 rounded-lg bg-green-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-green-600 transition-colors"
             onClick={onViewStream}
           >
-            <Eye className="size-3.5" />
+            <Eye className="size-4" />
             {isActive ? '查看当前执行任务' : '查看最近执行'}
           </button>
         )}
         <button
-          className="flex h-8 items-center justify-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+          className="w-full flex items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 py-2.5 text-sm font-medium text-foreground hover:bg-accent transition-colors"
           onClick={onViewHistory}
         >
-          <History className="size-3.5" />
+          <History className="size-4" />
           历史执行结果
         </button>
 
         {/* 跳转助手详情页 */}
         <button
-          className="flex h-8 items-center justify-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+          className="w-full flex items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 py-2.5 text-sm font-medium text-foreground hover:bg-accent transition-colors"
           onClick={() => navigate(`/assistant/${selectedRoomAgent?.id}`)}
         >
-          <ExternalLink className="size-3.5" />
+          <ExternalLink className="size-4" />
           助手详情
         </button>
 
         {/* 清空上下文按钮 - 原生助手和 ACP 助手都支持 */}
         {canClearContext && selectedRoomAgent?.chatRoomAgentId && (
           <button
-            className="col-span-2 flex h-8 items-center justify-center gap-1.5 rounded-md border border-red-300 bg-red-50 px-2.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-100"
+            className="w-full flex items-center justify-center gap-2 rounded-lg border border-red-300 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-600 hover:bg-red-100 transition-colors"
             onClick={() => setShowConfirm(true)}
           >
-            <Trash2 className="size-3.5" />
+            <Trash2 className="size-4" />
             清空上下文
           </button>
         )}

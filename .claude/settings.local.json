@@ -14,7 +14,8 @@
       "Bash(npx tsc *)",
       "mcp__plugin_playwright_playwright__browser_navigate",
       "mcp__plugin_playwright_playwright__browser_console_messages",
-      "Bash(python -c ' *)"
+      "Bash(python -c ' *)",
+      "Bash(git checkout *)"
     ]
   }
 }

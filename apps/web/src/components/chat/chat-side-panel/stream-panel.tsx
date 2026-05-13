@@ -3,8 +3,6 @@ import { cn, truncateToolName } from '@/lib/utils';
 import type { StreamEvent } from '@/stores/socket-store';
 import { Bot, CheckCircle, ChevronDown, ChevronRight, Clock, Loader2, Square } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 
 // 格式化开始时间（显示时分秒）
 function formatStartTime(timestamp: number): string {
@@ -73,19 +71,6 @@ function CollapsibleStateIcon({ className }: { className?: string }) {
       <ChevronRight className={cn('size-3 text-muted-foreground group-data-[state=open]:hidden', className)} />
       <ChevronDown className={cn('hidden size-3 text-muted-foreground group-data-[state=open]:block', className)} />
     </>
-  )
-}
-
-function MarkdownLog({ content, className }: { content: string; className?: string }) {
-  return (
-    <div className={cn(
-      'prose prose-sm max-w-none break-words text-foreground prose-p:my-1.5 prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-headings:my-2 prose-headings:text-foreground prose-code:rounded prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:text-foreground prose-pre:my-2 prose-pre:max-w-full prose-pre:overflow-x-auto prose-pre:rounded-md prose-pre:bg-muted prose-pre:p-3 prose-pre:text-xs prose-pre:text-foreground',
-      className
-    )}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-        {content}
-      </ReactMarkdown>
-    </div>
   )
 }
 
@@ -321,8 +306,8 @@ export function StreamPanel({
                     </div>
                   </CollapsibleTrigger>
                   <CollapsibleContent>
-                    <div className="px-3 pb-3">
-                      <MarkdownLog content={event.content ?? ''} />
+                    <div className="px-3 pb-3 whitespace-pre-wrap break-all text-sm text-foreground">
+                      {event.content}
                     </div>
                   </CollapsibleContent>
                 </Collapsible>
@@ -376,17 +361,11 @@ export function StreamPanel({
                       {tool.output && (
                         <div>
                           <div className="text-xs text-muted-foreground mb-1">输出:</div>
-                          {typeof tool.output === 'string' ? (
-                            <div className="rounded bg-muted/50 p-2">
-                              <MarkdownLog content={tool.output} className="text-xs" />
-                            </div>
-                          ) : (
-                            <div className="font-mono text-muted-foreground bg-muted/50 rounded p-2">
-                              <pre className="whitespace-pre-wrap text-xs" style={{ wordBreak: 'break-word' }}>
-                                {JSON.stringify(tool.output, null, 2)}
-                              </pre>
-                            </div>
-                          )}
+                          <div className="font-mono text-muted-foreground bg-muted/50 rounded p-2">
+                            <pre className="whitespace-pre-wrap text-xs" style={{ wordBreak: 'break-word' }}>
+                              {typeof tool.output === 'string' ? tool.output : JSON.stringify(tool.output, null, 2)}
+                            </pre>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -409,8 +388,8 @@ export function StreamPanel({
                     </div>
                   </CollapsibleTrigger>
                   <CollapsibleContent>
-                    <div className="px-3 pb-3">
-                      <MarkdownLog content={event.content ?? ''} />
+                    <div className="px-3 pb-3 whitespace-pre-wrap break-all text-sm text-foreground">
+                      {event.content}
                     </div>
                   </CollapsibleContent>
                 </Collapsible>
@@ -430,7 +409,7 @@ export function StreamPanel({
             scrollToBottom()
             setShowNewMessageHint(false)
           }}
-          className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full bg-primary px-4 py-1.5 text-sm text-primary-foreground shadow-lg hover:bg-primary/90 transition-colors"
+          className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full bg-blue-500 px-4 py-1.5 text-sm text-white shadow-lg hover:bg-blue-600 transition-colors"
         >
           <span className="animate-bounce">↓</span>
           <span>有新内容</span>

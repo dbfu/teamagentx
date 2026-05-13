@@ -181,7 +181,7 @@ export function AgentsPanel({ chatRoom, agentStatuses, onSelectAgent, onAgentSet
   // Add agent dialog state
   const [addDialogOpen, setAddDialogOpen] = useState(false)
   const [availableAgents, setAvailableAgents] = useState<Agent[]>([])
-  const [addingAgentIds, setAddingAgentIds] = useState<Set<string>>(new Set())
+  const [addingAgentId, setAddingAgentId] = useState<string | null>(null)
 
   // 分类助手：群主、系统助手、普通助手
   const categorizeAgents = (chatRoomAgents: ChatRoomAgent[] | undefined) => {
@@ -262,36 +262,24 @@ export function AgentsPanel({ chatRoom, agentStatuses, onSelectAgent, onAgentSet
     }
   }
 
-  // 批量添加助手
-  const handleAddAgents = async (agentIds: string[]) => {
-    setAddingAgentIds(new Set(agentIds))
+  // 添加助手
+  const handleAddAgent = async (agentId: string, settings: { injectGroupHistory: boolean }) => {
+    setAddingAgentId(agentId)
     try {
-      // 依次添加每个助手（默认注入群历史消息）
-      let successCount = 0
-      let failedCount = 0
-      for (const agentId of agentIds) {
-        const response = await chatRoomApi.addAgent(chatRoom.id, {
-          agentId,
-          role: 'MEMBER',
-          injectGroupHistory: true,
-        })
-        if (response.success) {
-          successCount++
-        } else {
-          failedCount++
-        }
-      }
-
-      if (successCount > 0) {
-        toast.success(`已添加 ${successCount} 个助手`)
+      const response = await chatRoomApi.addAgent(chatRoom.id, {
+        agentId,
+        role: 'MEMBER',
+        injectGroupHistory: settings.injectGroupHistory,
+      })
+      if (response.success) {
+        toast.success('助手已添加')
         onAgentSettingsChange?.()
         setAddDialogOpen(false)
-      }
-      if (failedCount > 0) {
-        toast.error(`${failedCount} 个助手添加失败`)
+      } else {
+        toast.error(response.error || '添加失败')
       }
     } finally {
-      setAddingAgentIds(new Set())
+      setAddingAgentId(null)
     }
   }
 
@@ -346,7 +334,7 @@ export function AgentsPanel({ chatRoom, agentStatuses, onSelectAgent, onAgentSet
         <div className="mt-4">
           <button
             onClick={handleOpenAddDialog}
-            className="group flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-sm shadow-primary/20 transition-all duration-200 hover:-translate-y-0.5 hover:bg-primary/90 hover:shadow-md hover:shadow-primary/25 active:translate-y-0 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2"
+            className="group flex w-full items-center justify-center gap-2 rounded-lg bg-blue-500 px-3 py-2.5 text-sm font-medium text-white shadow-sm shadow-blue-500/20 transition-all duration-200 hover:-translate-y-0.5 hover:bg-blue-600 hover:shadow-md hover:shadow-blue-500/25 active:translate-y-0 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-2"
           >
             <Plus className="size-4 transition-transform duration-200 group-hover:rotate-90" />
             <span>添加助手</span>
@@ -370,8 +358,8 @@ export function AgentsPanel({ chatRoom, agentStatuses, onSelectAgent, onAgentSet
         open={addDialogOpen}
         onClose={() => setAddDialogOpen(false)}
         availableAgents={availableAgents}
-        addingAgentIds={addingAgentIds}
-        onAddAgents={handleAddAgents}
+        addingAgentId={addingAgentId}
+        onAddAgent={handleAddAgent}
       />
     </>
   )

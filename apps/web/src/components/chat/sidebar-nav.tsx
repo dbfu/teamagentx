@@ -16,7 +16,7 @@ import { cn } from '@/lib/utils'
 import { useAuthStore, useSocketStore } from '@/stores'
 import { useChatStore } from '@/stores/chat-store'
 import { TodoData } from '@/stores/socket-store'
-import { Bot, Check, Cpu, Globe, ListTodo, MessageSquare, Monitor, Moon, Package, Palette, Plus, Sun, Users } from 'lucide-react'
+import { Bot, Check, Cpu, ListTodo, MessageSquare, Monitor, Moon, Package, Palette, Plus, Sun, Users } from 'lucide-react'
 import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -45,9 +45,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
         ? 'skill'
         : location.pathname.startsWith('/model')
           ? 'model'
-          : location.pathname.startsWith('/integration')
-            ? 'integration'
-            : 'message'
+          : 'message'
   const currentUser = user || socketUser
 
   // 待办数量
@@ -55,7 +53,6 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
 
   // 检测是否在 Electron 环境中
   const isElectron = window.electronAPI?.isElectron ?? false
-  const platform = window.electronAPI?.platform ?? ''
   const modeOptions = [
     { value: 'light', label: '浅色', icon: Sun },
     { value: 'dark', label: '深色', icon: Moon },
@@ -68,7 +65,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
     { value: 'ruby', label: '曜石红', color: 'oklch(0.55 0.2 18)' },
   ] as const
 
-  const handleTabChange = (tab: 'message' | 'assistant' | 'skill' | 'model' | 'integration') => {
+  const handleTabChange = (tab: 'message' | 'assistant' | 'skill' | 'model') => {
     // 切换 Tab 时关闭侧拉框
     setSidePanelMode(null)
     if (tab === 'message') {
@@ -107,146 +104,147 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
     }
   }
 
-  const navItems = [
-    { id: 'message' as const, icon: MessageSquare, label: '消息' },
-    { id: 'assistant' as const, icon: Bot, label: '助手' },
-    { id: 'skill' as const, icon: Package, label: '技能' },
-    { id: 'model' as const, icon: Cpu, label: '模型' },
-  ]
-
   return (
     <div
-      className="flex h-full w-[80px] shrink-0 flex-col items-center border-r border-border bg-sidebar"
+      className="flex h-full w-20 shrink-0 flex-col items-center border-r border-sidebar-border bg-sidebar/95 shadow-[var(--control-shadow)] backdrop-blur"
       style={isElectron ? { WebkitAppRegion: 'drag' } as React.CSSProperties : {}}
     >
-      {/* Logo area */}
+      {/* Logo area - 拖拽区域 */}
       <div className={cn(
-        "flex items-center justify-center",
-        isElectron ? (platform === 'darwin' ? "mt-[34px]" : "mt-[24px]") : "mt-3"
+        "mb-4 flex size-10 items-center justify-center overflow-hidden rounded-xl border border-sidebar-border bg-[var(--surface-raised)] shadow-[var(--control-shadow)]",
+        isElectron ? "mt-10" : "mt-4"
       )}>
-        <div className="flex size-10 items-center justify-center overflow-hidden rounded-lg bg-white">
-          <img src={`${import.meta.env.BASE_URL}app-logo.png`} alt="TeamAgentX" className="size-full object-cover" />
-        </div>
+        <img src={`${import.meta.env.BASE_URL}app-logo.png`} alt="TeamAgentX" className="size-full object-cover" />
       </div>
 
-      {/* New button */}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            className="mt-4 mb-1 flex size-7 items-center justify-center rounded bg-primary text-primary-foreground shadow-[0_2px_8px_oklch(0.55_0.22_250/0.18)] hover:opacity-90 transition-opacity"
-            style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
-          >
-            <Plus className="size-3.5" strokeWidth={2.5} />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          side="right"
-          align="start"
-          style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
-        >
-          <DropdownMenuItem onClick={() => setIsCreateGroupOpen(true)}>
-            <Users className="size-4" />
-            创建群组
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => setIsCreateAssistantOpen(true)}>
-            <Bot className="size-4" />
-            创建助手
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => handleTabChange('model')}>
-            <Cpu className="size-4" />
-            模型管理
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      {/* Divider */}
-      <div className="my-1 h-px w-6 bg-border/60" />
-
       {/* Nav items */}
-      <div className="flex w-full flex-1 flex-col items-center gap-0.5 px-1.5 select-none">
-        {navItems.map((item) => {
-          const isActive = activeTab === item.id
-          return (
+      <div className="flex w-full flex-1 flex-col items-center gap-1 px-2 pb-4 select-none">
+        {/* 加号按钮 */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
             <button
-              key={item.id}
-              onClick={() => handleTabChange(item.id)}
-              className={cn(
-                'relative flex flex-col items-center justify-center gap-1 w-full rounded-md py-3 transition-all duration-150 cursor-pointer group',
-                isActive
-                  ? 'bg-[var(--nav-active)] text-primary'
-                  : 'text-muted-foreground hover:bg-[var(--surface-subtle)] hover:text-foreground'
-              )}
+              className="flex w-full flex-col items-center gap-1 rounded-lg py-2 text-muted-foreground hover:bg-sidebar-accent transition-colors focus:outline-none"
               style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
             >
-              {/* Active indicator bar (VS Code style) */}
-              {isActive && (
-                <div className="absolute left-[-6px] top-2.5 bottom-2.5 w-[3px] rounded-r-sm bg-primary" />
-              )}
-              <div className="relative">
-                <item.icon className="size-4" strokeWidth={isActive ? 2.2 : 1.6} />
-                {/* Notification badge for messages */}
-                {item.id === 'message' && !!messageBadge && messageBadge > 0 && (
-                  <div className="absolute -right-1.5 -top-1 flex size-2 items-center justify-center rounded-full bg-primary"
-                    style={{ animation: 'sidebar-glow 2s ease-in-out infinite' }}
-                  />
-                )}
-                {/* Todo count badge */}
-                {item.id === 'message' && !!messageBadge && messageBadge > 0 && (
-                  <span className="absolute -right-2 -top-1 flex min-w-3.5 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-bold leading-none text-primary-foreground">
-                    {messageBadge > 99 ? '99' : messageBadge}
-                  </span>
-                )}
+              <div className="flex size-8 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-[var(--control-shadow)]">
+                <Plus className="size-4" />
               </div>
-              <span className="text-[9px] font-medium leading-none">{item.label}</span>
             </button>
-          )
-        })}
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            side="right"
+            align="start"
+            style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+          >
+            <DropdownMenuItem onClick={() => setIsCreateGroupOpen(true)}>
+              <Users className="size-4" />
+              创建群组
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => setIsCreateAssistantOpen(true)}>
+              <Bot className="size-4" />
+              创建助手
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => handleTabChange('model')}>
+              <Cpu className="size-4" />
+              模型管理
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
 
-        {/* 集成 Tab */}
+        {/* 消息 Tab */}
         <button
-          onClick={() => handleTabChange('integration')}
+          onClick={() => handleTabChange('message')}
           className={cn(
-            'relative flex w-full flex-col items-center gap-1 rounded-lg py-2 transition-colors',
-            activeTab === 'integration'
-              ? 'bg-card text-primary shadow-sm'
+            'relative flex w-full flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
+            activeTab === 'message'
+              ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
               : 'text-muted-foreground hover:bg-sidebar-accent'
           )}
           style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
         >
-          <Globe className="size-5" />
-          <span className="text-xs">集成</span>
+          <MessageSquare className="size-5" />
+          <span className="text-xs">消息</span>
+          {!!messageBadge && messageBadge > 0 && (
+            <span className="absolute right-3 top-0.5 flex size-4 items-center justify-center rounded-full bg-red-500 text-[10px] text-white">
+              {messageBadge > 99 ? '99' : messageBadge}
+            </span>
+          )}
+        </button>
+
+        {/* 助手 Tab */}
+        <button
+          onClick={() => handleTabChange('assistant')}
+          className={cn(
+            'relative flex w-full flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
+            activeTab === 'assistant'
+              ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
+              : 'text-muted-foreground hover:bg-sidebar-accent'
+          )}
+          style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+        >
+          <Bot className="size-5" />
+          <span className="text-xs">助手</span>
+        </button>
+
+        {/* 技能 Tab */}
+        <button
+          onClick={() => handleTabChange('skill')}
+          className={cn(
+            'relative flex w-full flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
+            activeTab === 'skill'
+              ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
+              : 'text-muted-foreground hover:bg-sidebar-accent'
+          )}
+          style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+        >
+          <Package className="size-5" />
+          <span className="text-xs">技能</span>
+        </button>
+
+        {/* 模型 Tab */}
+        <button
+          onClick={() => handleTabChange('model')}
+          className={cn(
+            'relative flex w-full flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
+            activeTab === 'model'
+              ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
+              : 'text-muted-foreground hover:bg-sidebar-accent'
+          )}
+          style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+        >
+          <Cpu className="size-5" />
+          <span className="text-xs">模型</span>
         </button>
 
         {/* 待办按钮 */}
         <button
           onClick={() => setIsTodoModalOpen(true)}
           className={cn(
-            'relative flex w-full flex-col items-center justify-center gap-1 rounded-md py-3 transition-all duration-150 cursor-pointer',
-            'text-muted-foreground hover:bg-[var(--surface-subtle)] hover:text-foreground'
+            'relative flex w-full flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
+            'text-muted-foreground hover:bg-sidebar-accent'
           )}
           style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
         >
-          <div className="relative">
-            <ListTodo className="size-4" strokeWidth={1.6} />
-            {todoCount > 0 && (
-              <span className="absolute -right-1.5 -top-1 flex size-3.5 items-center justify-center rounded-full bg-amber-500 text-[8px] font-bold text-white">
-                {todoCount > 99 ? '99' : todoCount}
-              </span>
-            )}
-          </div>
-          <span className="text-[9px] font-medium leading-none">待办</span>
+          <ListTodo className="size-5" />
+          <span className="text-xs">待办</span>
+          {todoCount > 0 && (
+            <span className="absolute right-1 top-1 flex size-4 items-center justify-center rounded-full bg-orange-500 text-[10px] text-white">
+              {todoCount > 99 ? '99' : todoCount}
+            </span>
+          )}
         </button>
+
+        {/* 中间空白区域 - 可拖拽 */}
       </div>
 
       {/* Bottom buttons */}
-      <div className="flex flex-col items-center gap-0.5 py-2">
-        {/* Theme picker */}
+      <div className="flex flex-col items-center gap-1 pb-4">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
-              className="flex size-9 items-center justify-center rounded-md text-muted-foreground hover:bg-[var(--surface-subtle)] hover:text-foreground transition-colors cursor-pointer"
+              className="flex size-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
               title="外观主题"
               style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
             >
@@ -280,9 +278,9 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {/* Settings / User avatar */}
+        {/* User avatar - 跳转到设置 */}
         <button
-          className="flex size-9 items-center justify-center rounded-md text-muted-foreground hover:bg-[var(--surface-subtle)] transition-colors cursor-pointer"
+          className="flex size-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-sidebar-accent"
           onClick={() => navigate('/settings')}
           title="设置"
           style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
@@ -290,7 +288,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
           {currentUser ? (
             <UserAvatar avatar={currentUser.avatar} size="sm" />
           ) : (
-            <div className="flex size-6 items-center justify-center rounded-full bg-linear-to-br from-green-400 to-green-600 text-[10px] font-bold text-white">
+            <div className="flex size-7 items-center justify-center rounded-full bg-linear-to-br from-green-400 to-green-600 text-xs text-white">
               U
             </div>
           )}
@@ -303,6 +301,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
         onClose={() => setIsCreateGroupOpen(false)}
         onSuccess={(chatRoomId) => {
           onRefreshChatRooms?.()
+          // 导航到新创建的群聊
           navigate(`/?room=${chatRoomId}`)
         }}
         ownerId={currentUser?.id}
@@ -320,6 +319,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
         isOpen={isTodoModalOpen}
         onClose={() => setIsTodoModalOpen(false)}
         onTodoClick={(todo: TodoData) => {
+          // 跳转到对应群聊并定位消息
           navigate(`/?room=${todo.chatRoomId}&msg=${todo.messageId}`)
         }}
       />

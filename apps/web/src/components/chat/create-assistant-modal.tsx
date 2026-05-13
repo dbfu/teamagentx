@@ -111,7 +111,7 @@ function FullscreenPromptModal({
             type="button"
             onClick={handleOptimize}
             disabled={!editPrompt.trim() || isOptimizing}
-            className="inline-flex items-center gap-2 rounded-md border border-purple-200 bg-purple-50 px-3.5 py-2 text-sm text-purple-600 hover:bg-purple-100 disabled:opacity-50 disabled:cursor-not-allowed dark:border-purple-800 dark:bg-purple-950 dark:text-purple-300 dark:hover:bg-purple-900"
+            className="flex items-center gap-2 rounded-lg border border-purple-200 bg-purple-50 px-4 py-2 text-sm text-purple-600 hover:bg-purple-100 disabled:opacity-50 disabled:cursor-not-allowed dark:border-purple-800 dark:bg-purple-950 dark:text-purple-300 dark:hover:bg-purple-900"
           >
             {isOptimizing ? (
               <Loader2 className="size-4 animate-spin" />
@@ -124,14 +124,14 @@ function FullscreenPromptModal({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md border border-gray-200 px-3.5 py-2 text-sm text-gray-600 hover:bg-gray-50 dark:border-border dark:text-muted-foreground dark:hover:bg-accent"
+              className="rounded-lg border border-border px-4 py-2 text-sm text-muted-foreground hover:bg-accent"
             >
               取消
             </button>
             <button
               type="button"
               onClick={() => onConfirm(editPrompt)}
-              className="rounded-md bg-primary px-3.5 py-2 text-sm text-primary-foreground hover:bg-primary/90"
+              className="rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90"
             >
               确定
             </button>
@@ -449,14 +449,14 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
               type="button"
               onClick={onClose}
               disabled={isSubmitting}
-              className="rounded-md border border-gray-200 px-3.5 py-2 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-border dark:text-muted-foreground dark:hover:bg-accent"
+              className="rounded-lg border border-border px-4 py-2 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50"
             >
               取消
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="rounded-md bg-primary px-3.5 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              className="rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
               {isSubmitting ? '创建中...' : '创建'}
             </button>

@@ -69,13 +69,13 @@ export function WorkDirCard({
             value={editingWorkDir}
             onChange={(e) => onEditingWorkDirChange(e.target.value)}
             placeholder="输入自定义工作目录"
-            className="ta-input flex-1 font-mono"
+            className="flex-1 rounded-lg border border-gray-200 bg-background px-3 py-2 text-sm font-mono text-foreground placeholder:text-muted-foreground focus:border-blue-500 focus:outline-none"
           />
           {isElectron && (
             <button
               type="button"
               onClick={onSelectFolder}
-              className="ta-icon-button"
+              className="flex items-center justify-center rounded-lg border border-gray-200 px-3 py-2 text-gray-600 hover:bg-gray-50"
               title="选择目录"
             >
               <FolderOpen className="size-4" />
@@ -92,14 +92,14 @@ export function WorkDirCard({
           <button
             onClick={onSave}
             disabled={savingSettings}
-            className="ta-button-primary"
+            className="flex items-center gap-1.5 rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white hover:bg-blue-600 disabled:opacity-50"
           >
             {savingSettings ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
             保存
           </button>
           <button
             onClick={onCancelEdit}
-            className="ta-button-secondary"
+            className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50"
           >
             <X className="size-4" />
             取消
@@ -120,7 +120,7 @@ export function WorkDirCard({
             <DropdownMenuTrigger asChild>
               <button
                 disabled={openingFolder || !displayWorkDir}
-                className="ta-button-primary px-3"
+                className="flex items-center gap-1.5 rounded-lg bg-blue-500 px-3 py-2 text-sm font-medium text-white hover:bg-blue-600 disabled:opacity-50"
                 title="选择打开方式"
               >
                 <FolderOpen className="size-4" />
@@ -141,7 +141,7 @@ export function WorkDirCard({
 
         <button
           onClick={onStartEdit}
-          className="ta-button-secondary px-3"
+          className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
           title="编辑"
         >
           <Pencil className="size-4" />
@@ -151,7 +151,7 @@ export function WorkDirCard({
         {displayWorkDir && (
           <button
             onClick={onCopy}
-            className="ta-button-secondary px-3"
+            className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
             title="复制地址"
           >
             <Copy className="size-4" />

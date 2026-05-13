@@ -3,7 +3,7 @@ import { ChatRoom, chatRoomApi } from '@/lib/agent-api'
 import { AgentAvatarImage } from '@/lib/agent-avatars'
 import { GroupAvatarImage } from '@/lib/group-avatars'
 import { cn, formatDateTime } from '@/lib/utils'
-import { Loader2, Pin, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { Loader2, MessageSquare, Pin, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
 
@@ -112,27 +112,29 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
   }
 
   return (
-    <div className={cn("flex h-full select-none flex-col bg-[var(--surface)] overflow-x-hidden", isMobile ? "w-full border-0" : "w-60 shrink-0 border-r border-border")}>
-      {/* Header */}
+    <div className={cn("flex h-full select-none flex-col bg-background overflow-x-hidden", isMobile ? "w-full border-0" : "w-72 shrink-0 border-r border-border")}>
+      {/* Header - 支持拖动 */}
       {!isMobile && (
         <div
-          className={cn("flex flex-col border-b border-border/50 bg-[var(--surface-raised)]", isElectron ? "mt-1" : "")}
+          className={cn("flex items-center justify-between px-4 py-3", isElectron ? "mt-1" : "")}
           style={isElectron ? { WebkitAppRegion: 'drag' } as React.CSSProperties : {}}
         >
-          <div className="flex items-center justify-between px-3 pt-2.5 pb-2">
-            <span className="text-sm font-bold text-foreground">消息</span>
-            <div className="flex items-center gap-0.5">
+          <div className="flex items-center gap-3">
+            <MessageSquare className="size-5 text-muted-foreground" />
+            <span className="text-xl font-semibold text-foreground">消息</span>
+          </div>
+          <div className="flex items-center gap-1">
               {onCreateChatRoom && (
                 <button
                   onClick={(e) => {
                     e.stopPropagation()
                     onCreateChatRoom()
                   }}
-                  className="flex size-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                   title="创建群聊"
                   style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
                 >
-                  <Plus className="size-3.5" />
+                  <Plus className="size-4" />
                 </button>
               )}
               {onRefresh && (
@@ -141,22 +143,24 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
                     e.stopPropagation()
                     onRefresh()
                   }}
-                  className="flex size-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  className={cn(
+                    "flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  )}
                   title="刷新"
                   style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
                 >
-                  <RefreshCw className={cn("size-3.5", isRefreshing && "animate-spin")} />
+                  <RefreshCw className={cn("size-4", isRefreshing && "animate-spin")} />
                 </button>
               )}
             </div>
-          </div>
         </div>
       )}
 
-      {/* 置顶群聊区域 */}
+      {/* 置顶群聊区域 - 卡片形式，不参与滚动 */}
       {chatRooms.some(room => room.isPinned) && (
-        <div className="flex flex-wrap gap-1 px-2 py-1.5">
+        <div className="mx-2 flex flex-wrap gap-1.5 px-1 py-1 pb-2">
           {chatRooms.filter(room => room.isPinned).sort((a, b) => {
+            // 置顶群聊按置顶时间倒序
             const aPinnedAt = a.pinnedAt ? new Date(a.pinnedAt).getTime() : 0
             const bPinnedAt = b.pinnedAt ? new Date(b.pinnedAt).getTime() : 0
             return bPinnedAt - aPinnedAt
@@ -171,44 +175,51 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
                 onClick={() => onSelect(room.id)}
                 onContextMenu={(e) => handleContextMenu(e, room)}
                 className={cn(
-                  'flex shrink-0 cursor-pointer flex-col items-center gap-0.5 rounded-md px-1.5 py-1 transition-colors',
+                  'flex shrink-0 cursor-pointer flex-col items-center gap-1 rounded-lg px-2 py-1 transition-colors',
                   selectedId === room.id
-                    ? 'bg-[var(--brand-soft)] ring-1 ring-[var(--nav-active-border)]'
-                    : 'bg-[var(--surface-raised)] hover:bg-[var(--surface-subtle)]'
+                    ? 'bg-primary/10 ring-1 ring-primary/20'
+                    : 'bg-muted/50 hover:bg-accent'
                 )}
               >
                 <div className="relative shrink-0">
+                  {/* 快速对话群聊使用助手头像，普通群聊使用群聊头像 */}
                   {room.isQuickChatRoom ? (
-                    <AgentAvatarImage avatar={room.avatar ?? null} className="size-8 rounded-full" />
+                    <AgentAvatarImage avatar={room.avatar ?? null} className="size-10 rounded-full" />
                   ) : (
-                    <GroupAvatarImage avatar={room.avatar ?? null} className="size-8 rounded-full" />
+                    <GroupAvatarImage avatar={room.avatar ?? null} className="size-10 rounded-full" />
                   )}
+                  {/* 未读数红点 */}
                   {unreadDisplay && (
-                    <div className="absolute -right-1 -top-1 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+                    <div className="absolute -right-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-xs font-medium text-white">
                       {unreadDisplay}
                     </div>
                   )}
+                  {/* 助手执行中标识 */}
                   {isExecuting && (
-                    <div className="absolute -bottom-0.5 -right-0.5 flex size-3 items-center justify-center rounded-full bg-primary">
-                      <Loader2 className="size-2 animate-spin text-white" />
+                    <div className="absolute -bottom-1 -right-1 flex size-4 items-center justify-center rounded-full bg-primary">
+                      <Loader2 className="size-3 animate-spin text-white" />
                     </div>
                   )}
                 </div>
-                <span className="max-w-12 truncate text-[10px] text-muted-foreground">{room.name}</span>
+                <span className={cn(
+                  "max-w-16 truncate text-xs",
+                  unreadCount > 0 ? "font-medium text-foreground" : "text-muted-foreground"
+                )}>{room.name}</span>
               </div>
             )
           })}
         </div>
       )}
 
-      {/* Conversation list */}
-      <div className="flex-1 overflow-y-auto">
+      {/* Conversation list - 不支持拖动 */}
+      <div className="scrollbar-hover flex-1 overflow-y-auto pb-3">
         {chatRooms.length === 0 ? (
-          <div className="flex items-center justify-center py-8 text-xs text-muted-foreground">
+          <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
             暂无群聊，点击左上角 + 创建
           </div>
         ) : (
           (() => {
+            // 显示所有群聊
             return (
               <>
                 {[...chatRooms].sort((a, b) => {
@@ -219,7 +230,6 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
                   const unreadCount = unreadCounts[room.id] || 0
                   const unreadDisplay = formatUnreadCount(unreadCount)
                   const isExecuting = executingChatRooms.has(room.id)
-                  const isSelected = selectedId === room.id
 
                   return (
                     <div
@@ -227,68 +237,63 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
                       onClick={() => onSelect(room.id)}
                       onContextMenu={(e) => handleContextMenu(e, room)}
                       className={cn(
-                        'flex cursor-pointer items-start gap-2 border-b border-border/30 px-3 py-2 transition-all duration-100',
-                        isMobile ? 'px-4 py-3' : '',
-                        isSelected
-                          ? 'bg-[var(--brand-soft)] border-l-2 border-l-primary'
-                          : 'border-l-2 border-l-transparent hover:bg-[var(--surface-raised)]'
+                        'mx-2 flex cursor-pointer items-start gap-3 rounded-lg transition-colors',
+                        isMobile ? 'px-4 py-4' : 'px-3 py-3',
+                        selectedId === room.id
+                          ? 'bg-primary/10'
+                          : 'hover:bg-accent'
                       )}
                     >
-                      <div className="relative shrink-0">
+                      <div className="relative">
+                        {/* 快速对话群聊使用助手头像，普通群聊使用群聊头像 */}
                         {room.isQuickChatRoom ? (
-                          <AgentAvatarImage avatar={room.avatar ?? null} className={cn("rounded-full", isMobile ? "size-11" : "size-9")} />
+                          <AgentAvatarImage avatar={room.avatar ?? null} className={cn("rounded-full", isMobile ? "size-12" : "size-10")} />
                         ) : (
-                          <GroupAvatarImage avatar={room.avatar ?? null} className={cn("rounded-full", isMobile ? "size-11" : "size-9")} />
+                          <GroupAvatarImage avatar={room.avatar ?? null} className={cn("rounded-full", isMobile ? "size-12" : "size-10")} />
                         )}
+                        {/* 未读数红点 */}
                         {unreadDisplay && (
-                          <div className={cn("absolute -right-1 -top-1 flex items-center justify-center rounded-full bg-red-500 font-bold text-white", isMobile ? "min-h-5 min-w-5 px-1 text-xs" : "min-h-4 min-w-4 px-0.5 text-[10px]")}>
+                          <div className={cn("absolute -right-1 -top-1 flex items-center justify-center rounded-full bg-red-500 font-medium text-white", isMobile ? "min-h-6 min-w-6 px-2 text-sm" : "min-h-5 min-w-5 px-1.5 text-xs")}>
                             {unreadDisplay}
                           </div>
                         )}
+                        {/* 助手执行中标识 */}
                         {isExecuting && (
-                          <div className={cn("absolute -bottom-0.5 -right-0.5 flex items-center justify-center rounded-full bg-primary", isMobile ? "size-4" : "size-3")}>
-                            <Loader2 className={cn("animate-spin text-white", isMobile ? "size-3" : "size-2")} />
+                          <div className={cn("absolute -bottom-1 -right-1 flex items-center justify-center rounded-full bg-primary", isMobile ? "size-5" : "size-4")}>
+                            <Loader2 className={cn("animate-spin text-white", isMobile ? "size-4" : "size-3")} />
                           </div>
                         )}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-baseline justify-between gap-1">
+                        <div className="flex items-baseline justify-between gap-1.5">
                           <span className={cn(
-                            "min-w-0 truncate",
-                            isMobile ? "text-sm font-semibold" : "text-[13px] font-semibold",
+                            "min-w-0 truncate font-medium",
+                            isMobile ? "text-base leading-6" : "text-sm leading-5",
                             unreadCount > 0 ? "text-foreground" : "text-muted-foreground"
                           )}>{room.name}</span>
                           {room.lastMessage && (
-                            <span className={cn("shrink-0 text-[11px] tabular-nums text-muted-foreground/60")}>
+                            <span className={cn("shrink-0 text-muted-foreground/70 tabular-nums", isMobile ? "text-sm leading-6" : "text-xs leading-5")}>
                               {formatDateTime(room.lastMessage.time)}
                             </span>
                           )}
                         </div>
-                        <div className="mt-0.5 flex items-center gap-1.5">
-                          <p className={cn(
-                            "min-w-0 flex-1 truncate",
-                            isMobile ? "text-xs" : "text-[11px]",
-                            unreadCount > 0 ? "text-muted-foreground" : "text-muted-foreground/60"
-                          )}>
-                            {room.lastMessage ? (
-                              <>
-                                {room.lastMessage.isHuman ? (
-                                  room.lastMessage.user?.username || '用户'
-                                ) : (
-                                  room.lastMessage.agent?.name || '助手'
-                                )}：{room.lastMessage.content}
-                              </>
-                            ) : (
-                              '暂无消息'
-                            )}
-                          </p>
-                          {/* Show thinking dots for executing rooms without unread */}
-                          {isExecuting && !unreadDisplay && (
-                            <div className="thinking-dots flex shrink-0 gap-0.5 text-primary">
-                              <span /><span /><span />
-                            </div>
+                        <p className={cn(
+                          "mt-1 truncate",
+                          isMobile ? "text-sm" : "text-xs",
+                          unreadCount > 0 ? "text-muted-foreground" : "text-muted-foreground/70"
+                        )}>
+                          {room.lastMessage ? (
+                            <>
+                              {room.lastMessage.isHuman ? (
+                                room.lastMessage.user?.username || '用户'
+                              ) : (
+                                room.lastMessage.agent?.name || '助手'
+                              )}：{room.lastMessage.content}
+                            </>
+                          ) : (
+                            '暂无消息'
                           )}
-                        </div>
+                        </p>
                       </div>
                     </div>
                   )
@@ -304,23 +309,23 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
         <>
           <div className="fixed inset-0 z-40" onClick={handleCloseContextMenu} />
           <div
-            className="fixed z-50 min-w-[140px] overflow-hidden rounded-md border border-border bg-[var(--surface-raised)] py-1 shadow-lg"
+            className="fixed z-50 min-w-[120px] rounded-lg bg-popover py-1 shadow-lg border border-border"
             style={{ left: contextMenu.x, top: contextMenu.y }}
             onClick={(e) => e.stopPropagation()}
           >
             <button
               onClick={handleTogglePin}
               disabled={pinning}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-[13px] text-foreground transition-colors hover:bg-accent disabled:opacity-50"
+              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-popover-foreground hover:bg-accent disabled:opacity-50"
             >
-              <Pin className="size-3.5" />
+              <Pin className="size-4" />
               {contextMenu.room.isPinned ? '取消置顶' : '置顶'}
             </button>
             <button
               onClick={handleDeleteClick}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-[13px] text-red-600 transition-colors hover:bg-red-50 dark:hover:bg-red-950/30"
+              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
             >
-              <Trash2 className="size-3.5" />
+              <Trash2 className="size-4" />
               删除群聊
             </button>
           </div>
@@ -330,23 +335,23 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
       {/* 删除确认对话框 */}
       {showDeleteConfirm && contextMenu && (
         <>
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" onClick={handleCancelDelete} />
-          <div className="fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2 rounded-md border border-border bg-[var(--surface-raised)] p-5 shadow-xl w-72">
-            <h3 className="text-sm font-semibold text-foreground mb-1.5">确认删除</h3>
-            <p className="text-xs text-muted-foreground mb-4">
+          <div className="fixed inset-0 z-50 bg-black/50" onClick={handleCancelDelete} />
+          <div className="fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2 rounded-lg bg-background p-6 shadow-lg border border-border w-80">
+            <h3 className="text-lg font-semibold text-foreground mb-2">确认删除</h3>
+            <p className="text-sm text-muted-foreground mb-4">
               确定要删除群聊「{contextMenu.room.name}」吗？此操作不可恢复。
             </p>
             <div className="flex justify-end gap-2">
               <button
                 onClick={handleCancelDelete}
-                className="rounded px-3 py-1.5 text-xs border border-border text-muted-foreground hover:bg-accent transition-colors"
+                className="px-4 py-2 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800"
               >
                 取消
               </button>
               <button
                 onClick={handleConfirmDelete}
                 disabled={deleting}
-                className="rounded px-3 py-1.5 text-xs bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 transition-colors"
+                className="px-4 py-2 text-sm rounded-lg bg-red-500 text-white hover:bg-red-600 disabled:opacity-50"
               >
                 {deleting ? '删除中...' : '确认删除'}
               </button>

@@ -212,7 +212,7 @@ export function SidePanel({
           }}
           className="group absolute left-0 top-0 z-20 h-full w-3 -translate-x-1.5 cursor-col-resize outline-none"
         >
-          <span className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-transparent transition-colors group-hover:bg-primary group-focus-visible:bg-primary" />
+          <span className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-transparent transition-colors group-hover:bg-blue-500 group-focus-visible:bg-blue-500" />
         </div>
       )}
 

@@ -50,7 +50,7 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
 
     showAddAgent,
     setShowAddAgent,
-    addingAgentIds,
+    addingAgentId,
     showClearConfirm,
     setShowClearConfirm,
     clearing,
@@ -58,9 +58,8 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
 
     handleSend,
     handleKeyDown,
-    handleAddAgents,
+    handleAddAgent,
     handleClearMessages,
-    deleteMessage,
     handleAgentAvatarClick,
     handleTypingAgentClick,
     handleReplyClick,
@@ -81,12 +80,8 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
 
   if (!chatRoom) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center bg-[var(--surface)] text-muted-foreground/40 gap-3">
-        <svg width="32" height="32" viewBox="0 0 28 28" fill="none">
-          <path d="M14 2L25 8.5V19.5L14 26L3 19.5V8.5L14 2Z"
-            stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" fill="none" />
-        </svg>
-        <span className="text-sm">选择一个群聊开始对话</span>
+      <div className="flex flex-1 items-center justify-center bg-[var(--surface)] text-muted-foreground">
+        选择一个群聊开始对话
       </div>
     )
   }
@@ -190,7 +185,6 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
               onReplyClick={handleReplyClick}
               onExecutionDetailClick={handleExecutionDetailClick}
               onMentionAgent={handleMentionAgent}
-              onDeleteMessage={deleteMessage}
               currentUser={currentUser}
             />
 
@@ -249,8 +243,8 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
         open={showAddAgent}
         onClose={() => setShowAddAgent(false)}
         availableAgents={availableAgents}
-        addingAgentIds={addingAgentIds}
-        onAddAgents={handleAddAgents}
+        addingAgentId={addingAgentId}
+        onAddAgent={handleAddAgent}
       />
 
       {/* Clear Messages Confirm Dialog */}

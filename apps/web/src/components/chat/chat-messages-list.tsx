@@ -36,7 +36,6 @@ interface ChatMessagesListProps {
   onReplyClick: (messageId: string) => void
   onExecutionDetailClick?: (messageId: string, executionRecordId: string) => void
   onMentionAgent?: (agentId: string, agentName: string) => void
-  onDeleteMessage?: (messageId: string) => Promise<void> | void
   currentUser?: CurrentUser
 }
 
@@ -56,7 +55,6 @@ export function ChatMessagesList({
   onReplyClick,
   onExecutionDetailClick,
   onMentionAgent,
-  onDeleteMessage,
   currentUser,
 }: ChatMessagesListProps) {
   const isMobile = useIsMobile()
@@ -243,7 +241,6 @@ export function ChatMessagesList({
                 onReplyClick={onReplyClick}
                 onExecutionDetailClick={onExecutionDetailClick}
                 onMentionAgent={onMentionAgent}
-                onDeleteMessage={onDeleteMessage}
               />
             </div>
           ))
@@ -258,7 +255,7 @@ export function ChatMessagesList({
             scrollToBottom()
             setShowNewMessageHint(false)
           }}
-          className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full bg-primary px-4 py-1.5 text-sm text-primary-foreground shadow-lg hover:bg-primary/90 transition-colors"
+          className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full bg-blue-500 px-4 py-1.5 text-sm text-white shadow-lg hover:bg-blue-600 transition-colors"
         >
           <span className="animate-bounce">↓</span>
           <span>有新消息</span>
