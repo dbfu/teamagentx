@@ -7,6 +7,7 @@ import { SpeechService } from '@/speech/speech-service'
 export const webSpeechProviderRegistry = new SpeechProviderRegistry()
 webSpeechProviderRegistry.register(createBrowserLocalSpeechProvider())
 webSpeechProviderRegistry.register(createRemoteTtsSpeechProvider())
+webSpeechProviderRegistry.register(createRemoteTtsSpeechProvider({ providerId: 'edge-tts' }))
 webSpeechProviderRegistry.register(createRemoteTtsSpeechProvider({ providerId: 'remote-tts' }))
 
 export const webSpeechService = new SpeechService(new SpeechRouter(webSpeechProviderRegistry))

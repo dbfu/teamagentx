@@ -180,7 +180,7 @@ async function synthesizeWithBrowser(task: SpeechTask<{ text: string }>): Promis
       utterance.lang = 'zh-CN'
     }
 
-    utterance.rate = task.profile?.speed ?? 1
+    utterance.rate = task.profile?.speed ?? 1.3
     utterance.volume = task.profile?.volume ?? 1
     if (typeof task.profile?.pitch === 'number') {
       utterance.pitch = task.profile.pitch

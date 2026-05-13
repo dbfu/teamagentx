@@ -2,6 +2,7 @@ export * from './domain/types.js';
 export * from './domain/provider.js';
 export * from './speech-config.js';
 export * from './default-service.js';
+export * from './providers/edge-tts.provider.js';
 export * from './providers/remote-tts.provider.js';
 export * from './speech.registry.js';
 export * from './speech.router.js';

@@ -24,4 +24,8 @@ export const config = {
     encryptionKey: process.env.BRIDGE_ENCRYPTION_KEY || '',
     requireSignature: process.env.BRIDGE_REQUIRE_SIGNATURE === 'true',
   },
+  speech: {
+    edgeTtsBinary: process.env.EDGE_TTS_BINARY || 'edge-tts',
+    edgeTtsDefaultVoice: process.env.EDGE_TTS_DEFAULT_VOICE || 'zh-CN-XiaoxiaoNeural',
+  },
 };

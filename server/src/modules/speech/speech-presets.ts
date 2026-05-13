@@ -8,7 +8,10 @@ export type SpeechPresetId =
   | 'system-default'
   | 'gentle-guide'
   | 'steady-pro'
-  | 'bright-host';
+  | 'bright-host'
+  | 'edge-xiaoxiao'
+  | 'edge-xiaoyi'
+  | 'edge-yunxi';
 
 export type SpeechPresetDefinition = {
   id: SpeechPresetId;
@@ -32,7 +35,7 @@ export const SPEECH_PRESETS: SpeechPresetDefinition[] = [
       },
       profile: {
         provider: 'browser-local',
-        speed: 1,
+        speed: 1.3,
         volume: 1,
         pitch: null,
         emotion: null,
@@ -54,7 +57,7 @@ export const SPEECH_PRESETS: SpeechPresetDefinition[] = [
       },
       profile: {
         provider: 'browser-local',
-        speed: 0.9,
+        speed: 1.3,
         volume: 1,
         pitch: 1.1,
         emotion: 'warm',
@@ -76,7 +79,7 @@ export const SPEECH_PRESETS: SpeechPresetDefinition[] = [
       },
       profile: {
         provider: 'browser-local',
-        speed: 0.92,
+        speed: 1.3,
         volume: 0.95,
         pitch: 0.9,
         emotion: 'serious',
@@ -98,12 +101,84 @@ export const SPEECH_PRESETS: SpeechPresetDefinition[] = [
       },
       profile: {
         provider: 'browser-local',
-        speed: 1.1,
+        speed: 1.3,
         volume: 1,
         pitch: 1.15,
         emotion: 'cheerful',
         style: 'energetic',
         prompt: '语气轻快、有节奏感，像在做自然播报。',
+      },
+    }),
+  },
+  {
+    id: 'edge-xiaoxiao',
+    name: 'Edge 晓晓',
+    description: '女声自然顺滑，适合通用讲解和日常对话。',
+    recommendedFor: ['通用', '讲解', '客服'],
+    speechConfig: normalizeAgentSpeechConfig({
+      behavior: {
+        enabled: true,
+        outputMode: 'manual',
+        autoPlay: false,
+      },
+      profile: {
+        provider: 'edge-tts',
+        fallbackProvider: 'browser-local',
+        voice: 'zh-CN-XiaoxiaoNeural',
+        speed: 1,
+        volume: 1,
+        pitch: null,
+        emotion: null,
+        style: null,
+        prompt: null,
+      },
+    }),
+  },
+  {
+    id: 'edge-xiaoyi',
+    name: 'Edge 晓伊',
+    description: '女声更柔和，适合陪伴和轻声引导。',
+    recommendedFor: ['陪伴', '引导', '温和回复'],
+    speechConfig: normalizeAgentSpeechConfig({
+      behavior: {
+        enabled: true,
+        outputMode: 'manual',
+        autoPlay: false,
+      },
+      profile: {
+        provider: 'edge-tts',
+        fallbackProvider: 'browser-local',
+        voice: 'zh-CN-XiaoyiNeural',
+        speed: 1,
+        volume: 1,
+        pitch: null,
+        emotion: null,
+        style: null,
+        prompt: null,
+      },
+    }),
+  },
+  {
+    id: 'edge-yunxi',
+    name: 'Edge 云希',
+    description: '男声更稳，适合播报、分析和专业回答。',
+    recommendedFor: ['播报', '分析', '专业场景'],
+    speechConfig: normalizeAgentSpeechConfig({
+      behavior: {
+        enabled: true,
+        outputMode: 'manual',
+        autoPlay: false,
+      },
+      profile: {
+        provider: 'edge-tts',
+        fallbackProvider: 'browser-local',
+        voice: 'zh-CN-YunxiNeural',
+        speed: 1,
+        volume: 1,
+        pitch: null,
+        emotion: null,
+        style: null,
+        prompt: null,
       },
     }),
   },

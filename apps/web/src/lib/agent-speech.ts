@@ -26,7 +26,14 @@ export type AgentVoicePanelConfig = {
   vendorOptionsText: string
 }
 
-export type AgentVoicePresetId = 'system-default' | 'gentle-guide' | 'steady-pro' | 'bright-host'
+export type AgentVoicePresetId =
+  | 'system-default'
+  | 'gentle-guide'
+  | 'steady-pro'
+  | 'bright-host'
+  | 'edge-xiaoxiao'
+  | 'edge-xiaoyi'
+  | 'edge-yunxi'
 
 export interface AgentVoicePreset {
   id: AgentVoicePresetId
@@ -43,7 +50,10 @@ export const AGENT_VOICE_PRESETS: AgentVoicePreset[] = [
     description: '最稳妥，适合日常对话和普通助手。',
     recommendedFor: ['通用', '日常对话', '默认助手'],
     patch: {
-      speed: 1,
+      provider: 'browser-local',
+      fallbackProvider: null,
+      voiceId: null,
+      speed: 1.3,
       volume: 1,
       pitch: null,
       emotion: null,
@@ -57,7 +67,10 @@ export const AGENT_VOICE_PRESETS: AgentVoicePreset[] = [
     description: '适合客服、教学、引导类助手。',
     recommendedFor: ['客服', '教学', '引导'],
     patch: {
-      speed: 0.9,
+      provider: 'browser-local',
+      fallbackProvider: null,
+      voiceId: null,
+      speed: 1.3,
       volume: 1,
       pitch: 1.1,
       emotion: 'warm',
@@ -71,7 +84,10 @@ export const AGENT_VOICE_PRESETS: AgentVoicePreset[] = [
     description: '适合法律、分析、咨询类助手。',
     recommendedFor: ['法律', '分析', '咨询'],
     patch: {
-      speed: 0.92,
+      provider: 'browser-local',
+      fallbackProvider: null,
+      voiceId: null,
+      speed: 1.3,
       volume: 0.95,
       pitch: 0.9,
       emotion: 'serious',
@@ -85,12 +101,66 @@ export const AGENT_VOICE_PRESETS: AgentVoicePreset[] = [
     description: '适合主持、热点播报、活跃氛围的助手。',
     recommendedFor: ['主持', '热点播报', '娱乐'],
     patch: {
-      speed: 1.1,
+      provider: 'browser-local',
+      fallbackProvider: null,
+      voiceId: null,
+      speed: 1.3,
       volume: 1,
       pitch: 1.15,
       emotion: 'cheerful',
       style: 'energetic',
       prompt: '语气轻快、有节奏感，像在做自然播报。',
+    },
+  },
+  {
+    id: 'edge-xiaoxiao',
+    name: 'Edge 晓晓',
+    description: '女声自然顺滑，适合通用讲解和日常对话。',
+    recommendedFor: ['通用', '讲解', '客服'],
+    patch: {
+      provider: 'edge-tts',
+      fallbackProvider: 'browser-local',
+      voiceId: 'zh-CN-XiaoxiaoNeural',
+      speed: 1,
+      volume: 1,
+      pitch: null,
+      emotion: null,
+      style: null,
+      prompt: null,
+    },
+  },
+  {
+    id: 'edge-xiaoyi',
+    name: 'Edge 晓伊',
+    description: '女声更柔和，适合陪伴和轻声引导。',
+    recommendedFor: ['陪伴', '引导', '温和回复'],
+    patch: {
+      provider: 'edge-tts',
+      fallbackProvider: 'browser-local',
+      voiceId: 'zh-CN-XiaoyiNeural',
+      speed: 1,
+      volume: 1,
+      pitch: null,
+      emotion: null,
+      style: null,
+      prompt: null,
+    },
+  },
+  {
+    id: 'edge-yunxi',
+    name: 'Edge 云希',
+    description: '男声更稳，适合播报、分析和专业回答。',
+    recommendedFor: ['播报', '分析', '专业场景'],
+    patch: {
+      provider: 'edge-tts',
+      fallbackProvider: 'browser-local',
+      voiceId: 'zh-CN-YunxiNeural',
+      speed: 1,
+      volume: 1,
+      pitch: null,
+      emotion: null,
+      style: null,
+      prompt: null,
     },
   },
 ]
@@ -112,7 +182,7 @@ export function createDefaultAgentSpeechConfig(): AgentSpeechConfig {
       model: null,
       voice: null,
       fallbackProvider: null,
-      speed: 1,
+      speed: 1.3,
       volume: 1,
       pitch: null,
       emotion: null,

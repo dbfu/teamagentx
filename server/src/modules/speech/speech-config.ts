@@ -34,7 +34,7 @@ export function createDefaultAgentSpeechConfig(): AgentSpeechConfig {
       model: null,
       voice: null,
       fallbackProvider: null,
-      speed: 1,
+      speed: 1.3,
       volume: 1,
       pitch: null,
       emotion: null,

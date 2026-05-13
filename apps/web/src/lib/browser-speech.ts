@@ -93,8 +93,13 @@ export function normalizeSpeechText(text: string): string {
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/`([^`]+)`/g, '$1')
     .replace(/<[^>]+>/g, ' ')
+    .replace(/^\s*[-=:]{3,}\s*$/gm, ' ')
     .replace(/^[>#*\-]+\s+/gm, '')
     .replace(/^\d+\.\s+/gm, '')
+    .replace(/(^|\s)[-=:]{3,}(?=\s|$)/g, ' ')
+    .replace(/[@＠](?=\S+)/g, '')
+    .replace(/[\p{Extended_Pictographic}\uFE0F]/gu, ' ')
+    .replace(/[←→↑↓↔↕↖↗↘↙➜➤➡︎▶►]+/gu, ' ')
     .replace(/[|]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
@@ -130,7 +135,7 @@ export async function speakText(options: SpeakTextOptions): Promise<void> {
       model: options.model ?? null,
       voice: options.voiceId ?? null,
       fallbackProvider: options.fallbackProvider ?? null,
-      speed: options.rate ?? 1,
+      speed: options.rate ?? 1.3,
       volume: options.volume ?? 1,
       pitch: options.pitch ?? null,
       emotion: options.emotion ?? null,
