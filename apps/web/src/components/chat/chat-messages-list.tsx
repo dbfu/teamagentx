@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { Message } from '@/lib/agent-api'
 import { ChatMessage } from './chat-message'
 import type { StreamEvent } from '@/stores/socket-store'
 import { useChatStore } from '@/stores/chat-store'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { cn } from '@/lib/utils'
+import { normalizeSpeechText, speakTextWithBrowserSpeech, supportsBrowserSpeechSynthesis } from '@/lib/browser-speech'
 
 interface MentionAgent {
   id: string
@@ -66,8 +67,25 @@ export function ChatMessagesList({
   const setForceScrollToBottom = useChatStore((s) => s.setForceScrollToBottom)
   const saveScrollPosition = useChatStore((s) => s.saveScrollPosition)
   const getScrollPosition = useChatStore((s) => s.getScrollPosition)
+  const allAgents = useChatStore((s) => s.allAgents)
+  const setPlayingVoiceMessageId = useChatStore((s) => s.setPlayingVoiceMessageId)
+  const handledVoiceMessageIdsByRoom = useChatStore((s) => s.handledVoiceMessageIdsByRoom)
+  const playedVoiceMessageIdsByRoom = useChatStore((s) => s.playedVoiceMessageIdsByRoom)
+  const markVoiceMessagesHandled = useChatStore((s) => s.markVoiceMessagesHandled)
+  const markVoiceMessagesPlayed = useChatStore((s) => s.markVoiceMessagesPlayed)
   const messageRefs = useRef<Map<string, HTMLDivElement | null>>(new Map())
   const containerRef = useRef<HTMLDivElement | null>(null)
+  // 语音播报队列：上一条播完再播下一条
+  const speechQueueRef = useRef<Array<{ messageId: string; text: string; voiceId: string | null; speed: number; volume: number }>>([])
+  const isSpeakingRef = useRef(false)
+  const handledIds = useMemo(
+    () => new Set(handledVoiceMessageIdsByRoom[chatRoomId] ?? []),
+    [chatRoomId, handledVoiceMessageIdsByRoom],
+  )
+  const playedIds = useMemo(
+    () => new Set(playedVoiceMessageIdsByRoom[chatRoomId] ?? []),
+    [chatRoomId, playedVoiceMessageIdsByRoom],
+  )
 
   // 是否在底部附近（距离底部 100px 以内算"在底部"）
   const [isNearBottom, setIsNearBottom] = useState(true)
@@ -187,6 +205,81 @@ export function ChatMessagesList({
     }
   }, [loading, chatRoomId, getScrollPosition, scrollToBottom])
 
+  // 切换房间时取消正在播报的语音（已播 ID 保留，不清空）
+  useEffect(() => {
+    if (supportsBrowserSpeechSynthesis()) {
+      window.speechSynthesis.cancel()
+      setPlayingVoiceMessageId(null)
+    }
+  }, [chatRoomId, setPlayingVoiceMessageId])
+
+  useEffect(() => {
+    if (loading) return
+    if (!supportsBrowserSpeechSynthesis()) return
+
+    const hasInitializedRoom = Object.prototype.hasOwnProperty.call(handledVoiceMessageIdsByRoom, chatRoomId)
+
+    // 首次进入该房间：把当前已加载消息标记为已处理/已播，刷新后不会从头再播
+    if (!hasInitializedRoom) {
+      const initialMessageIds = messages.map((message) => message.id)
+      markVoiceMessagesHandled(chatRoomId, initialMessageIds)
+      markVoiceMessagesPlayed(chatRoomId, initialMessageIds)
+      return
+    }
+
+    // 找出未播报的新消息
+    const newMessages = messages.filter((message) => !handledIds.has(message.id))
+    if (newMessages.length === 0) return
+
+    // 无论是否实际播报，先全部标记，不会重播
+    markVoiceMessagesHandled(chatRoomId, newMessages.map((message) => message.id))
+
+    // tab 在后台不播
+    if (document.hidden) return
+
+    // 收集所有需要播报的新消息，按顺序入队
+    const toSpeak = newMessages.filter((message) => {
+      if (message.isHuman || !message.agentId || !message.content.trim()) return false
+      const agent = allAgents.find((item) => item.id === message.agentId)
+      const voiceConfig = agent?.voiceConfig
+      return voiceConfig?.enabled && voiceConfig.outputMode === 'auto_final_only'
+    })
+
+    if (toSpeak.length === 0) return
+
+    for (const message of toSpeak) {
+      const vc = allAgents.find((item) => item.id === message.agentId)!.voiceConfig!
+      speechQueueRef.current.push({
+        messageId: message.id,
+        text: normalizeSpeechText(message.content),
+        voiceId: vc.voiceId,
+        speed: vc.speed,
+        volume: vc.volume,
+      })
+    }
+
+    // 串行消费队列：上一条播完再播下一条
+    const processQueue = async () => {
+      if (isSpeakingRef.current) return
+      isSpeakingRef.current = true
+      while (speechQueueRef.current.length > 0) {
+        const item = speechQueueRef.current.shift()!
+        setPlayingVoiceMessageId(item.messageId)
+        markVoiceMessagesPlayed(chatRoomId, [item.messageId])
+        await speakTextWithBrowserSpeech({
+          text: item.text,
+          voiceId: item.voiceId,
+          rate: item.speed,
+          volume: item.volume,
+        }).catch(() => {})
+        setPlayingVoiceMessageId(null)
+      }
+      isSpeakingRef.current = false
+    }
+
+    void processQueue()
+  }, [allAgents, chatRoomId, handledIds, handledVoiceMessageIdsByRoom, loading, markVoiceMessagesHandled, markVoiceMessagesPlayed, messages, setPlayingVoiceMessageId])
+
   // 组件卸载时保存当前滚动位置
   useEffect(() => {
     return () => {
@@ -237,6 +330,8 @@ export function ChatMessagesList({
                 streamEvents={streamEvents}
                 mentionAgents={mentionAgents}
                 currentUser={currentUser}
+                hasBeenPlayed={playedIds.has(message.id)}
+                onMarkPlayed={() => markVoiceMessagesPlayed(chatRoomId, [message.id])}
                 onAgentAvatarClick={onAgentAvatarClick}
                 onTypingAgentClick={onTypingAgentClick}
                 onMentionClick={onMentionClick}

@@ -5,9 +5,12 @@ import type { FastifyRequest } from 'fastify';
 import type { MultipartFile } from '@fastify/multipart';
 
 // Electron 打包时使用环境变量指定的路径，否则使用 cwd/uploads
-const UPLOAD_DIR = process.env.UPLOADS_DIR || path.join(process.cwd(), 'uploads', 'images');
+const UPLOAD_ROOT = process.env.UPLOADS_DIR || path.join(process.cwd(), 'uploads');
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+const IMAGE_UPLOAD_DIR = path.join(UPLOAD_ROOT, 'images');
+const AUDIO_UPLOAD_DIR = path.join(UPLOAD_ROOT, 'audio');
+const ALLOWED_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+const ALLOWED_AUDIO_MIME_TYPES = ['audio/webm', 'audio/wav', 'audio/mpeg', 'audio/mp4'];
 
 // MIME 类型到扩展名的映射
 const MIME_TO_EXT: Record<string, string> = {
@@ -15,15 +18,21 @@ const MIME_TO_EXT: Record<string, string> = {
   'image/png': 'png',
   'image/gif': 'gif',
   'image/webp': 'webp',
+  'audio/webm': 'webm',
+  'audio/wav': 'wav',
+  'audio/mpeg': 'mp3',
+  'audio/mp4': 'm4a',
 };
 
 interface UploadResult {
+  type: 'image' | 'audio';
   filename: string;  // 原始文件名
   mimeType: string;
   size: number;
   url: string;
   width?: number;
   height?: number;
+  durationMs?: number;
 }
 
 export const uploadService = {
@@ -31,7 +40,8 @@ export const uploadService = {
    * 初始化上传目录
    */
   async init() {
-    await fs.mkdir(UPLOAD_DIR, { recursive: true });
+    await fs.mkdir(IMAGE_UPLOAD_DIR, { recursive: true });
+    await fs.mkdir(AUDIO_UPLOAD_DIR, { recursive: true });
   },
 
   /**
@@ -43,7 +53,7 @@ export const uploadService = {
     }
 
     // 验证 MIME 类型
-    if (!ALLOWED_MIME_TYPES.includes(file.mimetype)) {
+    if (!ALLOWED_IMAGE_MIME_TYPES.includes(file.mimetype)) {
       throw new Error(`不支持的文件类型: ${file.mimetype}`);
     }
 
@@ -61,13 +71,49 @@ export const uploadService = {
     const filename = `${id}.${ext}`;
 
     // 保存文件
-    await fs.writeFile(path.join(UPLOAD_DIR, filename), buffer);
+    await fs.writeFile(path.join(IMAGE_UPLOAD_DIR, filename), buffer);
 
     return {
+      type: 'image',
       filename: file.filename, // 原始文件名
       mimeType: file.mimetype,
       size: buffer.length,
       url: `/uploads/images/${filename}`,
+    };
+  },
+
+  /**
+   * 处理上传的音频文件
+   */
+  async processAudio(file: Awaited<ReturnType<FastifyRequest['file']>>): Promise<UploadResult> {
+    if (!file) {
+      throw new Error('未提供文件');
+    }
+
+    // 截断 codec 参数（如 audio/webm;codecs=opus → audio/webm）
+    const baseMime = file.mimetype.split(';')[0].trim();
+    if (!ALLOWED_AUDIO_MIME_TYPES.includes(baseMime)) {
+      throw new Error(`不支持的文件类型: ${file.mimetype}`);
+    }
+
+    const buffer = await file.toBuffer();
+
+    if (buffer.length > MAX_FILE_SIZE) {
+      throw new Error(`文件大小超出限制: ${buffer.length} > ${MAX_FILE_SIZE}`);
+    }
+
+    const ext = MIME_TO_EXT[baseMime] || 'bin';
+    const id = uuidv4();
+    const filename = `${id}.${ext}`;
+
+    await fs.writeFile(path.join(AUDIO_UPLOAD_DIR, filename), buffer);
+
+    return {
+      type: 'audio',
+      filename: file.filename,
+      mimeType: baseMime,
+      size: buffer.length,
+      url: `/uploads/audio/${filename}`,
     };
   },
 
@@ -90,11 +136,26 @@ export const uploadService = {
    */
   async deleteImage(url: string) {
     const filename = path.basename(url);
-    const filepath = path.join(UPLOAD_DIR, filename);
+    const filepath = path.join(IMAGE_UPLOAD_DIR, filename);
 
     // 安全检查：确保路径在允许的目录内
     const resolvedPath = path.resolve(filepath);
-    if (!resolvedPath.startsWith(path.resolve(UPLOAD_DIR))) {
+    if (!resolvedPath.startsWith(path.resolve(IMAGE_UPLOAD_DIR))) {
+      throw new Error('非法路径');
+    }
+
+    await fs.unlink(filepath).catch(() => {});
+  },
+
+  /**
+   * 删除音频文件
+   */
+  async deleteAudio(url: string) {
+    const filename = path.basename(url);
+    const filepath = path.join(AUDIO_UPLOAD_DIR, filename);
+
+    const resolvedPath = path.resolve(filepath);
+    if (!resolvedPath.startsWith(path.resolve(AUDIO_UPLOAD_DIR))) {
       throw new Error('非法路径');
     }
 

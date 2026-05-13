@@ -16,6 +16,27 @@ export const ACP_TOOL_VALUES = [
 
 export type AcpToolValue = (typeof ACP_TOOL_VALUES)[number];
 
+// 语音配置类型
+type VoiceConfigInput = {
+  enabled: boolean;
+  outputMode: 'off' | 'manual' | 'auto_final_only';
+  voiceId?: string | null | undefined;
+  speed?: number;
+  volume?: number;
+  autoPlay?: boolean;
+};
+
+function normalizeVoiceConfig(v: VoiceConfigInput) {
+  return {
+    enabled: v.enabled,
+    outputMode: v.outputMode,
+    voiceId: v.voiceId ?? null,
+    speed: v.speed ?? 1,
+    volume: v.volume ?? 1,
+    autoPlay: v.autoPlay ?? false,
+  };
+}
+
 // 单个助手配置类型
 type AgentConfig = {
   name: string;
@@ -28,7 +49,23 @@ type AgentConfig = {
   workDir?: string;
   llmProviderId?: string;
   categoryId?: string;
+  voiceConfig?: VoiceConfigInput;
 };
+
+// voiceConfig zod schema（复用）
+const voiceConfigSchema = z
+  .object({
+    enabled: z.boolean().describe('是否启用语音播报'),
+    outputMode: z
+      .enum(['off', 'manual', 'auto_final_only'])
+      .describe('播报模式：off 关闭，manual 手动播放，auto_final_only 自动播报最终回答'),
+    voiceId: z.string().nullable().optional().describe('音色 ID，null 表示自动选择'),
+    speed: z.number().min(0.5).max(2).optional().describe('语速，0.5-2，默认 1'),
+    volume: z.number().min(0).max(1).optional().describe('音量，0-1，默认 1'),
+    autoPlay: z.boolean().optional().describe('是否自动播放，默认 false'),
+  })
+  .optional()
+  .describe('语音播报配置，不填则不设置语音');
 
 // 创建助手工具
 export const createAgentTool = tool(
@@ -43,6 +80,7 @@ export const createAgentTool = tool(
     workDir,
     llmProviderId,
     categoryId,
+    voiceConfig,
   }: AgentConfig) => {
     try {
       // 检查名称是否已存在
@@ -62,6 +100,7 @@ export const createAgentTool = tool(
         workDir,
         llmProviderId,
         categoryId,
+        voiceConfig: voiceConfig ? normalizeVoiceConfig(voiceConfig) : null,
       });
 
       return JSON.stringify({
@@ -104,6 +143,7 @@ export const createAgentTool = tool(
         .optional()
         .describe('LLM供应商ID，可选；ACP 仅支持 claude/anthropic 和 codex/openai'),
       categoryId: z.string().optional().describe('分类ID，可选'),
+      voiceConfig: voiceConfigSchema,
     }),
   },
 );
@@ -153,6 +193,7 @@ export const createAgentsTool = tool(
           workDir: config.workDir,
           llmProviderId: config.llmProviderId,
           categoryId: config.categoryId,
+          voiceConfig: config.voiceConfig ? normalizeVoiceConfig(config.voiceConfig) : null,
         });
 
         results.push({
@@ -202,6 +243,7 @@ export const createAgentsTool = tool(
               .optional()
               .describe('LLM供应商ID；ACP 仅支持 claude/anthropic 和 codex/openai'),
             categoryId: z.string().optional().describe('分类ID'),
+            voiceConfig: voiceConfigSchema,
           }),
         )
         .describe('助手配置数组'),
@@ -305,12 +347,175 @@ export const createLlmProviderTool = tool(
   },
 );
 
+// 查询助手工具（用于找到要更新的助手 ID）
+export const listAgentsTool = tool(
+  async () => {
+    const agents = await agentService.findAll();
+    const custom = agents.filter((a) => a.agentLevel !== 'system');
+    if (custom.length === 0) return '暂无自定义助手。';
+    return custom
+      .map(
+        (a) =>
+          `ID: ${a.id}\n名称: ${a.name}\n描述: ${a.description || '无'}\n语音: ${a.voiceConfig ? JSON.stringify(a.voiceConfig) : '未配置'}`,
+      )
+      .join('\n\n');
+  },
+  {
+    name: 'list_agents',
+    description: '列出所有自定义助手及其当前配置（含语音配置），用于查找需要更新的助手 ID。',
+    schema: z.object({}),
+  },
+);
+
+// 更新助手工具
+export const updateAgentTool = tool(
+  async ({
+    agentId,
+    name,
+    description,
+    prompt,
+    voiceConfig,
+    llmProviderId,
+    categoryId,
+  }: {
+    agentId: string;
+    name?: string;
+    description?: string;
+    prompt?: string;
+    voiceConfig?: VoiceConfigInput;
+    llmProviderId?: string;
+    categoryId?: string;
+  }) => {
+    try {
+      const agent = await agentService.update(agentId, {
+        ...(name !== undefined && { name }),
+        ...(description !== undefined && { description }),
+        ...(prompt !== undefined && { prompt }),
+        ...(llmProviderId !== undefined && { llmProviderId }),
+        ...(categoryId !== undefined && { categoryId }),
+        ...(voiceConfig !== undefined && { voiceConfig: normalizeVoiceConfig(voiceConfig) }),
+      });
+
+      return JSON.stringify({
+        success: true,
+        agent: {
+          id: agent.id,
+          name: agent.name,
+          voiceConfig: agent.voiceConfig,
+        },
+        message: `成功更新助手 "${agent.name}"。`,
+      });
+    } catch (error) {
+      return JSON.stringify({
+        success: false,
+        error: error instanceof Error ? error.message : '更新失败',
+      });
+    }
+  },
+  {
+    name: 'update_agent',
+    description: '【必须用户确认后才能调用】更新已有助手的配置，包括语音播报设置。先用 list_agents 获取助手 ID，再调用此工具。',
+    schema: z.object({
+      agentId: z.string().describe('要更新的助手 ID'),
+      name: z.string().optional().describe('新名称（可选）'),
+      description: z.string().optional().describe('新描述（可选）'),
+      prompt: z.string().optional().describe('新系统提示词（可选）'),
+      voiceConfig: voiceConfigSchema,
+      llmProviderId: z.string().optional().describe('新 LLM 供应商 ID（可选）'),
+      categoryId: z.string().optional().describe('新分类 ID（可选）'),
+    }),
+  },
+);
+
+// 批量更新助手工具（串行执行，避免并发写库冲突）
+export const updateAgentsTool = tool(
+  async ({
+    agents,
+  }: {
+    agents: Array<{
+      agentId: string;
+      name?: string;
+      description?: string;
+      prompt?: string;
+      voiceConfig?: VoiceConfigInput;
+      llmProviderId?: string;
+      categoryId?: string;
+    }>;
+  }) => {
+    if (!agents || agents.length === 0) {
+      return JSON.stringify({ success: false, error: '请提供至少一个助手配置' });
+    }
+
+    const results: Array<{
+      agentId: string;
+      name?: string;
+      success: boolean;
+      error?: string;
+    }> = [];
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const config of agents) {
+      try {
+        const agent = await agentService.update(config.agentId, {
+          ...(config.name !== undefined && { name: config.name }),
+          ...(config.description !== undefined && { description: config.description }),
+          ...(config.prompt !== undefined && { prompt: config.prompt }),
+          ...(config.llmProviderId !== undefined && { llmProviderId: config.llmProviderId }),
+          ...(config.categoryId !== undefined && { categoryId: config.categoryId }),
+          ...(config.voiceConfig !== undefined && {
+            voiceConfig: normalizeVoiceConfig(config.voiceConfig),
+          }),
+        });
+        results.push({ agentId: config.agentId, name: agent.name, success: true });
+        successCount++;
+      } catch (error) {
+        results.push({
+          agentId: config.agentId,
+          success: false,
+          error: error instanceof Error ? error.message : '更新失败',
+        });
+        failCount++;
+      }
+    }
+
+    return JSON.stringify({
+      success: successCount > 0,
+      summary: `批量更新完成：成功 ${successCount} 个，失败 ${failCount} 个`,
+      results,
+    });
+  },
+  {
+    name: 'update_agents',
+    description:
+      '【必须用户确认后才能调用】批量更新多个助手配置，串行执行避免并发冲突。需要同时更新多个助手时优先使用此工具，而非多次调用 update_agent。先用 list_agents 获取助手 ID，再调用此工具。',
+    schema: z.object({
+      agents: z
+        .array(
+          z.object({
+            agentId: z.string().describe('要更新的助手 ID'),
+            name: z.string().optional().describe('新名称（可选）'),
+            description: z.string().optional().describe('新描述（可选）'),
+            prompt: z.string().optional().describe('新系统提示词（可选）'),
+            voiceConfig: voiceConfigSchema,
+            llmProviderId: z.string().optional().describe('新 LLM 供应商 ID（可选）'),
+            categoryId: z.string().optional().describe('新分类 ID（可选）'),
+          }),
+        )
+        .describe('要更新的助手配置数组'),
+    }),
+  },
+);
+
 // 助手生成助手的工具列表
 export const agentCreatorTools = [
   createAgentTool,
-  createAgentsTool, // 批量创建助手
+  createAgentsTool,
+  listAgentsTool,
+  updateAgentTool,
+  updateAgentsTool,
   listLlmProvidersTool,
-  createLlmProviderTool, // 创建模型配置
+  createLlmProviderTool,
   installSkillFromSourceTool,
-  getChatHistoryTool, // 获取对话历史，用于从对话生成助手
+  getChatHistoryTool,
 ];

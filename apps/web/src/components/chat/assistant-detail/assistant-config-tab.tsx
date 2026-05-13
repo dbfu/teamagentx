@@ -1,4 +1,4 @@
-import { Agent, agentApi } from '@/lib/agent-api'
+import { Agent, AgentVoiceConfig, agentApi } from '@/lib/agent-api'
 import { Badge } from '@/components/ui/badge'
 import { cn, formatDateTime } from '@/lib/utils'
 import {
@@ -14,10 +14,25 @@ import {
   X,
   Loader2,
   FolderOpen,
+  Volume2,
 } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import { toast } from 'sonner'
 import { promptOptimizeApi } from '@/lib/prompt-optimize-api'
+import {
+  getBrowserSpeechVoices,
+  speakTextWithBrowserSpeech,
+  supportsBrowserSpeechSynthesis,
+} from '@/lib/browser-speech'
+
+const DEFAULT_VOICE_CONFIG: AgentVoiceConfig = {
+  enabled: false,
+  outputMode: 'off',
+  voiceId: null,
+  speed: 1,
+  volume: 1,
+  autoPlay: false,
+}
 
 // 全屏编辑模态框
 function FullscreenPromptModal({
@@ -148,7 +163,66 @@ interface AssistantConfigTabProps {
 export function AssistantConfigTab({ agent, onUpdate }: AssistantConfigTabProps) {
   const [isEditingPrompt, setIsEditingPrompt] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [voiceConfig, setVoiceConfig] = useState<AgentVoiceConfig>(agent.voiceConfig || DEFAULT_VOICE_CONFIG)
+  const [voiceOptions, setVoiceOptions] = useState(getBrowserSpeechVoices())
   const isSystemAgent = agent.agentLevel === 'system'
+  const savedVoiceConfigRef = useRef<AgentVoiceConfig>(agent.voiceConfig || DEFAULT_VOICE_CONFIG)
+  const voiceSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    const incoming = agent.voiceConfig || DEFAULT_VOICE_CONFIG
+    savedVoiceConfigRef.current = incoming
+    setVoiceConfig(incoming)
+  }, [agent])
+
+  // voice config 变化时 debounce 自动保存（系统助手也允许修改语音配置）
+  useEffect(() => {
+    if (JSON.stringify(voiceConfig) === JSON.stringify(savedVoiceConfigRef.current)) return
+
+    if (voiceSaveTimerRef.current) clearTimeout(voiceSaveTimerRef.current)
+    voiceSaveTimerRef.current = setTimeout(async () => {
+      try {
+        await agentApi.update(agent.id, {
+          voiceConfig: {
+            ...voiceConfig,
+            outputMode: voiceConfig.enabled ? voiceConfig.outputMode : 'off',
+            voiceId: voiceConfig.voiceId?.trim() || null,
+            autoPlay: voiceConfig.enabled ? voiceConfig.autoPlay : false,
+          },
+        })
+        savedVoiceConfigRef.current = voiceConfig
+        onUpdate?.()
+      } catch {
+        toast.error('语音配置保存失败')
+      }
+    }, 600)
+
+    return () => {
+      if (voiceSaveTimerRef.current) clearTimeout(voiceSaveTimerRef.current)
+    }
+  }, [voiceConfig, agent.id, isSystemAgent, onUpdate])
+
+  useEffect(() => {
+    if (!supportsBrowserSpeechSynthesis()) {
+      setVoiceOptions([])
+      return
+    }
+
+    const updateVoices = () => {
+      const all = getBrowserSpeechVoices()
+      const primaryLang = (navigator.language || 'zh').split('-')[0].toLowerCase()
+      const filtered = all.filter((v) => v.lang.toLowerCase().startsWith(primaryLang))
+      setVoiceOptions(filtered.length > 0 ? filtered : all)
+    }
+    updateVoices()
+    window.speechSynthesis.onvoiceschanged = updateVoices
+
+    return () => {
+      if (window.speechSynthesis.onvoiceschanged === updateVoices) {
+        window.speechSynthesis.onvoiceschanged = null
+      }
+    }
+  }, [])
 
   const handleOpenWorkDir = async (workDir: string) => {
     if (!window.electronAPI?.isElectron) return
@@ -175,6 +249,29 @@ export function AssistantConfigTab({ agent, onUpdate }: AssistantConfigTabProps)
       toast.error('更新失败')
     } finally {
       setIsSaving(false)
+    }
+  }
+
+  const handlePreviewVoice = async () => {
+    if (!voiceConfig.enabled) {
+      toast.error('请先启用语音播报')
+      return
+    }
+
+    if (!supportsBrowserSpeechSynthesis()) {
+      toast.error('当前环境不支持浏览器语音播报')
+      return
+    }
+
+    try {
+      await speakTextWithBrowserSpeech({
+        text: `你好，我是 ${agent.name}，这是当前音色试听。`,
+        voiceId: voiceConfig.voiceId,
+        rate: voiceConfig.speed,
+        volume: voiceConfig.volume,
+      })
+    } catch {
+      toast.error('试听失败')
     }
   }
 
@@ -299,6 +396,139 @@ export function AssistantConfigTab({ agent, onUpdate }: AssistantConfigTabProps)
                 </Badge>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-border bg-card overflow-hidden">
+        <div className="px-6 py-4 border-b border-border bg-muted/50">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Volume2 className="size-5 text-primary" />
+              <h3 className="font-semibold text-foreground">语音播报</h3>
+            </div>
+          </div>
+        </div>
+        <div className="p-6 space-y-4">
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-muted/40 p-4">
+            <div>
+              <p className="font-medium text-foreground">启用语音播报</p>
+              <p className="mt-1 text-sm text-muted-foreground">浏览器侧可用于自动或手动播报助手回答。</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setVoiceConfig((prev) => ({
+                ...prev,
+                enabled: !prev.enabled,
+                outputMode: !prev.enabled && prev.outputMode === 'off' ? 'manual' : prev.outputMode,
+              }))}
+              className={cn(
+                'relative h-5 w-10 rounded-full transition-colors',
+                voiceConfig.enabled ? 'bg-blue-500' : 'bg-gray-200'
+              )}
+            >
+              <span
+                className={cn(
+                  'absolute top-0.5 size-4 rounded-full bg-white transition-transform',
+                  voiceConfig.enabled ? 'translate-x-5' : 'translate-x-0.5'
+                )}
+              />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-foreground">播报模式</label>
+              <select
+                value={voiceConfig.outputMode}
+                disabled={!voiceConfig.enabled}
+                onChange={(e) => setVoiceConfig((prev) => ({ ...prev, outputMode: e.target.value as AgentVoiceConfig['outputMode'] }))}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none disabled:opacity-60"
+              >
+                <option value="off">关闭</option>
+                <option value="manual">手动播放</option>
+                <option value="auto_final_only">自动播报最终回答</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-foreground">音色</label>
+              <select
+                value={voiceConfig.voiceId || '__auto__'}
+                disabled={!voiceConfig.enabled}
+                onChange={(e) => setVoiceConfig((prev) => ({
+                  ...prev,
+                  voiceId: e.target.value === '__auto__' ? null : e.target.value,
+                }))}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none disabled:opacity-60"
+              >
+                <option value="__auto__">自动选择</option>
+                {voiceOptions.map((voice) => (
+                  <option key={voice.id} value={voice.id}>
+                    {voice.name} · {voice.lang}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-muted-foreground">
+                音色来源于当前浏览器或系统可用的本地语音。
+              </p>
+            </div>
+
+            <div>
+              <label className="mb-1.5 flex items-center justify-between text-sm font-medium text-foreground">
+                语速
+                <span className="font-normal text-muted-foreground">{voiceConfig.speed.toFixed(1)}x</span>
+              </label>
+              <input
+                type="range"
+                min="0.5"
+                max="2"
+                step="0.1"
+                value={voiceConfig.speed}
+                disabled={!voiceConfig.enabled}
+                onChange={(e) => setVoiceConfig((prev) => ({ ...prev, speed: Number(e.target.value) }))}
+                className="w-full cursor-pointer accent-blue-500 disabled:opacity-60"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1.5 flex items-center justify-between text-sm font-medium text-foreground">
+                音量
+                <span className="font-normal text-muted-foreground">{Math.round(voiceConfig.volume * 100)}%</span>
+              </label>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={voiceConfig.volume}
+                disabled={!voiceConfig.enabled}
+                onChange={(e) => setVoiceConfig((prev) => ({ ...prev, volume: Number(e.target.value) }))}
+                className="w-full cursor-pointer accent-blue-500 disabled:opacity-60"
+              />
+            </div>
+          </div>
+
+          <label className={cn('flex items-center gap-2 text-sm text-foreground', !voiceConfig.enabled && 'opacity-60')}>
+            <input
+              type="checkbox"
+              checked={voiceConfig.autoPlay}
+              disabled={!voiceConfig.enabled}
+              onChange={(e) => setVoiceConfig((prev) => ({ ...prev, autoPlay: e.target.checked }))}
+              className="size-4 rounded border border-input"
+            />
+            自动播放
+          </label>
+
+          <div>
+            <button
+              type="button"
+              disabled={!voiceConfig.enabled}
+              onClick={handlePreviewVoice}
+              className="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+            >
+              试听当前音色
+            </button>
           </div>
         </div>
       </div>

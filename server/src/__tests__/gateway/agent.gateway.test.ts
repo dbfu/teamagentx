@@ -155,6 +155,33 @@ describe('Agent Gateway API', () => {
       assert.strictEqual(body.success, false);
       assert.strictEqual(body.error, 'Agent name already exists');
     });
+
+    test('应该创建并返回助手级语音配置', async () => {
+      const voiceConfig = {
+        enabled: true,
+        outputMode: 'manual',
+        voiceId: 'voice-zh-female-001',
+        speed: 1,
+        volume: 1,
+        autoPlay: false,
+      };
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/agents',
+        payload: {
+          name: 'Voice Agent ' + Date.now(),
+          prompt: 'Speak clearly',
+          voiceConfig,
+        },
+      });
+
+      assert.strictEqual(response.statusCode, 201);
+
+      const body = response.json();
+      assert.strictEqual(body.success, true);
+      assert.deepStrictEqual(body.data.voiceConfig, voiceConfig);
+    });
   });
 
   describe('PUT /agents/:id', () => {

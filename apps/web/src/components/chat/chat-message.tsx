@@ -2,7 +2,7 @@ import { Message } from '@/lib/agent-api'
 import { tokenUsageApi } from '@/lib/token-usage-api'
 import { cn, formatDateTime } from '@/lib/utils'
 import { copyToClipboard } from '@/lib/copy-utils'
-import { Bot, MessageSquareMore, Info, Copy, XCircle, Trash2 } from 'lucide-react'
+import { Bot, MessageSquareMore, Info, Copy, XCircle, Trash2, Volume2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw'
@@ -10,13 +10,15 @@ import { remarkMentions, MENTION_MARKER_CLASS } from '@/lib/remark-mentions'
 import { useState, useCallback } from 'react'
 import { toast } from 'sonner'
 import { ImageViewerModal } from './image-viewer-modal'
+import { AudioMessagePlayer } from './audio-message-player'
 import type { StreamEvent } from '@/stores/socket-store'
 import { AgentAvatar } from './agent-avatar'
 import { UserAvatar } from './user-avatar'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { useChatStore, VOICE_MESSAGE_PLACEHOLDER } from '@/stores/chat-store'
+import { normalizeSpeechText, speakTextWithBrowserSpeech, supportsBrowserSpeechSynthesis } from '@/lib/browser-speech'
 
-// 格式化耗时显示（1m40s 格式，分钟为0时只显示秒）
 function formatDuration(ms: number): string {
   const totalSeconds = Math.round(ms / 1000)
   const minutes = Math.floor(totalSeconds / 60)
@@ -25,6 +27,13 @@ function formatDuration(ms: number): string {
     return `${seconds}s`
   }
   return `${minutes}m${seconds}s`
+}
+
+function getAttachmentType(attachment: NonNullable<Message['attachments']>[number]): 'image' | 'audio' | 'file' {
+  if (attachment.type) return attachment.type
+  if (attachment.mimeType.startsWith('audio/')) return 'audio'
+  if (attachment.mimeType.startsWith('image/')) return 'image'
+  return 'file'
 }
 
 interface TypingAgent {
@@ -51,10 +60,13 @@ interface ChatMessageProps {
   isRight?: boolean
   replyTo?: Message | null
   replyCount?: number
+  showSpeechButton?: boolean
   typingAgents?: TypingAgent[]
   mentionAgents?: MentionAgent[]
   currentUser?: CurrentUser
   streamEvents?: Map<string, StreamEvent[]>
+  hasBeenPlayed?: boolean
+  onMarkPlayed?: () => void
   onAgentAvatarClick?: (agentId: string, agentName: string) => void
   onTypingAgentClick?: (messageId: string, agentId: string, agentName: string) => void
   onMentionClick?: (agentId: string, agentName: string) => void
@@ -64,11 +76,21 @@ interface ChatMessageProps {
   onDeleteMessage?: (messageId: string) => Promise<void> | void
 }
 
-export function ChatMessage({ message, isRight, replyTo, replyCount, typingAgents, mentionAgents, currentUser, onAgentAvatarClick, onTypingAgentClick, onMentionClick, onReplyClick, onExecutionDetailClick, onMentionAgent, onDeleteMessage }: ChatMessageProps) {
+export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechButton = true, typingAgents, mentionAgents, currentUser, hasBeenPlayed, onMarkPlayed, onAgentAvatarClick, onTypingAgentClick, onMentionClick, onReplyClick, onExecutionDetailClick, onMentionAgent, onDeleteMessage }: ChatMessageProps) {
   const isMobile = useIsMobile()
+  const allAgents = useChatStore((s) => s.allAgents)
+  const playingVoiceMessageId = useChatStore((s) => s.playingVoiceMessageId)
+  const setPlayingVoiceMessageId = useChatStore((s) => s.setPlayingVoiceMessageId)
+  const isCurrentlyPlaying = playingVoiceMessageId === message.id
   const senderName = message.isHuman
     ? (message.user?.username ?? '用户')
     : (message.agent?.name ?? '助手')
+  const currentAgent = message.agentId ? allAgents.find((agent) => agent.id === message.agentId) : null
+  const voiceConfig = currentAgent?.voiceConfig
+  const hasAudioAttachment = message.attachments?.some((attachment) => getAttachmentType(attachment) === 'audio') ?? false
+  const shouldHideContent = hasAudioAttachment && message.content.trim() === VOICE_MESSAGE_PLACEHOLDER
+  // 纯语音消息：只有音频附件、无文字内容，气泡样式退化为透明
+  const isAudioOnly = hasAudioAttachment && shouldHideContent && (message.attachments?.every((att) => getAttachmentType(att) === 'audio') ?? false)
   // 右键菜单状态
   const [showContextMenu, setShowContextMenu] = useState(false)
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 })
@@ -81,6 +103,7 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, typingAgent
 
   // 图片查看器状态
   const [viewerImage, setViewerImage] = useState<{ url: string; name: string } | null>(null)
+  // isSpeaking = isCurrentlyPlaying（通过 store 统一管理，手动和自动播放图标一致）
 
   // 处理右键菜单（桌面端）
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
@@ -167,6 +190,37 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, typingAgent
       onMentionAgent?.(message.agentId, message.agent.name)
     }
   }
+
+  const handleSpeakMessage = useCallback(async () => {
+    if (!voiceConfig?.enabled || !message.content.trim()) return
+
+    if (isCurrentlyPlaying) {
+      window.speechSynthesis.cancel()
+      setPlayingVoiceMessageId(null)
+      return
+    }
+
+    const speechText = normalizeSpeechText(message.content)
+    if (!speechText) return
+
+    onMarkPlayed?.()
+    setPlayingVoiceMessageId(message.id)
+    try {
+      await speakTextWithBrowserSpeech({
+        text: speechText,
+        voiceId: voiceConfig.voiceId,
+        rate: voiceConfig.speed,
+        volume: voiceConfig.volume,
+      })
+    } catch (error) {
+      console.error('语音播报失败:', error)
+      toast.error(error instanceof Error ? error.message : '语音播报失败')
+    } finally {
+      if (useChatStore.getState().playingVoiceMessageId === message.id) {
+        setPlayingVoiceMessageId(null)
+      }
+    }
+  }, [isCurrentlyPlaying, message.content, message.id, onMarkPlayed, setPlayingVoiceMessageId, voiceConfig])
 
   const renderContent = (content: string) => {
     // 用户消息：普通文本展示，但 @助手 需要高亮
@@ -326,17 +380,42 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, typingAgent
 
     return (
       <div className="flex flex-wrap gap-2 mt-1 mb-1">
-        {message.attachments.map((attachment) => (
-          <div key={attachment.id} className="relative">
-            <img
-              src={attachment.url}
-              alt={attachment.filename}
-              className="max-w-[120px] max-h-[120px] rounded-lg cursor-pointer hover:opacity-90 transition-opacity object-cover"
-              onClick={() => setViewerImage({ url: attachment.url, name: attachment.filename })}
-              loading="lazy"
-            />
-          </div>
-        ))}
+        {message.attachments.map((attachment) => {
+          const attachmentType = getAttachmentType(attachment)
+
+          if (attachmentType === 'image') {
+            return (
+              <div key={attachment.id} className="relative">
+                <img
+                  src={attachment.url}
+                  alt={attachment.filename}
+                  className="max-w-[120px] max-h-[120px] rounded-lg cursor-pointer hover:opacity-90 transition-opacity object-cover"
+                  onClick={() => setViewerImage({ url: attachment.url, name: attachment.filename })}
+                  loading="lazy"
+                />
+              </div>
+            )
+          }
+
+          if (attachmentType === 'audio') {
+            return (
+              <AudioMessagePlayer
+                key={attachment.id}
+                src={attachment.url}
+                mimeType={attachment.mimeType}
+                title={attachment.filename}
+                durationMs={attachment.durationMs}
+                transcript={attachment.transcript && attachment.transcript !== message.content.trim() ? attachment.transcript : null}
+              />
+            )
+          }
+
+          return (
+            <div key={attachment.id} className="max-w-sm rounded-lg border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
+              <div className="truncate">{attachment.filename}</div>
+            </div>
+          )
+        })}
       </div>
     )
   }
@@ -377,6 +456,52 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, typingAgent
           )
         })}
       </div>
+    )
+  }
+
+  const renderSpeechButton = () => {
+    if (message.isHuman || !showSpeechButton) return null
+    if (!voiceConfig?.enabled || !normalizeSpeechText(message.content) || !supportsBrowserSpeechSynthesis()) return null
+
+    return (
+      <span className="relative inline-flex">
+        <button
+          onClick={handleSpeakMessage}
+          className={cn(
+            "group inline-flex h-8 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-all",
+            isCurrentlyPlaying
+              ? "border-blue-300 bg-blue-50 text-blue-700 shadow-[0_6px_18px_-12px_rgba(59,130,246,0.9)] hover:border-blue-400 hover:bg-blue-100 dark:border-blue-700/70 dark:bg-blue-900/30 dark:text-blue-200 dark:hover:bg-blue-900/40"
+              : "border-blue-200/80 bg-white/85 text-blue-600 shadow-sm hover:border-blue-300 hover:bg-blue-50 dark:border-blue-800/70 dark:bg-slate-900/60 dark:text-blue-300 dark:hover:bg-slate-900/80"
+          )}
+          title={isCurrentlyPlaying ? '停止播报' : '语音播报'}
+          aria-label={isCurrentlyPlaying ? '停止播报' : '语音播报'}
+        >
+          <span
+            className={cn(
+              "flex size-5 items-center justify-center rounded-full transition-colors",
+              isCurrentlyPlaying
+                ? "bg-blue-600 text-white dark:bg-blue-500"
+                : "bg-blue-100 text-blue-600 group-hover:bg-blue-200 dark:bg-blue-950/80 dark:text-blue-200"
+            )}
+          >
+            {isCurrentlyPlaying ? (
+              <span className="flex h-3 items-end gap-[2px]" aria-hidden>
+                <span className="w-[2px] rounded-full bg-current origin-bottom" style={{ height: '100%', animation: 'sound-bar 0.7s ease-in-out infinite', animationDelay: '0ms' }} />
+                <span className="w-[2px] rounded-full bg-current origin-bottom" style={{ height: '78%', animation: 'sound-bar 0.7s ease-in-out infinite', animationDelay: '180ms' }} />
+                <span className="w-[2px] rounded-full bg-current origin-bottom" style={{ height: '62%', animation: 'sound-bar 0.7s ease-in-out infinite', animationDelay: '360ms' }} />
+              </span>
+            ) : (
+              <Volume2 className="size-3.5" strokeWidth={2.2} />
+            )}
+          </span>
+          <span className="pr-0.5 tracking-[0.01em]">
+            {isCurrentlyPlaying ? '播放中' : '播报'}
+          </span>
+        </button>
+        {!hasBeenPlayed && !isCurrentlyPlaying && (
+          <span className="absolute -right-0.5 top-0 size-2.5 rounded-full bg-red-500 ring-2 ring-background dark:ring-slate-900" />
+        )}
+      </span>
     )
   }
 
@@ -465,7 +590,10 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, typingAgent
               {renderReplyPreview()}
               <div
                 className={cn(
-                  "rounded-lg bg-primary/15 px-4 py-2 text-foreground overflow-x-auto cursor-text border border-primary/20 dark:bg-primary/20 dark:border-primary/30 w-fit max-w-full",
+                  "text-foreground overflow-x-auto cursor-text w-fit max-w-full",
+                  isAudioOnly
+                    ? ""
+                    : "rounded-lg bg-primary/15 px-4 py-2 border border-primary/20 dark:bg-primary/20 dark:border-primary/30",
                   isMobile ? "select-none" : "select-text"
                 )}
                 onContextMenu={handleContextMenu}
@@ -473,7 +601,7 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, typingAgent
                 onTouchEnd={handleTouchEnd}
               >
                 {renderAttachments()}
-                {renderContent(message.content)}
+                {!shouldHideContent && renderContent(message.content)}
               </div>
               <div className="flex items-center gap-2">
                 {renderTypingAgents()}
@@ -555,7 +683,10 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, typingAgent
             {renderReplyPreview()}
             <div
               className={cn(
-                "rounded-lg bg-muted/50 px-4 py-3 text-foreground overflow-x-auto cursor-text border border-border/50 dark:bg-muted/40 dark:border-border max-w-full",
+                "text-foreground overflow-x-auto cursor-text max-w-full",
+                isAudioOnly
+                  ? ""
+                  : "rounded-lg bg-muted/50 px-4 py-3 border border-border/50 dark:bg-muted/40 dark:border-border",
                 isMobile ? "select-none" : "select-text"
               )}
               onContextMenu={handleContextMenu}
@@ -563,11 +694,12 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, typingAgent
               onTouchEnd={handleTouchEnd}
             >
               {renderAttachments()}
-              {renderContent(message.content)}
+              {!shouldHideContent && renderContent(message.content)}
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               {renderTypingAgents()}
               {renderReplyCount()}
+              {renderSpeechButton()}
               {renderExecutionDetailButton()}
             </div>
           </div>

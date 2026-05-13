@@ -1,12 +1,16 @@
 import prisma from '../../lib/prisma.js';
 
 interface AttachmentData {
+  type?: 'image' | 'audio' | 'file';
   filename: string;
   mimeType: string;
   size: number;
   url: string;
   width?: number;
   height?: number;
+  durationMs?: number;
+  transcript?: string;
+  waveform?: string;
 }
 
 export const messageService = {
@@ -62,13 +66,16 @@ export const messageService = {
         updatedAt: now,
         attachments: data.attachments ? {
           create: data.attachments.map(att => ({
-            type: 'image',
+            type: att.type ?? 'image',
             filename: att.filename,
             mimeType: att.mimeType,
             size: att.size,
             url: att.url,
             width: att.width,
             height: att.height,
+            durationMs: att.durationMs,
+            transcript: att.transcript,
+            waveform: att.waveform,
           })),
         } : undefined,
       },

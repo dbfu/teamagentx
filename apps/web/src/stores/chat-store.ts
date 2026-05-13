@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import { useRef, useCallback, useEffect, useMemo } from 'react'
 import { Agent, Message, messageApi, agentApi, ExecutionRecord, debugApi, AgentDebugInfo, ChatRoom, chatRoomApi, AgentContextInfo, uploadApi } from '@/lib/agent-api'
 import { useSocketStore } from './socket-store'
@@ -20,6 +21,8 @@ function generateUUID(): string {
     return v.toString(16)
   })
 }
+
+export const VOICE_MESSAGE_PLACEHOLDER = '[语音消息]'
 
 export type SidePanelMode = 'agents' | 'context' | 'history' | 'stream' | 'agent-detail' | 'record-detail' | 'reply-detail' | 'room-settings' | 'execution-detail' | 'cron-tasks' | 'task-queue' | 'task-board' | null
 
@@ -97,6 +100,12 @@ interface ChatStore {
   forceScrollToBottom: boolean
   // 滚动位置记忆（按群聊 ID 存储）
   scrollPositions: Record<string, number>  // chatRoomId -> scrollTop
+  // 当前正在语音播报的消息 ID（auto 或 manual）
+  playingVoiceMessageId: string | null
+  // 语音消息已处理记录（用于避免自动重复播报）
+  handledVoiceMessageIdsByRoom: Record<string, string[]>
+  // 语音消息已播放记录（用于红点/已播状态）
+  playedVoiceMessageIdsByRoom: Record<string, string[]>
 
   // Actions
   setInputValue: (value: string) => void
@@ -137,6 +146,9 @@ interface ChatStore {
   setForceScrollToBottom: (force: boolean) => void
   saveScrollPosition: (chatRoomId: string, scrollTop: number) => void
   getScrollPosition: (chatRoomId: string) => number | null
+  setPlayingVoiceMessageId: (id: string | null) => void
+  markVoiceMessagesHandled: (chatRoomId: string, messageIds: string[]) => void
+  markVoiceMessagesPlayed: (chatRoomId: string, messageIds: string[]) => void
   loadMessages: (chatRoomId: string) => Promise<void>
   loadAllAgents: () => Promise<void>
   loadDebugInfo: (chatRoomId: string, agentName: string) => Promise<void>
@@ -159,7 +171,22 @@ interface ChatStore {
   handleImageSelect: (files: File[]) => Promise<void>
 }
 
-export const useChatStore = create<ChatStore>((set, get) => ({
+
+function mergeUniqueIds(current: string[] | undefined, incoming: string[]): string[] {
+  if (incoming.length === 0) return current ?? []
+  const merged = new Set(current ?? [])
+  let changed = false
+  for (const id of incoming) {
+    if (!merged.has(id)) {
+      merged.add(id)
+      changed = true
+    }
+  }
+  return changed ? Array.from(merged) : (current ?? [])
+}
+
+export const useChatStore = create<ChatStore>()(
+  persist((set, get) => ({
   // 消息状态
   messages: [],
   inputValue: '',
@@ -177,6 +204,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   scrollToMessageId: null,
   forceScrollToBottom: false,
   scrollPositions: {},  // 滚动位置记忆
+  playingVoiceMessageId: null,
+  handledVoiceMessageIdsByRoom: {},
+  playedVoiceMessageIdsByRoom: {},
   selectedRecord: null,
   selectedRoomAgent: null,
   streamingViewAgent: null,
@@ -276,6 +306,31 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   setContextInfo: (info) => set({ contextInfo: info }),
   setScrollToMessageId: (messageId) => set({ scrollToMessageId: messageId }),
   setForceScrollToBottom: (force) => set({ forceScrollToBottom: force }),
+  setPlayingVoiceMessageId: (id) => set({ playingVoiceMessageId: id }),
+  markVoiceMessagesHandled: (chatRoomId, messageIds) => set((state) => {
+    const nextIds = mergeUniqueIds(state.handledVoiceMessageIdsByRoom[chatRoomId], messageIds)
+    if (nextIds === state.handledVoiceMessageIdsByRoom[chatRoomId]) {
+      return state
+    }
+    return {
+      handledVoiceMessageIdsByRoom: {
+        ...state.handledVoiceMessageIdsByRoom,
+        [chatRoomId]: nextIds,
+      },
+    }
+  }),
+  markVoiceMessagesPlayed: (chatRoomId, messageIds) => set((state) => {
+    const nextIds = mergeUniqueIds(state.playedVoiceMessageIdsByRoom[chatRoomId], messageIds)
+    if (nextIds === state.playedVoiceMessageIdsByRoom[chatRoomId]) {
+      return state
+    }
+    return {
+      playedVoiceMessageIdsByRoom: {
+        ...state.playedVoiceMessageIdsByRoom,
+        [chatRoomId]: nextIds,
+      },
+    }
+  }),
   saveScrollPosition: (chatRoomId, scrollTop) => set((state) => ({
     scrollPositions: { ...state.scrollPositions, [chatRoomId]: scrollTop }
   })),
@@ -529,7 +584,15 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       }
     }
   },
-}))
+  }),
+  {
+    name: 'chat-ui-storage',
+    partialize: (state) => ({
+      handledVoiceMessageIdsByRoom: state.handledVoiceMessageIdsByRoom,
+      playedVoiceMessageIdsByRoom: state.playedVoiceMessageIdsByRoom,
+    }),
+  })
+)
 
 // 导出一个组合 hook，用于 chat-area.tsx
 export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => void) {
@@ -653,13 +716,16 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
       } : null,
       attachments: msg.attachments ? msg.attachments.map((att: any) => ({
         id: att.id || generateUUID(),
-        type: 'image',
+        type: att.type || (typeof att.mimeType === 'string' && att.mimeType.startsWith('audio/') ? 'audio' : 'image'),
         filename: att.filename,
         mimeType: att.mimeType,
         size: att.size,
         url: att.url,
         width: att.width ?? null,
         height: att.height ?? null,
+        durationMs: att.durationMs ?? null,
+        transcript: att.transcript ?? null,
+        waveform: att.waveform ?? null,
         createdAt: new Date().toISOString(),
       })) : undefined,
     }

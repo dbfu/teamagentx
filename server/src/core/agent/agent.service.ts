@@ -8,6 +8,16 @@ export type AgentWithRelations = Agent & {
   llmProvider: LlmProvider | null;
 };
 
+export type AgentVoiceConfig = {
+  enabled: boolean;
+  outputMode: 'off' | 'manual' | 'auto_final_only';
+  voiceId: string | null;
+  speed: number;
+  volume: number;
+  autoPlay: boolean;
+  provider?: string;
+};
+
 export type CreateAgentInput = {
   id?: string; // 可选的自定义 ID
   name: string;
@@ -21,12 +31,19 @@ export type CreateAgentInput = {
   workDir?: string;
   categoryId?: string;
   llmProviderId?: string;
+  voiceConfig?: AgentVoiceConfig | null;
 };
 
 export type UpdateAgentInput = Partial<CreateAgentInput> & {
   categoryId?: string | null; // 允许 null 来移除分类
   llmProviderId?: string | null; // 允许 null 来移除 LLM 供应商
 };
+
+function serializeVoiceConfig(voiceConfig?: AgentVoiceConfig | null): string | null | undefined {
+  if (voiceConfig === undefined) return undefined;
+  if (voiceConfig === null) return null;
+  return JSON.stringify(voiceConfig);
+}
 
 async function assertAgentIsUserEditable(id: string, action: string): Promise<void> {
   const agent = await prisma.agent.findUnique({
@@ -96,7 +113,7 @@ export type UpdateSortOrderInput = {
 };
 
 export const agentService = {
-  async create(data: CreateAgentInput): Promise<Agent> {
+  async create(data: CreateAgentInput): Promise<AgentWithRelations> {
     const now = new Date();
     // 处理外键字段：空字符串转换为 null
     const categoryId = (data.categoryId === '' || data.categoryId === 'null') ? null : data.categoryId;
@@ -119,6 +136,7 @@ export const agentService = {
         workDir: data.workDir,
         categoryId,
         llmProviderId,
+        voiceConfig: serializeVoiceConfig(data.voiceConfig),
         updatedAt: now,
       },
       include: {
@@ -128,7 +146,7 @@ export const agentService = {
     });
   },
 
-  async findAll(): Promise<Agent[]> {
+  async findAll(): Promise<AgentWithRelations[]> {
     return prisma.agent.findMany({
       orderBy: { createdAt: 'desc' },
       include: {
@@ -138,7 +156,7 @@ export const agentService = {
     });
   },
 
-  async findActive(): Promise<Agent[]> {
+  async findActive(): Promise<AgentWithRelations[]> {
     return prisma.agent.findMany({
       where: { isActive: true },
       orderBy: { createdAt: 'desc' },
@@ -149,7 +167,7 @@ export const agentService = {
     });
   },
 
-  async findById(id: string): Promise<Agent | null> {
+  async findById(id: string): Promise<AgentWithRelations | null> {
     return prisma.agent.findUnique({
       where: { id },
       include: {
@@ -170,10 +188,17 @@ export const agentService = {
   },
 
   async update(id: string, data: UpdateAgentInput): Promise<AgentWithRelations> {
-    await assertAgentIsUserEditable(id, '修改');
-
     // 处理外键字段：空字符串转换为 undefined（表示不更新），'null' 字符串转换为 null（表示移除）
-    const { categoryId, llmProviderId, ...restData } = data;
+    const { categoryId, llmProviderId, voiceConfig, ...restData } = data;
+
+    // voiceConfig 是本机展示偏好，系统助手也允许修改；其他字段仍受保护
+    const hasNonVoiceFields =
+      Object.keys(restData).length > 0 ||
+      categoryId !== undefined ||
+      llmProviderId !== undefined;
+    if (hasNonVoiceFields) {
+      await assertAgentIsUserEditable(id, '修改');
+    }
     const processedCategoryId = categoryId === '' ? undefined : categoryId === 'null' ? null : categoryId;
     const processedLlmProviderId = llmProviderId === '' ? undefined : llmProviderId === 'null' ? null : llmProviderId;
     const currentAgent = await prisma.agent.findUnique({
@@ -201,6 +226,7 @@ export const agentService = {
         ...restData,
         ...(processedCategoryId !== undefined && { categoryId: processedCategoryId }),
         ...(processedLlmProviderId !== undefined && { llmProviderId: processedLlmProviderId }),
+        ...(voiceConfig !== undefined && { voiceConfig: serializeVoiceConfig(voiceConfig) }),
         updatedAt: new Date(),
       },
       include: {
