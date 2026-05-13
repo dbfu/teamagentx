@@ -36,6 +36,7 @@ interface ChatMessagesListProps {
   onReplyClick: (messageId: string) => void
   onExecutionDetailClick?: (messageId: string, executionRecordId: string) => void
   onMentionAgent?: (agentId: string, agentName: string) => void
+  onDeleteMessage?: (messageId: string) => Promise<void> | void
   currentUser?: CurrentUser
 }
 
@@ -55,6 +56,7 @@ export function ChatMessagesList({
   onReplyClick,
   onExecutionDetailClick,
   onMentionAgent,
+  onDeleteMessage,
   currentUser,
 }: ChatMessagesListProps) {
   const isMobile = useIsMobile()
@@ -241,6 +243,7 @@ export function ChatMessagesList({
                 onReplyClick={onReplyClick}
                 onExecutionDetailClick={onExecutionDetailClick}
                 onMentionAgent={onMentionAgent}
+                onDeleteMessage={onDeleteMessage}
               />
             </div>
           ))
