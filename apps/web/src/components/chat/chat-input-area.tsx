@@ -145,7 +145,7 @@ export const ChatInputArea = memo(function ChatInputArea({
       )}
 
       {/* Input area */}
-      <div className="flex min-h-11 items-center gap-2 rounded-md border border-border bg-[var(--surface)] px-2.5 py-2 transition-colors focus-within:border-primary focus-within:shadow-[0_0_0_2px_oklch(0.55_0.22_250/0.10)]">
+      <div className="flex min-h-11 items-end gap-2 rounded-md border border-border bg-[var(--surface)] px-2.5 py-1.5 transition-colors focus-within:border-primary focus-within:shadow-[0_0_0_2px_oklch(0.55_0.22_250/0.10)]">
         <MentionInput
           value={inputValue}
           onChange={setInputValue}
@@ -157,7 +157,7 @@ export const ChatInputArea = memo(function ChatInputArea({
         />
 
         {/* 工具按钮 */}
-        <div className="flex shrink-0 items-center gap-1 self-end">
+        <div className="flex shrink-0 items-center gap-1 self-end pb-0.5">
           {/* 图片上传按钮 */}
           <button
             type="button"

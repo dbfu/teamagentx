@@ -82,7 +82,7 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, typingAgent
     ? 'inline-flex items-center rounded bg-white/15 px-1.5 py-0.5 font-semibold text-white transition-colors hover:bg-white/25'
     : 'inline-flex items-center rounded bg-primary/10 px-1.5 py-0.5 font-medium text-primary transition-colors hover:bg-primary/15 hover:text-primary/90'
   const markdownClassName = cn(
-    'prose prose-sm max-w-none break-words leading-7 [&_a]:underline [&_a]:underline-offset-2 [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_pre]:whitespace-pre-wrap [&_pre]:rounded-xl [&_pre]:border [&_pre]:border-black/5 [&_pre]:bg-black/5 [&_pre]:px-3 [&_pre]:py-2.5 [&_code]:whitespace-pre-wrap [&_img]:max-w-[120px] [&_img]:max-h-[120px] [&_img]:rounded-xl [&_img]:object-cover [&_img]:cursor-pointer',
+    'prose prose-sm max-w-none break-words leading-7 [&_a]:underline [&_a]:underline-offset-2 [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_pre]:whitespace-pre-wrap [&_pre]:rounded-xl [&_pre]:border [&_pre]:border-black/5 [&_pre]:bg-black/5 [&_pre]:px-3 [&_pre]:py-2.5 [&_code]:whitespace-pre-wrap [&_img]:max-w-[120px] [&_img]:max-h-[120px] [&_img]:rounded-xl [&_img]:object-cover [&_img]:cursor-pointer [&_table]:w-full [&_table]:table-fixed [&_th]:align-top [&_td]:align-top [&_th]:break-words [&_td]:break-words [&_th]:whitespace-normal [&_td]:whitespace-normal',
     message.isHuman && 'text-white prose-headings:text-white prose-p:text-white prose-strong:text-white prose-code:text-white prose-pre:text-white [&_pre]:border-white/10 [&_pre]:bg-black/15',
   )
 
@@ -342,12 +342,12 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, typingAgent
           <div className="max-w-[min(34rem,72vw)] flex flex-col items-end">
             <div className="flex items-baseline gap-2 mb-1">
               <span className="text-[11px] text-muted-foreground/60">{formatDateTime(message.createdAt)}</span>
-              <span className="text-xs font-bold text-foreground">{senderName}</span>
+              <span className="text-xs font-bold text-foreground/70">{senderName}</span>
             </div>
             <div className="flex items-start gap-2">
               <div className="min-w-0 flex flex-col items-end gap-1">
                 <div
-                  className={cn("overflow-x-auto rounded-md px-3 py-2 text-sm leading-relaxed text-white shadow-sm cursor-text", isMobile ? "select-none" : "select-text")}
+                  className={cn("min-w-0 overflow-hidden rounded-md px-3 py-2 text-sm leading-relaxed text-white shadow-sm cursor-text", isMobile ? "select-none" : "select-text")}
                   style={{ background: 'var(--primary)' }}
                   onContextMenu={handleContextMenu} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}
                 >
@@ -405,7 +405,10 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, typingAgent
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2 mb-1">
             <span
-              className={cn("text-xs font-bold text-primary", !message.isHuman && "cursor-pointer group")}
+              className={cn(
+                "text-xs font-bold",
+                message.isHuman ? "text-foreground/70" : "text-primary cursor-pointer group"
+              )}
               onMouseEnter={() => !message.isHuman && setIsNameHovered(true)}
               onMouseLeave={() => !message.isHuman && setIsNameHovered(false)}
               onClick={handleNameClick}
@@ -420,7 +423,7 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, typingAgent
           </div>
           <div
             className={cn(
-              "max-w-[min(38rem,78vw)] overflow-x-auto rounded-md border border-border/80 bg-[var(--surface-raised)] px-3 py-2.5 text-sm leading-relaxed shadow-[var(--control-shadow)] cursor-text",
+              "min-w-0 max-w-[min(38rem,78vw)] overflow-hidden rounded-md border border-border/80 bg-[var(--surface-raised)] px-3 py-2.5 text-sm leading-relaxed shadow-[var(--control-shadow)] cursor-text",
               isMobile ? "select-none" : "select-text"
             )}
             style={{ borderLeft: '3px solid var(--primary)' }}

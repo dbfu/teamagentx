@@ -667,7 +667,7 @@ export function MentionInput({
   }, [])
 
   return (
-    <div ref={containerRef} className={cn('relative flex min-h-7 items-center', className)}>
+    <div ref={containerRef} className={cn('relative flex min-h-7 items-end self-stretch', className)}>
       {/* 可编辑区域 */}
       <div
         ref={editorRef}
@@ -679,7 +679,7 @@ export function MentionInput({
         onCompositionStart={handleCompositionStart}
         onCompositionEnd={handleCompositionEnd}
         onPaste={handlePaste}
-        className="min-h-6 max-h-32 flex-1 overflow-y-auto cursor-text whitespace-pre-wrap break-words text-sm leading-6 text-foreground outline-none empty:before:text-muted-foreground empty:before:content-[attr(data-placeholder)]"
+        className="min-h-[22px] max-h-[40vh] flex-1 overflow-y-auto py-1 cursor-text whitespace-pre-wrap break-words text-sm leading-6 text-foreground outline-none empty:before:text-muted-foreground empty:before:content-[attr(data-placeholder)]"
         data-placeholder={placeholder}
       />
 
