@@ -6,6 +6,7 @@ import { llmProviderApi, type LlmProvider } from '@/lib/llm-provider-api';
 import { getProviderProtocolHint, getRequiredProviderProtocol, isProviderCompatibleWithAgent } from '@/lib/llm-provider-compat';
 import { promptOptimizeApi } from '@/lib/prompt-optimize-api';
 import { InstalledSkill, skillApi } from '@/lib/skill-api';
+import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import { Check, ChevronDown, ChevronRight, Image, Loader2, Maximize2, Sparkles, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
@@ -604,22 +605,10 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
                     <div className="text-xs text-muted-foreground">开启后助手可通过受控工具生成图片</div>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setImageGenerationEnabled(v => !v)}
-                  className={cn(
-                    'relative h-5 w-10 rounded-full transition-colors',
-                    imageGenerationEnabled ? 'bg-primary' : 'bg-muted'
-                  )}
-                  aria-pressed={imageGenerationEnabled}
-                >
-                  <span
-                    className={cn(
-                      'absolute top-0.5 size-4 rounded-full bg-white transition-transform',
-                      imageGenerationEnabled ? 'translate-x-5' : 'translate-x-0.5'
-                    )}
-                  />
-                </button>
+                <Switch
+                  checked={imageGenerationEnabled}
+                  onCheckedChange={setImageGenerationEnabled}
+                />
               </div>
               {imageGenerationEnabled && (
                 <div className="mt-3">

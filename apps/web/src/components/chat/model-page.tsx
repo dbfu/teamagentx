@@ -2,7 +2,7 @@ import { Button } from '@/components/ui/button';
 import { llmProviderApi, type CreateLlmProviderRequest, type LlmProvider, type UpdateLlmProviderRequest } from '@/lib/llm-provider-api';
 import { tokenUsageApi, type TokenUsageByProvider } from '@/lib/token-usage-api';
 import { cn } from '@/lib/utils';
-import { Activity, BadgeCheck, Copy, Cpu, Eye, EyeOff, Image, Mic, Pencil, Plus, Power, RefreshCw, ServerCog, Sparkles, Star, Trash2, Video, Wifi, WifiOff, X } from 'lucide-react';
+import { Activity, BadgeCheck, Copy, Cpu, Eye, EyeOff, Image, Mic, Pencil, Plus, Power, RefreshCw, Search, ServerCog, Sparkles, Star, Trash2, Video, Wifi, WifiOff, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -40,6 +40,10 @@ export function ModelPage() {
   const [aiDescription, setAiDescription] = useState('')
   const [isAiParsing, setIsAiParsing] = useState(false)
 
+  // 搜索与筛选
+  const [searchQuery, setSearchQuery] = useState('')
+  const [filterType, setFilterType] = useState<'all' | 'text' | 'image' | 'video' | 'audio'>('all')
+
   // 加载供应商列表
   useEffect(() => {
     loadProviders()
@@ -69,6 +73,17 @@ export function ModelPage() {
 
   // 是否存在默认模型配置（AI 创建需要依赖默认模型来解析）
   const hasDefaultProvider = providers.some(p => p.isDefault && p.isActive && (p.modelType || 'text') === 'text')
+
+  const filteredProviders = providers.filter(p => {
+    if (filterType !== 'all' && (p.modelType || 'text') !== filterType) return false
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase()
+      return p.name.toLowerCase().includes(q)
+        || p.model.toLowerCase().includes(q)
+        || (p.apiUrl || '').toLowerCase().includes(q)
+    }
+    return true
+  })
 
   const getProviderMeta = (provider: LlmProvider) => {
     if (provider.modelType === 'image') {
@@ -308,11 +323,29 @@ export function ModelPage() {
         <div className="flex items-center gap-2">
           <Cpu className="size-4 text-primary" />
           <span className="text-sm font-bold text-foreground">模型管理</span>
+          {!isLoading && (
+            <span className="text-xs text-muted-foreground">{filteredProviders.length}/{providers.length}</span>
+          )}
         </div>
         <div
           className="ml-auto flex items-center gap-1.5"
           style={window.electronAPI?.isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
         >
+          <div className="ta-search-shell h-8">
+            <Search className="size-3.5 text-muted-foreground" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="搜索模型名称、API..."
+              className="w-40 bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+            />
+            {searchQuery && (
+              <button onClick={() => setSearchQuery('')} className="text-muted-foreground hover:text-foreground">
+                <X className="size-3.5" />
+              </button>
+            )}
+          </div>
           <Button
             variant="outline"
             size="sm"
@@ -348,6 +381,46 @@ export function ModelPage() {
         </div>
       ) : (
         <div className="ta-page-section">
+          {/* 类型筛选 */}
+          <div className="mb-3 flex items-center gap-1.5">
+            {([
+              { value: 'all' as const, label: '全部' },
+              { value: 'text' as const, label: '文本' },
+              { value: 'image' as const, label: '图片' },
+              { value: 'video' as const, label: '视频' },
+              { value: 'audio' as const, label: '语音' },
+            ] as const).map(item => {
+              const count = item.value === 'all'
+                ? providers.length
+                : providers.filter(p => (p.modelType || 'text') === item.value).length
+              return (
+                <button
+                  key={item.value}
+                  onClick={() => setFilterType(item.value)}
+                  className={cn(
+                    'inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors',
+                    filterType === item.value
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                  )}
+                >
+                  {item.label}
+                  <span className={cn(
+                    'rounded-sm px-1 py-0.5 text-[10px] leading-none',
+                    filterType === item.value
+                      ? 'bg-primary-foreground/20 text-primary-foreground'
+                      : 'bg-muted text-muted-foreground'
+                  )}>{count}</span>
+                </button>
+              )
+            })}
+          </div>
+          {filteredProviders.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+              <Search className="size-10 mb-2 opacity-40" />
+              <p className="text-sm">未找到匹配的模型</p>
+            </div>
+          ) : (
           <div className="overflow-x-auto rounded-md border border-border bg-[var(--surface-raised)]">
             <div className="grid min-w-[820px] grid-cols-[minmax(220px,1.35fr)_minmax(180px,1fr)_120px_120px_176px] border-b border-border bg-[var(--surface-subtle)] px-3 py-2 text-xs font-medium text-muted-foreground">
               <div>模型配置</div>
@@ -356,7 +429,7 @@ export function ModelPage() {
               <div>状态</div>
               <div className="text-right">操作</div>
             </div>
-            {providers.map(provider => {
+            {filteredProviders.map(provider => {
               const usage = getTokenUsage(provider.id)
               const meta = getProviderMeta(provider)
               return (
@@ -477,6 +550,7 @@ export function ModelPage() {
               )
             })}
           </div>
+          )}
         </div>
       )}
       </div>
@@ -519,12 +593,10 @@ export function ModelPage() {
                   <label className="mb-1.5 block text-sm font-medium text-foreground">
                     模型类型 <span className="text-red-500">*</span>
                   </label>
-                  <div className="grid grid-cols-4 gap-2">
+                  <div className="grid grid-cols-2 gap-2">
                     {[
                       { value: 'text', label: '文本', icon: Cpu },
                       { value: 'image', label: '图片', icon: Image },
-                      { value: 'video', label: '视频', icon: Video },
-                      { value: 'audio', label: '语音', icon: Mic },
                     ].map(item => {
                       const Icon = item.icon
                       return (
