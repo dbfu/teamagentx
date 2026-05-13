@@ -5,7 +5,7 @@ import type { Platform } from './bridge.service.js';
 export interface BridgePlatformConfigPayload {
   botToken?: string;
   defaultAgentId?: string | null;
-  config?: Record<string, unknown>;
+  config?: Record<string, unknown> | null;
 }
 
 export async function getBridgePlatformConfig(platform: Platform) {
