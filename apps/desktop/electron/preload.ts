@@ -9,6 +9,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getServerUrl: () => ipcRenderer.invoke('get-server-url'),
   getMobileWebUrl: () => ipcRenderer.invoke('get-mobile-web-url'),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  checkForUpdates: () => ipcRenderer.invoke('update:check'),
+  downloadUpdate: (update: {
+    version: string;
+    url: string;
+    macUrl?: string;
+    winUrl?: string;
+    downloads?: { mac?: string; win?: string };
+    notes?: string;
+    publishedAt?: string;
+  }) => ipcRenderer.invoke('update:download', update),
+  installUpdate: (filePath?: string) => ipcRenderer.invoke('update:install', filePath),
+  showUpdateInFolder: (filePath: string) => ipcRenderer.invoke('update:show-in-folder', filePath),
+  onUpdateDownloadProgress: (callback: (progress: { percent: number; transferred: number; total: number | null }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, progress: { percent: number; transferred: number; total: number | null }) => callback(progress);
+    ipcRenderer.on('update:download-progress', handler);
+    return () => ipcRenderer.removeListener('update:download-progress', handler);
+  },
   getOpenTargetIcons: () => ipcRenderer.invoke('get-open-target-icons'),
   openFolder: (
     path: string,

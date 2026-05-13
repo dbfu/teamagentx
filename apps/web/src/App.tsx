@@ -26,6 +26,7 @@ import { useIsMobile } from './hooks/use-mobile'
 import { playMessageSound } from './lib/message-sound'
 import { cn } from './lib/utils'
 import { SetupWizard } from './components/setup/setup-wizard'
+import { UpdateNotification } from './components/update/update-notification'
 import { isElectron, waitForServer } from './lib/config'
 import { ChatRoom } from './lib/agent-api'
 import { useAuthStore, useChatRoomStore, useSocketStore, useUIStore } from './stores'
@@ -672,6 +673,8 @@ export default function App() {
           <span>服务已关闭，正在尝试重新连接...</span>
         </div>
       )}
+
+      <UpdateNotification />
 
       <AppContent />
 

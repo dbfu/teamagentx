@@ -1,11 +1,6 @@
 # ── Stage 1: 构建阶段 ──
 FROM node:20-alpine AS builder
 
-# 构建参数：版本号 + 各平台下载链接
-ARG VITE_APP_VERSION=v1.2.0
-ARG VITE_DOWNLOAD_URL_MAC=https://releases.teamagentx.com/1.2.0/TeamAgentX-1.2.0-mac.dmg
-ARG VITE_DOWNLOAD_URL_WIN=https://releases.teamagentx.com/1.2.0/TeamAgentX-1.2.0-win.exe
-
 # 设置工作目录
 WORKDIR /app
 
@@ -38,7 +33,11 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 # 从构建阶段复制产物
 COPY --from=builder /app/dist /usr/share/nginx/html
 
+# 复制启动脚本（容器启动时用运行时环境变量重写 update.json）
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
 # 暴露 80 端口
 EXPOSE 80
 
-CMD ["nginx", "-g", "daemon off;"]
+ENTRYPOINT ["/docker-entrypoint.sh"]

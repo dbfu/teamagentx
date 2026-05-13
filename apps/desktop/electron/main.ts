@@ -3,6 +3,7 @@ import { UtilityProcess } from 'electron/main';
 import { execFileSync, execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
+import https from 'node:https';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import os from 'node:os';
@@ -40,9 +41,18 @@ let serverPort: number | null = null;
 let mobileWebServer: http.Server | null = null;
 let mobileWebPort: number | null = null;
 let isQuitting = false;
+let quitRequestedByInstaller = false;
+let shutdownPromise: Promise<void> | null = null;
+let shutdownCompleted = false;
+let downloadedUpdatePath: string | null = null;
 
 const MOBILE_WEB_PORT = 11054;
 const MOBILE_WEB_HOST = '0.0.0.0';
+// 由 vite.config.ts 的 define 在构建时注入，值来自 apps/desktop/.env 的 VITE_UPDATE_CHECK_URL。
+// 配置方法：在 apps/desktop/.env 中设置 VITE_UPDATE_CHECK_URL=https://yoursite.com/update.json
+declare const __UPDATE_CHECK_URL__: string;
+const UPDATE_CHECK_URL: string = (typeof __UPDATE_CHECK_URL__ !== 'undefined' ? __UPDATE_CHECK_URL__ : '') || '';
+const UPDATE_DOWNLOAD_DIR = 'updates';
 const API_PROXY_PREFIXES = [
   '/auth',
   '/agents',
@@ -101,6 +111,26 @@ function findLocalIp(interfaces: NodeJS.Dict<os.NetworkInterfaceInfo[]>): string
 }
 
 type FolderOpenTarget = 'system' | 'vscode' | 'cursor' | 'trae' | 'trae-cn';
+
+type UpdateInfo = {
+  version: string;
+  /** 兼容旧客户端的通用下载链接（fallback） */
+  url: string;
+  /** macOS 安装包下载链接 */
+  macUrl?: string;
+  /** Windows 安装包下载链接 */
+  winUrl?: string;
+  /** 各平台下载链接（新格式） */
+  downloads?: { mac?: string; win?: string };
+  notes?: string;
+  publishedAt?: string;
+};
+
+type DownloadProgress = {
+  percent: number;
+  transferred: number;
+  total: number | null;
+};
 
 const EDITOR_APP_NAMES: Record<Exclude<FolderOpenTarget, 'system'>, string> = {
   vscode: 'Visual Studio Code',
@@ -197,6 +227,248 @@ function resolveExistingAppPath(candidates: string[]): string | null {
 
 function pathExists(targetPath: string): boolean {
   return fs.existsSync(targetPath);
+}
+
+function compareVersions(a: string, b: string): number {
+  const left = a.replace(/^v/i, '').split(/[.-]/).map(part => Number.parseInt(part, 10) || 0);
+  const right = b.replace(/^v/i, '').split(/[.-]/).map(part => Number.parseInt(part, 10) || 0);
+  const length = Math.max(left.length, right.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const diff = (left[index] || 0) - (right[index] || 0);
+    if (diff !== 0) return diff > 0 ? 1 : -1;
+  }
+
+  return 0;
+}
+
+function getStringField(source: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return null;
+}
+
+function normalizeUpdateInfo(payload: unknown): UpdateInfo {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('更新信息格式不正确');
+  }
+
+  const data = payload as Record<string, unknown>;
+  const version = getStringField(data, ['version', 'latestVersion', 'tag_name']);
+
+  // 提取平台专属链接
+  const macUrl = getStringField(data, ['macUrl']) || undefined;
+  const winUrl = getStringField(data, ['winUrl']) || undefined;
+
+  // 提取 downloads 子对象中的链接
+  const downloadsRaw = data['downloads'];
+  let downloadsMac: string | undefined;
+  let downloadsWin: string | undefined;
+  if (downloadsRaw && typeof downloadsRaw === 'object') {
+    const dl = downloadsRaw as Record<string, unknown>;
+    downloadsMac = typeof dl['mac'] === 'string' && dl['mac'] ? dl['mac'] : undefined;
+    downloadsWin = typeof dl['win'] === 'string' && dl['win'] ? dl['win'] : undefined;
+  }
+
+  // 兼容旧格式：通用 url 字段
+  const url = getStringField(data, ['url', 'downloadUrl', 'downloadURL', 'latestDownloadUrl']);
+
+  // 至少要有某个可用的下载链接
+  const hasSomeUrl = url || macUrl || winUrl || downloadsMac || downloadsWin;
+  if (!version || !hasSomeUrl) {
+    throw new Error('更新信息缺少 version 或下载链接');
+  }
+
+  return {
+    version,
+    url: url || macUrl || winUrl || downloadsMac || downloadsWin || '',
+    macUrl: macUrl || downloadsMac,
+    winUrl: winUrl || downloadsWin,
+    downloads: (downloadsMac || downloadsWin) ? { mac: downloadsMac, win: downloadsWin } : undefined,
+    notes: getStringField(data, ['notes', 'releaseNotes', 'body']) || undefined,
+    publishedAt: getStringField(data, ['publishedAt', 'published_at']) || undefined,
+  };
+}
+
+/**
+ * 根据当前运行平台，从 UpdateInfo 中选取对应的下载链接。
+ * 优先级：平台专属链接 > 通用 url 字段。
+ */
+function getPlatformDownloadUrl(update: UpdateInfo): string {
+  if (process.platform === 'darwin') {
+    return update.macUrl || update.downloads?.mac || update.url;
+  }
+  if (process.platform === 'win32') {
+    return update.winUrl || update.downloads?.win || update.url;
+  }
+  // Linux 等其他平台 fallback 到通用链接
+  return update.url;
+}
+
+function requestJson(url: string, redirectCount = 0): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const client = url.startsWith('https:') ? https : http;
+    const request = client.get(url, { headers: { Accept: 'application/json' } }, (response) => {
+      const statusCode = response.statusCode || 0;
+      const location = response.headers.location;
+
+      if (statusCode >= 300 && statusCode < 400 && location) {
+        response.resume();
+        if (redirectCount >= 5) {
+          reject(new Error('更新检查重定向次数过多'));
+          return;
+        }
+        resolve(requestJson(new URL(location, url).toString(), redirectCount + 1));
+        return;
+      }
+
+      if (statusCode < 200 || statusCode >= 300) {
+        response.resume();
+        reject(new Error(`更新检查失败：HTTP ${statusCode}`));
+        return;
+      }
+
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', chunk => {
+        body += chunk;
+      });
+      response.on('end', () => {
+        try {
+          resolve(JSON.parse(body));
+        } catch {
+          reject(new Error('更新信息不是有效 JSON'));
+        }
+      });
+    });
+
+    request.on('error', reject);
+    request.setTimeout(15000, () => {
+      request.destroy(new Error('更新检查超时'));
+    });
+  });
+}
+
+async function checkForUpdate(): Promise<{ hasUpdate: boolean; currentVersion: string; update: UpdateInfo | null; noUrlConfigured?: boolean }> {
+  const currentVersion = app.getVersion();
+
+  if (!UPDATE_CHECK_URL) {
+    writeLog('[Update] 未配置更新检查地址（VITE_UPDATE_CHECK_URL 为空），跳过检查');
+    return { hasUpdate: false, currentVersion, update: null, noUrlConfigured: true };
+  }
+
+  writeLog(`[Update] 开始检查更新，当前版本：${currentVersion}，检查地址：${UPDATE_CHECK_URL}`);
+
+  let payload: unknown;
+  try {
+    payload = await requestJson(UPDATE_CHECK_URL);
+    writeLog(`[Update] 更新接口响应：${JSON.stringify(payload)}`);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    writeLog(`[Update] 更新接口请求失败：${msg}`);
+    throw error;
+  }
+
+  const update = normalizeUpdateInfo(payload);
+  const hasUpdate = compareVersions(update.version, currentVersion) > 0;
+  writeLog(`[Update] 最新版本：${update.version}，hasUpdate：${hasUpdate}`);
+
+  return { hasUpdate, currentVersion, update };
+}
+
+function getDownloadFileName(downloadUrl: string): string {
+  try {
+    const parsed = new URL(downloadUrl);
+    const basename = path.basename(parsed.pathname);
+    if (basename && basename.includes('.')) return basename;
+  } catch {
+    // fall through
+  }
+
+  const ext = process.platform === 'win32' ? '.exe' : process.platform === 'darwin' ? '.dmg' : '.AppImage';
+  return `TeamAgentX-${Date.now()}${ext}`;
+}
+
+function sendUpdateProgress(progress: DownloadProgress): void {
+  mainWindow?.webContents.send('update:download-progress', progress);
+}
+
+function downloadFile(downloadUrl: string, destination: string, redirectCount = 0): Promise<string> {
+  return new Promise((resolve, reject) => {
+    // settled 守卫：防止多个错误路径同时触发导致二次 reject 变成未处理 rejection
+    let settled = false;
+    const safeResolve = (value: string) => { if (!settled) { settled = true; resolve(value); } };
+    const safeReject = (error: Error) => { if (!settled) { settled = true; reject(error); } };
+
+    const client = downloadUrl.startsWith('https:') ? https : http;
+    const request = client.get(downloadUrl, (response) => {
+      const statusCode = response.statusCode || 0;
+      const location = response.headers.location;
+
+      if (statusCode >= 300 && statusCode < 400 && location) {
+        response.resume();
+        if (redirectCount >= 5) {
+          safeReject(new Error('安装包下载重定向次数过多'));
+          return;
+        }
+        resolve(downloadFile(new URL(location, downloadUrl).toString(), destination, redirectCount + 1));
+        return;
+      }
+
+      if (statusCode < 200 || statusCode >= 300) {
+        response.resume();
+        safeReject(new Error(`安装包下载失败：HTTP ${statusCode}`));
+        return;
+      }
+
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      const total = Number.parseInt(String(response.headers['content-length'] || ''), 10);
+      let transferred = 0;
+      const file = fs.createWriteStream(destination);
+
+      // 统一清理：关闭文件流、删除残留文件、触发 reject
+      const cleanup = (error: Error) => {
+        writeLog(`[Update] 下载出错，清理残留文件：${error.message}`);
+        file.destroy();
+        fs.rm(destination, { force: true }, () => safeReject(error));
+      };
+
+      response.on('error', cleanup);
+
+      response.on('data', (chunk: Buffer) => {
+        transferred += chunk.length;
+        sendUpdateProgress({
+          percent: Number.isFinite(total) && total > 0 ? Math.round((transferred / total) * 100) : 0,
+          transferred,
+          total: Number.isFinite(total) && total > 0 ? total : null,
+        });
+      });
+
+      response.pipe(file);
+
+      file.on('finish', () => {
+        file.close(() => safeResolve(destination));
+      });
+      file.on('error', cleanup);
+    });
+
+    request.on('error', (error) => safeReject(error instanceof Error ? error : new Error(String(error))));
+    request.setTimeout(120000, () => {
+      request.destroy(new Error('安装包下载超时'));
+    });
+  });
+}
+
+async function downloadUpdate(update: UpdateInfo): Promise<{ success: true; filePath: string }> {
+  const downloadUrl = getPlatformDownloadUrl(update);
+  const filePath = path.join(app.getPath('userData'), UPDATE_DOWNLOAD_DIR, getDownloadFileName(downloadUrl));
+  downloadedUpdatePath = await downloadFile(downloadUrl, filePath);
+  sendUpdateProgress({ percent: 100, transferred: 1, total: 1 });
+  return { success: true, filePath: downloadedUpdatePath };
 }
 
 function getServerProjectRoot(): string {
@@ -455,6 +727,133 @@ function stopMobileWebServer(): void {
     mobileWebServer.close();
     mobileWebServer = null;
     mobileWebPort = null;
+  }
+}
+
+function stopMobileWebServerAsync(): Promise<void> {
+  if (!mobileWebServer) {
+    mobileWebPort = null;
+    return Promise.resolve();
+  }
+
+  const server = mobileWebServer;
+  mobileWebServer = null;
+  mobileWebPort = null;
+
+  return new Promise((resolve) => {
+    server.close(() => resolve());
+    setTimeout(resolve, 3000);
+  });
+}
+
+function stopServerProcessAsync(): Promise<void> {
+  if (!serverProcess) {
+    serverPort = null;
+    return Promise.resolve();
+  }
+
+  const processToStop = serverProcess;
+  const pid = processToStop.pid;
+  serverProcess = null;
+  serverPort = null;
+
+  return new Promise((resolve) => {
+    processToStop.once('exit', () => {
+      writeLog(`[Shutdown] server process exited (pid=${pid})`);
+      resolve();
+    });
+
+    if (process.platform === 'win32' && pid) {
+      // Windows: taskkill /F /T 强制终止整个进程树（含 agent 产生的所有子进程），
+      // 单纯 kill() 只发信号，无法保证子进程一并退出，NSIS 会检测到残留进程。
+      writeLog(`[Shutdown] taskkill /F /T /PID ${pid}`);
+      try {
+        execFileSync('taskkill', ['/F', '/T', '/PID', String(pid)], { timeout: 5000 });
+      } catch (e) {
+        writeLog(`[Shutdown] taskkill failed: ${e}, fallback to kill()`);
+        processToStop.kill();
+      }
+    } else {
+      processToStop.kill();
+    }
+
+    setTimeout(resolve, 5000);
+  });
+}
+
+async function shutdownBackend(): Promise<void> {
+  if (shutdownPromise) return shutdownPromise;
+
+  shutdownPromise = (async () => {
+    await stopMobileWebServerAsync();
+    await stopServerProcessAsync();
+    shutdownCompleted = true;
+  })();
+
+  return shutdownPromise;
+}
+
+async function requestAppQuit(): Promise<void> {
+  isQuitting = true;
+  await shutdownBackend();
+  app.quit();
+}
+
+async function installDownloadedUpdate(filePath?: string): Promise<{ success: boolean; error?: string }> {
+  const installerPath = filePath || downloadedUpdatePath;
+  if (!installerPath || !fs.existsSync(installerPath)) {
+    return { success: false, error: '安装包不存在，请重新下载' };
+  }
+
+  try {
+    quitRequestedByInstaller = true;
+    isQuitting = true;
+    await shutdownBackend();
+
+    if (process.platform === 'win32') {
+      // 不能先卸载旧版再装新版——新版安装失败会让用户两头落空。
+      // 正确做法：用 /S（静默模式）直接运行新安装包。
+      // NSIS 静默模式跳过所有 UI 页面（含"关闭应用"检测页），直接覆盖文件，
+      // 旧版文件在安装成功后才被替换，安装失败时旧版依然可用。
+      //
+      // 流程：等当前进程退出 → 强杀残留子进程 → /S 静默安装新版
+      const safeInstallerPath = installerPath.replace(/'/g, "''");
+      const scriptLines = [
+        'Start-Sleep -Milliseconds 800',
+        "Stop-Process -Name 'TeamAgentX' -Force -ErrorAction SilentlyContinue",
+        'Start-Sleep -Milliseconds 300',
+        `Start-Process -FilePath '${safeInstallerPath}' -ArgumentList '/S' -Wait`,
+      ];
+
+      const scriptPath = path.join(app.getPath('temp'), 'teamagentx-update.ps1');
+      fs.writeFileSync(scriptPath, scriptLines.join('\r\n'), 'utf8');
+      writeLog(`[Update] 写入静默安装脚本：${scriptPath}`);
+
+      spawn(
+        'powershell',
+        ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', scriptPath],
+        { detached: true, stdio: 'ignore' },
+      ).unref();
+
+      writeLog('[Update] 主进程立即退出，PowerShell 脚本接管静默安装');
+      process.exit(0);
+    }
+
+    // macOS / Linux：直接打开安装包后退出
+    writeLog(`[Update] 打开安装包：${installerPath}`);
+    const errorMessage = await shell.openPath(installerPath);
+    if (errorMessage) {
+      writeLog(`[Update] shell.openPath 失败：${errorMessage}`);
+      quitRequestedByInstaller = false;
+      return { success: false, error: errorMessage };
+    }
+
+    writeLog('[Update] 安装包已启动，退出当前进程');
+    setTimeout(() => process.exit(0), 500);
+    return { success: true };
+  } catch (error) {
+    quitRequestedByInstaller = false;
+    return { success: false, error: String(error) };
   }
 }
 
@@ -778,8 +1177,7 @@ function createTray() {
       {
         label: '退出',
         click: () => {
-          isQuitting = true;
-          app.quit();
+          void requestAppQuit();
         },
       },
     ]),
@@ -889,6 +1287,33 @@ app.whenReady().then(async () => {
   // 获取应用版本号
   ipcMain.handle('get-app-version', () => {
     return app.getVersion();
+  });
+
+  ipcMain.handle('update:check', async () => {
+    try {
+      const data = await checkForUpdate();
+      return { success: true, data };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      writeLog(`[Update] checkForUpdate 异常：${msg}`);
+      return { success: false, error: msg };
+    }
+  });
+
+  ipcMain.handle('update:download', async (_event, update: UpdateInfo) => {
+    try {
+      return await downloadUpdate(update);
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('update:install', async (_event, filePath?: string) => {
+    return installDownloadedUpdate(filePath);
+  });
+
+  ipcMain.handle('update:show-in-folder', (_event, filePath: string) => {
+    shell.showItemInFolder(filePath);
   });
 
   // 窗口控制 IPC handlers (用于 Windows 无边框窗口)
@@ -1022,23 +1447,22 @@ app.on('second-instance', () => {
 app.on('window-all-closed', () => {
   if (!isQuitting) return;
 
-  stopMobileWebServer();
-  if (serverProcess) {
-    serverProcess.kill();
-    serverProcess = null;
+  if (!shutdownCompleted) {
+    void requestAppQuit();
+    return;
   }
-  // Reset serverPort so we know server is not running
-  serverPort = null;
-  app.quit();
+
+  if (process.platform !== 'darwin' || quitRequestedByInstaller) {
+    app.quit();
+  }
 });
 
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
   isQuitting = true;
-  stopMobileWebServer();
-  if (serverProcess) {
-    serverProcess.kill();
-    serverProcess = null;
-    serverPort = null;
+
+  if (!shutdownCompleted) {
+    event.preventDefault();
+    void requestAppQuit();
   }
 });
 

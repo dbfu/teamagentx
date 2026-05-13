@@ -4,7 +4,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { authApi } from '@/lib/auth-api';
 import { cn } from '@/lib/utils';
 import { useAuthStore, useUIStore } from '@/stores';
-import { Check, ExternalLink, Loader2, LogOut, Monitor, Moon, Palette, RefreshCw, Settings, Smartphone, Sun, Volume2, VolumeX, X } from 'lucide-react';
+import { Check, Download, ExternalLink, Loader2, LogOut, Monitor, Moon, Palette, RefreshCw, Settings, Smartphone, Sun, Volume2, VolumeX, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -129,6 +129,7 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
   const [generatedQRData, setGeneratedQRData] = useState<{ serverUrl: string; qrUrl: string } | null>(null)
   const [showQRModal, setShowQRModal] = useState(false)
   const [appVersion, setAppVersion] = useState<string | null>(null)
+  const [checkingUpdate, setCheckingUpdate] = useState(false)
   const [localNetworkIps, setLocalNetworkIps] = useState<string[]>([])
   const [selectedLocalIp, setSelectedLocalIp] = useState<string>('')
   const [refreshingIps, setRefreshingIps] = useState(false)
@@ -260,6 +261,38 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
       setCustomServerUrl(replaceUrlHostname(window.location.origin, localIp))
     }
     setGeneratedQRData(null)
+  }
+
+  const handleCheckUpdate = async () => {
+    const api = window.electronAPI
+    if (!api?.isElectron || !api.checkForUpdates) {
+      toast.error('仅桌面客户端支持检查更新')
+      return
+    }
+
+    setCheckingUpdate(true)
+    try {
+      const result = await api.checkForUpdates()
+      if (!result.success) {
+        toast.error(result.error || '检查更新失败')
+        return
+      }
+
+      if (result.data?.hasUpdate && result.data.update) {
+        window.dispatchEvent(new CustomEvent('teamagentx-update-found', {
+          detail: {
+            currentVersion: result.data.currentVersion,
+            update: result.data.update,
+          },
+        }))
+        toast.success(`发现新版本 ${result.data.update.version}，请查看右上角更新提示`)
+        return
+      }
+
+      toast.success('当前已是最新版本')
+    } finally {
+      setCheckingUpdate(false)
+    }
   }
 
   const themeOptions = [
@@ -576,6 +609,30 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
         )}
 
         {/* 退出登录 */}
+        {window.electronAPI?.isElectron && (
+          <div className="mb-6 rounded-xl border border-border bg-card p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-medium text-muted-foreground">客户端更新</h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  当前版本 {appVersion || '未知'}
+                </p>
+              </div>
+              <Download className="size-4 text-primary" />
+            </div>
+            <button
+              onClick={handleCheckUpdate}
+              disabled={checkingUpdate}
+              className="w-full rounded-lg bg-blue-500 px-4 py-2 text-sm text-white hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <span className="flex items-center justify-center gap-2">
+                {checkingUpdate ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+                {checkingUpdate ? '检查中...' : '检查更新'}
+              </span>
+            </button>
+          </div>
+        )}
+
         <button
           onClick={handleLogout}
           className="w-full rounded-xl border border-border bg-card px-4 py-3 text-sm text-red-500 hover:bg-red-500/10"
