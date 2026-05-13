@@ -45,23 +45,47 @@ enum LlmProviderType {
   custom // 自定义 API 端点
 }
 
+enum LlmModelType {
+  text
+  image
+  video
+  audio
+}
+
+enum ImageGenApiType {
+  sync
+  async
+  auto
+}
+
+enum AgentCapabilityType {
+  image
+  video
+  audio
+}
+
 // LLM 供应商配置
 model LlmProvider {
   id               String          @id @default(uuid())
   name             String          @unique
   type             LlmProviderType @default(custom)
+  modelType        LlmModelType    @default(text)
   apiProtocol      String          @default("anthropic") // 'anthropic' | 'openai'
   apiUrl           String?
   apiKey           String // 明文存储（本地应用）
   model            String
+  imageProvider    String?
+  imageApiType     ImageGenApiType?
   supportsThinking Boolean? // 是否支持思考模式（null 表示未检测）
   isActive         Boolean         @default(true)
   isDefault        Boolean         @default(false)
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
   agents           Agent[]
+  agentCapabilities AgentCapability[] @relation("CapabilityProvider")
 
   @@index([name])
+  @@index([modelType])
 }
 
 // 助手分类
@@ -103,12 +127,31 @@ model Agent {
   triggeredTodos    Todo[] // 该助手触发的待办
   externalChannels  ExternalChannel[] // 作为默认助手的外部频道
   platformConfigs   PlatformConfig[]  // 作为平台全局默认助手
+  capabilities      AgentCapability[]
 
   @@index([name])
   @@index([categoryId])
   @@index([llmProviderId])
   @@index([agentLevel])
   @@index([categoryId, sortOrder]) // 分类内排序查询优化
+}
+
+model AgentCapability {
+  id             String              @id @default(uuid())
+  agentId        String
+  capabilityType AgentCapabilityType
+  enabled        Boolean             @default(false)
+  llmProviderId  String?
+  config         Json?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  agent       Agent        @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  llmProvider LlmProvider? @relation("CapabilityProvider", fields: [llmProviderId], references: [id], onDelete: SetNull)
+
+  @@unique([agentId, capabilityType])
+  @@index([agentId])
+  @@index([llmProviderId])
 }
 
 model ChatRoom {

@@ -12,7 +12,7 @@
     "sync:prisma:prod": "node scripts/sync-prisma-client.cjs",
     "db:studio": "prisma studio",
     "db:seed": "tsx prisma/seed.ts",
-    "build": "tsc",
+    "build": "tsc && node scripts/copy-assets.cjs",
     "electron:entry": "tsc src/electron-entry.ts --outDir dist --moduleResolution node --module NodeNext --target ES2022 --esModuleInterop",
     "verify:electron-deps": "node scripts/verify-electron-deps.cjs",
     "test": "node --import tsx --test --experimental-test-coverage",

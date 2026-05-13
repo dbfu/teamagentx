@@ -67,7 +67,7 @@ export async function createApp(options?: { enableSwagger?: boolean }) {
 
   // 注册静态文件服务（用于图片访问）
   await app.register(staticPlugin, {
-    root: path.join(process.cwd(), 'uploads'),
+    root: uploadService.getStaticRootDir(),
     prefix: '/uploads/',
     maxAge: '7d',
   });

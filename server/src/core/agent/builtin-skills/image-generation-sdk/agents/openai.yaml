@@ -1,0 +1,4 @@
+display_name: Image Generation SDK
+short_description: Generate images through portable HTTP/SDK provider contracts.
+default_prompt: Generate image files from a prompt using a provider-neutral image generation API, saving local files and returning structured JSON.
+

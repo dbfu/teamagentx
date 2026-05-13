@@ -2,7 +2,7 @@ import { Button } from '@/components/ui/button';
 import { llmProviderApi, type CreateLlmProviderRequest, type LlmProvider, type UpdateLlmProviderRequest } from '@/lib/llm-provider-api';
 import { tokenUsageApi, type TokenUsageByProvider } from '@/lib/token-usage-api';
 import { cn } from '@/lib/utils';
-import { Activity, BadgeCheck, Copy, Cpu, Eye, EyeOff, Pencil, Plus, Power, RefreshCw, ServerCog, Sparkles, Star, Trash2, Wifi, WifiOff, X } from 'lucide-react';
+import { Activity, BadgeCheck, Copy, Cpu, Eye, EyeOff, Image, Mic, Pencil, Plus, Power, RefreshCw, ServerCog, Sparkles, Star, Trash2, Video, Wifi, WifiOff, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -17,10 +17,13 @@ export function ModelPage() {
   const [formData, setFormData] = useState<CreateLlmProviderRequest>({
     name: '',
     type: 'custom',
+    modelType: 'text',
     apiProtocol: 'anthropic',
     apiUrl: '',
     apiKey: '',
     model: '',
+    imageProvider: 'openai',
+    imageApiType: 'sync',
     isActive: true,
     isDefault: false,
   })
@@ -65,9 +68,30 @@ export function ModelPage() {
   }
 
   // 是否存在默认模型配置（AI 创建需要依赖默认模型来解析）
-  const hasDefaultProvider = providers.some(p => p.isDefault && p.isActive)
+  const hasDefaultProvider = providers.some(p => p.isDefault && p.isActive && (p.modelType || 'text') === 'text')
 
   const getProviderMeta = (provider: LlmProvider) => {
+    if (provider.modelType === 'image') {
+      return {
+        label: '图片模型',
+        icon: <Image className="size-4 text-sky-600 dark:text-sky-400" />,
+        badge: 'bg-sky-500/10 text-sky-700 dark:text-sky-300',
+      }
+    }
+    if (provider.modelType === 'video') {
+      return {
+        label: '视频模型',
+        icon: <Video className="size-4 text-fuchsia-600 dark:text-fuchsia-400" />,
+        badge: 'bg-fuchsia-500/10 text-fuchsia-700 dark:text-fuchsia-300',
+      }
+    }
+    if (provider.modelType === 'audio') {
+      return {
+        label: '语音模型',
+        icon: <Mic className="size-4 text-amber-600 dark:text-amber-400" />,
+        badge: 'bg-amber-500/10 text-amber-700 dark:text-amber-300',
+      }
+    }
     const protocol = provider.apiProtocol || 'anthropic'
     if (protocol === 'openai') {
       return {
@@ -89,10 +113,13 @@ export function ModelPage() {
     setFormData({
       name: '',
       type: 'custom',
+      modelType: 'text',
       apiProtocol: 'anthropic',
       apiUrl: '',
       apiKey: '',
       model: '',
+      imageProvider: 'openai',
+      imageApiType: 'sync',
       isActive: true,
       isDefault: false,
     })
@@ -105,10 +132,13 @@ export function ModelPage() {
     setFormData({
       name: provider.name,
       type: 'custom',
+      modelType: provider.modelType || 'text',
       apiProtocol: provider.apiProtocol || 'anthropic',
       apiUrl: provider.apiUrl || '',
       apiKey: provider.apiKey,
       model: provider.model,
+      imageProvider: provider.imageProvider || 'openai',
+      imageApiType: provider.imageApiType || 'sync',
       isActive: provider.isActive,
       isDefault: provider.isDefault,
     })
@@ -122,10 +152,13 @@ export function ModelPage() {
     setFormData({
       name: `${provider.name} (副本)`,
       type: 'custom',
+      modelType: provider.modelType || 'text',
       apiProtocol: provider.apiProtocol || 'anthropic',
       apiUrl: provider.apiUrl || '',
       apiKey: provider.apiKey,
       model: provider.model,
+      imageProvider: provider.imageProvider || 'openai',
+      imageApiType: provider.imageApiType || 'sync',
       isActive: true,
       isDefault: false, // 副本不设为默认
     })
@@ -136,6 +169,10 @@ export function ModelPage() {
   const handleSubmit = async () => {
     if (!formData.name || !formData.apiKey || !formData.model || !formData.apiUrl) {
       toast.error('请填写必填字段：名称、API URL、API Key、模型')
+      return
+    }
+    if (formData.modelType === 'image' && (!formData.imageProvider || !formData.imageApiType)) {
+      toast.error('请填写图片模型的供应商类型和调用方式')
       return
     }
 
@@ -236,10 +273,13 @@ export function ModelPage() {
       setFormData({
         name: response.data.name ?? '',
         type: 'custom',
+        modelType: 'text',
         apiProtocol: response.data.apiProtocol ?? 'anthropic',
         apiUrl: response.data.apiUrl ?? '',
         apiKey: response.data.apiKey ?? '',
         model: response.data.model ?? '',
+        imageProvider: 'openai',
+        imageApiType: 'sync',
         isActive: true,
         isDefault: false,
       })
@@ -337,7 +377,13 @@ export function ModelPage() {
                       </div>
                       <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
                         <span className={cn("rounded px-1.5 py-0.5 font-medium", meta.badge)}>{meta.label}</span>
-                        <span>{provider._count?.agents || 0} 个助手</span>
+                        {provider.modelType === 'text' ? (
+                          <span>{provider._count?.agents || 0} 个助手</span>
+                        ) : provider.modelType === 'image' ? (
+                          <span>{provider.imageProvider || 'custom'} / {provider.imageApiType || 'sync'}</span>
+                        ) : (
+                          <span>预留配置</span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -468,6 +514,45 @@ export function ModelPage() {
                   />
                 </div>
 
+                {/* 模型类型 */}
+                <div className="mb-4">
+                  <label className="mb-1.5 block text-sm font-medium text-foreground">
+                    模型类型 <span className="text-red-500">*</span>
+                  </label>
+                  <div className="grid grid-cols-4 gap-2">
+                    {[
+                      { value: 'text', label: '文本', icon: Cpu },
+                      { value: 'image', label: '图片', icon: Image },
+                      { value: 'video', label: '视频', icon: Video },
+                      { value: 'audio', label: '语音', icon: Mic },
+                    ].map(item => {
+                      const Icon = item.icon
+                      return (
+                        <button
+                          key={item.value}
+                          type="button"
+                          onClick={() => setFormData(prev => ({
+                            ...prev,
+                            modelType: item.value as CreateLlmProviderRequest['modelType'],
+                            apiProtocol: item.value === 'text' ? (prev.apiProtocol || 'anthropic') : 'openai',
+                            imageProvider: item.value === 'image' ? (prev.imageProvider || 'openai') : prev.imageProvider,
+                            imageApiType: item.value === 'image' ? (prev.imageApiType || 'sync') : prev.imageApiType,
+                          }))}
+                          className={cn(
+                            'flex h-9 items-center justify-center gap-2 rounded-md border px-3 text-xs font-medium transition-colors',
+                            formData.modelType === item.value
+                              ? 'border-primary bg-primary/10 text-primary'
+                              : 'border-border text-muted-foreground hover:border-primary/50 hover:bg-accent'
+                          )}
+                        >
+                          <Icon className="size-3.5" />
+                          {item.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
                 {/* API URL */}
                 <div className="mb-4">
                   <label className="mb-1.5 block text-sm font-medium text-foreground">
@@ -520,6 +605,7 @@ export function ModelPage() {
                 </div>
 
                 {/* API 协议 */}
+                {formData.modelType === 'text' && (
                 <div className="mb-4">
                   <label className="mb-1.5 block text-sm font-medium text-foreground">
                     API 协议 <span className="text-red-500">*</span>
@@ -554,6 +640,42 @@ export function ModelPage() {
                     Anthropic 协议支持 Claude 特性（thinking、prompt caching），OpenAI 协议兼容更多模型
                   </p>
                 </div>
+                )}
+
+                {formData.modelType === 'image' && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="mb-4">
+                      <label className="mb-1.5 block text-sm font-medium text-foreground">
+                        图片供应商 <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={formData.imageProvider || 'openai'}
+                        onChange={e => setFormData(prev => ({ ...prev, imageProvider: e.target.value }))}
+                        className="ta-input w-full shadow-none"
+                      >
+                        <option value="openai">OpenAI</option>
+                        <option value="apimart">APIMart</option>
+                        <option value="openrouter">OpenRouter</option>
+                        <option value="gemini">Gemini</option>
+                        <option value="custom">Custom</option>
+                      </select>
+                    </div>
+                    <div className="mb-4">
+                      <label className="mb-1.5 block text-sm font-medium text-foreground">
+                        调用方式 <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={formData.imageApiType || 'sync'}
+                        onChange={e => setFormData(prev => ({ ...prev, imageApiType: e.target.value as CreateLlmProviderRequest['imageApiType'] }))}
+                        className="ta-input w-full shadow-none"
+                      >
+                        <option value="sync">同步返回图片</option>
+                        <option value="async">返回任务 ID 后轮询</option>
+                        <option value="auto">自动识别</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
 
                 {/* 默认模型 */}
                 <div className="flex items-center gap-2">
