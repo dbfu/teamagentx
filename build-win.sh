@@ -57,7 +57,7 @@ echo ""
 # Step 2: 部署生产依赖
 log_info "Step 2/4: Deploying production dependencies..."
 cd "$SCRIPT_DIR"
-pnpm --filter=server deploy server/node_modules-prod --prod --frozen-lockfile --force
+pnpm --filter=server deploy server/node_modules-prod --prod --frozen-lockfile --force --legacy
 if [ $? -ne 0 ]; then
   log_error "Production dependency deployment failed"
   exit 1
