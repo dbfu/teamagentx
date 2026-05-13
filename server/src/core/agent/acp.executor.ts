@@ -29,6 +29,7 @@ import {
   buildInstalledSkillsInstructions,
   buildInstalledSkillsSignature,
 } from './skill-instructions.js';
+import { getImageGenerationSkillInstructions } from './image-generation-config.js';
 import type {
   AgentDebugInfo,
   AgentExecResult,
@@ -132,6 +133,7 @@ export class AcpExecutor implements IAgentExecutor {
   readonly agentWorkDir: string | null; // Agent 全局工作目录（用于 Skills）
   readonly chatRoomAgents: ChatRoomAgentInfo[]; // 群内所有助手信息列表
   readonly llmProvider?: LlmProvider; // 可选：由 TeamAgentX 注入到 ACP CLI 的模型供应商
+  readonly imageGenerationProvider?: LlmProvider | null;
 
   // 上次注入群历史的最后消息 ID（用于增量注入）
   private _lastInjectedMessageId?: string;
@@ -195,6 +197,7 @@ export class AcpExecutor implements IAgentExecutor {
     lastInjectedMessageId?: string, // 上次注入群历史的最后消息 ID
     chatRoomAgents?: ChatRoomAgentInfo[], // 群内助手列表
     llmProvider?: LlmProvider,
+    imageGenerationProvider?: LlmProvider | null,
   ) {
     this.name = name;
     this.systemPrompt = systemPrompt;
@@ -210,6 +213,7 @@ export class AcpExecutor implements IAgentExecutor {
     this._lastInjectedMessageId = lastInjectedMessageId;
     this.chatRoomAgents = chatRoomAgents || [];
     this.llmProvider = llmProvider;
+    this.imageGenerationProvider = imageGenerationProvider;
 
     this.workDir = resolveAgentWorkDir({
       chatRoomId,
@@ -229,6 +233,8 @@ export class AcpExecutor implements IAgentExecutor {
     // 在系统提示中注入模型和工作目录信息（一次性注入，避免每次消息重复）
     this.systemPrompt = `${modelInfo}
 ${systemPrompt}
+
+${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
 
 ## 工作目录
 你的工作目录是：${this.workDir}

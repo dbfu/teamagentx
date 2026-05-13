@@ -20,6 +20,7 @@ import {
   buildInstalledSkillsInstructions,
   buildInstalledSkillsSignature,
 } from './skill-instructions.js';
+import { getImageGenerationSkillInstructions } from './image-generation-config.js';
 import type {
   AgentDebugInfo,
   AgentExecResult,
@@ -123,6 +124,7 @@ export class CodexSdkExecutor implements IAgentExecutor {
   readonly agentWorkDir: string | null;
   readonly chatRoomAgents: ChatRoomAgentInfo[];
   readonly llmProvider?: LlmProvider;
+  readonly imageGenerationProvider?: LlmProvider | null;
 
   private _lastInjectedMessageId?: string;
   private systemPrompt: string;
@@ -157,6 +159,7 @@ export class CodexSdkExecutor implements IAgentExecutor {
     lastInjectedMessageId?: string,
     chatRoomAgents?: ChatRoomAgentInfo[],
     llmProvider?: LlmProvider,
+    imageGenerationProvider?: LlmProvider | null,
   ) {
     this.name = name;
     this.chatRoomId = chatRoomId;
@@ -166,6 +169,7 @@ export class CodexSdkExecutor implements IAgentExecutor {
     this._lastInjectedMessageId = lastInjectedMessageId;
     this.chatRoomAgents = chatRoomAgents || [];
     this.llmProvider = llmProvider;
+    this.imageGenerationProvider = imageGenerationProvider;
 
     this.workDir = resolveAgentWorkDir({
       chatRoomId,
@@ -184,6 +188,8 @@ export class CodexSdkExecutor implements IAgentExecutor {
 
     this.systemPrompt = `${modelInfo}
 ${systemPrompt}
+
+${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
 
 ## 工作目录
 你的工作目录是：${this.workDir}
@@ -286,6 +292,7 @@ ${systemPrompt}
     const serverPath = this.getTeamAgentXMcpServerPath();
     const script = `#!/usr/bin/env node
 const endpoint = process.env.TEAMAGENTX_SEND_MESSAGE_ENDPOINT;
+const generateImageEndpoint = process.env.TEAMAGENTX_GENERATE_IMAGE_ENDPOINT;
 const token = process.env.TEAMAGENTX_INTERNAL_TOOL_TOKEN;
 const chatRoomId = process.env.TEAMAGENTX_CHAT_ROOM_ID;
 const sourceAgentId = process.env.TEAMAGENTX_SOURCE_AGENT_ID;
@@ -339,6 +346,49 @@ async function callSendMessage(args) {
   }
 }
 
+async function callGenerateImage(args) {
+  if (!generateImageEndpoint || !token || !sourceAgentId) {
+    return toolResult("当前助手未开启图片生成能力。", {}, true);
+  }
+
+  const prompt = typeof args?.prompt === "string" ? args.prompt.trim() : "";
+  const n = Number.isInteger(args?.n) ? args.n : undefined;
+  if (!prompt) {
+    return toolResult("参数错误：必须提供 prompt。", {}, true);
+  }
+  if (n !== undefined && (n < 1 || n > 4)) {
+    return toolResult("参数错误：n 必须在 1 到 4 之间。", {}, true);
+  }
+
+  try {
+    const response = await fetch(generateImageEndpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer " + token,
+      },
+      body: JSON.stringify({
+        sourceAgentId,
+        prompt,
+        size: typeof args?.size === "string" ? args.size : undefined,
+        n,
+        filename: typeof args?.filename === "string" ? args.filename : undefined,
+        extraJson: args?.extraJson && typeof args.extraJson === "object" ? args.extraJson : undefined,
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.success === false) {
+      return toolResult(payload.error || "图片生成失败。", payload, true);
+    }
+    const result = payload.data || payload;
+    const urls = Array.isArray(result.urls) ? result.urls : [];
+    const files = Array.isArray(result.files) ? result.files : [];
+    return toolResult("图片生成成功：" + (urls.join(", ") || files.join(", ")), result, false);
+  } catch (error) {
+    return toolResult(error instanceof Error ? error.message : "图片生成失败。", {}, true);
+  }
+}
+
 async function handle(request) {
   const { id, method, params } = request;
   if (!method) return;
@@ -361,24 +411,43 @@ async function handle(request) {
   }
 
   if (method === "tools/list") {
+    const tools = [{
+      name: "send_message",
+      description: "向当前 TeamAgentX 群聊中的另一个助手发送公开消息，并触发该助手处理任务。消息会以 @目标助手名 消息内容 的格式显示在群聊中。",
+      inputSchema: {
+        type: "object",
+        properties: {
+          targetAgentId: { type: "string", description: "目标助手 ID。已知 ID 时优先使用。" },
+          targetAgentName: { type: "string", description: "目标助手名称。未提供 ID 时使用。" },
+          content: { type: "string", description: "发送给目标助手的消息内容，不要包含 @目标助手名前缀。" },
+        },
+        required: ["content"],
+        additionalProperties: false,
+      },
+    }];
+    if (generateImageEndpoint) {
+      tools.push({
+        name: "generate_image",
+        description: "通过 TeamAgentX 服务端受控图片模型生成图片。API Key 只在服务端使用。",
+        inputSchema: {
+          type: "object",
+          properties: {
+            prompt: { type: "string", description: "详细图片提示词。应包含主体、风格、构图、色彩、用途等。" },
+            size: { type: "string", description: "图片尺寸或比例，例如 1024x1024、1024x1792、1:1。" },
+            n: { type: "number", description: "生成图片数量，默认 1，最多 4。" },
+            filename: { type: "string", description: "可选文件名，不要包含路径。" },
+            extraJson: { type: "object", description: "供应商特定额外参数。" },
+          },
+          required: ["prompt"],
+          additionalProperties: false,
+        },
+      });
+    }
     write({
       jsonrpc: "2.0",
       id,
       result: {
-        tools: [{
-          name: "send_message",
-          description: "向当前 TeamAgentX 群聊中的另一个助手发送公开消息，并触发该助手处理任务。消息会以 @目标助手名 消息内容 的格式显示在群聊中。",
-          inputSchema: {
-            type: "object",
-            properties: {
-              targetAgentId: { type: "string", description: "目标助手 ID。已知 ID 时优先使用。" },
-              targetAgentName: { type: "string", description: "目标助手名称。未提供 ID 时使用。" },
-              content: { type: "string", description: "发送给目标助手的消息内容，不要包含 @目标助手名前缀。" },
-            },
-            required: ["content"],
-            additionalProperties: false,
-          },
-        }],
+        tools,
       },
     });
     return;
@@ -387,16 +456,21 @@ async function handle(request) {
   if (method === "tools/call") {
     const name = params?.name;
     const args = params?.arguments || {};
-    if (name !== "send_message") {
-      write({
-        jsonrpc: "2.0",
-        id,
-        result: toolResult("未知工具：" + name, {}, true),
-      });
+    if (name === "send_message") {
+      const result = await callSendMessage(args);
+      write({ jsonrpc: "2.0", id, result });
       return;
     }
-    const result = await callSendMessage(args);
-    write({ jsonrpc: "2.0", id, result });
+    if (name === "generate_image") {
+      const result = await callGenerateImage(args);
+      write({ jsonrpc: "2.0", id, result });
+      return;
+    }
+    write({
+      jsonrpc: "2.0",
+      id,
+      result: toolResult("未知工具：" + name, {}, true),
+    });
     return;
   }
 
@@ -628,6 +702,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     const env = this.buildEnv();
     const mcpServerPath = this.ensureTeamAgentXMcpServerFile();
     const sendMessageEndpoint = `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/send-message-to-agent`;
+    const generateImageEndpoint = `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/generate-image`;
     const config = {
       hide_agent_reasoning: false,
       show_raw_agent_reasoning: false,
@@ -645,6 +720,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
             TEAMAGENTX_CHAT_ROOM_ID: this.chatRoomId,
             TEAMAGENTX_SOURCE_AGENT_ID: this.agentId || '',
             TEAMAGENTX_SOURCE_AGENT_NAME: this.name,
+            ...(this.imageGenerationProvider ? { TEAMAGENTX_GENERATE_IMAGE_ENDPOINT: generateImageEndpoint } : {}),
           },
         },
       },

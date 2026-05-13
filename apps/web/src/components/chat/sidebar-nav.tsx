@@ -86,6 +86,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
     acpTool: string
     categoryId: string | null
     llmProviderId: string | null
+    imageGeneration?: { enabled: boolean; llmProviderId: string | null }
   }): Promise<boolean> => {
     const response = await agentApi.create({
       name: data.name,
@@ -96,6 +97,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
       acpTool: data.acpTool || undefined,
       categoryId: data.categoryId || undefined,
       llmProviderId: data.llmProviderId || undefined,
+      imageGeneration: data.imageGeneration,
     })
     if (response.success) {
       setIsCreateAssistantOpen(false)

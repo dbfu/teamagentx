@@ -228,14 +228,14 @@ export const createAgentsTool = tool(
 export const listLlmProvidersTool = tool(
   async () => {
     const providers = await llmProviderService.findAll();
-    const activeProviders = providers.filter((p) => p.isActive);
+    const activeProviders = providers.filter((p) => p.isActive && ((p as any).modelType || 'text') === 'text');
     if (activeProviders.length === 0) {
       return '没有可用的 LLM 供应商。请先在设置中配置 LLM Provider。';
     }
     return activeProviders
       .map(
         (p) =>
-          `ID: ${p.id}\n名称: ${p.name}\n类型: ${p.type}\n模型: ${p.model}\n默认: ${p.isDefault ? '是' : '否'}`,
+          `ID: ${p.id}\n名称: ${p.name}\n类型: ${p.type}\n模型类型: ${(p as any).modelType || 'text'}\n模型: ${p.model}\n默认: ${p.isDefault ? '是' : '否'}`,
       )
       .join('\n\n');
   },

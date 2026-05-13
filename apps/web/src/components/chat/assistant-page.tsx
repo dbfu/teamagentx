@@ -352,6 +352,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     acpTool: string
     categoryId: string | null
     llmProviderId: string | null
+    imageGeneration?: { enabled: boolean; llmProviderId: string | null }
   }): Promise<boolean> => {
     const response = await agentApi.create({
       name: data.name,
@@ -362,6 +363,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
       acpTool: data.acpTool || undefined,
       categoryId: data.categoryId || undefined,
       llmProviderId: data.llmProviderId,
+      imageGeneration: data.imageGeneration,
     })
     if (response.success) {
       await fetchData()
@@ -384,6 +386,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     acpTool: string
     categoryId: string | null
     llmProviderId: string | null
+    imageGeneration?: { enabled: boolean; llmProviderId: string | null }
   }): Promise<boolean> => {
     if (!editingAssistant) return false
     const response = await agentApi.update(editingAssistant.id, {
@@ -395,6 +398,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
       acpTool: data.acpTool || undefined,
       categoryId: data.categoryId,
       llmProviderId: data.llmProviderId,
+      imageGeneration: data.imageGeneration,
     })
     if (response.success) {
       await fetchData()

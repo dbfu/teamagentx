@@ -34,6 +34,7 @@ export interface CreateExecutorOptions {
   sessionDir?: string;  // 快速对话会话工作目录
   customWorkDir?: string;  // 群聊工作目录
   llmProvider?: LlmProvider;  // LLM 供应商配置
+  imageGenerationProvider?: LlmProvider | null; // 默认图片模型配置
   lastInjectedMessageId?: string;  // 上次注入群历史的最后消息 ID（用于增量注入）
   chatRoomRules?: string;  // 群规则/指南
 }
@@ -42,7 +43,7 @@ export interface CreateExecutorOptions {
  * 根据助手类型创建对应的执行器
  */
 export function createExecutor(options: CreateExecutorOptions): IAgentExecutor {
-  const { agent, chatRoomId, injectGroupHistory, chatRoomAgents, sessionDir, customWorkDir, llmProvider, lastInjectedMessageId } = options;
+  const { agent, chatRoomId, injectGroupHistory, chatRoomAgents, sessionDir, customWorkDir, llmProvider, imageGenerationProvider, lastInjectedMessageId } = options;
 
   switch (agent.type) {
     case 'acp':
@@ -60,6 +61,7 @@ export function createExecutor(options: CreateExecutorOptions): IAgentExecutor {
           lastInjectedMessageId,
           chatRoomAgents,
           llmProvider,
+          imageGenerationProvider,
         );
       }
       if (acpTool === 'codex') {
@@ -75,6 +77,7 @@ export function createExecutor(options: CreateExecutorOptions): IAgentExecutor {
           lastInjectedMessageId,
           chatRoomAgents,
           llmProvider,
+          imageGenerationProvider,
         );
       }
       const agentCommand = getAcpToolCommand(acpTool);
@@ -92,6 +95,7 @@ export function createExecutor(options: CreateExecutorOptions): IAgentExecutor {
         lastInjectedMessageId,  // 传递上次注入位置
         chatRoomAgents,  // 传递群内助手列表
         llmProvider,
+        null,
       );
 
     case 'builtin':
@@ -108,6 +112,7 @@ export function createExecutor(options: CreateExecutorOptions): IAgentExecutor {
         lastInjectedMessageId,  // 传递上次注入位置
         chatRoomAgents,
         (llmProvider as any)?.apiProtocol === 'anthropic' ? llmProvider : undefined,
+        imageGenerationProvider,
       );
   }
 }

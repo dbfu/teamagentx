@@ -49,9 +49,35 @@ export interface Agent {
     isActive: boolean
     isDefault: boolean
   } | null
+  capabilities?: AgentCapability[]
   sortOrder: number  // 同分类内的排序顺序
   createdAt: string
   updatedAt: string
+}
+
+export interface AgentCapability {
+  id: string
+  agentId: string
+  capabilityType: 'image' | 'video' | 'audio'
+  enabled: boolean
+  llmProviderId: string | null
+  llmProvider?: {
+    id: string
+    name: string
+    type: string
+    apiUrl: string | null
+    model: string
+    modelType?: 'text' | 'image' | 'video' | 'audio'
+    isActive: boolean
+    isDefault: boolean
+  } | null
+  config?: Record<string, unknown> | null
+}
+
+export interface ImageGenerationCapabilityRequest {
+  enabled: boolean
+  llmProviderId: string | null
+  config?: Record<string, unknown> | null
 }
 
 export interface CreateAgentRequest {
@@ -65,6 +91,7 @@ export interface CreateAgentRequest {
   workDir?: string
   categoryId?: string
   llmProviderId?: string | null
+  imageGeneration?: ImageGenerationCapabilityRequest
   sortOrder?: number
 }
 
@@ -80,6 +107,7 @@ export interface UpdateAgentRequest {
   workDir?: string
   categoryId?: string | null
   llmProviderId?: string | null
+  imageGeneration?: ImageGenerationCapabilityRequest
   sortOrder?: number
 }
 

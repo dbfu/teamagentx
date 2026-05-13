@@ -290,6 +290,7 @@ export function AssistantDetailPage() {
     acpTool: string
     categoryId: string | null
     llmProviderId: string | null
+    imageGeneration?: { enabled: boolean; llmProviderId: string | null }
   }): Promise<boolean> => {
     if (!agent) return false
     const response = await agentApi.update(agent.id, {
@@ -301,6 +302,7 @@ export function AssistantDetailPage() {
       acpTool: data.acpTool || undefined,
       categoryId: data.categoryId,
       llmProviderId: data.llmProviderId,
+      imageGeneration: data.imageGeneration,
     })
     if (response.success) {
       refreshAgent()
