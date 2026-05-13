@@ -85,8 +85,7 @@ function parseExtraJson(value) {
 }
 
 function jsonResult(payload, exitCode) {
-  const stream = payload.success ? process.stdout : process.stderr;
-  stream.write(`${JSON.stringify(payload, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
   process.exit(exitCode);
 }
 

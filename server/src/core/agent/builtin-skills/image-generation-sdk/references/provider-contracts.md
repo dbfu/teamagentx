@@ -85,6 +85,33 @@ node scripts/generate-image.mjs \
   --extra-json '{"resolution":"2k"}'
 ```
 
+## Known Provider Quirks
+
+### apimart (gpt-image-2 / image-2)
+
+- **Submit:** `POST {base}/images/generations`
+- **Submit response:** task id is at `data[0].task_id`
+- **Poll:** `GET {base}/tasks/{task_id}`
+- **Size format:** aspect ratio string, e.g. `"1:1"`, `"16:9"` (not pixels)
+- **Completed status value:** `"completed"`
+- **Image URL path:** `data.result.images[0].url[0]` — note `url` is an **array**, not a string
+
+Example poll response when complete:
+```json
+{
+  "code": 200,
+  "data": {
+    "task_id": "task_01KPQ...",
+    "status": "completed",
+    "result": {
+      "images": [{ "url": ["https://cdn.apimart.ai/xxx.png"] }]
+    }
+  }
+}
+```
+
+Required config: `mode=async`, `baseUrl=https://api.apimart.ai/v1`, size in ratio format.
+
 ## Result JSON
 
 Success:
