@@ -27,6 +27,18 @@ interface UploadResult {
 }
 
 export const uploadService = {
+  getImageUploadDir() {
+    return UPLOAD_DIR;
+  },
+
+  getStaticRootDir() {
+    return path.dirname(UPLOAD_DIR);
+  },
+
+  getImageUrlPrefix() {
+    return '/uploads/images';
+  },
+
   /**
    * 初始化上传目录
    */

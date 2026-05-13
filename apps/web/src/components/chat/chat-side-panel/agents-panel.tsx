@@ -262,34 +262,26 @@ export function AgentsPanel({ chatRoom, agentStatuses, onSelectAgent, onAgentSet
     }
   }
 
-  // 批量添加助手
+  // 添加助手
   const handleAddAgents = async (agentIds: string[]) => {
     setAddingAgentIds(new Set(agentIds))
     try {
-      // 依次添加每个助手（默认注入群历史消息）
-      let successCount = 0
-      let failedCount = 0
       for (const agentId of agentIds) {
         const response = await chatRoomApi.addAgent(chatRoom.id, {
           agentId,
           role: 'MEMBER',
           injectGroupHistory: true,
         })
-        if (response.success) {
-          successCount++
-        } else {
-          failedCount++
+
+        if (!response.success) {
+          toast.error(response.error || '添加失败')
+          return
         }
       }
 
-      if (successCount > 0) {
-        toast.success(`已添加 ${successCount} 个助手`)
-        onAgentSettingsChange?.()
-        setAddDialogOpen(false)
-      }
-      if (failedCount > 0) {
-        toast.error(`${failedCount} 个助手添加失败`)
-      }
+      toast.success(agentIds.length > 1 ? `已添加 ${agentIds.length} 个助手` : '助手已添加')
+      onAgentSettingsChange?.()
+      setAddDialogOpen(false)
     } finally {
       setAddingAgentIds(new Set())
     }

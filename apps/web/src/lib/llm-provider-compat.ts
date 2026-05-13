@@ -15,6 +15,7 @@ export function isProviderCompatibleWithAgent(
   assistantType: 'builtin' | 'acp',
   acpTool: string
 ): boolean {
+  if ((provider.modelType || 'text') !== 'text') return false
   const requiredProtocol = getRequiredProviderProtocol(assistantType, acpTool)
   return !requiredProtocol || provider.apiProtocol === requiredProtocol
 }

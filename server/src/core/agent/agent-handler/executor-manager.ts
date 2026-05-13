@@ -3,6 +3,7 @@ import { chatRoomService } from '../../../modules/chatroom/chatroom.service.js';
 import { llmProviderService } from '../../../modules/llm-provider/llm-provider.service.js';
 import type { IAgentExecutor, AgentDebugInfo, ChatRoomAgentInfo } from '../executor.interface.js';
 import { createExecutor } from '../executor.factory.js';
+import { resolveAgentImageProvider } from '../image-generation.service.js';
 import { clearAgentLog } from '../agent-log.js';
 import { agentService } from '../agent.service.js';
 import { clearExecutorCacheEntries, executorCache, getCacheKey } from './cache.js';
@@ -100,6 +101,7 @@ export async function getExecutor(
       }
     }
   }
+  const imageGenerationProvider = agent.id ? await resolveAgentImageProvider(agent.id) : null;
 
   // Create executor using factory and cache
   const executor = createExecutor({
@@ -111,6 +113,7 @@ export async function getExecutor(
     sessionDir,
     customWorkDir: chatRoomWorkDir,
     llmProvider: llmProvider ?? undefined,
+    imageGenerationProvider,
     lastInjectedMessageId,  // 传递上次注入位置
     chatRoomRules,  // 传递群规则
   });

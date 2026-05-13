@@ -3,13 +3,19 @@ import { LlmProvider, LlmProviderType } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { createLlmClient } from '../../lib/llm-client.js';
 
+export type LlmModelType = 'text' | 'image' | 'video' | 'audio';
+export type ImageGenApiType = 'sync' | 'async' | 'auto';
+
 export type CreateLlmProviderInput = {
   name: string;
   type?: LlmProviderType;
+  modelType?: LlmModelType;
   apiProtocol?: string;
   apiUrl?: string;
   apiKey: string;
   model: string;
+  imageProvider?: string | null;
+  imageApiType?: ImageGenApiType | null;
   isActive?: boolean;
   isDefault?: boolean;
 };
@@ -39,10 +45,12 @@ const PARSE_CONFIG_PROMPT = `你是一个模型配置解析助手。用户会提
 
 export const llmProviderService = {
   async create(data: CreateLlmProviderInput): Promise<LlmProvider> {
+    const modelType = data.modelType || 'text';
+
     // 如果设置为默认，需要先清除其他默认
     if (data.isDefault) {
       await prisma.llmProvider.updateMany({
-        where: { isDefault: true },
+        where: { isDefault: true, modelType },
         data: { isDefault: false },
       });
     }
@@ -52,10 +60,13 @@ export const llmProviderService = {
         id: randomUUID(),
         name: data.name,
         type: data.type || 'custom',
+        modelType,
         apiProtocol: data.apiProtocol || 'anthropic',
         apiUrl: data.apiUrl,
         apiKey: data.apiKey,
         model: data.model,
+        imageProvider: modelType === 'image' ? data.imageProvider : null,
+        imageApiType: modelType === 'image' ? (data.imageApiType || 'sync') : null,
         isActive: data.isActive ?? true,
         isDefault: data.isDefault ?? false,
       },
@@ -73,9 +84,9 @@ export const llmProviderService = {
     });
   },
 
-  async findActive(): Promise<LlmProvider[]> {
+  async findActive(modelType: LlmModelType = 'text'): Promise<LlmProvider[]> {
     return prisma.llmProvider.findMany({
-      where: { isActive: true },
+      where: { isActive: true, modelType },
       orderBy: { createdAt: 'desc' },
     });
   },
@@ -97,17 +108,33 @@ export const llmProviderService = {
     });
   },
 
-  async findDefault(): Promise<LlmProvider | null> {
+  async findDefault(modelType: LlmModelType = 'text'): Promise<LlmProvider | null> {
     return prisma.llmProvider.findFirst({
-      where: { isDefault: true, isActive: true },
+      where: { isDefault: true, isActive: true, modelType },
     });
   },
 
+  async findDefaultImageProvider(): Promise<LlmProvider | null> {
+    return this.findDefault('image');
+  },
+
   async update(id: string, data: UpdateLlmProviderInput): Promise<LlmProvider> {
+    const current = await prisma.llmProvider.findUnique({
+      where: { id },
+      select: { modelType: true, isDefault: true },
+    });
+    if (!current) {
+      return prisma.llmProvider.update({
+        where: { id },
+        data: {},
+      });
+    }
+    const modelType = data.modelType || (current.modelType as LlmModelType);
+
     // 如果设置为默认，需要先清除其他默认
-    if (data.isDefault) {
+    if (data.isDefault || (current.isDefault && data.modelType && data.modelType !== current.modelType)) {
       await prisma.llmProvider.updateMany({
-        where: { isDefault: true, id: { not: id } },
+        where: { isDefault: true, id: { not: id }, modelType },
         data: { isDefault: false },
       });
     }
@@ -116,6 +143,8 @@ export const llmProviderService = {
       where: { id },
       data: {
         ...data,
+        ...(data.modelType && data.modelType !== 'image' ? { imageProvider: null, imageApiType: null } : {}),
+        ...(data.modelType === 'image' && data.imageApiType === undefined ? { imageApiType: 'sync' } : {}),
         updatedAt: new Date(),
       },
     });
@@ -135,9 +164,20 @@ export const llmProviderService = {
   },
 
   async setDefault(id: string): Promise<LlmProvider> {
+    const provider = await prisma.llmProvider.findUnique({
+      where: { id },
+      select: { modelType: true },
+    });
+    if (!provider) {
+      return prisma.llmProvider.update({
+        where: { id },
+        data: {},
+      });
+    }
+
     // 清除其他默认
     await prisma.llmProvider.updateMany({
-      where: { isDefault: true },
+      where: { isDefault: true, modelType: provider.modelType },
       data: { isDefault: false },
     });
 

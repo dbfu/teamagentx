@@ -1,9 +1,16 @@
 import { FastifyInstance } from 'fastify';
 import { createLlmClient } from '../lib/llm-client.js';
 import { llmProviderService } from '../modules/llm-provider/llm-provider.service.js';
+import { clearExecutorCache } from '../core/agent/agent-handler/index.js';
 
 // 所有支持的 LLM 供应商类型 - 仅支持自定义
 const LLM_PROVIDER_TYPES = ['custom'] as const;
+const LLM_MODEL_TYPES = ['text', 'image', 'video', 'audio'] as const;
+const IMAGE_GEN_API_TYPES = ['sync', 'async', 'auto'] as const;
+
+function clearProviderDependentExecutors() {
+  clearExecutorCache();
+}
 
 // JSON Schema for response
 const llmProviderResponseSchema = {
@@ -12,10 +19,13 @@ const llmProviderResponseSchema = {
     id: { type: 'string' },
     name: { type: 'string' },
     type: { type: 'string', enum: LLM_PROVIDER_TYPES },
+    modelType: { type: 'string', enum: LLM_MODEL_TYPES },
     apiProtocol: { type: 'string', enum: ['anthropic', 'openai'] },
     apiUrl: { type: 'string', nullable: true },
     apiKey: { type: 'string' },
     model: { type: 'string' },
+    imageProvider: { type: 'string', nullable: true },
+    imageApiType: { type: 'string', enum: IMAGE_GEN_API_TYPES, nullable: true },
     isActive: { type: 'boolean' },
     isDefault: { type: 'boolean' },
     createdAt: { type: 'string' },
@@ -29,10 +39,13 @@ const llmProviderWithCountResponseSchema = {
     id: { type: 'string' },
     name: { type: 'string' },
     type: { type: 'string', enum: LLM_PROVIDER_TYPES },
+    modelType: { type: 'string', enum: LLM_MODEL_TYPES },
     apiProtocol: { type: 'string', enum: ['anthropic', 'openai'] },
     apiUrl: { type: 'string', nullable: true },
     apiKey: { type: 'string' },
     model: { type: 'string' },
+    imageProvider: { type: 'string', nullable: true },
+    imageApiType: { type: 'string', enum: IMAGE_GEN_API_TYPES, nullable: true },
     isActive: { type: 'boolean' },
     isDefault: { type: 'boolean' },
     createdAt: { type: 'string' },
@@ -52,10 +65,13 @@ const createLlmProviderBodySchema = {
   properties: {
     name: { type: 'string', description: '供应商名称（唯一）' },
     type: { type: 'string', enum: LLM_PROVIDER_TYPES, description: '供应商类型' },
+    modelType: { type: 'string', enum: LLM_MODEL_TYPES, description: '模型类型：文本、图片、视频或语音' },
     apiProtocol: { type: 'string', enum: ['anthropic', 'openai'], description: 'API 协议类型' },
     apiUrl: { type: 'string', description: 'API URL（可选，用于自定义供应商）' },
     apiKey: { type: 'string', description: 'API Key' },
     model: { type: 'string', description: '模型名称' },
+    imageProvider: { type: 'string', description: '图片模型供应商类型，例如 openai、apimart、openrouter、gemini' },
+    imageApiType: { type: 'string', enum: IMAGE_GEN_API_TYPES, description: '图片模型调用方式' },
     isActive: { type: 'boolean', description: '是否激活' },
     isDefault: { type: 'boolean', description: '是否为默认供应商' },
   },
@@ -66,10 +82,13 @@ const updateLlmProviderBodySchema = {
   properties: {
     name: { type: 'string' },
     type: { type: 'string', enum: LLM_PROVIDER_TYPES },
+    modelType: { type: 'string', enum: LLM_MODEL_TYPES },
     apiProtocol: { type: 'string', enum: ['anthropic', 'openai'] },
     apiUrl: { type: 'string' },
     apiKey: { type: 'string' },
     model: { type: 'string' },
+    imageProvider: { type: 'string' },
+    imageApiType: { type: 'string', enum: IMAGE_GEN_API_TYPES },
     isActive: { type: 'boolean' },
     isDefault: { type: 'boolean' },
   },
@@ -84,14 +103,19 @@ const setStatusBodySchema = {
 };
 
 export type LlmProviderType = typeof LLM_PROVIDER_TYPES[number];
+export type LlmModelType = typeof LLM_MODEL_TYPES[number];
+export type ImageGenApiType = typeof IMAGE_GEN_API_TYPES[number];
 
 interface CreateLlmProviderBody {
   name: string;
   type?: LlmProviderType;
+  modelType?: LlmModelType;
   apiProtocol?: 'anthropic' | 'openai';
   apiUrl?: string;
   apiKey: string;
   model: string;
+  imageProvider?: string | null;
+  imageApiType?: ImageGenApiType | null;
   isActive?: boolean;
   isDefault?: boolean;
 }
@@ -99,10 +123,13 @@ interface CreateLlmProviderBody {
 interface UpdateLlmProviderBody {
   name?: string;
   type?: LlmProviderType;
+  modelType?: LlmModelType;
   apiProtocol?: 'anthropic' | 'openai';
   apiUrl?: string;
   apiKey?: string;
   model?: string;
+  imageProvider?: string | null;
+  imageApiType?: ImageGenApiType | null;
   isActive?: boolean;
   isDefault?: boolean;
 }
@@ -161,10 +188,14 @@ export async function llmProviderGateway(app: FastifyInstance) {
                 properties: {
                   id: { type: 'string' },
                   name: { type: 'string' },
-                  type: { type: 'string', enum: ['anthropic', 'openai', 'deepseek', 'custom'] },
+                  type: { type: 'string', enum: LLM_PROVIDER_TYPES },
+                  modelType: { type: 'string', enum: LLM_MODEL_TYPES },
+                  apiProtocol: { type: 'string', enum: ['anthropic', 'openai'] },
                   apiUrl: { type: 'string', nullable: true },
                   apiKey: { type: 'string' },
                   model: { type: 'string' },
+                  imageProvider: { type: 'string', nullable: true },
+                  imageApiType: { type: 'string', enum: IMAGE_GEN_API_TYPES, nullable: true },
                   isActive: { type: 'boolean' },
                   isDefault: { type: 'boolean' },
                   createdAt: { type: 'string' },
@@ -236,19 +267,23 @@ export async function llmProviderGateway(app: FastifyInstance) {
       },
     },
     async (request, reply) => {
-      const { name, type, apiProtocol, apiUrl, apiKey, model, isActive, isDefault } = request.body;
+      const { name, type, modelType, apiProtocol, apiUrl, apiKey, model, imageProvider, imageApiType, isActive, isDefault } = request.body;
 
       try {
         const provider = await llmProviderService.create({
           name,
           type,
+          modelType,
           apiProtocol,
           apiUrl,
           apiKey,
           model,
+          imageProvider,
+          imageApiType,
           isActive,
           isDefault,
         });
+        clearProviderDependentExecutors();
         return reply.code(201).send({ success: true, data: provider });
       } catch (error: any) {
         if (error.code === 'P2002') {
@@ -304,6 +339,7 @@ export async function llmProviderGateway(app: FastifyInstance) {
 
       try {
         const provider = await llmProviderService.update(id, data);
+        clearProviderDependentExecutors();
         return reply.send({ success: true, data: provider });
       } catch (error: any) {
         if (error.code === 'P2025') {
@@ -355,6 +391,7 @@ export async function llmProviderGateway(app: FastifyInstance) {
 
       try {
         const provider = await llmProviderService.delete(id);
+        clearProviderDependentExecutors();
         return reply.send({ success: true, data: provider });
       } catch (error: any) {
         if (error.code === 'P2025') {
@@ -403,6 +440,7 @@ export async function llmProviderGateway(app: FastifyInstance) {
 
       try {
         const provider = await llmProviderService.setActive(id, isActive);
+        clearProviderDependentExecutors();
         return reply.send({ success: true, data: provider });
       } catch (error: any) {
         if (error.code === 'P2025') {
@@ -449,6 +487,7 @@ export async function llmProviderGateway(app: FastifyInstance) {
 
       try {
         const provider = await llmProviderService.setDefault(id);
+        clearProviderDependentExecutors();
         return reply.send({ success: true, data: provider });
       } catch (error: any) {
         if (error.code === 'P2025') {
@@ -504,6 +543,17 @@ export async function llmProviderGateway(app: FastifyInstance) {
         const provider = await llmProviderService.findById(id);
         if (!provider) {
           return reply.code(404).send({ success: false, error: 'LLM 供应商不存在' });
+        }
+
+        if ((provider as any).modelType === 'image') {
+          return reply.send({
+            success: true,
+            data: {
+              connected: true,
+              message: '图片模型配置已保存，实际生成时将验证接口',
+              model: provider.model,
+            },
+          });
         }
 
         const model = createLlmClient(provider, { maxTokens: 10 });

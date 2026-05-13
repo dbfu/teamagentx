@@ -2,16 +2,21 @@ import { getApiBaseUrl } from './config'
 
 // LLM 供应商类型 - 仅支持自定义
 export type LlmProviderType = 'custom'
+export type LlmModelType = 'text' | 'image' | 'video' | 'audio'
+export type ImageGenApiType = 'sync' | 'async' | 'auto'
 
 // LLM 供应商接口
 export interface LlmProvider {
   id: string
   name: string
   type: LlmProviderType
+  modelType: LlmModelType
   apiProtocol: 'anthropic' | 'openai'
   apiUrl: string | null
   apiKey: string
   model: string
+  imageProvider: string | null
+  imageApiType: ImageGenApiType | null
   isActive: boolean
   isDefault: boolean
   createdAt: string
@@ -25,10 +30,13 @@ export interface LlmProvider {
 export interface CreateLlmProviderRequest {
   name: string
   type?: LlmProviderType
+  modelType?: LlmModelType
   apiProtocol?: 'anthropic' | 'openai'
   apiUrl?: string
   apiKey: string
   model: string
+  imageProvider?: string | null
+  imageApiType?: ImageGenApiType | null
   isActive?: boolean
   isDefault?: boolean
 }
@@ -37,10 +45,13 @@ export interface CreateLlmProviderRequest {
 export interface UpdateLlmProviderRequest {
   name?: string
   type?: LlmProviderType
+  modelType?: LlmModelType
   apiProtocol?: 'anthropic' | 'openai'
   apiUrl?: string
   apiKey?: string
   model?: string
+  imageProvider?: string | null
+  imageApiType?: ImageGenApiType | null
   isActive?: boolean
   isDefault?: boolean
 }

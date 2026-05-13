@@ -352,6 +352,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     acpTool: string
     categoryId: string | null
     llmProviderId: string | null
+    imageGeneration?: { enabled: boolean; llmProviderId: string | null }
   }): Promise<boolean> => {
     const response = await agentApi.create({
       name: data.name,
@@ -362,6 +363,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
       acpTool: data.acpTool || undefined,
       categoryId: data.categoryId || undefined,
       llmProviderId: data.llmProviderId,
+      imageGeneration: data.imageGeneration,
     })
     if (response.success) {
       await fetchData()
@@ -384,6 +386,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     acpTool: string
     categoryId: string | null
     llmProviderId: string | null
+    imageGeneration?: { enabled: boolean; llmProviderId: string | null }
   }): Promise<boolean> => {
     if (!editingAssistant) return false
     const response = await agentApi.update(editingAssistant.id, {
@@ -395,6 +398,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
       acpTool: data.acpTool || undefined,
       categoryId: data.categoryId,
       llmProviderId: data.llmProviderId,
+      imageGeneration: data.imageGeneration,
     })
     if (response.success) {
       await fetchData()
@@ -897,66 +901,61 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
 
   return (
     <>
-      <div className="flex flex-1 flex-col bg-background">
+      <div className="flex flex-1 flex-col bg-[var(--surface)]">
         {/* Header */}
         <div
-          className={cn(
-            "flex items-center justify-between border-b border-border px-4 h-14",
-            !isMobile && "px-6"
-          )}
+          className="flex h-[52px] items-center border-b border-border px-4 shrink-0 bg-[var(--surface-raised)]"
           style={window.electronAPI?.isElectron ? { WebkitAppRegion: 'drag' } as React.CSSProperties : {}}
         >
-          <div className="flex items-center gap-3">
-            <Bot className="size-5 text-muted-foreground" />
-            <h2 className="text-xl font-semibold text-foreground">助手</h2>
+          <div className="flex items-center gap-2">
+            <Bot className="size-4 text-primary" />
+            <span className="text-sm font-bold text-foreground">助手</span>
           </div>
           <div
-            className="flex items-center gap-2"
+            className="ml-auto flex items-center gap-1.5"
             style={window.electronAPI?.isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
           >
-            <div className={cn("flex items-center gap-2 rounded-lg bg-muted px-3 py-2", isMobile && "flex-1 max-w-[200px]")}>
-              <Search className="size-4 text-muted-foreground" />
+            <div className={cn("ta-search-shell", isMobile && "flex-1 max-w-[220px]")}>
+              <Search className="size-3.5 text-muted-foreground" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="搜索助手"
-                className={cn("bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none", isMobile ? "w-full" : "w-48")}
+                className={cn("bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none", isMobile ? "w-full" : "w-44")}
               />
             </div>
-            {/* 移动端隐藏创建按钮 */}
             {!isMobile && (
               <>
                 <button
                   onClick={() => setIsCreateCategoryModalOpen(true)}
-                  className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:bg-accent"
+                  className="ta-button-secondary"
                 >
                   <FolderPlus className="size-4" />
-                  <span>创建分类</span>
+                  创建分类
                 </button>
                 <button
                   onClick={() => fetchData()}
                   disabled={loading}
-                  className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50"
+                  className="ta-button-secondary"
                 >
                   <RefreshCw className={`size-4 ${loading ? 'animate-spin' : ''}`} />
-                  <span>刷新</span>
+                  刷新
                 </button>
                 <button
                   onClick={() => setIsCreateModalOpen(true)}
-                  className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm text-white hover:bg-primary/90"
+                  className="ta-button-primary"
                 >
                   <Plus className="size-4" />
-                  <span>创建助手</span>
+                  创建助手
                 </button>
               </>
             )}
-            {/* 移动端只显示刷新按钮 */}
             {isMobile && (
               <button
                 onClick={() => fetchData()}
                 disabled={loading}
-                className="flex size-9 items-center justify-center rounded-lg border border-border text-muted-foreground hover:bg-accent disabled:opacity-50"
+                className="ta-icon-button"
               >
                 <RefreshCw className={`size-4 ${loading ? 'animate-spin' : ''}`} />
               </button>
@@ -966,10 +965,10 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto">
-          <div className={cn("py-6", isMobile ? "px-4" : "px-6")}>
+          <div className={cn(isMobile ? "ta-page-section-mobile" : "ta-page-section")}>
             {loading ? (
               <div className="flex items-center justify-center h-full">
-                <div className="size-8 animate-spin rounded-full border-2 border-muted border-t-primary" />
+                <div className="size-6 animate-spin rounded-full border-2 border-muted border-t-primary" />
               </div>
             ) : assistants.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
@@ -995,7 +994,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
                   >
                     <div className="mb-6">
                       {/* Category header */}
-                      <div className="flex items-center gap-2 mb-3 group">
+                      <div className="group mb-3 flex items-center gap-2">
                         {expandedCategories.has(categoryGroup.category.id) ? (
                           <ChevronDown className="size-4 text-muted-foreground" />
                         ) : (
@@ -1020,18 +1019,18 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
                                   cancelEditCategoryName()
                                 }
                               }}
-                              className="h-6 w-32 rounded border border-primary px-1.5 text-sm focus:border-primary focus:outline-none bg-background"
+                              className="ta-input h-8 w-36 px-2 py-1 text-sm shadow-none"
                               autoFocus
                             />
                             <button
                               onClick={saveCategoryName}
-                              className="p-0.5 text-green-600 hover:bg-green-500/10 rounded"
+                              className="ta-icon-button-compact text-green-600 hover:bg-green-500/10 hover:text-green-600"
                             >
                               <Check className="size-3.5" />
                             </button>
                             <button
                               onClick={cancelEditCategoryName}
-                              className="p-0.5 text-muted-foreground hover:bg-accent rounded"
+                              className="ta-icon-button-compact"
                             >
                               <X className="size-3.5" />
                             </button>
@@ -1049,7 +1048,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
                             {!isMobile && categoryGroup.category.id !== SYSTEM_CATEGORY_ID && (
                               <button
                                 onClick={() => openCreateModalWithCategory(categoryGroup.category.id)}
-                                className="rounded p-1 text-muted-foreground opacity-70 hover:bg-primary/10 hover:text-primary hover:opacity-100"
+                                className="ta-icon-button-compact opacity-70 hover:bg-primary/10 hover:text-primary hover:opacity-100"
                                 title="添加助手"
                               >
                                 <Plus className="size-3.5" />
@@ -1060,14 +1059,14 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
                               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                 <button
                                   onClick={() => startEditCategoryName(categoryGroup.category.id, categoryGroup.category.name)}
-                                  className="p-1 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded"
+                                  className="ta-icon-button-compact hover:bg-primary/10 hover:text-primary"
                                   title="修改名称"
                                 >
                                   <Pencil className="size-3.5" />
                                 </button>
                                 <button
                                   onClick={() => openDeleteCategoryDialog(categoryGroup.category, categoryGroup.agents.length)}
-                                  className="p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded"
+                                  className="ta-icon-button-compact hover:bg-destructive/10 hover:text-destructive"
                                   title="删除分类"
                                 >
                                   <Trash2 className="size-3.5" />
@@ -1149,7 +1148,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
                         {!isMobile && (
                           <button
                             onClick={() => openCreateModalWithCategory(null)}
-                            className="rounded p-1 text-muted-foreground opacity-70 hover:bg-primary/10 hover:text-primary hover:opacity-100"
+                            className="ta-icon-button-compact opacity-70 hover:bg-primary/10 hover:text-primary hover:opacity-100"
                             title="添加助手"
                           >
                             <Plus className="size-3.5" />

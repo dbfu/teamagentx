@@ -235,6 +235,14 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, typingAgent
                   {children}
                 </a>
               ),
+              img: ({ src, alt }) => (
+                <img
+                  src={src}
+                  alt={alt || '图片'}
+                  className="max-w-[120px] max-h-[120px] rounded-lg object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                  onClick={() => src && setViewerImage({ url: src, name: alt || '图片' })}
+                />
+              ),
             }}
           >
             {content}
@@ -256,6 +264,14 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, typingAgent
               <a href={href} target="_blank" rel="noopener noreferrer">
                 {children}
               </a>
+            ),
+            img: ({ src, alt }) => (
+              <img
+                src={src}
+                alt={alt || '图片'}
+                className="max-w-[120px] max-h-[120px] rounded-lg object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                onClick={() => src && setViewerImage({ url: src, name: alt || '图片' })}
+              />
             ),
             span: ({ className, children, ...props }) => {
               // 只处理带有我们唯一标记 class 的 span（由我们的 remark 插件插入）

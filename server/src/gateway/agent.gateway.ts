@@ -24,6 +24,18 @@ function isSystemAgentMutationError(error: unknown): error is Error {
   return error instanceof Error && error.message.startsWith('系统助手不允许');
 }
 
+function isAgentValidationError(error: unknown): error is Error {
+  if (!(error instanceof Error)) return false;
+  return [
+    '目前仅支持',
+    '该 ACP 工具暂不支持',
+    '助手只能绑定文本模型',
+    '图片能力只能绑定图片模型',
+    '开启图片能力时必须选择图片模型',
+    '图片模型供应商不存在',
+  ].some((prefix) => error.message.startsWith(prefix));
+}
+
 // JSON Schema for response
 const agentResponseSchema = {
   type: 'object',
@@ -68,6 +80,26 @@ const agentResponseSchema = {
         isDefault: { type: 'boolean' },
       },
     },
+    capabilities: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: true,
+        properties: {
+          id: { type: 'string' },
+          agentId: { type: 'string' },
+          capabilityType: { type: 'string', enum: ['image', 'video', 'audio'] },
+          enabled: { type: 'boolean' },
+          llmProviderId: { type: 'string', nullable: true },
+          llmProvider: {
+            type: 'object',
+            nullable: true,
+            additionalProperties: true,
+          },
+          config: { type: 'object', nullable: true, additionalProperties: true },
+        },
+      },
+    },
     sortOrder: { type: 'integer' },
     createdAt: { type: 'string' },
     updatedAt: { type: 'string' },
@@ -88,6 +120,15 @@ const createAgentBodySchema = {
     workDir: { type: 'string', description: '工作目录（适用于所有类型）' },
     categoryId: { type: 'string', description: '分类 ID' },
     llmProviderId: { type: 'string', description: 'LLM 供应商 ID（builtin 直接使用；acp 目前仅支持 claude/codex 最小闭环）' },
+    imageGeneration: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        enabled: { type: 'boolean' },
+        llmProviderId: { type: 'string', nullable: true },
+        config: { type: 'object', nullable: true, additionalProperties: true },
+      },
+    },
   },
 };
 
@@ -105,8 +146,23 @@ const updateAgentBodySchema = {
     isActive: { type: 'boolean' },
     categoryId: { type: 'string', description: '分类 ID，设为 null 移除分类' },
     llmProviderId: { type: 'string', description: 'LLM 供应商 ID，设为 null 移除供应商' },
+    imageGeneration: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        enabled: { type: 'boolean' },
+        llmProviderId: { type: 'string', nullable: true },
+        config: { type: 'object', nullable: true, additionalProperties: true },
+      },
+    },
   },
 };
+
+interface ImageGenerationCapabilityBody {
+  enabled?: boolean;
+  llmProviderId?: string | null;
+  config?: Record<string, unknown> | null;
+}
 
 interface CreateAgentBody {
   name: string;
@@ -119,6 +175,7 @@ interface CreateAgentBody {
   workDir?: string;
   categoryId?: string;
   llmProviderId?: string;
+  imageGeneration?: ImageGenerationCapabilityBody;
 }
 
 interface UpdateAgentBody {
@@ -133,6 +190,7 @@ interface UpdateAgentBody {
   isActive?: boolean;
   categoryId?: string | null;
   llmProviderId?: string | null;
+  imageGeneration?: ImageGenerationCapabilityBody;
 }
 
 interface AgentParams {
@@ -343,7 +401,7 @@ export async function agentGateway(app: FastifyInstance) {
       },
     },
     async (request, reply) => {
-      const {name, avatar, avatarColor, description, prompt, type, acpTool, workDir, categoryId, llmProviderId} = request.body;
+      const {name, avatar, avatarColor, description, prompt, type, acpTool, workDir, categoryId, llmProviderId, imageGeneration} = request.body;
 
       try {
         const agent = await agentService.create({
@@ -357,6 +415,7 @@ export async function agentGateway(app: FastifyInstance) {
           workDir,
           categoryId,
           llmProviderId,
+          imageGeneration,
         });
         return reply.code(201).send({ success: true, data: agent });
       } catch (error: any) {
@@ -364,6 +423,11 @@ export async function agentGateway(app: FastifyInstance) {
           return reply
             .code(409)
             .send({ success: false, error: '助手名称已存在' });
+        }
+        if (isAgentValidationError(error)) {
+          return reply
+            .code(400)
+            .send({ success: false, error: error.message });
         }
         throw error;
       }
@@ -427,6 +491,11 @@ export async function agentGateway(app: FastifyInstance) {
           return reply
             .code(404)
             .send({ success: false, error: '助手不存在' });
+        }
+        if (isAgentValidationError(error)) {
+          return reply
+            .code(400)
+            .send({ success: false, error: error.message });
         }
         throw error;
       }

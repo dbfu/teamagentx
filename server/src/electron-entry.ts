@@ -5,6 +5,18 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+function getFilePathFromDatabaseUrl(databaseUrl: string): string {
+  if (databaseUrl.startsWith('file://')) {
+    return fileURLToPath(databaseUrl);
+  }
+
+  if (databaseUrl.startsWith('file:')) {
+    return databaseUrl.slice('file:'.length);
+  }
+
+  return databaseUrl;
+}
+
 async function runMigrations() {
   try {
     const projectRoot = path.resolve(__dirname, '..');
@@ -26,12 +38,13 @@ async function runMigrations() {
     } else {
       // Production mode: Execute migrations directly using libsql
       const fs = await import('fs');
-      const dbPath = process.env.DATABASE_URL?.replace('file:', '') || path.join(projectRoot, 'dev.db');
+      const dbUrl = process.env.DATABASE_URL;
+      const dbPath = dbUrl ? getFilePathFromDatabaseUrl(dbUrl) : path.join(projectRoot, 'dev.db');
       console.log('[electron-entry] Database path:', dbPath);
 
       // Import libsql client
       const { createClient } = await import('@libsql/client');
-      const dbClient = createClient({ url: `file:${dbPath}` });
+      const dbClient = createClient({ url: dbUrl || `file:${dbPath}` });
 
       // Create _prisma_migrations tracking table if not exists
       await dbClient.execute(`

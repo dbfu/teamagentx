@@ -6,8 +6,9 @@ import { llmProviderApi, type LlmProvider } from '@/lib/llm-provider-api';
 import { getProviderProtocolHint, getRequiredProviderProtocol, isProviderCompatibleWithAgent } from '@/lib/llm-provider-compat';
 import { promptOptimizeApi } from '@/lib/prompt-optimize-api';
 import { InstalledSkill, skillApi } from '@/lib/skill-api';
+import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
-import { Check, ChevronDown, ChevronRight, Loader2, Maximize2, Sparkles, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Image, Loader2, Maximize2, Sparkles, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -23,6 +24,10 @@ interface EditAssistantModalProps {
     acpTool: string
     categoryId: string | null
     llmProviderId: string | null
+    imageGeneration?: {
+      enabled: boolean
+      llmProviderId: string | null
+    }
   }) => Promise<boolean>  // 返回是否成功
   assistant: Agent | null
   mode?: 'edit' | 'copy'  // 编辑模式或复制模式
@@ -158,6 +163,8 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
   const [categoryId, setCategoryId] = useState<string>('')
   const [llmProviders, setLlmProviders] = useState<LlmProvider[]>([])
   const [llmProviderId, setLlmProviderId] = useState<string>('')
+  const [imageGenerationEnabled, setImageGenerationEnabled] = useState(false)
+  const [imageProviderId, setImageProviderId] = useState<string>('')
   const [providerSelectionTouched, setProviderSelectionTouched] = useState(false)
   const [resolvedAssistant, setResolvedAssistant] = useState<Agent | null>(assistant)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -204,6 +211,9 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
     ...compatibleLlmProviders,
   ]
   const selectedAcpTool = acpTools.find((tool) => tool.id === acpTool)
+  const imageProviders = llmProviders.filter(
+    (provider) => provider.isActive && provider.modelType === 'image'
+  )
   const canUseLocalAcpConfig = assistantType === 'acp' && selectedAcpTool?.localConfigAvailable
   const providerSelectLabel = selectedProviderInfo
     ? `${selectedProviderInfo.name} · ${selectedProviderInfo.model}`
@@ -331,6 +341,9 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
       setAcpTool(assistantForForm.acpTool || 'claude')
       setCategoryId(assistantForForm.categoryId || '')
       setLlmProviderId(assistantForForm.llmProviderId || assistantForForm.llmProvider?.id || '')
+      const imageCapability = assistantForForm.capabilities?.find((capability) => capability.capabilityType === 'image')
+      setImageGenerationEnabled(Boolean(imageCapability?.enabled))
+      setImageProviderId(imageCapability?.llmProviderId || imageCapability?.llmProvider?.id || '')
       setProviderSelectionTouched(false)
     }
   }, [isOpen, assistantForForm, mode])
@@ -416,6 +429,10 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!name.trim() || isSubmitting) return
+    if (imageGenerationEnabled && !imageProviderId) {
+      toast.error('请先选择图片模型')
+      return
+    }
 
     setIsSubmitting(true)
     try {
@@ -431,6 +448,10 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
         acpTool: assistantType === 'acp' ? acpTool : '',
         categoryId: categoryId || null,
         llmProviderId: submittedLlmProviderId,
+        imageGeneration: {
+          enabled: imageGenerationEnabled,
+          llmProviderId: imageGenerationEnabled ? imageProviderId || null : null,
+        },
       })
 
       if (success) {
@@ -571,6 +592,48 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
                 <p className="mt-1 text-xs text-muted-foreground">
                   {getProviderProtocolHint(assistantType, acpTool)}
                 </p>
+              )}
+            </div>
+
+            {/* Image generation capability */}
+            <div className="mb-4 rounded-lg border border-border p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Image className="size-4 text-muted-foreground" />
+                  <div>
+                    <div className="text-sm font-medium text-foreground">图片生成能力</div>
+                    <div className="text-xs text-muted-foreground">开启后助手可通过受控工具生成图片</div>
+                  </div>
+                </div>
+                <Switch
+                  checked={imageGenerationEnabled}
+                  onCheckedChange={setImageGenerationEnabled}
+                />
+              </div>
+              {imageGenerationEnabled && (
+                <div className="mt-3">
+                  <Select value={imageProviderId || '__none__'} onValueChange={(v) => setImageProviderId(v === '__none__' ? '' : v)}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="选择图片模型" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">选择图片模型</SelectItem>
+                      {imageProviders.map((provider) => (
+                        <SelectItem key={provider.id} value={provider.id}>
+                          <span className="flex items-center gap-2">
+                            {provider.name}
+                            <span className="text-xs text-muted-foreground">{provider.model}</span>
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {imageProviders.length === 0 ? (
+                    <p className="mt-1 text-xs text-muted-foreground">暂无可用图片模型，请先在模型配置中添加图片模型</p>
+                  ) : !imageProviderId ? (
+                    <p className="mt-1 text-xs text-red-500">开启图片能力后必须选择图片模型</p>
+                  ) : null}
+                </div>
               )}
             </div>
 

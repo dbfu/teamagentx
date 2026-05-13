@@ -14,6 +14,7 @@ import type { AttachmentData } from '../../modules/task-queue/task-queue.service
 import { buildAgentLongTermMemorySection } from './agent-long-term-memory.js';
 import { debugLog } from './agent-handler/debug.js';
 import { sendMessageToAgent } from './agent-handler/agent-dispatch.service.js';
+import { generateImageForAgent } from './image-generation.service.js';
 import { getDefaultChatRoomWorkDir } from './work-dir.js';
 import { buildAcpProviderEnv, type AcpProviderInfo } from './acp-provider.adapter.js';
 import {
@@ -23,6 +24,7 @@ import {
   buildInstalledSkillsInstructions,
   buildInstalledSkillsSignature,
 } from './skill-instructions.js';
+import { getImageGenerationSkillInstructions } from './image-generation-config.js';
 import {
   AGENT_CREATOR_AGENT_ID,
   agentCreatorTools,
@@ -283,6 +285,7 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
   readonly agentWorkDir: string | null;
   readonly chatRoomAgents: ChatRoomAgentInfo[];
   readonly llmProvider?: LlmProvider;
+  readonly imageGenerationProvider?: LlmProvider | null;
 
   private _lastInjectedMessageId?: string;
   private systemPrompt: string;
@@ -320,6 +323,7 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
     lastInjectedMessageId?: string,
     chatRoomAgents?: ChatRoomAgentInfo[],
     llmProvider?: LlmProvider,
+    imageGenerationProvider?: LlmProvider | null,
   ) {
     this.name = name;
     this.chatRoomId = chatRoomId;
@@ -329,6 +333,7 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
     this._lastInjectedMessageId = lastInjectedMessageId;
     this.chatRoomAgents = chatRoomAgents || [];
     this.llmProvider = llmProvider;
+    this.imageGenerationProvider = imageGenerationProvider;
     this.workDir = resolveAgentWorkDir({
       chatRoomId,
       sessionDir,
@@ -350,6 +355,8 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
 
     this.systemPrompt = `${modelInfo}
 ${systemPrompt}
+
+${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
 
 ## 工作目录
 你的工作目录是：${this.workDir}
@@ -841,6 +848,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
 
     return [
       'mcp__tax__send_message',
+      ...(this.imageGenerationProvider ? ['mcp__tax__generate_image'] : []),
       ...systemToolNames.map((name) => `mcp__tax__${name}`),
     ];
   }
@@ -892,6 +900,53 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
           },
           { alwaysLoad: true },
         ),
+        ...(this.imageGenerationProvider ? [
+          sdkTool(
+            'generate_image',
+            '通过 TeamAgentX 服务端受控图片模型生成图片。API Key 只在服务端使用。用户明确要求生成图片、海报、插画、产品图或视觉稿时使用。',
+            {
+              prompt: z.string().describe('详细图片提示词。应包含主体、风格、构图、色彩、用途等。'),
+              size: z.string().optional().describe('图片尺寸或比例，例如 1024x1024、1024x1792、1:1。'),
+              n: z.number().int().min(1).max(4).optional().describe('生成图片数量，默认 1，最多 4。'),
+              filename: z.string().optional().describe('可选文件名，不要包含路径。'),
+              extraJson: z.record(z.string(), z.unknown()).optional().describe('供应商特定额外参数。'),
+            },
+            async (args) => {
+              if (!this.agentId) {
+                return {
+                  content: [{ type: 'text', text: '当前助手缺少 agentId，无法生成图片。' }],
+                  isError: true,
+                };
+              }
+
+              try {
+                const result = await generateImageForAgent(this.agentId, {
+                  prompt: args.prompt,
+                  size: args.size,
+                  n: args.n,
+                  filename: args.filename,
+                  extraJson: args.extraJson,
+                });
+                return {
+                  content: [{
+                    type: 'text',
+                    text: `图片生成成功：${result.urls.join(', ') || result.files.join(', ')}`,
+                  }],
+                  structuredContent: result as unknown as Record<string, unknown>,
+                };
+              } catch (error) {
+                return {
+                  content: [{
+                    type: 'text',
+                    text: error instanceof Error ? error.message : '图片生成失败。',
+                  }],
+                  isError: true,
+                };
+              }
+            },
+            { alwaysLoad: true },
+          ),
+        ] : []),
         ...this.buildSystemAssistantMcpTools(),
       ],
     });

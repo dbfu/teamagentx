@@ -1,16 +1,8 @@
 import { Button } from '@/components/ui/button';
-import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-} from '@/components/ui/table';
 import { llmProviderApi, type CreateLlmProviderRequest, type LlmProvider, type UpdateLlmProviderRequest } from '@/lib/llm-provider-api';
 import { tokenUsageApi, type TokenUsageByProvider } from '@/lib/token-usage-api';
 import { cn } from '@/lib/utils';
-import { Check, Copy, Cpu, Eye, EyeOff, Pencil, Plus, Power, RefreshCw, Sparkles, Star, Trash2, Wifi, WifiOff, X } from 'lucide-react';
+import { Activity, BadgeCheck, Copy, Cpu, Eye, EyeOff, Image, Mic, Pencil, Plus, Power, RefreshCw, Search, ServerCog, Sparkles, Star, Trash2, Video, Wifi, WifiOff, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -25,10 +17,13 @@ export function ModelPage() {
   const [formData, setFormData] = useState<CreateLlmProviderRequest>({
     name: '',
     type: 'custom',
+    modelType: 'text',
     apiProtocol: 'anthropic',
     apiUrl: '',
     apiKey: '',
     model: '',
+    imageProvider: 'openai',
+    imageApiType: 'sync',
     isActive: true,
     isDefault: false,
   })
@@ -44,6 +39,10 @@ export function ModelPage() {
   const [isAiDialogOpen, setIsAiDialogOpen] = useState(false)
   const [aiDescription, setAiDescription] = useState('')
   const [isAiParsing, setIsAiParsing] = useState(false)
+
+  // 搜索与筛选
+  const [searchQuery, setSearchQuery] = useState('')
+  const [filterType, setFilterType] = useState<'all' | 'text' | 'image' | 'video' | 'audio'>('all')
 
   // 加载供应商列表
   useEffect(() => {
@@ -73,7 +72,55 @@ export function ModelPage() {
   }
 
   // 是否存在默认模型配置（AI 创建需要依赖默认模型来解析）
-  const hasDefaultProvider = providers.some(p => p.isDefault && p.isActive)
+  const hasDefaultProvider = providers.some(p => p.isDefault && p.isActive && (p.modelType || 'text') === 'text')
+
+  const filteredProviders = providers.filter(p => {
+    if (filterType !== 'all' && (p.modelType || 'text') !== filterType) return false
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase()
+      return p.name.toLowerCase().includes(q)
+        || p.model.toLowerCase().includes(q)
+        || (p.apiUrl || '').toLowerCase().includes(q)
+    }
+    return true
+  })
+
+  const getProviderMeta = (provider: LlmProvider) => {
+    if (provider.modelType === 'image') {
+      return {
+        label: '图片模型',
+        icon: <Image className="size-4 text-sky-600 dark:text-sky-400" />,
+        badge: 'bg-sky-500/10 text-sky-700 dark:text-sky-300',
+      }
+    }
+    if (provider.modelType === 'video') {
+      return {
+        label: '视频模型',
+        icon: <Video className="size-4 text-fuchsia-600 dark:text-fuchsia-400" />,
+        badge: 'bg-fuchsia-500/10 text-fuchsia-700 dark:text-fuchsia-300',
+      }
+    }
+    if (provider.modelType === 'audio') {
+      return {
+        label: '语音模型',
+        icon: <Mic className="size-4 text-amber-600 dark:text-amber-400" />,
+        badge: 'bg-amber-500/10 text-amber-700 dark:text-amber-300',
+      }
+    }
+    const protocol = provider.apiProtocol || 'anthropic'
+    if (protocol === 'openai') {
+      return {
+        label: 'OpenAI',
+        icon: <ServerCog className="size-4 text-emerald-600 dark:text-emerald-400" />,
+        badge: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+      }
+    }
+    return {
+      label: 'Anthropic',
+      icon: <Cpu className="size-4 text-primary" />,
+      badge: 'bg-primary/10 text-primary',
+    }
+  }
 
   // 打开创建对话框
   const openCreateDialog = () => {
@@ -81,10 +128,13 @@ export function ModelPage() {
     setFormData({
       name: '',
       type: 'custom',
+      modelType: 'text',
       apiProtocol: 'anthropic',
       apiUrl: '',
       apiKey: '',
       model: '',
+      imageProvider: 'openai',
+      imageApiType: 'sync',
       isActive: true,
       isDefault: false,
     })
@@ -97,10 +147,13 @@ export function ModelPage() {
     setFormData({
       name: provider.name,
       type: 'custom',
+      modelType: provider.modelType || 'text',
       apiProtocol: provider.apiProtocol || 'anthropic',
       apiUrl: provider.apiUrl || '',
       apiKey: provider.apiKey,
       model: provider.model,
+      imageProvider: provider.imageProvider || 'openai',
+      imageApiType: provider.imageApiType || 'sync',
       isActive: provider.isActive,
       isDefault: provider.isDefault,
     })
@@ -114,10 +167,13 @@ export function ModelPage() {
     setFormData({
       name: `${provider.name} (副本)`,
       type: 'custom',
+      modelType: provider.modelType || 'text',
       apiProtocol: provider.apiProtocol || 'anthropic',
       apiUrl: provider.apiUrl || '',
       apiKey: provider.apiKey,
       model: provider.model,
+      imageProvider: provider.imageProvider || 'openai',
+      imageApiType: provider.imageApiType || 'sync',
       isActive: true,
       isDefault: false, // 副本不设为默认
     })
@@ -128,6 +184,10 @@ export function ModelPage() {
   const handleSubmit = async () => {
     if (!formData.name || !formData.apiKey || !formData.model || !formData.apiUrl) {
       toast.error('请填写必填字段：名称、API URL、API Key、模型')
+      return
+    }
+    if (formData.modelType === 'image' && (!formData.imageProvider || !formData.imageApiType)) {
+      toast.error('请填写图片模型的供应商类型和调用方式')
       return
     }
 
@@ -228,10 +288,13 @@ export function ModelPage() {
       setFormData({
         name: response.data.name ?? '',
         type: 'custom',
+        modelType: 'text',
         apiProtocol: response.data.apiProtocol ?? 'anthropic',
         apiUrl: response.data.apiUrl ?? '',
         apiKey: response.data.apiKey ?? '',
         model: response.data.model ?? '',
+        imageProvider: 'openai',
+        imageApiType: 'sync',
         isActive: true,
         isDefault: false,
       })
@@ -251,35 +314,55 @@ export function ModelPage() {
   }
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden bg-background">
+    <div className="flex flex-1 flex-col overflow-hidden bg-[var(--surface)]">
       {/* 头部 */}
       <div
-        className="flex items-center justify-between px-6 h-14 border-b border-border"
+        className="flex h-[52px] items-center border-b border-border px-4 shrink-0 bg-[var(--surface-raised)]"
         style={window.electronAPI?.isElectron ? { WebkitAppRegion: 'drag' } as React.CSSProperties : {}}
       >
-        <div className="flex items-center gap-3">
-          <Cpu className="size-5 text-muted-foreground" />
-          <h2 className="text-xl font-semibold text-foreground">模型管理</h2>
+        <div className="flex items-center gap-2">
+          <Cpu className="size-4 text-primary" />
+          <span className="text-sm font-bold text-foreground">模型管理</span>
+          {!isLoading && (
+            <span className="text-xs text-muted-foreground">{filteredProviders.length}/{providers.length}</span>
+          )}
         </div>
         <div
-          className="flex items-center gap-2"
+          className="ml-auto flex items-center gap-1.5"
           style={window.electronAPI?.isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
         >
+          <div className="ta-search-shell h-8">
+            <Search className="size-3.5 text-muted-foreground" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="搜索模型名称、API..."
+              className="w-40 bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+            />
+            {searchQuery && (
+              <button onClick={() => setSearchQuery('')} className="text-muted-foreground hover:text-foreground">
+                <X className="size-3.5" />
+              </button>
+            )}
+          </div>
           <Button
             variant="outline"
+            size="sm"
             onClick={loadProviders}
             disabled={isLoading}
+            className="h-8"
           >
-            <RefreshCw className={cn('size-4', isLoading && 'animate-spin')} />
+            <RefreshCw className={cn('size-3.5', isLoading && 'animate-spin')} />
             刷新
           </Button>
-          <Button className="bg-primary text-white hover:bg-primary/90" onClick={openCreateDialog}>
-            <Plus className="size-4" />
+          <Button size="sm" className="h-8 bg-primary text-primary-foreground hover:bg-primary/90" onClick={openCreateDialog}>
+            <Plus className="size-3.5" />
             新增模型
           </Button>
           {hasDefaultProvider && (
-            <Button variant="outline" onClick={openAiDialog}>
-              <Sparkles className="size-4" />
+            <Button variant="outline" size="sm" className="h-8" onClick={openAiDialog}>
+              <Sparkles className="size-3.5" />
               AI创建
             </Button>
           )}
@@ -287,141 +370,187 @@ export function ModelPage() {
       </div>
 
       {/* 供应商列表 */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto">
         {isLoading ? (
         <div className="flex items-center justify-center h-full text-muted-foreground">加载中...</div>
       ) : providers.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+        <div className="ta-page-section flex h-full flex-col items-center justify-center text-muted-foreground">
           <Cpu className="size-12 mb-2 opacity-50" />
           <p>暂无模型配置</p>
           <p className="text-sm mt-1">请创建一个模型以使用原生助手</p>
         </div>
       ) : (
-        <div className="rounded-lg border border-border bg-card">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>名称</TableHead>
-                <TableHead>供应商</TableHead>
-                <TableHead>模型</TableHead>
-                <TableHead>Token 使用</TableHead>
-                <TableHead>关联助手</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead className="w-40">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {providers.map(provider => (
-                <TableRow key={provider.id}>
-                  <TableCell className="font-medium">
-                    <div className="flex items-center gap-2">
-                      {provider.name}
-                      {provider.isDefault && (
-                        <span className="flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary">
-                          <Star className="size-3" />
-                          默认
-                        </span>
-                      )}
+        <div className="ta-page-section">
+          {/* 类型筛选 */}
+          <div className="mb-3 flex items-center gap-1.5">
+            {([
+              { value: 'all' as const, label: '全部' },
+              { value: 'text' as const, label: '文本' },
+              { value: 'image' as const, label: '图片' },
+              { value: 'video' as const, label: '视频' },
+              { value: 'audio' as const, label: '语音' },
+            ] as const).map(item => {
+              const count = item.value === 'all'
+                ? providers.length
+                : providers.filter(p => (p.modelType || 'text') === item.value).length
+              return (
+                <button
+                  key={item.value}
+                  onClick={() => setFilterType(item.value)}
+                  className={cn(
+                    'inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors',
+                    filterType === item.value
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                  )}
+                >
+                  {item.label}
+                  <span className={cn(
+                    'rounded-sm px-1 py-0.5 text-[10px] leading-none',
+                    filterType === item.value
+                      ? 'bg-primary-foreground/20 text-primary-foreground'
+                      : 'bg-muted text-muted-foreground'
+                  )}>{count}</span>
+                </button>
+              )
+            })}
+          </div>
+          {filteredProviders.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+              <Search className="size-10 mb-2 opacity-40" />
+              <p className="text-sm">未找到匹配的模型</p>
+            </div>
+          ) : (
+          <div className="overflow-x-auto rounded-md border border-border bg-[var(--surface-raised)]">
+            <div className="grid min-w-[820px] grid-cols-[minmax(220px,1.35fr)_minmax(180px,1fr)_120px_120px_176px] border-b border-border bg-[var(--surface-subtle)] px-3 py-2 text-xs font-medium text-muted-foreground">
+              <div>模型配置</div>
+              <div>模型</div>
+              <div>Token</div>
+              <div>状态</div>
+              <div className="text-right">操作</div>
+            </div>
+            {filteredProviders.map(provider => {
+              const usage = getTokenUsage(provider.id)
+              const meta = getProviderMeta(provider)
+              return (
+                <div key={provider.id} className="grid min-w-[820px] grid-cols-[minmax(220px,1.35fr)_minmax(180px,1fr)_120px_120px_176px] items-center border-b border-border/60 px-3 py-2.5 last:border-b-0 hover:bg-accent/60">
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <div className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-background">
+                      {meta.icon}
                     </div>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">自定义</TableCell>
-                  <TableCell className="text-muted-foreground">{provider.model}</TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {(() => {
-                      const usage = getTokenUsage(provider.id)
-                      if (!usage || usage.totalTokens === 0) {
-                        return <span className="text-muted-foreground/60">-</span>
-                      }
-                      return (
-                        <div className="flex flex-col gap-0.5">
-                          <span className="text-xs font-medium text-foreground">
-                            {tokenUsageApi.formatTokens(usage.totalTokens)}
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <span className="truncate text-sm font-medium text-foreground">{provider.name}</span>
+                        {provider.isDefault && (
+                          <span className="inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
+                            <Star className="size-3" />
+                            默认
                           </span>
-                          <span className="text-xs text-muted-foreground/60">
-                            {usage.executionCount} 次执行
-                          </span>
+                        )}
+                      </div>
+                      <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <span className={cn("rounded px-1.5 py-0.5 font-medium", meta.badge)}>{meta.label}</span>
+                        {provider.modelType === 'text' ? (
+                          <span>{provider._count?.agents || 0} 个助手</span>
+                        ) : provider.modelType === 'image' ? (
+                          <span>{provider.imageProvider || 'custom'} / {provider.imageApiType || 'sync'}</span>
+                        ) : (
+                          <span>预留配置</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="min-w-0 text-xs text-muted-foreground">
+                    <div className="truncate font-mono text-foreground">{provider.model}</div>
+                    <div className="truncate">{provider.apiUrl || '未设置 API URL'}</div>
+                  </div>
+                  <div className="text-xs">
+                    {usage && usage.totalTokens > 0 ? (
+                      <div className="flex items-center gap-1.5 text-foreground">
+                        <Activity className="size-3.5 text-muted-foreground" />
+                        <div>
+                          <div className="font-medium">{tokenUsageApi.formatTokens(usage.totalTokens)}</div>
+                          <div className="text-muted-foreground/70">{usage.executionCount} 次</div>
                         </div>
-                      )
-                    })()}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {provider._count?.agents || 0}
-                  </TableCell>
-                  <TableCell>
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground/60">暂无</span>
+                    )}
+                  </div>
+                  <div>
                     <span className={cn(
-                      'inline-flex items-center gap-1 rounded px-2 py-1 text-xs',
+                      'inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium',
                       provider.isActive
                         ? 'bg-green-500/10 text-green-600 dark:text-green-400'
                         : 'bg-muted text-muted-foreground'
                     )}>
-                      {provider.isActive ? <Check className="size-3" /> : <Power className="size-3" />}
-                      {provider.isActive ? '激活' : '停用'}
+                      {provider.isActive ? <BadgeCheck className="size-3" /> : <Power className="size-3" />}
+                      {provider.isActive ? '已启用' : '已停用'}
                     </span>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1">
+                  </div>
+                  <div className="flex items-center justify-end gap-0.5">
                       <button
                         onClick={() => handleTestConnection(provider)}
                         disabled={testingProvider === provider.id}
                         className={cn(
-                          'flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground',
+                          'inline-flex size-7 items-center justify-center rounded-[calc(var(--radius-control)-0.125rem)] text-muted-foreground transition-colors hover:bg-[var(--surface-subtle)] hover:text-foreground',
                           testingProvider === provider.id && 'opacity-50 cursor-wait'
                         )}
                         title={testResults[provider.id]?.connected ? '连接正常' : '测试连接'}
                       >
                         {testingProvider === provider.id ? (
-                          <RefreshCw className="size-4 animate-spin" />
+                          <RefreshCw className="size-3.5 animate-spin" />
                         ) : testResults[provider.id]?.connected ? (
-                          <Wifi className="size-4 text-green-500" />
+                          <Wifi className="size-3.5 text-green-500" />
                         ) : testResults[provider.id] ? (
-                          <WifiOff className="size-4 text-red-500" />
+                          <WifiOff className="size-3.5 text-red-500" />
                         ) : (
-                          <Wifi className="size-4" />
+                          <Wifi className="size-3.5" />
                         )}
                       </button>
                       <button
                         onClick={() => openEditDialog(provider)}
-                        className="flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+                        className="inline-flex size-7 items-center justify-center rounded-[calc(var(--radius-control)-0.125rem)] text-muted-foreground transition-colors hover:bg-[var(--surface-subtle)] hover:text-foreground"
                         title="编辑"
                       >
-                        <Pencil className="size-4" />
+                        <Pencil className="size-3.5" />
                       </button>
                       <button
                         onClick={() => handleCopy(provider)}
-                        className="flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+                        className="inline-flex size-7 items-center justify-center rounded-[calc(var(--radius-control)-0.125rem)] text-muted-foreground transition-colors hover:bg-[var(--surface-subtle)] hover:text-foreground"
                         title="复制配置"
                       >
-                        <Copy className="size-4" />
+                        <Copy className="size-3.5" />
                       </button>
                       {!provider.isDefault && provider.isActive && (
                         <button
                           onClick={() => handleSetDefault(provider)}
-                          className="flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-primary"
+                          className="inline-flex size-7 items-center justify-center rounded-[calc(var(--radius-control)-0.125rem)] text-muted-foreground transition-colors hover:bg-[var(--surface-subtle)] hover:text-primary"
                           title="设为默认"
                         >
-                          <Star className="size-4" />
+                          <Star className="size-3.5" />
                         </button>
                       )}
                       <button
                         onClick={() => handleToggleActive(provider)}
-                        className="flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+                        className="inline-flex size-7 items-center justify-center rounded-[calc(var(--radius-control)-0.125rem)] text-muted-foreground transition-colors hover:bg-[var(--surface-subtle)] hover:text-foreground"
                         title={provider.isActive ? '停用' : '激活'}
                       >
-                        <Power className="size-4" />
+                        <Power className="size-3.5" />
                       </button>
                       <button
                         onClick={() => handleDelete(provider)}
-                        className="flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                        className="inline-flex size-7 items-center justify-center rounded-[calc(var(--radius-control)-0.125rem)] text-destructive/70 transition-colors hover:bg-destructive/10 hover:text-destructive"
                         title="删除"
                       >
-                        <Trash2 className="size-4" />
+                        <Trash2 className="size-3.5" />
                       </button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          )}
         </div>
       )}
       </div>
@@ -429,7 +558,7 @@ export function ModelPage() {
       {/* 创建/编辑对话框 */}
       {!isDialogOpen ? null : (
         <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 py-12">
-          <div className="w-[800px] shrink-0 rounded-2xl bg-background shadow-xl">
+          <div className="w-[800px] shrink-0 rounded-md bg-background shadow-xl">
             {/* Header */}
             <div className="flex items-center justify-between border-b border-border px-6 py-4">
               <h2 className="text-lg font-semibold text-foreground">
@@ -437,7 +566,7 @@ export function ModelPage() {
               </h2>
               <button
                 onClick={() => setIsDialogOpen(false)}
-                className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                className="ta-icon-button-compact"
               >
                 <X className="size-5" />
               </button>
@@ -455,8 +584,45 @@ export function ModelPage() {
                     type="text"
                     value={formData.name}
                     onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                    className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+                    className="ta-input w-full shadow-none"
                   />
+                </div>
+
+                {/* 模型类型 */}
+                <div className="mb-4">
+                  <label className="mb-1.5 block text-sm font-medium text-foreground">
+                    模型类型 <span className="text-red-500">*</span>
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { value: 'text', label: '文本', icon: Cpu },
+                      { value: 'image', label: '图片', icon: Image },
+                    ].map(item => {
+                      const Icon = item.icon
+                      return (
+                        <button
+                          key={item.value}
+                          type="button"
+                          onClick={() => setFormData(prev => ({
+                            ...prev,
+                            modelType: item.value as CreateLlmProviderRequest['modelType'],
+                            apiProtocol: item.value === 'text' ? (prev.apiProtocol || 'anthropic') : 'openai',
+                            imageProvider: item.value === 'image' ? (prev.imageProvider || 'openai') : prev.imageProvider,
+                            imageApiType: item.value === 'image' ? (prev.imageApiType || 'sync') : prev.imageApiType,
+                          }))}
+                          className={cn(
+                            'flex h-9 items-center justify-center gap-2 rounded-md border px-3 text-xs font-medium transition-colors',
+                            formData.modelType === item.value
+                              ? 'border-primary bg-primary/10 text-primary'
+                              : 'border-border text-muted-foreground hover:border-primary/50 hover:bg-accent'
+                          )}
+                        >
+                          <Icon className="size-3.5" />
+                          {item.label}
+                        </button>
+                      )
+                    })}
+                  </div>
                 </div>
 
                 {/* API URL */}
@@ -469,7 +635,7 @@ export function ModelPage() {
                     value={formData.apiUrl}
                     onChange={e => setFormData(prev => ({ ...prev, apiUrl: e.target.value }))}
                     placeholder="https://api.anthropic.com"
-                    className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+                    className="ta-input w-full shadow-none"
                   />
                 </div>
 
@@ -484,12 +650,12 @@ export function ModelPage() {
                       value={formData.apiKey}
                       onChange={e => setFormData(prev => ({ ...prev, apiKey: e.target.value }))}
                       placeholder="sk-..."
-                      className="flex-1 rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+                      className="ta-input flex-1 shadow-none"
                     />
                     <button
                       type="button"
                       onClick={() => setShowApiKey(!showApiKey)}
-                      className="flex size-9 items-center justify-center rounded-lg border border-input text-muted-foreground hover:bg-accent"
+                      className="ta-icon-button"
                       title={showApiKey ? '隐藏密码' : '显示密码'}
                     >
                       {showApiKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
@@ -506,11 +672,12 @@ export function ModelPage() {
                     type="text"
                     value={formData.model}
                     onChange={e => setFormData(prev => ({ ...prev, model: e.target.value }))}
-                    className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+                    className="ta-input w-full shadow-none"
                   />
                 </div>
 
                 {/* API 协议 */}
+                {formData.modelType === 'text' && (
                 <div className="mb-4">
                   <label className="mb-1.5 block text-sm font-medium text-foreground">
                     API 协议 <span className="text-red-500">*</span>
@@ -520,7 +687,7 @@ export function ModelPage() {
                       type="button"
                       onClick={() => setFormData(prev => ({ ...prev, apiProtocol: 'anthropic' }))}
                       className={cn(
-                        'flex items-center gap-2 rounded-lg border px-4 py-2 text-sm transition-colors',
+                        'flex h-8 items-center gap-2 rounded-md border px-3 text-xs font-medium transition-colors',
                         formData.apiProtocol === 'anthropic'
                           ? 'border-primary bg-primary/10 text-primary'
                           : 'border-border text-muted-foreground hover:border-primary/50 hover:bg-accent'
@@ -532,7 +699,7 @@ export function ModelPage() {
                       type="button"
                       onClick={() => setFormData(prev => ({ ...prev, apiProtocol: 'openai' }))}
                       className={cn(
-                        'flex items-center gap-2 rounded-lg border px-4 py-2 text-sm transition-colors',
+                        'flex h-8 items-center gap-2 rounded-md border px-3 text-xs font-medium transition-colors',
                         formData.apiProtocol === 'openai'
                           ? 'border-primary bg-primary/10 text-primary'
                           : 'border-border text-muted-foreground hover:border-primary/50 hover:bg-accent'
@@ -545,6 +712,42 @@ export function ModelPage() {
                     Anthropic 协议支持 Claude 特性（thinking、prompt caching），OpenAI 协议兼容更多模型
                   </p>
                 </div>
+                )}
+
+                {formData.modelType === 'image' && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="mb-4">
+                      <label className="mb-1.5 block text-sm font-medium text-foreground">
+                        图片供应商 <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={formData.imageProvider || 'openai'}
+                        onChange={e => setFormData(prev => ({ ...prev, imageProvider: e.target.value }))}
+                        className="ta-input w-full shadow-none"
+                      >
+                        <option value="openai">OpenAI</option>
+                        <option value="apimart">APIMart</option>
+                        <option value="openrouter">OpenRouter</option>
+                        <option value="gemini">Gemini</option>
+                        <option value="custom">Custom</option>
+                      </select>
+                    </div>
+                    <div className="mb-4">
+                      <label className="mb-1.5 block text-sm font-medium text-foreground">
+                        调用方式 <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={formData.imageApiType || 'sync'}
+                        onChange={e => setFormData(prev => ({ ...prev, imageApiType: e.target.value as CreateLlmProviderRequest['imageApiType'] }))}
+                        className="ta-input w-full shadow-none"
+                      >
+                        <option value="sync">同步返回图片</option>
+                        <option value="async">返回任务 ID 后轮询</option>
+                        <option value="auto">自动识别</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
 
                 {/* 默认模型 */}
                 <div className="flex items-center gap-2">
@@ -566,13 +769,13 @@ export function ModelPage() {
                 <button
                   type="button"
                   onClick={() => setIsDialogOpen(false)}
-                  className="rounded-lg border border-input px-4 py-2 text-sm text-muted-foreground hover:bg-accent"
+                  className="ta-button-secondary"
                 >
                   取消
                 </button>
                 <button
                   type="submit"
-                  className="rounded-lg bg-primary px-4 py-2 text-sm text-white hover:bg-primary/90"
+                  className="ta-button-primary"
                 >
                   {editingProvider ? '保存' : '创建'}
                 </button>
@@ -585,7 +788,7 @@ export function ModelPage() {
       {/* AI 创建对话框 */}
       {!isAiDialogOpen ? null : (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-[500px] rounded-2xl bg-background shadow-xl">
+          <div className="w-[500px] rounded-md bg-background shadow-xl">
             {/* Header */}
             <div className="flex items-center justify-between border-b border-border px-6 py-4">
               <div className="flex items-center gap-2">
@@ -594,7 +797,7 @@ export function ModelPage() {
               </div>
               <button
                 onClick={() => setIsAiDialogOpen(false)}
-                className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                className="ta-icon-button-compact"
               >
                 <X className="size-5" />
               </button>
@@ -605,7 +808,7 @@ export function ModelPage() {
               <p className="mb-4 text-sm text-muted-foreground">
                 输入您的 API 配置信息描述，AI 会自动解析并填充表单。例如：
               </p>
-              <div className="mb-4 rounded-lg bg-muted p-3 text-xs text-muted-foreground">
+              <div className="mb-4 rounded-md bg-muted p-3 text-xs text-muted-foreground">
                 <p>"我有一个 DeepSeek API，地址是 https://api.deepseek.com，API Key 是 sk-xxx，模型是 deepseek-chat"</p>
                 <p className="mt-1">"我的 Claude API key 是 sk-ant-xxx"</p>
               </div>
@@ -614,7 +817,7 @@ export function ModelPage() {
                 onChange={e => setAiDescription(e.target.value)}
                 placeholder="描述您的 API 配置信息..."
                 rows={4}
-                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+                className="ta-input w-full resize-none shadow-none"
               />
             </div>
 
@@ -623,7 +826,7 @@ export function ModelPage() {
               <button
                 type="button"
                 onClick={() => setIsAiDialogOpen(false)}
-                className="rounded-lg border border-input px-4 py-2 text-sm text-muted-foreground hover:bg-accent"
+                className="ta-button-secondary"
               >
                 取消
               </button>
@@ -632,7 +835,7 @@ export function ModelPage() {
                 onClick={handleAiParse}
                 disabled={isAiParsing}
                 className={cn(
-                  'flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm text-white hover:bg-primary/90',
+                  'ta-button-primary',
                   isAiParsing && 'opacity-50 cursor-wait'
                 )}
               >

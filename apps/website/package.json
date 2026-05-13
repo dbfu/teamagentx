@@ -1,0 +1,23 @@
+{
+  "name": "@teamagentx/website",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "TeamAgentX official website",
+  "scripts": {
+    "dev": "vite --host --port 5184",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host --port 4184"
+  },
+  "dependencies": {
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "^4.0.0",
+    "typescript": "5.7.3",
+    "vite": "^6.0.0"
+  }
+}

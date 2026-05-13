@@ -3,6 +3,7 @@ import { CreateAssistantModal } from '@/components/chat/create-assistant-modal'
 import { CreateGroupModal } from '@/components/chat/create-group-modal'
 import { TodoModal } from '@/components/chat/todo-modal'
 import { UserAvatar } from '@/components/chat/user-avatar'
+import { useTheme } from '@/components/theme-provider'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,7 +16,7 @@ import { cn } from '@/lib/utils'
 import { useAuthStore, useSocketStore } from '@/stores'
 import { useChatStore } from '@/stores/chat-store'
 import { TodoData } from '@/stores/socket-store'
-import { Bot, Cpu, Globe, ListTodo, MessageSquare, Package, Plus, Users } from 'lucide-react'
+import { Bot, Check, Cpu, Globe, ListTodo, MessageSquare, Monitor, Moon, Package, Palette, Plus, Sun, Users } from 'lucide-react'
 import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -33,6 +34,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
   const [isTodoModalOpen, setIsTodoModalOpen] = useState(false)
   const { user } = useAuthStore()
   const { user: socketUser, todos } = useSocketStore()
+  const { theme, setTheme, brandTheme, setBrandTheme } = useTheme()
   const setSidePanelMode = useChatStore((s) => s.setSidePanelMode)
 
   const activeTab = location.pathname.startsWith('/settings')
@@ -53,6 +55,17 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
 
   // 检测是否在 Electron 环境中
   const isElectron = window.electronAPI?.isElectron ?? false
+  const modeOptions = [
+    { value: 'light', label: '浅色', icon: Sun },
+    { value: 'dark', label: '深色', icon: Moon },
+    { value: 'system', label: '跟随系统', icon: Monitor },
+  ] as const
+  const brandOptions = [
+    { value: 'enterprise', label: '商务蓝', color: 'oklch(0.55 0.22 250)' },
+    { value: 'graphite', label: '石墨灰', color: 'oklch(0.36 0.018 260)' },
+    { value: 'emerald', label: '翡翠绿', color: 'oklch(0.55 0.16 158)' },
+    { value: 'ruby', label: '曜石红', color: 'oklch(0.55 0.2 18)' },
+  ] as const
 
   const handleTabChange = (tab: 'message' | 'assistant' | 'skill' | 'model' | 'integration') => {
     // 切换 Tab 时关闭侧拉框
@@ -73,6 +86,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
     acpTool: string
     categoryId: string | null
     llmProviderId: string | null
+    imageGeneration?: { enabled: boolean; llmProviderId: string | null }
   }): Promise<boolean> => {
     const response = await agentApi.create({
       name: data.name,
@@ -83,6 +97,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
       acpTool: data.acpTool || undefined,
       categoryId: data.categoryId || undefined,
       llmProviderId: data.llmProviderId || undefined,
+      imageGeneration: data.imageGeneration,
     })
     if (response.success) {
       setIsCreateAssistantOpen(false)
@@ -95,12 +110,12 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
 
   return (
     <div
-      className="flex h-full w-20 shrink-0 flex-col items-center bg-sidebar"
+      className="flex h-full w-20 shrink-0 flex-col items-center border-r border-sidebar-border bg-sidebar/95 shadow-[var(--control-shadow)] backdrop-blur"
       style={isElectron ? { WebkitAppRegion: 'drag' } as React.CSSProperties : {}}
     >
       {/* Logo area - 拖拽区域 */}
       <div className={cn(
-        "mb-4 flex size-9 items-center justify-center overflow-hidden rounded-lg shadow-sm bg-white dark:bg-black",
+        "mb-4 flex size-10 items-center justify-center overflow-hidden rounded-xl border border-sidebar-border bg-[var(--surface-raised)] shadow-[var(--control-shadow)]",
         isElectron ? "mt-10" : "mt-4"
       )}>
         <img src={`${import.meta.env.BASE_URL}app-logo.png`} alt="TeamAgentX" className="size-full object-cover" />
@@ -112,10 +127,10 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
-              className="flex w-full flex-col items-center gap-1 rounded-lg py-2 text-muted-foreground hover:bg-sidebar-accent transition-colors focus:outline-none"
+              className="flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg py-2 text-muted-foreground hover:bg-sidebar-accent transition-colors focus:outline-none"
               style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
             >
-              <div className="flex size-7 items-center justify-center rounded-full bg-primary text-white">
+              <div className="flex size-8 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-[var(--control-shadow)]">
                 <Plus className="size-4" />
               </div>
             </button>
@@ -146,9 +161,9 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
         <button
           onClick={() => handleTabChange('message')}
           className={cn(
-            'relative flex w-full flex-col items-center gap-1 rounded-lg py-2 transition-colors',
+            'relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
             activeTab === 'message'
-              ? 'bg-card text-primary shadow-sm'
+              ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
               : 'text-muted-foreground hover:bg-sidebar-accent'
           )}
           style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
@@ -166,9 +181,9 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
         <button
           onClick={() => handleTabChange('assistant')}
           className={cn(
-            'relative flex w-full flex-col items-center gap-1 rounded-lg py-2 transition-colors',
+            'relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
             activeTab === 'assistant'
-              ? 'bg-card text-primary shadow-sm'
+              ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
               : 'text-muted-foreground hover:bg-sidebar-accent'
           )}
           style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
@@ -181,9 +196,9 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
         <button
           onClick={() => handleTabChange('skill')}
           className={cn(
-            'relative flex w-full flex-col items-center gap-1 rounded-lg py-2 transition-colors',
+            'relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
             activeTab === 'skill'
-              ? 'bg-card text-primary shadow-sm'
+              ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
               : 'text-muted-foreground hover:bg-sidebar-accent'
           )}
           style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
@@ -196,9 +211,9 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
         <button
           onClick={() => handleTabChange('model')}
           className={cn(
-            'relative flex w-full flex-col items-center gap-1 rounded-lg py-2 transition-colors',
+            'relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
             activeTab === 'model'
-              ? 'bg-card text-primary shadow-sm'
+              ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
               : 'text-muted-foreground hover:bg-sidebar-accent'
           )}
           style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
@@ -211,9 +226,9 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
         <button
           onClick={() => handleTabChange('integration')}
           className={cn(
-            'relative flex w-full flex-col items-center gap-1 rounded-lg py-2 transition-colors',
+            'relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
             activeTab === 'integration'
-              ? 'bg-card text-primary shadow-sm'
+              ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
               : 'text-muted-foreground hover:bg-sidebar-accent'
           )}
           style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
@@ -226,7 +241,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
         <button
           onClick={() => setIsTodoModalOpen(true)}
           className={cn(
-            'relative flex w-full flex-col items-center gap-1 rounded-lg py-2 transition-colors',
+            'relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
             'text-muted-foreground hover:bg-sidebar-accent'
           )}
           style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
@@ -245,9 +260,46 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
 
       {/* Bottom buttons */}
       <div className="flex flex-col items-center gap-1 pb-4">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              className="flex size-9 cursor-pointer items-center justify-center rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+              title="外观主题"
+              style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+            >
+              <Palette className="size-4" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            side="right"
+            align="end"
+            className="w-48"
+            style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+          >
+            {modeOptions.map((option) => {
+              const Icon = option.icon
+              return (
+                <DropdownMenuItem key={option.value} onClick={() => setTheme(option.value)}>
+                  <Icon className="size-4" />
+                  <span>{option.label}</span>
+                  {theme === option.value && <Check className="ml-auto size-4 text-primary" />}
+                </DropdownMenuItem>
+              )
+            })}
+            <DropdownMenuSeparator />
+            {brandOptions.map((option) => (
+              <DropdownMenuItem key={option.value} onClick={() => setBrandTheme(option.value)}>
+                <span className="size-2.5 rounded-full" style={{ background: option.color }} />
+                <span>{option.label}</span>
+                {brandTheme === option.value && <Check className="ml-auto size-4 text-primary" />}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
         {/* User avatar - 跳转到设置 */}
         <button
-          className="flex size-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-sidebar-accent"
+          className="flex size-9 cursor-pointer items-center justify-center rounded-lg text-muted-foreground hover:bg-sidebar-accent"
           onClick={() => navigate('/settings')}
           title="设置"
           style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}

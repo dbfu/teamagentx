@@ -7,7 +7,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import os from 'node:os';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -587,6 +587,7 @@ function startServer(): Promise<number> {
 
     // Set DATABASE_URL to user data directory
     const dbPath = path.join(app.getPath('userData'), 'teamagentx.db');
+    const databaseUrl = pathToFileURL(dbPath).href;
     // Set UPLOADS_DIR to user data directory (not inside app)
     const uploadsDir = path.join(app.getPath('userData'), 'uploads', 'images');
     // 本地工具安装目录
@@ -610,7 +611,7 @@ function startServer(): Promise<number> {
       env: {
         ...process.env,
         PATH: fullPath,
-        DATABASE_URL: `file:${dbPath}`,
+        DATABASE_URL: databaseUrl,
         UPLOADS_DIR: uploadsDir,
         TOOLS_DIR: toolsDir,
         NODE_PATH: nodeModulesPath,
@@ -845,7 +846,7 @@ function createWindow() {
 
   if (!app.isPackaged) {
     // Dev: load Vite dev server (supports dynamic port)
-    const viteUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
+    const viteUrl = process.env.VITE_DEV_SERVER_URL || 'http://127.0.0.1:5173';
     mainWindow.loadURL(viteUrl);
     mainWindow.webContents.openDevTools();
   } else {

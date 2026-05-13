@@ -1,11 +1,18 @@
 import prisma from '../../lib/prisma.js';
-import { Agent, AgentType, LlmProvider, AgentCategory, AgentLevel } from '@prisma/client';
+import { Agent, AgentType, LlmProvider, AgentCategory, AgentLevel, AgentCapability } from '@prisma/client';
 import { randomUUID } from 'crypto';
 
 // 包含关联的 Agent 类型
 export type AgentWithRelations = Agent & {
   category: AgentCategory | null;
   llmProvider: LlmProvider | null;
+  capabilities?: Array<AgentCapability & { llmProvider: LlmProvider | null }>;
+};
+
+export type AgentCapabilityInput = {
+  enabled?: boolean;
+  llmProviderId?: string | null;
+  config?: Record<string, unknown> | null;
 };
 
 export type CreateAgentInput = {
@@ -21,6 +28,7 @@ export type CreateAgentInput = {
   workDir?: string;
   categoryId?: string;
   llmProviderId?: string;
+  imageGeneration?: AgentCapabilityInput;
 };
 
 export type UpdateAgentInput = Partial<CreateAgentInput> & {
@@ -75,18 +83,78 @@ async function assertLlmProviderCompatible(
 
   const provider = await prisma.llmProvider.findUnique({
     where: { id: llmProviderId },
-    select: { apiProtocol: true, name: true },
+    select: { apiProtocol: true, name: true, modelType: true },
   });
   if (!provider) {
     const error = new Error('LLM 供应商不存在') as Error & { code?: string };
     error.code = 'P2025';
     throw error;
   }
+  if (((provider as any).modelType || 'text') !== 'text') {
+    throw new Error(`助手只能绑定文本模型，当前供应商 ${provider.name} 的模型类型是 ${(provider as any).modelType}`);
+  }
   if (provider.apiProtocol !== requiredProtocol) {
     const label = acpTool === 'claude' ? 'Claude' : 'Codex';
     throw new Error(`${label} 仅支持 ${requiredProtocol} 协议供应商，当前供应商 ${provider.name} 的协议是 ${provider.apiProtocol}`);
   }
 }
+
+async function assertImageProviderCompatible(llmProviderId: string | null | undefined): Promise<void> {
+  if (!llmProviderId) return;
+
+  const provider = await prisma.llmProvider.findUnique({
+    where: { id: llmProviderId },
+    select: { name: true, modelType: true },
+  });
+  if (!provider) {
+    const error = new Error('图片模型供应商不存在') as Error & { code?: string };
+    error.code = 'P2025';
+    throw error;
+  }
+  if (((provider as any).modelType || 'text') !== 'image') {
+    throw new Error(`图片能力只能绑定图片模型，当前供应商 ${provider.name} 的模型类型是 ${(provider as any).modelType || 'text'}`);
+  }
+}
+
+function normalizeNullableId(value: string | null | undefined): string | null | undefined {
+  if (value === '') return undefined;
+  if (value === 'null') return null;
+  return value;
+}
+
+async function upsertImageCapability(tx: any, agentId: string, input: AgentCapabilityInput): Promise<void> {
+  const enabled = Boolean(input.enabled);
+  const llmProviderId = normalizeNullableId(input.llmProviderId ?? null) ?? null;
+  if (enabled && !llmProviderId) {
+    throw new Error('开启图片能力时必须选择图片模型');
+  }
+
+  await tx.agentCapability.upsert({
+    where: { agentId_capabilityType: { agentId, capabilityType: 'image' } },
+    create: {
+      agentId,
+      capabilityType: 'image',
+      enabled,
+      llmProviderId: enabled ? llmProviderId : null,
+      config: input.config ?? undefined,
+    },
+    update: {
+      enabled,
+      llmProviderId: enabled ? llmProviderId : null,
+      config: input.config ?? undefined,
+    },
+  });
+}
+
+const agentInclude = {
+  category: true,
+  llmProvider: true,
+  capabilities: {
+    include: {
+      llmProvider: true,
+    },
+  },
+} as const;
 
 // 批量更新排序请求类型
 export type UpdateSortOrderInput = {
@@ -96,7 +164,7 @@ export type UpdateSortOrderInput = {
 };
 
 export const agentService = {
-  async create(data: CreateAgentInput): Promise<Agent> {
+  async create(data: CreateAgentInput): Promise<AgentWithRelations> {
     const now = new Date();
     // 处理外键字段：空字符串转换为 null
     const categoryId = (data.categoryId === '' || data.categoryId === 'null') ? null : data.categoryId;
@@ -104,27 +172,36 @@ export const agentService = {
     const agentType = data.type || 'builtin';
     assertAcpToolSupported(agentType, data.acpTool);
     await assertLlmProviderCompatible(agentType, data.acpTool, llmProviderId);
+    if (data.imageGeneration?.enabled) {
+      await assertImageProviderCompatible(data.imageGeneration.llmProviderId);
+    }
 
-    return prisma.agent.create({
-      data: {
-        id: data.id || randomUUID(), // 使用自定义 ID 或生成新 ID
-        name: data.name,
-        avatar: data.avatar,
-        avatarColor: data.avatarColor,
-        description: data.description,
-        prompt: data.prompt,
-        type: agentType,
-        agentLevel: data.agentLevel || 'normal',
-        acpTool: data.acpTool,
-        workDir: data.workDir,
-        categoryId,
-        llmProviderId,
-        updatedAt: now,
-      },
-      include: {
-        category: true,
-        llmProvider: true,
-      },
+    const agentId = data.id || randomUUID();
+    return prisma.$transaction(async (tx) => {
+      await tx.agent.create({
+        data: {
+          id: agentId,
+          name: data.name,
+          avatar: data.avatar,
+          avatarColor: data.avatarColor,
+          description: data.description,
+          prompt: data.prompt,
+          type: agentType,
+          agentLevel: data.agentLevel || 'normal',
+          acpTool: data.acpTool,
+          workDir: data.workDir,
+          categoryId,
+          llmProviderId,
+          updatedAt: now,
+        },
+      });
+      if (data.imageGeneration) {
+        await upsertImageCapability(tx, agentId, data.imageGeneration);
+      }
+      return tx.agent.findUniqueOrThrow({
+        where: { id: agentId },
+        include: agentInclude,
+      });
     });
   },
 
@@ -132,8 +209,7 @@ export const agentService = {
     return prisma.agent.findMany({
       orderBy: { createdAt: 'desc' },
       include: {
-        category: true,
-        llmProvider: true,
+        ...agentInclude,
       },
     });
   },
@@ -143,8 +219,7 @@ export const agentService = {
       where: { isActive: true },
       orderBy: { createdAt: 'desc' },
       include: {
-        category: true,
-        llmProvider: true,
+        ...agentInclude,
       },
     });
   },
@@ -153,8 +228,7 @@ export const agentService = {
     return prisma.agent.findUnique({
       where: { id },
       include: {
-        category: true,
-        llmProvider: true,
+        ...agentInclude,
       },
     });
   },
@@ -163,8 +237,7 @@ export const agentService = {
     return prisma.agent.findUnique({
       where: { name },
       include: {
-        category: true,
-        llmProvider: true,
+        ...agentInclude,
       },
     });
   },
@@ -173,7 +246,7 @@ export const agentService = {
     await assertAgentIsUserEditable(id, '修改');
 
     // 处理外键字段：空字符串转换为 undefined（表示不更新），'null' 字符串转换为 null（表示移除）
-    const { categoryId, llmProviderId, ...restData } = data;
+    const { categoryId, llmProviderId, imageGeneration, ...restData } = data;
     const processedCategoryId = categoryId === '' ? undefined : categoryId === 'null' ? null : categoryId;
     const processedLlmProviderId = llmProviderId === '' ? undefined : llmProviderId === 'null' ? null : llmProviderId;
     const currentAgent = await prisma.agent.findUnique({
@@ -194,19 +267,27 @@ export const agentService = {
       restData.acpTool ?? currentAgent.acpTool,
       processedLlmProviderId === undefined ? currentAgent.llmProviderId : processedLlmProviderId,
     );
+    if (imageGeneration?.enabled) {
+      await assertImageProviderCompatible(imageGeneration.llmProviderId);
+    }
 
-    return prisma.agent.update({
-      where: { id },
-      data: {
-        ...restData,
-        ...(processedCategoryId !== undefined && { categoryId: processedCategoryId }),
-        ...(processedLlmProviderId !== undefined && { llmProviderId: processedLlmProviderId }),
-        updatedAt: new Date(),
-      },
-      include: {
-        category: true,
-        llmProvider: true,
-      },
+    return prisma.$transaction(async (tx) => {
+      await tx.agent.update({
+        where: { id },
+        data: {
+          ...restData,
+          ...(processedCategoryId !== undefined && { categoryId: processedCategoryId }),
+          ...(processedLlmProviderId !== undefined && { llmProviderId: processedLlmProviderId }),
+          updatedAt: new Date(),
+        },
+      });
+      if (imageGeneration) {
+        await upsertImageCapability(tx, id, imageGeneration);
+      }
+      return tx.agent.findUniqueOrThrow({
+        where: { id },
+        include: agentInclude,
+      });
     });
   },
 
@@ -216,8 +297,7 @@ export const agentService = {
     return prisma.agent.delete({
       where: { id },
       include: {
-        category: true,
-        llmProvider: true,
+        ...agentInclude,
       },
     });
   },
@@ -229,8 +309,7 @@ export const agentService = {
       where: { id },
       data: { isActive, updatedAt: new Date() },
       include: {
-        category: true,
-        llmProvider: true,
+        ...agentInclude,
       },
     });
   },
@@ -249,8 +328,7 @@ export const agentService = {
     const agents = await prisma.agent.findMany({
       orderBy: { createdAt: 'desc' },
       include: {
-        category: true,
-        llmProvider: true,
+        ...agentInclude,
       },
     });
 

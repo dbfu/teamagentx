@@ -75,6 +75,25 @@ describe('ACP Provider Adapter', () => {
     assert.match(content, /OPENAI_MODEL/);
   });
 
+  test('wrapper 不注入图片模型环境变量，避免 ACP 进程读取密钥', () => {
+    const wrapperRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-acp-'));
+    const result = createAcpProviderCommand({
+      acpTool: 'claude',
+      agentCommand: 'embedded-claude-agent --stdio',
+      provider: provider({ apiProtocol: 'anthropic' }),
+      agentId: 'agent-image',
+      agentName: 'Claude',
+      wrapperRoot,
+    });
+
+    const wrapperPath = result.command.slice(1, -1);
+    const content = fs.readFileSync(wrapperPath, 'utf-8');
+    assert.doesNotMatch(content, /IMAGE_GEN_API_KEY/);
+    assert.doesNotMatch(content, /IMAGE_GEN_BASE_URL/);
+    assert.doesNotMatch(content, /TEAMAGENTX_IMAGE_OUTPUT_DIR/);
+    assert.doesNotMatch(result.command, /image-key/);
+  });
+
   test('不支持的 ACP 工具会报错', () => {
     assert.throws(
       () =>

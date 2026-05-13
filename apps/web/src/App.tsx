@@ -435,7 +435,7 @@ function AppContent() {
   }
 
   return (
-    <div className={cn("flex flex-1 h-full w-full bg-background", isMobile ? "overflow-x-hidden" : "overflow-hidden")}>
+    <div className={cn("flex flex-1 h-full w-full bg-[var(--surface)] text-foreground", isMobile ? "overflow-x-hidden" : "overflow-hidden")}>
       {/* 桌面端 Sidebar navigation */}
       {!isMobile && <SidebarNav messageBadge={totalUnreadCount} onRefreshChatRooms={loadChatRooms} />}
 
@@ -628,7 +628,7 @@ export default function App() {
   // Show loading state while checking auth
   if (state === 'checking') {
     return (
-      <div className="flex flex-col h-screen w-full bg-background">
+      <div className="flex flex-col h-screen w-full bg-[var(--surface)]">
         {/* Windows 自定义标题栏 */}
         <WindowTitleBar />
         <div className="flex flex-1 flex-col items-center justify-center">
@@ -661,7 +661,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex flex-col h-screen w-full bg-background">
+    <div className="flex flex-col h-screen w-full bg-[var(--surface)]">
       {/* Windows 自定义标题栏 */}
       <WindowTitleBar />
 

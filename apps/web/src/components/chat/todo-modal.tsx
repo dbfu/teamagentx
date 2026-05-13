@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useSocketStore, TodoData } from '@/stores/socket-store'
 import { X, Check, Trash2, Clock } from 'lucide-react'
 import { formatRelativeTime } from '@/lib/utils'
@@ -70,13 +71,14 @@ export function TodoModal({ isOpen, onClose, onTodoClick }: TodoModalProps) {
 
   const pendingTodos = localTodos.filter((t) => t.status === 'pending')
 
-  return (
+  return createPortal(
+    (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
       <div className="fixed inset-0 bg-black/50" onClick={onClose} />
 
       {/* Modal */}
-      <div className="relative z-10 w-[400px] max-h-[500px] rounded-xl bg-card shadow-xl overflow-hidden">
+      <div className="relative z-10 mx-4 w-full max-w-[400px] max-h-[500px] overflow-hidden rounded-xl bg-card shadow-xl">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <h3 className="text-lg font-semibold text-foreground">待办事项</h3>
@@ -167,5 +169,7 @@ export function TodoModal({ isOpen, onClose, onTodoClick }: TodoModalProps) {
         )}
       </div>
     </div>
+    ),
+    document.body
   )
 }

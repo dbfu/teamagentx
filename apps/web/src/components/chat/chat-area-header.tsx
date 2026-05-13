@@ -41,7 +41,7 @@ export function ChatAreaHeader({
 
   return (
     <div
-      className="flex items-center border-b border-border bg-card px-6 py-3"
+      className="flex items-center border-b border-border/80 bg-[var(--surface-raised)] px-6 py-3 shadow-[var(--control-shadow)]"
       style={isElectron ? { WebkitAppRegion: 'drag' } as React.CSSProperties : {}}
     >
       {/* Left content */}
@@ -97,8 +97,8 @@ export function ChatAreaHeader({
                   className={cn(
                     'rounded-lg p-2 transition-colors',
                     taskBoardActive
-                      ? 'bg-blue-500 text-white shadow-sm hover:bg-blue-600 hover:text-white'
-                      : 'text-muted-foreground hover:text-blue-500 hover:bg-blue-500/10'
+                      ? 'bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:text-primary-foreground'
+                      : 'text-muted-foreground hover:text-primary hover:bg-primary/10'
                   )}
                   onClick={onOpenTaskBoard}
                 >
@@ -128,7 +128,7 @@ export function ChatAreaHeader({
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
-                    className="group rounded-lg p-2 text-muted-foreground transition-all duration-200 hover:bg-blue-500/10 hover:text-blue-500 active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-2"
+                    className="group rounded-lg p-2 text-muted-foreground transition-all duration-200 hover:bg-primary/10 hover:text-primary active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2"
                     onClick={() => onShowAddAgent(true)}
                   >
                     <UserPlus className="size-5 transition-transform duration-200 group-hover:scale-110" />
@@ -144,8 +144,8 @@ export function ChatAreaHeader({
                   className={cn(
                     'rounded-lg p-2 transition-colors',
                     taskBoardActive
-                      ? 'bg-blue-500 text-white shadow-sm hover:bg-blue-600 hover:text-white'
-                      : 'text-muted-foreground hover:text-blue-500 hover:bg-blue-500/10'
+                      ? 'bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:text-primary-foreground'
+                      : 'text-muted-foreground hover:text-primary hover:bg-primary/10'
                   )}
                   onClick={onOpenTaskBoard}
                 >
@@ -182,7 +182,7 @@ export function ChatAreaHeader({
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
-                  className="rounded-lg p-2 text-muted-foreground hover:text-blue-500 hover:bg-blue-500/10"
+                  className="rounded-lg p-2 text-muted-foreground hover:text-primary hover:bg-primary/10"
                   onClick={onOpenCronTasks}
                 >
                   <Clock className="size-5" />
