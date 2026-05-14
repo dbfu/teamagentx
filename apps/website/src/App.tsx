@@ -387,6 +387,8 @@ function toneToHue(tone: string) {
 // ══════════════════════════════════════════════════════
 //  主应用
 // ══════════════════════════════════════════════════════
+const IS_MAC = /Mac|iPhone|iPad/.test(navigator.userAgent)
+
 function App() {
   const [menuOpen, setMenuOpen] = useState(false)
   const { version: APP_VERSION, macUrl: DOWNLOAD_URL_MAC, winUrl: DOWNLOAD_URL_WIN } = useSiteConfig()
@@ -489,7 +491,14 @@ function App() {
               多个 Agent 并行推进、相互协作，竞品分析、内容创作、数据报告、软件开发——<strong>任何大模型能做的事，都能自动化完成。</strong>
             </p>
             <div className="hero-actions">
-              <a href={DOWNLOAD_URL_MAC} className="btn btn-primary btn-hero">{downloadIcon(15)} 下载 macOS 客户端</a>
+              <a
+                href={IS_MAC ? DOWNLOAD_URL_MAC : DOWNLOAD_URL_WIN}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn-primary btn-hero"
+              >
+                {downloadIcon(15)} 下载 {IS_MAC ? 'macOS' : 'Windows'} 客户端
+              </a>
               <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="btn btn-outline btn-hero">
                 <GitHubIcon size={16} /> 开源 · 免费使用
               </a>
@@ -664,8 +673,17 @@ function App() {
           完全免费 · 开源无限制 · 数据本地存储
         </p>
         <div className="cta-actions reveal">
-          <a href={DOWNLOAD_URL_MAC} className="btn btn-primary btn-lg">{downloadIcon(16)}下载 macOS 客户端</a>
-          <a href={DOWNLOAD_URL_WIN} className="btn btn-outline btn-lg">下载 Windows 客户端</a>
+          {IS_MAC ? (
+            <>
+              <a href={DOWNLOAD_URL_MAC} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-lg">{downloadIcon(16)}下载 macOS 客户端</a>
+              <a href={DOWNLOAD_URL_WIN} target="_blank" rel="noopener noreferrer" className="btn btn-outline btn-lg">下载 Windows 客户端</a>
+            </>
+          ) : (
+            <>
+              <a href={DOWNLOAD_URL_WIN} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-lg">{downloadIcon(16)}下载 Windows 客户端</a>
+              <a href={DOWNLOAD_URL_MAC} target="_blank" rel="noopener noreferrer" className="btn btn-outline btn-lg">下载 macOS 客户端</a>
+            </>
+          )}
           <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="btn btn-outline btn-lg">
             <GitHubIcon size={16} />GitHub 开源
           </a>
