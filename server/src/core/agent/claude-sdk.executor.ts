@@ -13,7 +13,6 @@ import { skillInstallService } from '../../modules/skill/skill-install.service.j
 import type { AttachmentData } from '../../modules/task-queue/task-queue.service.js';
 import { buildAgentLongTermMemorySection } from './agent-long-term-memory.js';
 import { debugLog } from './agent-handler/debug.js';
-import { sendMessageToAgent } from './agent-handler/agent-dispatch.service.js';
 import { generateImageForAgent } from './image-generation.service.js';
 import { getDefaultChatRoomWorkDir } from './work-dir.js';
 import { buildAcpProviderEnv, type AcpProviderInfo } from './acp-provider.adapter.js';
@@ -822,7 +821,7 @@ ${historyText}
       const otherAgentsList = otherAgents.map((agent) => agent.name).join('、');
       const othersInfo = otherAgents.length > 0 ? otherAgentsList : '无';
       const mentionTip = otherAgents.length > 0
-        ? '\n【提示】\n需要把任务交给其他助手时，必须调用 mcp__tax__send_message 工具。不要通过直接输出 @助手名称 来触发其他助手。'
+        ? '\n【提示】\n需要给其他助手发任意消息时，必须调用 mcp__tax__send_message 工具生成消息草稿，并把工具返回的 @助手消息放入你的最终回复。工具本身不会直接发送消息；最终回复中的 @助手消息会在自动模式下触发目标助手。如果用户只是要求你给某个助手发消息，最终回复只输出这条 @助手消息，不要添加解释、寒暄、总结，也不要擅自扩写成协作邀请。'
         : '';
 
       fullMessage += `【群聊成员信息】
@@ -974,38 +973,87 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       tools: [
         sdkTool(
           'send_message',
-          '向当前 TeamAgentX 群聊中的另一个助手发送公开消息，并触发该助手处理任务。消息会以 @目标助手名 消息内容 的格式显示在群聊中。需要给其他助手发消息时必须使用此工具，不要直接输出 @助手名。',
+          '生成一段要放入最终回复的 TeamAgentX 助手消息草稿。消息内容可以是用户要求转达的任意内容，不一定是协作请求。工具支持一个或多个目标助手；不会直接发送消息，也不会直接触发任务。你必须把返回的 @目标助手 消息内容放入最终回复，最终回复落入群聊后才会在自动模式下触发目标助手。如果用户只是要求你给某个或多个助手发消息，最终回复只输出这条 @助手消息，不要添加解释、寒暄、总结，也不要擅自扩写成协作邀请。',
           {
             targetAgentId: z.string().optional().describe('目标助手 ID。已知 ID 时优先使用。'),
             targetAgentName: z.string().optional().describe('目标助手名称。未提供 ID 时使用。'),
-            content: z.string().describe('发送给目标助手的消息内容，不要包含 @目标助手名前缀。'),
+            targetAgentIds: z.array(z.string()).optional().describe('多个目标助手 ID。已知 ID 时优先使用。'),
+            targetAgentNames: z.array(z.string()).optional().describe('多个目标助手名称。未提供 ID 时使用。'),
+            content: z.string().describe('给目标助手的消息内容，不要包含 @目标助手名前缀。多个目标会自动生成 @助手1 @助手2 前缀。'),
           },
           async (args) => {
             if (!this.agentId) {
               return {
-                content: [{ type: 'text', text: '当前助手缺少 agentId，无法发送助手消息。' }],
+                content: [{ type: 'text', text: '当前助手缺少 agentId，无法生成消息草稿。' }],
                 isError: true,
               };
             }
 
             try {
-              const result = await sendMessageToAgent({
-                chatRoomId: this.chatRoomId,
-                sourceAgentId: this.agentId,
-                targetAgentId: args.targetAgentId,
-                targetAgentName: args.targetAgentName,
-                content: args.content,
-              });
+              const content = args.content.trim();
+              const normalizeStringArray = (value: string | string[] | undefined) => {
+                if (Array.isArray(value)) {
+                  return value.map((item) => item.trim()).filter(Boolean);
+                }
+                return value?.trim() ? [value.trim()] : [];
+              };
+              const targetAgentIds = [
+                ...normalizeStringArray(args.targetAgentIds),
+                ...normalizeStringArray(args.targetAgentId),
+              ];
+              const targetAgentNames = [
+                ...normalizeStringArray(args.targetAgentNames),
+                ...normalizeStringArray(args.targetAgentName),
+              ];
+              const targets: { agentId?: string; agentName: string }[] = [];
+              const seen = new Set<string>();
+
+              for (const targetAgentId of targetAgentIds) {
+                const targetAgent = this.chatRoomAgents.find((agent) => agent.agentId === targetAgentId);
+                if (!targetAgent?.name || seen.has(targetAgent.name)) continue;
+                seen.add(targetAgent.name);
+                targets.push({ agentId: targetAgent.agentId, agentName: targetAgent.name });
+              }
+
+              for (const targetAgentName of targetAgentNames) {
+                const targetAgent = this.chatRoomAgents.find((agent) => agent.name === targetAgentName);
+                const resolvedName = targetAgent?.name || targetAgentName;
+                if (seen.has(resolvedName)) continue;
+                seen.add(resolvedName);
+                targets.push({ agentId: targetAgent?.agentId, agentName: resolvedName });
+              }
+
+              if (!content || targets.length === 0) {
+                return {
+                  content: [{
+                    type: 'text',
+                    text: '参数错误：必须提供 content，以及至少一个可解析的 targetAgentId/targetAgentName 或 targetAgentIds/targetAgentNames。',
+                  }],
+                  isError: true,
+                };
+              }
+
+              const mentionPrefix = targets.map((agent) => `@${agent.agentName}`).join(' ');
+              const draftContent = `${mentionPrefix} ${content}`;
 
               return {
-                content: [{ type: 'text', text: '已发送给目标助手并加入任务队列。' }],
-                structuredContent: result,
+                content: [{
+                  type: 'text',
+                  text: `最终回复请只输出下面这段消息，不要添加其他内容：\n${draftContent}`,
+                }],
+                structuredContent: {
+                  targetAgentIds: targets.map((agent) => agent.agentId).filter(Boolean),
+                  targetAgentNames: targets.map((agent) => agent.agentName),
+                  targetAgents: targets,
+                  content,
+                  draftContent,
+                },
               };
             } catch (error) {
               return {
                 content: [{
                   type: 'text',
-                  text: error instanceof Error ? error.message : '发送助手消息失败。',
+                  text: error instanceof Error ? error.message : '生成消息草稿失败。',
                 }],
                 isError: true,
               };

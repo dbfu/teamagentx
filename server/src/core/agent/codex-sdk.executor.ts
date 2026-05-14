@@ -7,9 +7,9 @@ import { execFileSync, execSync, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { config as appConfig } from '../../config/index.js';
 import { agentMemoryService } from '../../modules/agent-memory/agent-memory.service.js';
 import { skillInstallService } from '../../modules/skill/skill-install.service.js';
-import { config as appConfig } from '../../config/index.js';
 import type { AttachmentData } from '../../modules/task-queue/task-queue.service.js';
 import { buildAgentLongTermMemorySection } from './agent-long-term-memory.js';
 import { debugLog } from './agent-handler/debug.js';
@@ -740,11 +740,11 @@ ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
   private ensureTeamAgentXMcpServerFile(): string {
     const serverPath = this.getTeamAgentXMcpServerPath();
     const script = `#!/usr/bin/env node
-const endpoint = process.env.TEAMAGENTX_SEND_MESSAGE_ENDPOINT;
 const generateImageEndpoint = process.env.TEAMAGENTX_GENERATE_IMAGE_ENDPOINT;
 const token = process.env.TEAMAGENTX_INTERNAL_TOOL_TOKEN;
 const chatRoomId = process.env.TEAMAGENTX_CHAT_ROOM_ID;
 const sourceAgentId = process.env.TEAMAGENTX_SOURCE_AGENT_ID;
+const chatRoomAgents = JSON.parse(process.env.TEAMAGENTX_CHAT_ROOM_AGENTS || "[]");
 
 function write(message) {
   process.stdout.write(JSON.stringify(message) + "\\n");
@@ -759,40 +759,61 @@ function toolResult(text, structuredContent, isError = false) {
 }
 
 async function callSendMessage(args) {
-  if (!endpoint || !token || !chatRoomId || !sourceAgentId) {
-    return toolResult("TeamAgentX 工具环境不完整，无法发送助手消息。", {}, true);
+  if (!chatRoomId || !sourceAgentId) {
+    return toolResult("TeamAgentX 工具环境不完整，无法生成消息草稿。", {}, true);
   }
 
   const content = typeof args?.content === "string" ? args.content.trim() : "";
-  const targetAgentId = typeof args?.targetAgentId === "string" ? args.targetAgentId.trim() : "";
-  const targetAgentName = typeof args?.targetAgentName === "string" ? args.targetAgentName.trim() : "";
-  if (!content || (!targetAgentId && !targetAgentName)) {
-    return toolResult("参数错误：必须提供 content，以及 targetAgentId 或 targetAgentName。", {}, true);
+
+  function normalizeStringArray(value) {
+    if (Array.isArray(value)) {
+      return value.filter((item) => typeof item === "string").map((item) => item.trim()).filter(Boolean);
+    }
+    if (typeof value === "string" && value.trim()) {
+      return [value.trim()];
+    }
+    return [];
   }
 
-  try {
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: "Bearer " + token,
-      },
-      body: JSON.stringify({
-        chatRoomId,
-        sourceAgentId,
-        targetAgentId: targetAgentId || undefined,
-        targetAgentName: targetAgentName || undefined,
-        content,
-      }),
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || payload.success === false) {
-      return toolResult(payload.error || "发送助手消息失败。", payload, true);
-    }
-    return toolResult("已发送给目标助手并加入任务队列。", payload.data || payload, false);
-  } catch (error) {
-    return toolResult(error instanceof Error ? error.message : "发送助手消息失败。", {}, true);
+  const targetAgentIds = [
+    ...normalizeStringArray(args?.targetAgentIds),
+    ...normalizeStringArray(args?.targetAgentId),
+  ];
+  const targetAgentNames = [
+    ...normalizeStringArray(args?.targetAgentNames),
+    ...normalizeStringArray(args?.targetAgentName),
+  ];
+  const targets = [];
+  const seen = new Set();
+
+  for (const targetAgentId of targetAgentIds) {
+    const targetAgent = chatRoomAgents.find((agent) => agent.agentId === targetAgentId);
+    if (!targetAgent?.name || seen.has(targetAgent.name)) continue;
+    seen.add(targetAgent.name);
+    targets.push({ agentId: targetAgent.agentId, agentName: targetAgent.name });
   }
+
+  for (const targetAgentName of targetAgentNames) {
+    const targetAgent = chatRoomAgents.find((agent) => agent.name === targetAgentName);
+    const resolvedName = targetAgent?.name || targetAgentName;
+    if (seen.has(resolvedName)) continue;
+    seen.add(resolvedName);
+    targets.push({ agentId: targetAgent?.agentId, agentName: resolvedName });
+  }
+
+  if (!content || targets.length === 0) {
+    return toolResult("参数错误：必须提供 content，以及至少一个可解析的 targetAgentId/targetAgentName 或 targetAgentIds/targetAgentNames。", {}, true);
+  }
+
+  const mentionPrefix = targets.map((agent) => "@" + agent.agentName).join(" ");
+  const draftContent = mentionPrefix + " " + content;
+  return toolResult("最终回复请只输出下面这段消息，不要添加其他内容：\\n" + draftContent, {
+    targetAgentIds: targets.map((agent) => agent.agentId).filter(Boolean),
+    targetAgentNames: targets.map((agent) => agent.agentName),
+    targetAgents: targets,
+    content,
+    draftContent,
+  }, false);
 }
 
 async function callGenerateImage(args) {
@@ -862,13 +883,15 @@ async function handle(request) {
   if (method === "tools/list") {
     const tools = [{
       name: "send_message",
-      description: "向当前 TeamAgentX 群聊中的另一个助手发送公开消息，并触发该助手处理任务。消息会以 @目标助手名 消息内容 的格式显示在群聊中。",
+      description: "生成一段要放入最终回复的 TeamAgentX 助手消息草稿。消息内容可以是用户要求转达的任意内容，不一定是协作请求。工具支持一个或多个目标助手；不会直接发送消息，也不会直接触发任务。你必须把返回的 @目标助手 消息内容放入最终回复，最终回复落入群聊后才会在自动模式下触发目标助手。如果用户只是要求你给某个或多个助手发消息，最终回复只输出这条 @助手消息，不要添加解释、寒暄、总结，也不要擅自扩写成协作邀请。",
       inputSchema: {
         type: "object",
         properties: {
           targetAgentId: { type: "string", description: "目标助手 ID。已知 ID 时优先使用。" },
           targetAgentName: { type: "string", description: "目标助手名称。未提供 ID 时使用。" },
-          content: { type: "string", description: "发送给目标助手的消息内容，不要包含 @目标助手名前缀。" },
+          targetAgentIds: { type: "array", items: { type: "string" }, description: "多个目标助手 ID。已知 ID 时优先使用。" },
+          targetAgentNames: { type: "array", items: { type: "string" }, description: "多个目标助手名称。未提供 ID 时使用。" },
+          content: { type: "string", description: "给目标助手的消息内容，不要包含 @目标助手名前缀。多个目标会自动生成 @助手1 @助手2 前缀。" },
         },
         required: ["content"],
         additionalProperties: false,
@@ -1111,7 +1134,7 @@ ${historyText}
       const otherAgentsList = otherAgents.map((agent) => agent.name).join('、');
       const othersInfo = otherAgents.length > 0 ? otherAgentsList : '无';
       const mentionTip = otherAgents.length > 0
-        ? '\n【提示】\n需要把任务交给其他助手时，调用 tax.send_message 工具。不要通过直接输出 @助手名称 来触发其他助手。'
+        ? '\n【提示】\n需要给其他助手发任意消息时，调用 tax.send_message 工具生成消息草稿，并把工具返回的 @助手消息放入你的最终回复。工具本身不会直接发送消息；最终回复中的 @助手消息会在自动模式下触发目标助手。如果用户只是要求你给某个助手发消息，最终回复只输出这条 @助手消息，不要添加解释、寒暄、总结，也不要擅自扩写成协作邀请。'
         : '';
 
       fullMessage += `【群聊成员信息】
@@ -1150,7 +1173,6 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
   private getCodexRunner(): TeamAgentXCodexRunner {
     const env = this.buildEnv();
     const mcpServerPath = this.ensureTeamAgentXMcpServerFile();
-    const sendMessageEndpoint = `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/send-message-to-agent`;
     const generateImageEndpoint = `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/generate-image`;
     const config = {
       hide_agent_reasoning: false,
@@ -1164,12 +1186,17 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
           command: process.execPath,
           args: [mcpServerPath],
           env: {
-            TEAMAGENTX_SEND_MESSAGE_ENDPOINT: sendMessageEndpoint,
-            TEAMAGENTX_INTERNAL_TOOL_TOKEN: getInternalAgentToolToken(),
             TEAMAGENTX_CHAT_ROOM_ID: this.chatRoomId,
             TEAMAGENTX_SOURCE_AGENT_ID: this.agentId || '',
             TEAMAGENTX_SOURCE_AGENT_NAME: this.name,
-            ...(this.imageGenerationProvider ? { TEAMAGENTX_GENERATE_IMAGE_ENDPOINT: generateImageEndpoint } : {}),
+            TEAMAGENTX_CHAT_ROOM_AGENTS: JSON.stringify(this.chatRoomAgents.map((agent) => ({
+              agentId: agent.agentId,
+              name: agent.name,
+            }))),
+            ...(this.imageGenerationProvider ? {
+              TEAMAGENTX_GENERATE_IMAGE_ENDPOINT: generateImageEndpoint,
+              TEAMAGENTX_INTERNAL_TOOL_TOKEN: getInternalAgentToolToken(),
+            } : {}),
           },
         },
       },

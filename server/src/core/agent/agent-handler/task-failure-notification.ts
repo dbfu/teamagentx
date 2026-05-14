@@ -7,11 +7,11 @@ import { sendMessageToAgent } from './agent-dispatch.service.js';
 /**
  * 任务失败后通知分配者助手
  * 通过 TaskQueue.messageId -> Message.agentId 反查分配者助手
- * 然后调用 sendMessageToAgent 让失败助手发送消息给分配者助手
+ * 然后调用 sendMessageToAgent 让失败助手发布一条 @分配者助手 的消息
  *
  * 流程：
- * 1. 失败助手（codex1）通过 sendMessageToAgent 发送消息给分配者助手（test1）
- * 2. sendMessageToAgent 会自动创建消息并触发目标助手任务入队
+ * 1. 失败助手（codex1）通过 sendMessageToAgent 发布 @分配者助手 的消息
+ * 2. 自动模式下，统一消息处理流程会解析 @ 并触发分配者助手任务入队
  */
 export async function notifySourceAgentOnFailure(params: {
   task: TaskQueue;
@@ -78,8 +78,8 @@ export async function notifySourceAgentOnFailure(params: {
     executionRecordId,
   });
 
-  // 8. 调用 sendMessageToAgent，以失败助手的名义发送消息给分配者助手
-  // sendMessageToAgent 会自动创建消息、广播、并触发分配者助手任务入队
+  // 8. 调用 sendMessageToAgent，以失败助手的名义发布消息给分配者助手
+  // sendMessageToAgent 只创建并广播消息，任务触发由统一消息处理流程完成
   try {
     await sendMessageToAgent({
       chatRoomId,

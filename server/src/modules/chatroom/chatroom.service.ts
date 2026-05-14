@@ -574,15 +574,42 @@ export const chatRoomService = {
    * 更新用户在某个群聊的最后阅读时间
    */
   async updateLastReadAt(chatRoomId: string, userId: string) {
-    return prisma.chatRoomAgent.update({
+    const now = new Date();
+    const result = await prisma.chatRoomAgent.updateMany({
+      where: { chatRoomId, userId },
+      data: { lastReadAt: now },
+    });
+
+    if (result.count > 0) {
+      return result;
+    }
+
+    const chatRoom = await prisma.chatRoom.findUnique({
+      where: { id: chatRoomId },
+      select: { ownerId: true },
+    });
+
+    if (chatRoom?.ownerId !== userId) {
+      return result;
+    }
+
+    return prisma.chatRoomAgent.upsert({
       where: {
         chatRoomId_userId: {
           chatRoomId,
           userId,
         },
       },
-      data: {
-        lastReadAt: new Date(),
+      update: {
+        lastReadAt: now,
+      },
+      create: {
+        id: randomUUID(),
+        chatRoomId,
+        userId,
+        role: 'OWNER',
+        injectGroupHistory: true,
+        lastReadAt: now,
       },
     });
   },

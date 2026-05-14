@@ -183,8 +183,6 @@ export async function sendMessageToAgent(params: {
     await globalEmit(message, params.chatRoomId);
   }
 
-  const task = await enqueueAgentTask(params.chatRoomId, message, targetAgent);
-
   debugLog('agentToolSendMessage', {
     chatRoomId: params.chatRoomId,
     sourceAgentId: sourceAgent.id,
@@ -192,12 +190,11 @@ export async function sendMessageToAgent(params: {
     targetAgentId: targetAgent.id,
     targetAgentName: targetAgent.name,
     messageId,
-    taskId: task.id,
+    dispatchMode: 'messageEvent',
   });
 
   return {
     messageId,
-    taskId: task.id,
     targetAgentId: targetAgent.id,
     targetAgentName: targetAgent.name,
     content: displayContent,

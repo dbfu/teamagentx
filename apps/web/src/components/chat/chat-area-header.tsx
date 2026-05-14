@@ -4,7 +4,7 @@ import { ChatRoom, Message } from '@/lib/agent-api';
 import { AgentAvatarImage } from '@/lib/agent-avatars';
 import { GroupAvatarImage } from '@/lib/group-avatars';
 import { cn } from '@/lib/utils';
-import { Camera, ClipboardList, Clock, Eraser, Scroll, Settings, UserPlus, Users } from 'lucide-react';
+import { Camera, ClipboardList, Clock, Eraser, Scroll, Settings, Square, UserPlus, Users } from 'lucide-react';
 import { ChatRoomOpenMenu } from './chat-room-open-menu';
 
 interface ChatAreaHeaderProps {
@@ -17,6 +17,8 @@ interface ChatAreaHeaderProps {
   onOpenCronTasks?: () => void
   onOpenTaskBoard?: () => void
   taskBoardActive?: boolean
+  hasActiveTasks?: boolean
+  onStopAllTasks?: () => void
   onOpenRoomRules?: () => void
   onScreenshot?: () => void
 }
@@ -31,6 +33,8 @@ export function ChatAreaHeader({
   onOpenCronTasks,
   onOpenTaskBoard,
   taskBoardActive,
+  hasActiveTasks,
+  onStopAllTasks,
   onOpenRoomRules,
   onScreenshot,
 }: ChatAreaHeaderProps) {
@@ -90,6 +94,24 @@ export function ChatAreaHeader({
         {/* 移动端只显示任务看板和清空消息 */}
         {isMobile ? (
           <>
+            {/* 停止所有任务按钮 */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className={cn(
+                    'rounded-lg p-2 transition-colors',
+                    hasActiveTasks
+                      ? 'text-red-500 hover:bg-red-500/10 active:bg-red-500/20'
+                      : 'text-muted-foreground/50'
+                  )}
+                  disabled={!hasActiveTasks}
+                  onClick={onStopAllTasks}
+                >
+                  <Square className="size-5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">停止所有任务</TooltipContent>
+            </Tooltip>
             {/* 任务看板按钮 */}
             <Tooltip>
               <TooltipTrigger asChild>
@@ -137,6 +159,24 @@ export function ChatAreaHeader({
                 <TooltipContent side="bottom">添加助手</TooltipContent>
               </Tooltip>
             )}
+            {/* 停止所有任务按钮 */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className={cn(
+                    'rounded-lg p-2 transition-colors',
+                    hasActiveTasks
+                      ? 'text-red-500 hover:bg-red-500/10 active:bg-red-500/20'
+                      : 'text-muted-foreground/50'
+                  )}
+                  disabled={!hasActiveTasks}
+                  onClick={onStopAllTasks}
+                >
+                  <Square className="size-5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">停止所有任务</TooltipContent>
+            </Tooltip>
             {/* 任务看板按钮 */}
             <Tooltip>
               <TooltipTrigger asChild>

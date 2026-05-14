@@ -109,8 +109,13 @@ export function setupAIHandlers(
 
       const chatRoom = await chatRoomService.findById(chatRoomId);
 
-      // 助手消息中的 @ 只作为公开展示，不再触发其他助手任务。
-      if (!message.isHuman) {
+      // 手动模式下，助手消息中的 @ 只作为公开展示。
+      if (!message.isHuman && chatRoom?.agentTriggerMode !== 'auto') {
+        debugLog('assistantMentionTriggerSkipped', {
+          chatRoomId,
+          messageId: message.id,
+          reason: 'manualMode',
+        });
         return;
       }
 
@@ -119,7 +124,7 @@ export function setupAIHandlers(
       const hasMentions = mentionNames.length > 0;
 
       // 快速对话群聊：如果没有 @其他助手，则触发快速对话助手
-      if (chatRoom?.isQuickChatRoom && chatRoom.quickChatAgentId && !hasMentions) {
+      if (message.isHuman && chatRoom?.isQuickChatRoom && chatRoom.quickChatAgentId && !hasMentions) {
         // 快速对话群聊：直接触发助手，不需要 @mentions
         const agent = await agentService.findById(chatRoom.quickChatAgentId);
         if (agent && agent.isActive) {
@@ -169,6 +174,7 @@ export function setupAIHandlers(
       // TODO: 若未来支持用户创建无主房间，需评估此处是否需要增加触发权限校验
       if (!hasMentions) {
         if (
+          message.isHuman &&
           chatRoom &&
           !chatRoom.isQuickChatRoom &&
           chatRoom.defaultAgentId &&
@@ -218,6 +224,16 @@ export function setupAIHandlers(
         // Find agent by name
         const agent = await agentService.findByName(agentName);
         if (!agent || !agent.isActive) continue;
+        if (!message.isHuman && message.agentId && agent.id === message.agentId) {
+          debugLog('assistantMentionTriggerSkipped', {
+            chatRoomId,
+            messageId: message.id,
+            agentId: agent.id,
+            agentName: agent.name,
+            reason: 'selfMention',
+          });
+          continue;
+        }
 
         // 系统助手（agentLevel: 'system'）是虚拟成员，跳过成员检查
         // 普通助手需要检查是否是群聊成员

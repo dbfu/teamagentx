@@ -7,9 +7,10 @@ import { ChatSidePanel } from './chat-side-panel'
 import { AddAgentDialog } from './dialogs/add-agent-dialog'
 import { ClearMessagesDialog } from './dialogs/clear-messages-dialog'
 import { RoomRulesDialog } from './dialogs/room-rules-dialog'
+import { StopAllTasksDialog } from './dialogs/stop-all-tasks-dialog'
 import { ScreenshotModal } from './screenshot-modal'
 import { useSocketStore, useChatRoomStore } from '@/stores'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { cn } from '@/lib/utils'
 
 interface ChatAreaProps {
@@ -24,6 +25,8 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
   const selectRoom = useChatRoomStore((s) => s.selectRoom)
   const [showRoomRules, setShowRoomRules] = useState(false)
   const [showScreenshot, setShowScreenshot] = useState(false)
+  const [showStopAllConfirm, setShowStopAllConfirm] = useState(false)
+  const [stopAllTargetAgentIds, setStopAllTargetAgentIds] = useState<string[]>([])
   const {
     inputValue,
     setInputValue,
@@ -78,6 +81,59 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
     removePendingImage,
     restoreStreamEventsFromRecord,
   } = useChatAreaStore(chatRoom, onChatRoomChange)
+
+  const activeTaskAgentIds = useMemo(() => {
+    if (!chatRoom) return []
+
+    const ids = new Set<string>()
+    const currentMessageIds = new Set(messages.map((message) => message.id))
+    for (const roomAgent of chatRoom.chatRoomAgents ?? []) {
+      const agentId = roomAgent.agent?.id ?? roomAgent.agentId
+      if (!agentId) continue
+
+      const status = agentStatuses.get(agentId)
+      if (status === 'executing' || status === 'busy') {
+        ids.add(agentId)
+      }
+    }
+
+    for (const [messageId, agents] of typingAgents) {
+      if (!currentMessageIds.has(messageId)) continue
+      for (const agent of agents) {
+        if (agent.status !== 'cancelled') {
+          ids.add(agent.agentId)
+        }
+      }
+    }
+
+    return [...ids]
+  }, [agentStatuses, chatRoom, messages, typingAgents])
+
+  const handleStopAllTasks = () => {
+    if (!chatRoom || activeTaskAgentIds.length === 0) return
+
+    setStopAllTargetAgentIds(activeTaskAgentIds)
+    setShowStopAllConfirm(true)
+  }
+
+  const confirmStopAllTasks = () => {
+    if (!chatRoom || stopAllTargetAgentIds.length === 0) return
+
+    setStreamingViewAgent(null)
+    setSidePanelMode(null)
+    for (const agentId of stopAllTargetAgentIds) {
+      stopAgent(chatRoom.id, agentId)
+    }
+    setStopAllTargetAgentIds([])
+    setShowStopAllConfirm(false)
+  }
+
+  const handleStopAllConfirmOpenChange = (open: boolean) => {
+    setShowStopAllConfirm(open)
+    if (!open) {
+      setStopAllTargetAgentIds([])
+    }
+  }
 
   if (!chatRoom) {
     return (
@@ -159,6 +215,8 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
           onOpenCronTasks={handleOpenCronTasks}
           onOpenTaskBoard={handleOpenTaskBoard}
           taskBoardActive={isTaskBoardOpen}
+          hasActiveTasks={activeTaskAgentIds.length > 0}
+          onStopAllTasks={handleStopAllTasks}
           onOpenRoomRules={() => setShowRoomRules(true)}
           onScreenshot={() => setShowScreenshot(true)}
         />
@@ -255,6 +313,14 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
         onOpenChange={setShowClearConfirm}
         clearing={clearing}
         onClear={handleClearMessages}
+      />
+
+      {/* Stop All Tasks Confirm Dialog */}
+      <StopAllTasksDialog
+        open={showStopAllConfirm}
+        onOpenChange={handleStopAllConfirmOpenChange}
+        taskCount={stopAllTargetAgentIds.length}
+        onConfirm={confirmStopAllTasks}
       />
 
       {/* Room Rules Dialog */}

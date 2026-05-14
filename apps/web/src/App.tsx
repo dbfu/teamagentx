@@ -1,5 +1,5 @@
-import { ArrowLeft, ChevronLeft, ClipboardList, Eraser, Loader2, MoreVertical, RefreshCw } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { ArrowLeft, ChevronLeft, ClipboardList, Eraser, Loader2, MoreVertical, RefreshCw, Square } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Route, Routes, useNavigate, useSearchParams, useParams } from 'react-router-dom'
 import { LoginModal } from './components/auth/login-modal'
 import { RegisterModal } from './components/auth/register-modal'
@@ -14,6 +14,7 @@ import { ModelPage } from './components/chat/model-page'
 import { SkillPage } from './components/chat/skill-page'
 import { SidebarNav } from './components/chat/sidebar-nav'
 import { SettingsPage } from './components/chat/settings-page'
+import { StopAllTasksDialog } from './components/chat/dialogs/stop-all-tasks-dialog'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -122,6 +123,43 @@ function MobileChatDetailPage({
   // 从 store 获取操作函数
   const setSidePanelMode = useChatStore((s) => s.setSidePanelMode)
   const setShowClearConfirm = useChatStore((s) => s.setShowClearConfirm)
+  const messages = useChatStore((s) => s.messages)
+  const agentStatuses = useChatStore((s) => s.agentStatuses)
+  const typingAgents = useChatStore((s) => s.typingAgents)
+  const stopAgent = useSocketStore((s) => s.stopAgent)
+  const [showStopAllConfirm, setShowStopAllConfirm] = useState(false)
+  const [stopAllTargetAgentIds, setStopAllTargetAgentIds] = useState<string[]>([])
+
+  const activeTaskAgentIds = useMemo(() => {
+    if (!selectedRoom) return []
+
+    const ids = new Set<string>()
+    const currentMessageIds = new Set(
+      messages
+        .filter((message) => message.chatRoomId === selectedRoom.id)
+        .map((message) => message.id)
+    )
+    for (const roomAgent of selectedRoom.chatRoomAgents ?? []) {
+      const agentId = roomAgent.agent?.id ?? roomAgent.agentId
+      if (!agentId) continue
+
+      const status = agentStatuses.get(agentId)
+      if (status === 'executing' || status === 'busy') {
+        ids.add(agentId)
+      }
+    }
+
+    for (const [messageId, agents] of typingAgents) {
+      if (!currentMessageIds.has(messageId)) continue
+      for (const agent of agents) {
+        if (agent.status !== 'cancelled') {
+          ids.add(agent.agentId)
+        }
+      }
+    }
+
+    return [...ids]
+  }, [agentStatuses, messages, selectedRoom, typingAgents])
 
   const handleBack = () => {
     navigate('/')
@@ -129,6 +167,31 @@ function MobileChatDetailPage({
 
   const handleOpenTaskBoard = () => {
     setSidePanelMode('task-board')
+  }
+
+  const handleStopAllTasks = () => {
+    if (!selectedRoom || activeTaskAgentIds.length === 0) return
+
+    setStopAllTargetAgentIds(activeTaskAgentIds)
+    setShowStopAllConfirm(true)
+  }
+
+  const confirmStopAllTasks = () => {
+    if (!selectedRoom || stopAllTargetAgentIds.length === 0) return
+
+    setSidePanelMode(null)
+    for (const agentId of stopAllTargetAgentIds) {
+      stopAgent(selectedRoom.id, agentId)
+    }
+    setStopAllTargetAgentIds([])
+    setShowStopAllConfirm(false)
+  }
+
+  const handleStopAllConfirmOpenChange = (open: boolean) => {
+    setShowStopAllConfirm(open)
+    if (!open) {
+      setStopAllTargetAgentIds([])
+    }
   }
 
   if (!selectedRoom) {
@@ -188,6 +251,13 @@ function MobileChatDetailPage({
                 <ClipboardList className="size-4 mr-2" />
                 任务看板
               </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={activeTaskAgentIds.length === 0}
+                onClick={handleStopAllTasks}
+              >
+                <Square className="size-4 mr-2" />
+                停止所有任务
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setShowClearConfirm(true)}>
                 <Eraser className="size-4 mr-2" />
                 清空消息
@@ -206,6 +276,13 @@ function MobileChatDetailPage({
           isMobile={true}
         />
       </div>
+
+      <StopAllTasksDialog
+        open={showStopAllConfirm}
+        onOpenChange={handleStopAllConfirmOpenChange}
+        taskCount={stopAllTargetAgentIds.length}
+        onConfirm={confirmStopAllTasks}
+      />
     </div>
   )
 }

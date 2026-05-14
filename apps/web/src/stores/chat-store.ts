@@ -606,6 +606,7 @@ export const useChatStore = create<ChatStore>()(
 export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => void) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const prevChatRoomIdRef = useRef<string | null>(null)
+  const chatRoomId = chatRoom?.id ?? null
 
   // 使用 selectors 选择具体的值，避免整个 store 对象变化
   const messages = useChatStore((s) => s.messages)
@@ -752,14 +753,14 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
 
     const unsubscribe = onMessage((msg) => {
       // 只有当前群聊的消息才添加到消息列表
-      if (chatRoom && msg.chatRoomId === chatRoom.id) {
+      if (chatRoomId && msg.chatRoomId === chatRoomId) {
         handleNewMessage(msg)
         // 用户在当前群聊中收到消息，自动标记为已读
-        markChatRoomRead(chatRoom.id)
+        markChatRoomRead(chatRoomId)
       }
     })
     return unsubscribe
-  }, [isConnected, chatRoom, onMessage, handleNewMessage, markChatRoomRead])
+  }, [isConnected, chatRoomId, onMessage, handleNewMessage, markChatRoomRead])
 
   // 监听 agent 事件
   useEffect(() => {
@@ -1170,7 +1171,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
 
     // 监听缓存的流式事件（用于刷新页面后恢复）
     const unsubCachedEvents = onCachedEvents((data) => {
-      if (data.chatRoomId !== chatRoom?.id) return
+      if (data.chatRoomId !== chatRoomId) return
 
       const { streamEvents } = useChatStore.getState()
       const streamKey = `${data.messageId}_${data.agentId}`
@@ -1194,13 +1195,13 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
       unsubCachedEvents()
     }
     // 依赖 isConnected，确保 socket 连接后重新设置监听器
-  }, [isConnected, onAgentTyping, onAgentDone, onAgentResume, onAgentStream, onAgentThinking, onAgentToolCall, onAgentStatus, onAgentStopped, onAgentTaskCancelled, onInactiveTasks, onAgentTaskResumed, onCachedEvents, setTypingAgents, setCompletedAgents, setToolCalls, setStreamingThinking, setStreamingContent, setStreamEvents, setAgentStatuses, setAgentQueueCounts, setExecutingChatRooms, setInactiveTasks, setStreamingViewAgent, setSidePanelMode])
+  }, [chatRoomId, isConnected, onAgentTyping, onAgentDone, onAgentResume, onAgentStream, onAgentThinking, onAgentToolCall, onAgentStatus, onAgentStopped, onAgentTaskCancelled, onInactiveTasks, onAgentTaskResumed, onCachedEvents, setTypingAgents, setCompletedAgents, setToolCalls, setStreamingThinking, setStreamingContent, setStreamEvents, setAgentStatuses, setAgentQueueCounts, setExecutingChatRooms, setInactiveTasks, setStreamingViewAgent, setSidePanelMode])
 
   // 切换群聊时加入房间
   useEffect(() => {
-    if (!chatRoom) return
+    if (!chatRoomId) return
 
-    if (prevChatRoomIdRef.current && prevChatRoomIdRef.current !== chatRoom.id) {
+    if (prevChatRoomIdRef.current && prevChatRoomIdRef.current !== chatRoomId) {
       leaveChatRoom(prevChatRoomIdRef.current)
       setSidePanelMode(null)
       setSelectedRoomAgent(null)
@@ -1211,22 +1212,20 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     }
 
     if (isConnected) {
-      joinChatRoom(chatRoom.id)
+      joinChatRoom(chatRoomId)
       // 请求 agent 状态（用于恢复正在执行的 agent 显示）
-      requestAgentStatus(chatRoom.id)
+      requestAgentStatus(chatRoomId)
       // 标记群聊已读
-      markChatRoomRead(chatRoom.id)
+      markChatRoomRead(chatRoomId)
     }
 
-    prevChatRoomIdRef.current = chatRoom.id
-    loadMessages(chatRoom.id)
+    prevChatRoomIdRef.current = chatRoomId
+    loadMessages(chatRoomId)
 
     return () => {
-      if (chatRoom.id) {
-        leaveChatRoom(chatRoom.id)
-      }
+      leaveChatRoom(chatRoomId)
     }
-  }, [chatRoom, isConnected, joinChatRoom, leaveChatRoom, loadMessages, setSidePanelMode, setSelectedRoomAgent, setStreamingViewAgent, setSelectedRecord, requestAgentStatus, markChatRoomRead])
+  }, [chatRoomId, isConnected, joinChatRoom, leaveChatRoom, loadMessages, setSidePanelMode, setSelectedRoomAgent, setStreamingViewAgent, setSelectedRecord, requestAgentStatus, markChatRoomRead])
 
   // 计算属性
   const chatRoomAgents = chatRoom?.chatRoomAgents ?? []
