@@ -12,12 +12,13 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { agentApi, AgentSpeechConfig } from '@/lib/agent-api'
+import { updateManager } from '@/lib/update-manager'
 import { cn } from '@/lib/utils'
 import { useAuthStore, useSocketStore } from '@/stores'
 import { useChatStore } from '@/stores/chat-store'
 import { TodoData } from '@/stores/socket-store'
-import { Bot, Check, Cpu, Globe, ListTodo, MessageSquare, Monitor, Moon, Package, Palette, Plus, Sun, Users } from 'lucide-react'
-import { useState } from 'react'
+import { Bot, Check, CircleArrowUp, Cpu, Globe, ListTodo, MessageSquare, Monitor, Moon, Package, Palette, Plus, Sun, Users } from 'lucide-react'
+import { useState, useSyncExternalStore } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 
@@ -36,6 +37,11 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
   const { user: socketUser, todos } = useSocketStore()
   const { theme, setTheme, brandTheme, setBrandTheme } = useTheme()
   const setSidePanelMode = useChatStore((s) => s.setSidePanelMode)
+  const updateState = useSyncExternalStore(
+    updateManager.subscribe,
+    updateManager.getSnapshot,
+    updateManager.getSnapshot,
+  )
 
   const activeTab = location.pathname.startsWith('/settings')
     ? null
@@ -263,6 +269,18 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
 
       {/* Bottom buttons */}
       <div className="flex flex-col items-center gap-1 pb-4">
+        {isElectron && updateState.update && (
+          <button
+            className="relative flex size-9 cursor-pointer items-center justify-center rounded-lg text-emerald-600 hover:bg-emerald-500/10 hover:text-emerald-700"
+            onClick={() => updateManager.openNotification()}
+            title={`发现新版本 ${updateState.update.version}`}
+            style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+          >
+            <CircleArrowUp className="size-5" />
+            <span className="absolute right-1 top-1 size-2 rounded-full bg-emerald-500 shadow-[0_0_0_2px_var(--sidebar)]" />
+          </button>
+        )}
+
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button

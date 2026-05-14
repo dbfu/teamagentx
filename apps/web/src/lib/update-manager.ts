@@ -1,0 +1,183 @@
+export type UpdateStatus = 'idle' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'error'
+
+export type UpdateCheckReason = 'startup' | 'socket-connected' | 'window-focus' | 'visibility-change' | 'online' | 'manual' | 'test'
+
+export interface UpdateManagerState {
+  visible: boolean
+  status: UpdateStatus
+  currentVersion: string
+  update: UpdateInfo | null
+  progress: UpdateDownloadProgress
+  filePath: string | null
+  error: string
+  checking: boolean
+  lastCheckedAt: number | null
+}
+
+interface ElectronUpdateAPI {
+  isElectron?: boolean
+  checkForUpdates?: ElectronAPI['checkForUpdates']
+}
+
+interface CreateUpdateManagerOptions {
+  getElectronAPI?: () => ElectronUpdateAPI | undefined
+  now?: () => number
+  runtimeCheckIntervalMs?: number
+}
+
+interface CheckForUpdatesOptions {
+  force?: boolean
+  silent?: boolean
+  reason: UpdateCheckReason
+}
+
+const initialState: UpdateManagerState = {
+  visible: false,
+  status: 'idle',
+  currentVersion: '',
+  update: null,
+  progress: { percent: 0, transferred: 0, total: null },
+  filePath: null,
+  error: '',
+  checking: false,
+  lastCheckedAt: null,
+}
+
+export function createUpdateManager(options: CreateUpdateManagerOptions = {}) {
+  const getElectronAPI = options.getElectronAPI ?? (() => window.electronAPI)
+  const now = options.now ?? (() => Date.now())
+  const runtimeCheckIntervalMs = options.runtimeCheckIntervalMs ?? 30 * 60 * 1000
+  const listeners = new Set<() => void>()
+  let state: UpdateManagerState = { ...initialState }
+  let inFlight: Promise<unknown> | null = null
+
+  const emit = () => {
+    listeners.forEach((listener) => listener())
+  }
+
+  const setState = (next: Partial<UpdateManagerState>) => {
+    state = { ...state, ...next }
+    emit()
+  }
+
+  const applyAvailableUpdate = (currentVersion: string, update: UpdateInfo, visible: boolean) => {
+    setState({
+      visible,
+      status: 'available',
+      currentVersion,
+      update,
+      progress: { percent: 0, transferred: 0, total: null },
+      filePath: null,
+      error: '',
+    })
+  }
+
+  const checkForUpdates = async ({ force = false, silent = true, reason: _reason }: CheckForUpdatesOptions) => {
+    const api = getElectronAPI()
+    if (!api?.isElectron || !api.checkForUpdates) return null
+
+    const checkedAt = now()
+    if (!force && state.lastCheckedAt !== null && checkedAt - state.lastCheckedAt < runtimeCheckIntervalMs) {
+      return null
+    }
+
+    if (inFlight) return inFlight
+
+    setState({ checking: true, lastCheckedAt: checkedAt })
+
+    inFlight = api.checkForUpdates()
+      .then((result) => {
+        if (result.success && result.data?.hasUpdate && result.data.update) {
+          applyAvailableUpdate(result.data.currentVersion, result.data.update, !silent)
+          return result.data
+        }
+
+        if (result.success && result.data?.noUrlConfigured) {
+          if (!silent) {
+            setState({
+              visible: true,
+              status: 'error',
+              update: null,
+              currentVersion: result.data.currentVersion,
+              error: '未配置更新检查地址，请联系管理员',
+            })
+          }
+          return result.data
+        }
+
+        if (!result.success && result.error && !silent) {
+          setState({
+            visible: true,
+            status: 'error',
+            update: null,
+            error: `更新信息查询异常：${result.error}`,
+          })
+        }
+
+        if (result.success && !result.data?.hasUpdate && state.status === 'idle') {
+          setState({ currentVersion: result.data?.currentVersion ?? state.currentVersion })
+        }
+
+        return result.data ?? null
+      })
+      .catch((err: unknown) => {
+        if (!silent) {
+          const msg = err instanceof Error ? err.message : String(err)
+          setState({
+            visible: true,
+            status: 'error',
+            update: null,
+            error: `更新信息查询异常：${msg}`,
+          })
+        }
+        return null
+      })
+      .finally(() => {
+        inFlight = null
+        setState({ checking: false })
+      })
+
+    return inFlight
+  }
+
+  return {
+    subscribe(listener: () => void) {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    getSnapshot() {
+      return state
+    },
+    checkForUpdates,
+    openNotification() {
+      if (state.update) {
+        setState({ visible: true, error: '' })
+      }
+    },
+    closeNotification() {
+      setState({ visible: false })
+    },
+    setDownloadProgress(progress: UpdateDownloadProgress) {
+      setState({ progress })
+    },
+    setStatus(status: UpdateStatus) {
+      setState({ status })
+    },
+    setDownloaded(filePath: string) {
+      setState({ filePath, status: 'downloaded' })
+    },
+    setError(error: string) {
+      setState({ error, status: 'error', visible: true })
+    },
+    resetDownload() {
+      setState({
+        progress: { percent: 0, transferred: 0, total: null },
+        filePath: null,
+        error: '',
+      })
+    },
+    applyAvailableUpdate,
+  }
+}
+
+export const updateManager = createUpdateManager()

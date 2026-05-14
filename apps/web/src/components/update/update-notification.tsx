@@ -1,7 +1,6 @@
 import { CheckCircle2, Download, FolderOpen, Loader2, RefreshCw, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
-
-type UpdateStatus = 'idle' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'error'
+import { useEffect, useSyncExternalStore } from 'react'
+import { updateManager } from '@/lib/update-manager'
 
 function formatBytes(bytes: number) {
   if (!bytes) return '0 B'
@@ -11,26 +10,18 @@ function formatBytes(bytes: number) {
 }
 
 export function UpdateNotification() {
-  const [visible, setVisible] = useState(false)
-  const [status, setStatus] = useState<UpdateStatus>('idle')
-  const [currentVersion, setCurrentVersion] = useState('')
-  const [update, setUpdate] = useState<UpdateInfo | null>(null)
-  const [progress, setProgress] = useState<UpdateDownloadProgress>({ percent: 0, transferred: 0, total: null })
-  const [filePath, setFilePath] = useState<string | null>(null)
-  const [error, setError] = useState('')
+  const { visible, status, currentVersion, update, progress, filePath, error } = useSyncExternalStore(
+    updateManager.subscribe,
+    updateManager.getSnapshot,
+    updateManager.getSnapshot,
+  )
 
   useEffect(() => {
     const handleUpdateFound = (event: Event) => {
       const detail = (event as CustomEvent<{ currentVersion: string; update: UpdateInfo }>).detail
       if (!detail?.update) return
 
-      setCurrentVersion(detail.currentVersion)
-      setUpdate(detail.update)
-      setStatus('available')
-      setProgress({ percent: 0, transferred: 0, total: null })
-      setFilePath(null)
-      setError('')
-      setVisible(true)
+      updateManager.applyAvailableUpdate(detail.currentVersion, detail.update, true)
     }
 
     window.addEventListener('teamagentx-update-found', handleUpdateFound)
@@ -42,36 +33,10 @@ export function UpdateNotification() {
     if (!api?.isElectron || !api.checkForUpdates) return
 
     const unsubscribe = api.onUpdateDownloadProgress?.((nextProgress) => {
-      setProgress(nextProgress)
+      updateManager.setDownloadProgress(nextProgress)
     })
 
-    api.checkForUpdates()
-      .then((result) => {
-        if (result.success && result.data?.hasUpdate && result.data.update) {
-          setCurrentVersion(result.data.currentVersion)
-          setUpdate(result.data.update)
-          setStatus('available')
-          setVisible(true)
-          return
-        }
-        if (result.success && result.data?.noUrlConfigured) {
-          setError('未配置更新检查地址，请联系管理员')
-          setStatus('error')
-          setVisible(true)
-          return
-        }
-        if (!result.success && result.error) {
-          setError(`更新信息查询异常：${result.error}`)
-          setStatus('error')
-          setVisible(true)
-        }
-      })
-      .catch((err: unknown) => {
-        const msg = err instanceof Error ? err.message : String(err)
-        setError(`更新信息查询异常：${msg}`)
-        setStatus('error')
-        setVisible(true)
-      })
+    updateManager.checkForUpdates({ force: true, silent: false, reason: 'startup' })
 
     return () => {
       unsubscribe?.()
@@ -81,40 +46,34 @@ export function UpdateNotification() {
   const handleDownload = async () => {
     if (!update || !window.electronAPI?.downloadUpdate) return
 
-    setStatus('downloading')
-    setError('')
-    setFilePath(null)
+    updateManager.setStatus('downloading')
+    updateManager.resetDownload()
 
     try {
       const result = await window.electronAPI.downloadUpdate(update)
       if (result.success && result.filePath) {
-        setFilePath(result.filePath)
-        setStatus('downloaded')
+        updateManager.setDownloaded(result.filePath)
       } else {
-        setError(result.error || '下载失败，请检查网络后重试')
-        setStatus('error')
+        updateManager.setError(result.error || '下载失败，请检查网络后重试')
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
-      setError(`下载失败：${msg}`)
-      setStatus('error')
+      updateManager.setError(`下载失败：${msg}`)
     }
   }
 
   const handleInstall = async () => {
     if (!window.electronAPI?.installUpdate) return
 
-    setStatus('installing')
+    updateManager.setStatus('installing')
     try {
       const result = await window.electronAPI.installUpdate(filePath || undefined)
       if (!result.success) {
-        setError(result.error || '启动安装失败')
-        setStatus('error')
+        updateManager.setError(result.error || '启动安装失败')
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
-      setError(`启动安装失败：${msg}`)
-      setStatus('error')
+      updateManager.setError(`启动安装失败：${msg}`)
     }
   }
 
@@ -140,7 +99,7 @@ export function UpdateNotification() {
           </div>
         </div>
         <button
-          onClick={() => setVisible(false)}
+          onClick={() => updateManager.closeNotification()}
           disabled={status === 'downloading' || status === 'installing'}
           className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent disabled:opacity-50"
           title="关闭"
@@ -181,7 +140,7 @@ export function UpdateNotification() {
         {status === 'available' && (
           <>
             <button
-              onClick={() => setVisible(false)}
+              onClick={() => updateManager.closeNotification()}
               className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
             >
               稍后
