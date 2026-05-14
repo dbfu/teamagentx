@@ -7,7 +7,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw'
 import { remarkMentions, MENTION_MARKER_CLASS } from '@/lib/remark-mentions'
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import { toast } from 'sonner'
 import { ImageViewerModal } from './image-viewer-modal'
 import { AudioMessagePlayer } from './audio-message-player'
@@ -87,7 +87,14 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
     ? (message.user?.username ?? '用户')
     : (message.agent?.name ?? '助手')
   const currentAgent = message.agentId ? allAgents.find((agent) => agent.id === message.agentId) : null
-  const voiceConfig = currentAgent?.speechConfig ? toVoicePanelConfig(currentAgent.speechConfig) : null
+  const voiceConfig = useMemo(
+    () => (currentAgent?.speechConfig ? toVoicePanelConfig(currentAgent.speechConfig) : null),
+    [currentAgent?.speechConfig],
+  )
+  const normalizedContent = useMemo(
+    () => normalizeSpeechText(message.content),
+    [message.content],
+  )
   const hasAudioAttachment = message.attachments?.some((attachment) => getAttachmentType(attachment) === 'audio') ?? false
   const shouldHideContent = hasAudioAttachment && message.content.trim() === VOICE_MESSAGE_PLACEHOLDER
   // 纯语音消息：只有音频附件、无文字内容，气泡样式退化为透明
@@ -201,7 +208,7 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
       return
     }
 
-    const speechText = normalizeSpeechText(message.content)
+    const speechText = normalizedContent
     if (!speechText) return
 
     setPlayingVoiceMessageId(message.id)
@@ -233,7 +240,7 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
         setPlayingVoiceMessageId(null)
       }
     }
-  }, [isCurrentlyPlaying, message.content, message.id, onMarkPlayed, setPlayingVoiceMessageId, voiceConfig])
+  }, [isCurrentlyPlaying, message.content, message.id, message.agentId, normalizedContent, onMarkPlayed, setPlayingVoiceMessageId, voiceConfig])
 
   const renderContent = (content: string) => {
     // 用户消息：普通文本展示，但 @助手 需要高亮
@@ -474,7 +481,7 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
 
   const renderSpeechButton = () => {
     if (message.isHuman || !showSpeechButton) return null
-    if (!voiceConfig?.enabled || !normalizeSpeechText(message.content) || !supportsSpeechPlayback(voiceConfig)) return null
+    if (!voiceConfig?.enabled || !normalizedContent || !supportsSpeechPlayback(voiceConfig)) return null
 
     return (
       <span className="relative inline-flex">
@@ -512,7 +519,12 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
           </span>
         </button>
         {!hasBeenPlayed && !isCurrentlyPlaying && (
-          <span className="absolute -right-0.5 top-0 size-2 rounded-full bg-orange-500/90 ring-2 ring-background dark:ring-slate-900" />
+          <span
+            role="status"
+            aria-label="未播放"
+            title="未播放"
+            className="absolute -right-0.5 top-0 size-2 rounded-full bg-orange-500/90 ring-2 ring-background dark:ring-slate-900"
+          />
         )}
       </span>
     )

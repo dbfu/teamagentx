@@ -172,6 +172,9 @@ interface ChatStore {
 }
 
 
+// 每个房间最多保留多少个语音消息 ID，避免 localStorage 无限增长
+const MAX_VOICE_IDS_PER_ROOM = 500
+
 function mergeUniqueIds(current: string[] | undefined, incoming: string[]): string[] {
   if (incoming.length === 0) return current ?? []
   const merged = new Set(current ?? [])
@@ -182,7 +185,12 @@ function mergeUniqueIds(current: string[] | undefined, incoming: string[]): stri
       changed = true
     }
   }
-  return changed ? Array.from(merged) : (current ?? [])
+  if (!changed) return current ?? []
+  let result = Array.from(merged)
+  if (result.length > MAX_VOICE_IDS_PER_ROOM) {
+    result = result.slice(-MAX_VOICE_IDS_PER_ROOM)
+  }
+  return result
 }
 
 export const useChatStore = create<ChatStore>()(

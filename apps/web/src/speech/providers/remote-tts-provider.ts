@@ -11,63 +11,103 @@ type ActiveRemotePlayback = {
   stop: () => void
 }
 
-let activeRemotePlayback: ActiveRemotePlayback | null = null
+// 用闭包封装 active controller，避免模块级裸变量的并发竞态
+const playbackManager = (() => {
+  let active: ActiveRemotePlayback | null = null
+  return {
+    set(controller: ActiveRemotePlayback) {
+      // 设置新 controller 之前先同步 stop 旧的，保证顺序
+      if (active && active !== controller) {
+        try {
+          active.stop()
+        } catch {
+          // ignore stop errors
+        }
+      }
+      active = controller
+    },
+    clearIf(controller: ActiveRemotePlayback) {
+      if (active === controller) active = null
+    },
+    stopAll() {
+      const current = active
+      active = null
+      if (current) {
+        try {
+          current.stop()
+        } catch {
+          // ignore stop errors
+        }
+      }
+    },
+  }
+})()
 
 export function stopRemoteTtsPlayback(): void {
-  activeRemotePlayback?.stop()
-  activeRemotePlayback = null
+  playbackManager.stopAll()
 }
 
 async function playAudioUrl(audioUrl: string): Promise<void> {
-  stopRemoteTtsPlayback()
+  playbackManager.stopAll()
   const audio = new Audio(audioUrl)
-  try {
-    await new Promise<void>((resolve, reject) => {
-      let finished = false
-
-      const cleanup = () => {
-        if (activeRemotePlayback === controller) {
-          activeRemotePlayback = null
-        }
-        audio.onended = null
-        audio.onerror = null
-      }
-
-      const finish = () => {
-        if (finished) return
-        finished = true
-        cleanup()
-        resolve()
-      }
-
-      const fail = () => {
-        if (finished) return
-        finished = true
-        cleanup()
-        reject(new Error('远程语音播报失败'))
-      }
-
-      const controller: ActiveRemotePlayback = {
-        stop: () => {
-          if (finished) return
-          try {
-            audio.pause()
-            audio.currentTime = 0
-          } catch {
-            // ignore stop errors from browser media APIs
-          }
-          finish()
-        },
-      }
-
-      activeRemotePlayback = controller
-      audio.onended = () => finish()
-      audio.onerror = () => fail()
-      audio.play().catch(() => fail())
-    })
-  } finally {
+  let revoked = false
+  const revokeOnce = () => {
+    if (revoked) return
+    revoked = true
     URL.revokeObjectURL(audioUrl)
   }
+  await new Promise<void>((resolve, reject) => {
+    let finished = false
+
+    const cleanup = () => {
+      playbackManager.clearIf(controller)
+      audio.onended = null
+      audio.onerror = null
+      // 完全释放 audio 元素持有的网络资源
+      try {
+        audio.pause()
+        audio.currentTime = 0
+        audio.src = ''
+        audio.load()
+      } catch {
+        // ignore release errors
+      }
+      // play 完成或出错后再 revoke，不影响 artifact 返回值的有效性
+      revokeOnce()
+    }
+
+    const finish = () => {
+      if (finished) return
+      finished = true
+      cleanup()
+      resolve()
+    }
+
+    const fail = () => {
+      if (finished) return
+      finished = true
+      cleanup()
+      reject(new Error('远程语音播报失败'))
+    }
+
+    const controller: ActiveRemotePlayback = {
+      stop: () => {
+        if (finished) return
+        try {
+          audio.pause()
+          audio.currentTime = 0
+        } catch {
+          // ignore stop errors from browser media APIs
+        }
+        finish()
+      },
+    }
+
+    playbackManager.set(controller)
+    audio.onended = () => finish()
+    audio.onerror = () => fail()
+    audio.play().catch(() => fail())
+  })
 }
 
 export function createRemoteTtsSpeechProvider(

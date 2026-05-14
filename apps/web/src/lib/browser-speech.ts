@@ -4,6 +4,7 @@ import {
   getBrowserSpeechVoices as getBrowserLocalSpeechVoices,
   supportsBrowserSpeechRecognition as supportsBrowserLocalSpeechRecognition,
   supportsBrowserSpeechSynthesis as supportsBrowserLocalSpeechSynthesis,
+  stopBrowserSpeechSynthesis as stopBrowserLocalSpeechSynthesis,
   type BrowserSpeechRecognitionSession,
   type BrowserSpeechVoiceOption,
 } from '@/speech/providers/browser-local-provider'
@@ -113,9 +114,7 @@ export function supportsSpeechPlayback(profile?: Pick<SpeechProfile, 'provider'>
 }
 
 export function stopSpeechPlayback(): void {
-  if (supportsBrowserLocalSpeechSynthesis()) {
-    window.speechSynthesis.cancel()
-  }
+  stopBrowserLocalSpeechSynthesis()
   stopRemoteTtsPlayback()
 }
 

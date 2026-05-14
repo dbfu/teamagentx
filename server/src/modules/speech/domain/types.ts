@@ -37,7 +37,7 @@ export interface SpeechTask<TInput = unknown> {
 export interface SpeechArtifact {
   kind: 'audio' | 'transcript' | 'session';
   text?: string | null;
-  audioUrl?: string | null;
+  audioBuffer?: Buffer;
   mimeType?: string | null;
   durationMs?: number | null;
   provider: string;

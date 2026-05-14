@@ -30,7 +30,9 @@ export function AssistantVoiceTab({ agent, onUpdate }: AssistantVoiceTabProps) {
   const [isPreviewing, setIsPreviewing] = useState(false)
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [saveError, setSaveError] = useState<string | null>(null)
-  const lastSavedConfigRef = useRef(JSON.stringify(toVoicePanelConfig(agent.speechConfig || createDefaultAgentSpeechConfig())))
+  const [lastSavedConfigJson, setLastSavedConfigJson] = useState(
+    () => JSON.stringify(toVoicePanelConfig(agent.speechConfig || createDefaultAgentSpeechConfig())),
+  )
   const hasHydratedRef = useRef(false)
   const saveRequestIdRef = useRef(0)
 
@@ -38,15 +40,18 @@ export function AssistantVoiceTab({ agent, onUpdate }: AssistantVoiceTabProps) {
     const incoming = toVoicePanelConfig(agent.speechConfig || createDefaultAgentSpeechConfig())
     setVoiceConfig(incoming)
     setSelectedPresetId(inferVoicePresetId(incoming))
-    lastSavedConfigRef.current = JSON.stringify(incoming)
-    setSaveState('idle')
-    setSaveError(null)
+    setLastSavedConfigJson(JSON.stringify(incoming))
+    if (saveState !== 'saving') {
+      setSaveState('idle')
+      setSaveError(null)
+    }
     hasHydratedRef.current = true
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agent])
 
   const hasChanges = useMemo(
-    () => JSON.stringify(voiceConfig) !== lastSavedConfigRef.current,
-    [voiceConfig],
+    () => JSON.stringify(voiceConfig) !== lastSavedConfigJson,
+    [voiceConfig, lastSavedConfigJson],
   )
 
   const handlePresetSelect = (presetId: AgentVoicePresetId) => {
@@ -77,7 +82,7 @@ export function AssistantVoiceTab({ agent, onUpdate }: AssistantVoiceTabProps) {
         if (!response.success || !response.data) {
           throw new Error(response.error || '语音设置保存失败')
         }
-        lastSavedConfigRef.current = JSON.stringify(voiceConfig)
+        setLastSavedConfigJson(JSON.stringify(voiceConfig))
         setSaveState('saved')
         await onUpdate?.(response.data)
       } catch (error) {
@@ -157,6 +162,9 @@ export function AssistantVoiceTab({ agent, onUpdate }: AssistantVoiceTabProps) {
                 </span>
                 <button
                   type="button"
+                  role="switch"
+                  aria-checked={voiceConfig.enabled}
+                  aria-label="开启语音"
                   onClick={() => setVoiceConfig((prev) => ({
                     ...prev,
                     enabled: !prev.enabled,

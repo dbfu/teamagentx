@@ -7,9 +7,9 @@ SET "speechConfig" = CASE
   WHEN "voiceConfig" IS NULL THEN NULL
   ELSE json_object(
     'behavior', json_object(
-      'enabled', COALESCE(json_extract("voiceConfig", '$.enabled'), 0),
+      'enabled', CASE WHEN json_extract("voiceConfig", '$.enabled') = 1 THEN json('true') ELSE json('false') END,
       'outputMode', COALESCE(json_extract("voiceConfig", '$.outputMode'), 'off'),
-      'autoPlay', COALESCE(json_extract("voiceConfig", '$.autoPlay'), 0)
+      'autoPlay', CASE WHEN json_extract("voiceConfig", '$.autoPlay') = 1 THEN json('true') ELSE json('false') END
     ),
     'profile', json_object(
       'provider', COALESCE(json_extract("voiceConfig", '$.provider'), 'browser-local'),

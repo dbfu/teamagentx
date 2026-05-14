@@ -438,6 +438,18 @@
   50% { transform: scaleY(1); }
 }
 
+.voice-bar {
+  width: 3px;
+  border-radius: 9999px;
+  background-color: currentColor;
+  transform-origin: bottom;
+  height: 100%;
+  animation: sound-bar 0.7s ease-in-out infinite;
+}
+.voice-bar-1 { animation-delay: 0ms; }
+.voice-bar-2 { animation-delay: 180ms; }
+.voice-bar-3 { animation-delay: 360ms; }
+
 /* Typing animation for loading dots - appear one by one */
 @keyframes dot-appear {
   0%, 20% {

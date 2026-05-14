@@ -7,6 +7,5 @@ import { SpeechService } from './speech.service.js';
 export const serverSpeechProviderRegistry = new SpeechProviderRegistry();
 serverSpeechProviderRegistry.register(createRemoteTtsProvider());
 serverSpeechProviderRegistry.register(createEdgeTtsProvider());
-serverSpeechProviderRegistry.register(createRemoteTtsProvider({ providerId: 'remote-tts' }));
 
 export const serverSpeechService = new SpeechService(new SpeechRouter(serverSpeechProviderRegistry));

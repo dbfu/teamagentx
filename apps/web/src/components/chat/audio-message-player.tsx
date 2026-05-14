@@ -119,12 +119,14 @@ export function AudioMessagePlayer({
           onClick={handleTogglePlay}
           className="flex size-10 shrink-0 items-center justify-center rounded-full bg-blue-500 text-white transition-colors hover:bg-blue-600"
           title={isPlaying ? '暂停' : '播放'}
+          aria-label={isPlaying ? '暂停' : '播放'}
+          aria-pressed={isPlaying}
         >
           {isPlaying ? (
-            <span className="flex items-end gap-[3px] h-4" aria-hidden>
-              <span className="w-[3px] rounded-full bg-white origin-bottom" style={{ height: '100%', animation: 'sound-bar 0.7s ease-in-out infinite', animationDelay: '0ms' }} />
-              <span className="w-[3px] rounded-full bg-white origin-bottom" style={{ height: '100%', animation: 'sound-bar 0.7s ease-in-out infinite', animationDelay: '180ms' }} />
-              <span className="w-[3px] rounded-full bg-white origin-bottom" style={{ height: '100%', animation: 'sound-bar 0.7s ease-in-out infinite', animationDelay: '360ms' }} />
+            <span className="flex items-end gap-[3px] h-4 text-white" aria-hidden>
+              <span className="voice-bar voice-bar-1" />
+              <span className="voice-bar voice-bar-2" />
+              <span className="voice-bar voice-bar-3" />
             </span>
           ) : (
             <Play className="ml-0.5 size-4" />
@@ -145,6 +147,7 @@ export function AudioMessagePlayer({
               value={Math.min(currentTime, resolvedDuration || currentTime)}
               onChange={(e) => handleSeek(Number(e.target.value))}
               className="h-1.5 w-full cursor-pointer accent-blue-500"
+              aria-label="播放进度"
             />
             <span className="shrink-0 text-xs text-muted-foreground">
               {formatAudioTime(currentTime)} / {formatAudioTime(resolvedDuration)}
@@ -162,7 +165,7 @@ export function AudioMessagePlayer({
       )}
 
       {hasPlaybackError && (
-        <div className="mt-2 text-xs text-red-500">
+        <div role="alert" className="mt-2 text-xs text-red-500">
           语音播放失败，请确认音频文件仍可访问。
         </div>
       )}

@@ -75,7 +75,8 @@ describe('openai-compatible-tts provider', () => {
     assert.strictEqual(result?.model, 'gpt-4o-mini-tts');
     assert.strictEqual(result?.voice, 'alloy');
     assert.strictEqual(result?.mimeType, 'audio/mpeg');
-    assert.strictEqual(result?.audioUrl, 'data:audio/mpeg;base64,AQIDBA==');
+    assert.ok(result?.audioBuffer);
+    assert.strictEqual(result?.audioBuffer?.toString('base64'), 'AQIDBA==');
   });
 
   test('应拒绝非 openai 协议的模型供应商', async () => {

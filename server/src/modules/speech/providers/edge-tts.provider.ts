@@ -9,6 +9,8 @@ import type { SpeechArtifact, SpeechTask } from '../domain/types.js';
 
 const execFileAsync = promisify(nodeExecFile);
 
+const VOICE_PATTERN = /^[A-Za-z0-9,\- ]+$/;
+
 type EdgeTtsDependencies = {
   edgeTtsBinary?: string;
   defaultVoice?: string;
@@ -19,19 +21,18 @@ type EdgeTtsDependencies = {
   cleanupFile?: (filePath: string) => Promise<void>;
 };
 
-function toDataUrl(bytes: Uint8Array, mimeType: string): string {
-  return `data:${mimeType};base64,${Buffer.from(bytes).toString('base64')}`;
-}
-
 function formatSignedValue(value: number, suffix: string): string {
   return `${value >= 0 ? '+' : ''}${value}${suffix}`;
 }
 
 function toRateArg(speed?: number | null): string | null {
-  if (typeof speed !== 'number' || !Number.isFinite(speed) || speed <= 0) {
+  if (typeof speed !== 'number' || !Number.isFinite(speed)) {
     return null;
   }
-  return formatSignedValue(Math.round((speed - 1) * 100), '%');
+  // 注意：edge-tts 不接受负值过大的 rate；speed=0 会得到 -100%。
+  // 将最小值 clamp 为 0.1，避免生成不被支持的极端参数。
+  const clamped = speed <= 0 ? 0.1 : speed;
+  return formatSignedValue(Math.round((clamped - 1) * 100), '%');
 }
 
 function toVolumeArg(volume?: number | null): string | null {
@@ -42,7 +43,10 @@ function toVolumeArg(volume?: number | null): string | null {
 }
 
 function toPitchArg(pitch?: number | null): string | null {
-  if (typeof pitch !== 'number' || !Number.isFinite(pitch) || pitch <= 0) {
+  if (pitch === null || pitch === undefined) {
+    return null;
+  }
+  if (typeof pitch !== 'number' || !Number.isFinite(pitch)) {
     return null;
   }
   return formatSignedValue(Math.round((pitch - 1) * 50), 'Hz');
@@ -54,7 +58,7 @@ async function defaultCreateTempFile(): Promise<string> {
 }
 
 async function defaultRunEdgeTts(binary: string, args: string[]): Promise<void> {
-  await execFileAsync(binary, args);
+  await execFileAsync(binary, args, { timeout: 30000 });
 }
 
 async function defaultCleanupFile(filePath: string): Promise<void> {
@@ -89,8 +93,11 @@ export function createEdgeTtsProvider(dependencies: EdgeTtsDependencies = {}): S
         };
       }
 
-      const outputPath = await createTempFile();
       const voice = task.profile?.voice?.trim() || defaultVoice;
+      if (!VOICE_PATTERN.test(voice)) {
+        throw new Error('edge-tts voice 参数包含非法字符');
+      }
+      const outputPath = await createTempFile();
       const args = [
         '--voice',
         voice,
@@ -115,13 +122,13 @@ export function createEdgeTtsProvider(dependencies: EdgeTtsDependencies = {}): S
 
       try {
         await runEdgeTts(edgeTtsBinary, args);
-        const bytes = await readAudioFile(outputPath);
+        const audioBuffer = await readAudioFile(outputPath);
         return {
           kind: 'audio',
           provider: providerId,
           text,
-          audioUrl: toDataUrl(bytes, 'audio/mpeg'),
-          mimeType: 'audio/mpeg',
+          audioBuffer,
+          mimeType: 'audio/mp3',
           voice,
           metadata: {
             runtime: 'server',

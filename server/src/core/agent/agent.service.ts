@@ -5,6 +5,7 @@ import {
   type AgentSpeechConfig,
   serializeAgentSpeechConfig,
 } from '../../modules/speech/speech-config.js';
+import { invalidateSystemAgentsCache } from '../../modules/chatroom/system-agents-cache.js';
 
 // 包含关联的 Agent 类型
 export type AgentWithRelations = Agent & {
@@ -176,17 +177,40 @@ export const agentService = {
   },
 
   async update(id: string, data: UpdateAgentInput): Promise<AgentWithRelations> {
-    // 处理外键字段：空字符串转换为 undefined（表示不更新），'null' 字符串转换为 null（表示移除）
-    const { categoryId, llmProviderId, speechConfig, ...restData } = data;
+    // 系统助手允许更新的字段白名单（仅展示/偏好类字段）
+    // 任何不在白名单中的字段（包括未来新增的字段）都会被拦截，避免字段保护失效
+    const SYSTEM_AGENT_UPDATABLE_FIELDS = ['speechConfig'] as const;
 
-    // speechConfig 是本机展示偏好，系统助手也允许修改；其他字段仍受保护
-    const hasNonVoiceFields =
-      Object.keys(restData).length > 0 ||
-      categoryId !== undefined ||
-      llmProviderId !== undefined;
-    if (hasNonVoiceFields) {
-      await assertAgentIsUserEditable(id, '修改');
+    const existingAgent = await prisma.agent.findUnique({
+      where: { id },
+      select: { agentLevel: true },
+    });
+    if (!existingAgent) {
+      const error = new Error('助手不存在') as Error & { code?: string };
+      error.code = 'P2025';
+      throw error;
     }
+
+    let effectiveData: UpdateAgentInput = data;
+    if (existingAgent.agentLevel === 'system') {
+      const filtered: UpdateAgentInput = {};
+      for (const key of SYSTEM_AGENT_UPDATABLE_FIELDS) {
+        if (key in data) {
+          (filtered as Record<string, unknown>)[key] = (data as Record<string, unknown>)[key];
+        }
+      }
+      // 若调用方尝试更新白名单外的字段，直接拒绝以保持原有错误语义
+      const attemptedKeys = Object.keys(data).filter(
+        (k) => !(SYSTEM_AGENT_UPDATABLE_FIELDS as readonly string[]).includes(k)
+      );
+      if (attemptedKeys.length > 0) {
+        throw new Error('系统助手不允许修改');
+      }
+      effectiveData = filtered;
+    }
+
+    // 处理外键字段：空字符串转换为 undefined（表示不更新），'null' 字符串转换为 null（表示移除）
+    const { categoryId, llmProviderId, speechConfig, ...restData } = effectiveData;
     const processedCategoryId = categoryId === '' ? undefined : categoryId === 'null' ? null : categoryId;
     const processedLlmProviderId = llmProviderId === '' ? undefined : llmProviderId === 'null' ? null : llmProviderId;
     const currentAgent = await prisma.agent.findUnique({
@@ -208,7 +232,7 @@ export const agentService = {
       processedLlmProviderId === undefined ? currentAgent.llmProviderId : processedLlmProviderId,
     );
 
-    return prisma.agent.update({
+    const result = await prisma.agent.update({
       where: { id },
       data: {
         ...restData,
@@ -222,6 +246,11 @@ export const agentService = {
         llmProvider: true,
       },
     });
+    // 系统助手字段变更可能影响群聊列表展示，主动清空缓存
+    if (existingAgent.agentLevel === 'system') {
+      invalidateSystemAgentsCache();
+    }
+    return result;
   },
 
   async delete(id: string): Promise<AgentWithRelations> {

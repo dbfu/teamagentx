@@ -17,6 +17,11 @@ export class SpeechService {
         throw error;
       }
 
+      // 配置/校验类错误不可通过 fallback 恢复，直接抛出
+      if (isUnrecoverableError(error)) {
+        throw error;
+      }
+
       const fallbackProvider = this.router.route(task, {
         preferredProviderId: task.profile.fallbackProvider,
         skipProviderIds: triedProviderIds,
@@ -46,4 +51,11 @@ export class SpeechService {
 
     throw new Error(`Provider ${provider.id} does not support task type: ${task.type}`);
   }
+}
+
+function isUnrecoverableError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message || '';
+  const keywords = ['仅支持', 'Invalid', '不支持', 'empty', '非法字符', '不允许', '无效'];
+  return keywords.some((kw) => message.includes(kw));
 }

@@ -1,5 +1,7 @@
 import type { AgentSpeechConfig } from '@/lib/agent-api'
 
+// remote-tts 是历史 ID，统一归一化为 openai-compatible-tts（同一接口的规范名称），
+// 保证旧配置在新 provider 注册表下仍可命中。
 function normalizeSpeechProviderId(provider?: string | null): string | null {
   if (!provider) return null
   if (provider === 'remote-tts') return 'openai-compatible-tts'
@@ -252,7 +254,12 @@ export function fromVoicePanelConfig(config: AgentVoicePanelConfig): AgentSpeech
   const vendorOptionsText = config.vendorOptionsText.trim()
   let vendorOptions: Record<string, unknown> | null = null
   if (vendorOptionsText) {
-    const parsed = JSON.parse(vendorOptionsText)
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(vendorOptionsText)
+    } catch {
+      throw new Error('Vendor Options 不是有效的 JSON 格式')
+    }
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       throw new Error('高级参数必须是 JSON 对象')
     }
@@ -296,10 +303,24 @@ export function applyVoicePreset(
   }
 }
 
+// 仅比较影响预设身份的核心字段，避免依赖字段顺序或非关键字段。
+const PRESET_CORE_FIELDS: (keyof AgentVoicePanelConfig)[] = [
+  'provider',
+  'fallbackProvider',
+  'voiceId',
+  'speed',
+  'volume',
+  'pitch',
+  'emotion',
+  'style',
+  'prompt',
+]
+
 export function inferVoicePresetId(config: AgentVoicePanelConfig): AgentVoicePresetId | null {
   for (const preset of AGENT_VOICE_PRESETS) {
-    const matches = Object.entries(preset.patch).every(([key, value]) => {
-      return config[key as keyof AgentVoicePanelConfig] === value
+    const matches = PRESET_CORE_FIELDS.every((key) => {
+      if (!(key in preset.patch)) return true
+      return config[key] === preset.patch[key]
     })
     if (matches) {
       return preset.id

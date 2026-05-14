@@ -9,8 +9,6 @@ export interface BrowserSpeechVoiceOption {
   default: boolean
 }
 
-type BrowserSpeechRecognitionApi = new () => SpeechRecognition
-
 interface SpeechRecognitionResultLike {
   0: {
     transcript: string
@@ -28,22 +26,24 @@ interface SpeechRecognitionErrorEventLike extends Event {
   error: string
 }
 
+interface BrowserSpeechRecognitionInstance extends EventTarget {
+  continuous: boolean
+  interimResults: boolean
+  lang: string
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null
+  onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null
+  onend: (() => void) | null
+  start: () => void
+  stop: () => void
+  abort: () => void
+}
+
+type BrowserSpeechRecognitionApi = new () => BrowserSpeechRecognitionInstance
+
 declare global {
   interface Window {
-    webkitSpeechRecognition?: BrowserSpeechRecognitionApi
     SpeechRecognition?: BrowserSpeechRecognitionApi
-  }
-
-  interface SpeechRecognition extends EventTarget {
-    continuous: boolean
-    interimResults: boolean
-    lang: string
-    onresult: ((event: SpeechRecognitionEventLike) => void) | null
-    onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null
-    onend: (() => void) | null
-    start: () => void
-    stop: () => void
-    abort: () => void
+    webkitSpeechRecognition?: BrowserSpeechRecognitionApi
   }
 }
 
@@ -144,6 +144,16 @@ export function supportsBrowserSpeechSynthesis(): boolean {
   return typeof window !== 'undefined' && 'speechSynthesis' in window
 }
 
+// 只有 stopBrowserSpeechSynthesis() 被显式调用时才为 true，
+// 用于区分"外部主动停止"和"Chrome 偶发的 interrupted/canceled 噪音"。
+let externalStopRequested = false
+
+export function stopBrowserSpeechSynthesis(): void {
+  if (!supportsBrowserSpeechSynthesis()) return
+  externalStopRequested = true
+  window.speechSynthesis.cancel()
+}
+
 export function getBrowserSpeechVoices(): BrowserSpeechVoiceOption[] {
   if (!supportsBrowserSpeechSynthesis()) return []
 
@@ -186,27 +196,56 @@ async function synthesizeWithBrowser(task: SpeechTask<{ text: string }>): Promis
       utterance.pitch = task.profile.pitch
     }
 
-    utterance.onend = () => resolve({
-      kind: 'audio',
-      provider: 'browser-local',
-      text,
-      voice: task.profile?.voice ?? voice?.voiceURI ?? voice?.name ?? null,
-      metadata: {
-        runtime: 'client',
-      },
-    })
+    // Chrome 偶发 bug：onend 可能永远不触发。按字数估算最长等待时间作为兜底，
+    // 至少 30 秒，每个字符约 100ms，超时则取消合成并视为正常完成，避免阻塞队列。
+    const timeoutId = setTimeout(() => {
+      try {
+        window.speechSynthesis.cancel()
+      } catch {
+        // ignore
+      }
+      resolve({
+        kind: 'audio',
+        provider: 'browser-local',
+        text,
+        voice: task.profile?.voice ?? voice?.voiceURI ?? voice?.name ?? null,
+        metadata: {
+          runtime: 'client',
+          timedOut: true,
+        },
+      })
+    }, Math.max(30_000, text.length * 100))
+
+    utterance.onend = () => {
+      clearTimeout(timeoutId)
+      resolve({
+        kind: 'audio',
+        provider: 'browser-local',
+        text,
+        voice: task.profile?.voice ?? voice?.voiceURI ?? voice?.name ?? null,
+        metadata: {
+          runtime: 'client',
+        },
+      })
+    }
     utterance.onerror = (event) => {
-      if ((event as SpeechSynthesisErrorEvent).error === 'interrupted' || (event as SpeechSynthesisErrorEvent).error === 'canceled') {
-        resolve({
-          kind: 'audio',
-          provider: 'browser-local',
-          text,
-          voice: task.profile?.voice ?? voice?.voiceURI ?? voice?.name ?? null,
-          metadata: {
-            runtime: 'client',
-            interrupted: true,
-          },
-        })
+      clearTimeout(timeoutId)
+      const errorCode = (event as SpeechSynthesisErrorEvent).error
+      if (errorCode === 'interrupted' || errorCode === 'canceled') {
+        // 仅当外部显式调用 stopBrowserSpeechSynthesis() 时才视为"外部中断"，
+        // 否则 Chrome 偶发的 interrupted/canceled 是噪音，应视为正常结束。
+        if (externalStopRequested) {
+          externalStopRequested = false
+          reject(new Error('speech_interrupted'))
+        } else {
+          resolve({
+            kind: 'audio',
+            provider: 'browser-local',
+            text,
+            voice: task.profile?.voice ?? voice?.voiceURI ?? voice?.name ?? null,
+            metadata: { runtime: 'client', interrupted: true },
+          })
+        }
         return
       }
       reject(new Error('语音播报失败'))

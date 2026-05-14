@@ -24,6 +24,52 @@ const MIME_TO_EXT: Record<string, string> = {
   'audio/mp4': 'm4a',
 };
 
+/**
+ * 校验音频文件魔数，确保文件内容与声明的 MIME 类型一致
+ * 防止伪造 Content-Type 上传非音频文件
+ */
+function validateAudioMagicBytes(buffer: Buffer, mimeType: string): void {
+  if (buffer.length < 12) {
+    throw new Error('音频文件过小，无法校验格式');
+  }
+
+  const matchesPrefix = (offset: number, bytes: number[]): boolean =>
+    bytes.every((b, i) => buffer[offset + i] === b);
+
+  switch (mimeType) {
+    case 'audio/wav': {
+      // "RIFF" 52 49 46 46
+      if (!matchesPrefix(0, [0x52, 0x49, 0x46, 0x46])) {
+        throw new Error('WAV 文件魔数不匹配');
+      }
+      return;
+    }
+    case 'audio/mpeg': {
+      // "ID3" 49 44 33 或 MP3 frame sync FF FB / FF F3 / FF F2
+      if (matchesPrefix(0, [0x49, 0x44, 0x33])) return;
+      if (buffer[0] === 0xff && (buffer[1] === 0xfb || buffer[1] === 0xf3 || buffer[1] === 0xf2)) return;
+      throw new Error('MP3 文件魔数不匹配');
+    }
+    case 'audio/webm': {
+      // EBML header: 1A 45 DF A3
+      if (!matchesPrefix(0, [0x1a, 0x45, 0xdf, 0xa3])) {
+        throw new Error('WebM 文件魔数不匹配');
+      }
+      return;
+    }
+    case 'audio/mp4': {
+      // offset 4: "ftyp" 66 74 79 70
+      if (!matchesPrefix(4, [0x66, 0x74, 0x79, 0x70])) {
+        throw new Error('M4A/MP4 文件魔数不匹配');
+      }
+      return;
+    }
+    default:
+      // 未在白名单显式列出的类型按 MIME 白名单已经拦截，这里直接拒绝
+      throw new Error(`无法校验该类型的音频魔数: ${mimeType}`);
+  }
+}
+
 interface UploadResult {
   type: 'image' | 'audio';
   filename: string;  // 原始文件名
@@ -101,6 +147,9 @@ export const uploadService = {
     if (buffer.length > MAX_FILE_SIZE) {
       throw new Error(`文件大小超出限制: ${buffer.length} > ${MAX_FILE_SIZE}`);
     }
+
+    // 校验文件头魔数，防止伪造 Content-Type
+    validateAudioMagicBytes(buffer, baseMime);
 
     const ext = MIME_TO_EXT[baseMime] || 'bin';
     const id = uuidv4();

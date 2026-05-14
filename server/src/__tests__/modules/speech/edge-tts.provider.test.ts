@@ -54,8 +54,9 @@ describe('edge-tts provider', () => {
     assert.strictEqual(result?.kind, 'audio');
     assert.strictEqual(result?.provider, 'edge-tts');
     assert.strictEqual(result?.voice, 'zh-CN-XiaoxiaoNeural');
-    assert.strictEqual(result?.mimeType, 'audio/mpeg');
-    assert.strictEqual(result?.audioUrl, 'data:audio/mpeg;base64,AQIDBA==');
+    assert.strictEqual(result?.mimeType, 'audio/mp3');
+    assert.ok(result?.audioBuffer);
+    assert.strictEqual(result?.audioBuffer?.toString('base64'), 'AQIDBA==');
     assert.strictEqual(cleanedPath, '/tmp/teamagentx-edge-tts.mp3');
   });
 

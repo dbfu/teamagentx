@@ -123,7 +123,6 @@ export const SPEECH_PRESETS: SpeechPresetDefinition[] = [
       },
       profile: {
         provider: 'edge-tts',
-        fallbackProvider: 'browser-local',
         voice: 'zh-CN-XiaoxiaoNeural',
         speed: 1,
         volume: 1,
@@ -147,7 +146,6 @@ export const SPEECH_PRESETS: SpeechPresetDefinition[] = [
       },
       profile: {
         provider: 'edge-tts',
-        fallbackProvider: 'browser-local',
         voice: 'zh-CN-XiaoyiNeural',
         speed: 1,
         volume: 1,
@@ -171,7 +169,6 @@ export const SPEECH_PRESETS: SpeechPresetDefinition[] = [
       },
       profile: {
         provider: 'edge-tts',
-        fallbackProvider: 'browser-local',
         voice: 'zh-CN-YunxiNeural',
         speed: 1,
         volume: 1,
