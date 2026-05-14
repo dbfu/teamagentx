@@ -35,6 +35,8 @@ function isAgentValidationError(error: unknown): error is Error {
     '图片能力只能绑定图片模型',
     '开启图片能力时必须选择图片模型',
     '图片模型供应商不存在',
+    '代理配置',
+    '代理地址',
   ].some((prefix) => error.message.startsWith(prefix));
 }
 
@@ -67,6 +69,8 @@ const agentResponseSchema = {
     agentLevel: { type: 'string', enum: ['normal', 'system'] },
     acpTool: { type: 'string', nullable: true },
     workDir: { type: 'string', nullable: true },
+    proxyConfig: { type: 'string', nullable: true },
+    codexModel: { type: 'string', nullable: true },
     speechConfig: {
       type: 'object',
       nullable: true,
@@ -168,6 +172,8 @@ const createAgentBodySchema = {
     type: { type: 'string', enum: ['builtin', 'acp'], description: '助手类型' },
     acpTool: { type: 'string', description: 'ACP 工具名称（仅 type=acp 时有效，如 claude, codex）' },
     workDir: { type: 'string', description: '工作目录（适用于所有类型）' },
+    proxyConfig: { type: 'string', nullable: true, description: 'ACP 工具代理配置（支持代理地址或 export 片段）' },
+    codexModel: { type: 'string', nullable: true, description: 'Codex 本地配置模式下指定的模型名称' },
     speechConfig: {
       type: 'object',
       nullable: true,
@@ -228,6 +234,8 @@ const updateAgentBodySchema = {
     type: { type: 'string', enum: ['builtin', 'acp'] },
     acpTool: { type: 'string' },
     workDir: { type: 'string' },
+    proxyConfig: { type: 'string', nullable: true },
+    codexModel: { type: 'string', nullable: true },
     speechConfig: {
       type: 'object',
       nullable: true,
@@ -292,6 +300,8 @@ interface CreateAgentBody {
   type?: 'builtin' | 'acp';
   acpTool?: string;
   workDir?: string;
+  proxyConfig?: string | null;
+  codexModel?: string | null;
   speechConfig?: UpdateAgentInput['speechConfig'];
   categoryId?: string;
   llmProviderId?: string;
@@ -307,6 +317,8 @@ interface UpdateAgentBody {
   type?: 'builtin' | 'acp';
   acpTool?: string;
   workDir?: string;
+  proxyConfig?: string | null;
+  codexModel?: string | null;
   speechConfig?: UpdateAgentInput['speechConfig'];
   isActive?: boolean;
   categoryId?: string | null;
@@ -584,7 +596,7 @@ export async function agentGateway(app: FastifyInstance) {
       },
     },
     async (request, reply) => {
-      const {name, avatar, avatarColor, description, prompt, type, acpTool, workDir, speechConfig, categoryId, llmProviderId, imageGeneration} = request.body;
+      const {name, avatar, avatarColor, description, prompt, type, acpTool, workDir, proxyConfig, codexModel, speechConfig, categoryId, llmProviderId, imageGeneration} = request.body;
 
       try {
         const agent = await agentService.create({
@@ -596,6 +608,8 @@ export async function agentGateway(app: FastifyInstance) {
           type,
           acpTool,
           workDir,
+          proxyConfig,
+          codexModel,
           speechConfig,
           categoryId,
           llmProviderId,

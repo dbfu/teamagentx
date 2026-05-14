@@ -37,6 +37,8 @@ export interface Agent {
   agentLevel: 'normal' | 'system'
   acpTool: string | null
   workDir: string | null
+  proxyConfig: string | null
+  codexModel: string | null
   speechConfig: AgentSpeechConfig | null
   isActive: boolean
   categoryId: string | null
@@ -102,6 +104,8 @@ export interface CreateAgentRequest {
   type?: 'builtin' | 'acp'
   acpTool?: string
   workDir?: string
+  proxyConfig?: string | null
+  codexModel?: string | null
   speechConfig?: AgentSpeechConfig | null
   categoryId?: string
   llmProviderId?: string | null
@@ -119,6 +123,8 @@ export interface UpdateAgentRequest {
   type?: 'builtin' | 'acp'
   acpTool?: string
   workDir?: string
+  proxyConfig?: string | null
+  codexModel?: string | null
   speechConfig?: AgentSpeechConfig | null
   categoryId?: string | null
   llmProviderId?: string | null

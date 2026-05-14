@@ -15,6 +15,7 @@ import { buildAgentLongTermMemorySection } from './agent-long-term-memory.js';
 import { debugLog } from './agent-handler/debug.js';
 import { getInternalAgentToolToken } from './agent-handler/internal-agent-tool-auth.js';
 import { buildAcpProviderEnv, type AcpProviderInfo } from './acp-provider.adapter.js';
+import { parseProxyConfigEnv } from './proxy-config.js';
 import {
   resolveAgentWorkDir,
 } from './work-dir.js';
@@ -574,6 +575,8 @@ export class CodexSdkExecutor implements IAgentExecutor {
   readonly chatRoomAgents: ChatRoomAgentInfo[];
   readonly llmProvider?: LlmProvider;
   readonly imageGenerationProvider?: LlmProvider | null;
+  readonly proxyConfig: string | null;
+  readonly codexModel: string | null;
 
   private _lastInjectedMessageId?: string;
   private systemPrompt: string;
@@ -609,6 +612,8 @@ export class CodexSdkExecutor implements IAgentExecutor {
     chatRoomAgents?: ChatRoomAgentInfo[],
     llmProvider?: LlmProvider,
     imageGenerationProvider?: LlmProvider | null,
+    proxyConfig?: string | null,
+    codexModel?: string | null,
   ) {
     this.name = name;
     this.chatRoomId = chatRoomId;
@@ -619,6 +624,8 @@ export class CodexSdkExecutor implements IAgentExecutor {
     this.chatRoomAgents = chatRoomAgents || [];
     this.llmProvider = llmProvider;
     this.imageGenerationProvider = imageGenerationProvider;
+    this.proxyConfig = proxyConfig || null;
+    this.codexModel = codexModel || null;
 
     this.workDir = resolveAgentWorkDir({
       chatRoomId,
@@ -1084,6 +1091,7 @@ process.stdin.on("data", (chunk) => {
     return {
       ...cleanEnv,
       ...providerEnv,
+      ...parseProxyConfigEnv(this.proxyConfig),
       CODEX_HOME: this.getCodexHome(),
     };
   }
@@ -1215,7 +1223,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
   private getThread(): TeamAgentXCodexThread {
     const runner = this.getCodexRunner();
     const options = {
-      model: this.llmProvider?.model,
+      model: this.llmProvider?.model || this.codexModel || undefined,
       workingDirectory: this.workDir,
       skipGitRepoCheck: true,
       sandboxMode: 'danger-full-access' as const,

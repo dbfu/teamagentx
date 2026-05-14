@@ -1,6 +1,7 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AcpToolInfo, Agent, AgentSpeechConfig, agentApi, AgentCategory, acpToolsApi, categoryApi } from '@/lib/agent-api';
 import { AgentAvatarImage, agentAvatarOptions, normalizeAgentAvatarIndex } from '@/lib/agent-avatars';
+import { getCodexModelOptions } from '@/lib/codex-models';
 import { normalizeAgentSpeechConfig } from '@/lib/agent-speech';
 import { llmProviderApi, type LlmProvider } from '@/lib/llm-provider-api';
 import { getProviderProtocolHint, getRequiredProviderProtocol, isProviderCompatibleWithAgent } from '@/lib/llm-provider-compat';
@@ -22,6 +23,8 @@ interface EditAssistantModalProps {
     prompt: string
     type: 'builtin' | 'acp'
     acpTool: string
+    proxyConfig?: string | null
+    codexModel?: string | null
     categoryId: string | null
     llmProviderId: string | null
     imageGeneration?: {
@@ -164,6 +167,8 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
   const [categoryId, setCategoryId] = useState<string>('')
   const [llmProviders, setLlmProviders] = useState<LlmProvider[]>([])
   const [llmProviderId, setLlmProviderId] = useState<string>('')
+  const [codexModel, setCodexModel] = useState('')
+  const [proxyConfig, setProxyConfig] = useState('')
   const [imageGenerationEnabled, setImageGenerationEnabled] = useState(false)
   const [imageProviderId, setImageProviderId] = useState<string>('')
   const [providerSelectionTouched, setProviderSelectionTouched] = useState(false)
@@ -205,6 +210,7 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
     (provider) => provider.isActive && provider.modelType === 'image'
   )
   const canUseLocalAcpConfig = assistantType === 'acp' && selectedAcpTool?.localConfigAvailable
+  const showLocalCodexConfig = assistantType === 'acp' && acpTool === 'codex' && !effectiveLlmProviderId
   const providerSelectLabel = selectedProviderInfo
     ? `${selectedProviderInfo.name} · ${selectedProviderInfo.model}`
     : assistantType === 'acp'
@@ -316,6 +322,8 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
       setAcpTool(assistantForForm.acpTool || 'claude')
       setCategoryId(assistantForForm.categoryId || '')
       setLlmProviderId(assistantForForm.llmProviderId || assistantForForm.llmProvider?.id || '')
+      setCodexModel(assistantForForm.codexModel || '')
+      setProxyConfig(assistantForForm.proxyConfig || '')
       const imageCapability = assistantForForm.capabilities?.find((capability) => capability.capabilityType === 'image')
       setImageGenerationEnabled(Boolean(imageCapability?.enabled))
       setImageProviderId(imageCapability?.llmProviderId || imageCapability?.llmProvider?.id || '')
@@ -386,6 +394,8 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
         prompt: prompt.trim(),
         type: assistantType,
         acpTool: assistantType === 'acp' ? acpTool : '',
+        proxyConfig: showLocalCodexConfig ? proxyConfig.trim() || null : null,
+        codexModel: showLocalCodexConfig ? codexModel.trim() || null : null,
         categoryId: categoryId || null,
         llmProviderId: submittedLlmProviderId,
         imageGeneration: {
@@ -537,6 +547,41 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
                 </p>
               )}
             </div>
+
+            {showLocalCodexConfig && (
+              <div className="mb-4 space-y-3">
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-foreground">
+                    Codex 模型
+                  </label>
+                  <Select value={codexModel || '__default__'} onValueChange={(v) => setCodexModel(v === '__default__' ? '' : v)}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="选择 Codex 模型" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__default__">使用本地默认模型</SelectItem>
+                      {getCodexModelOptions(codexModel).map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-foreground">
+                    代理地址
+                  </label>
+                  <textarea
+                    value={proxyConfig}
+                    onChange={(e) => setProxyConfig(e.target.value)}
+                    placeholder="http://127.0.0.1:7890 或 export https_proxy=..."
+                    rows={2}
+                    className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+                  />
+                </div>
+              </div>
+            )}
 
             {/* Image generation capability */}
             <div className="mb-4 rounded-lg border border-border p-3">

@@ -6,6 +6,7 @@ import {
   serializeAgentSpeechConfig,
 } from '../../modules/speech/speech-config.js';
 import { invalidateSystemAgentsCache } from '../../modules/chatroom/system-agents-cache.js';
+import { normalizeAgentProxyConfig } from './proxy-config.js';
 
 // 包含关联的 Agent 类型
 export type AgentWithRelations = Agent & {
@@ -31,6 +32,8 @@ export type CreateAgentInput = {
   agentLevel?: AgentLevel;
   acpTool?: string;
   workDir?: string;
+  proxyConfig?: string | null;
+  codexModel?: string | null;
   categoryId?: string;
   llmProviderId?: string;
   imageGeneration?: AgentCapabilityInput;
@@ -128,6 +131,13 @@ function normalizeNullableId(value: string | null | undefined): string | null | 
   return value;
 }
 
+function normalizeNullableString(value: string | null | undefined): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
 async function upsertImageCapability(tx: any, agentId: string, input: AgentCapabilityInput): Promise<void> {
   const enabled = Boolean(input.enabled);
   const llmProviderId = normalizeNullableId(input.llmProviderId ?? null) ?? null;
@@ -196,6 +206,8 @@ export const agentService = {
           agentLevel: data.agentLevel || 'normal',
           acpTool: data.acpTool,
           workDir: data.workDir,
+          proxyConfig: normalizeAgentProxyConfig(data.proxyConfig),
+          codexModel: normalizeNullableString(data.codexModel),
           categoryId,
           llmProviderId,
           speechConfig: serializeAgentSpeechConfig(data.speechConfig),
@@ -283,9 +295,11 @@ export const agentService = {
     }
 
     // 处理外键字段：空字符串转换为 undefined（表示不更新），'null' 字符串转换为 null（表示移除）
-    const { categoryId, llmProviderId, speechConfig, imageGeneration, ...restData } = effectiveData;
+    const { categoryId, llmProviderId, speechConfig, imageGeneration, proxyConfig, codexModel, ...restData } = effectiveData;
     const processedCategoryId = categoryId === '' ? undefined : categoryId === 'null' ? null : categoryId;
     const processedLlmProviderId = llmProviderId === '' ? undefined : llmProviderId === 'null' ? null : llmProviderId;
+    const processedProxyConfig = normalizeAgentProxyConfig(proxyConfig);
+    const processedCodexModel = normalizeNullableString(codexModel);
     const currentAgent = await prisma.agent.findUnique({
       where: { id },
       select: { type: true, acpTool: true, llmProviderId: true },
@@ -315,6 +329,8 @@ export const agentService = {
           ...restData,
           ...(processedCategoryId !== undefined && { categoryId: processedCategoryId }),
           ...(processedLlmProviderId !== undefined && { llmProviderId: processedLlmProviderId }),
+          ...(processedProxyConfig !== undefined && { proxyConfig: processedProxyConfig }),
+          ...(processedCodexModel !== undefined && { codexModel: processedCodexModel }),
           ...(speechConfig !== undefined && { speechConfig: serializeAgentSpeechConfig(speechConfig) }),
           updatedAt: new Date(),
         },

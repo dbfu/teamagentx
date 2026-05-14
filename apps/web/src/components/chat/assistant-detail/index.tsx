@@ -290,6 +290,8 @@ export function AssistantDetailPage() {
     prompt: string
     type: 'builtin' | 'acp'
     acpTool: string
+    proxyConfig?: string | null
+    codexModel?: string | null
     categoryId: string | null
     llmProviderId: string | null
     speechConfig: AgentSpeechConfig | null
@@ -303,6 +305,8 @@ export function AssistantDetailPage() {
       prompt: data.prompt,
       type: data.type,
       acpTool: data.acpTool || undefined,
+      proxyConfig: data.proxyConfig || null,
+      codexModel: data.codexModel || null,
       categoryId: data.categoryId,
       llmProviderId: data.llmProviderId,
       speechConfig: data.speechConfig,

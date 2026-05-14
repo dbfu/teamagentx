@@ -78,6 +78,8 @@ export function createExecutor(options: CreateExecutorOptions): IAgentExecutor {
           chatRoomAgents,
           llmProvider,
           imageGenerationProvider,
+          agent.proxyConfig,
+          agent.codexModel,
         );
       }
       const agentCommand = getAcpToolCommand(acpTool);
