@@ -404,8 +404,8 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
                 >
                   <span
                     className={cn(
-                      'absolute top-0.5 size-4 rounded-full bg-white transition-transform',
-                      imageGenerationEnabled ? 'translate-x-5' : 'translate-x-0.5'
+                      'absolute left-0.5 top-0.5 size-4 rounded-full bg-white transition-transform',
+                      imageGenerationEnabled ? 'translate-x-5' : 'translate-x-0'
                     )}
                   />
                 </button>
