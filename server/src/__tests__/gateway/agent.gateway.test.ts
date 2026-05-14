@@ -64,7 +64,7 @@ describe('Agent Gateway API', () => {
 
       const body = response.json();
       assert.strictEqual(body.success, false);
-      assert.strictEqual(body.error, 'Agent not found');
+      assert.strictEqual(body.error, '助手不存在');
     });
   });
 
@@ -153,7 +153,65 @@ describe('Agent Gateway API', () => {
 
       const body = response.json();
       assert.strictEqual(body.success, false);
-      assert.strictEqual(body.error, 'Agent name already exists');
+      assert.strictEqual(body.error, '助手名称已存在');
+    });
+
+    test('应该创建并返回助手级 speechConfig', async () => {
+      const speechConfig = {
+        behavior: {
+          enabled: true,
+          outputMode: 'manual',
+          autoPlay: false,
+        },
+        profile: {
+          provider: 'browser-local',
+          voice: 'voice-zh-female-001',
+          speed: 1,
+          volume: 1,
+          pitch: 1,
+          emotion: 'calm',
+          style: 'conversational',
+          prompt: '自然一点',
+        },
+      };
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/agents',
+        payload: {
+          name: 'Voice Agent ' + Date.now(),
+          prompt: 'Speak clearly',
+          speechConfig,
+        },
+      });
+
+      assert.strictEqual(response.statusCode, 201);
+
+      const body = response.json();
+      assert.strictEqual(body.success, true);
+      assert.deepStrictEqual(body.data.speechConfig, {
+        behavior: {
+          enabled: true,
+          outputMode: 'manual',
+          autoPlay: false,
+        },
+        profile: {
+          provider: 'browser-local',
+          model: null,
+          voice: 'voice-zh-female-001',
+          fallbackProvider: null,
+          speed: 1,
+          volume: 1,
+          pitch: 1,
+          emotion: 'calm',
+          style: 'conversational',
+          format: null,
+          sampleRate: null,
+          temperature: null,
+          prompt: '自然一点',
+          vendorOptions: null,
+        },
+      });
     });
   });
 
@@ -275,7 +333,7 @@ describe('Agent Gateway API', () => {
 
       const body = response.json();
       assert.strictEqual(body.success, false);
-      assert.ok(body.error.includes('not found'));
+      assert.strictEqual(body.error, '未找到助手调试信息，助手可能尚未被调用');
     });
 
     test('应该返回 Agent 调试信息', async () => {

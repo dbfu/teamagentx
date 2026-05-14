@@ -1,10 +1,16 @@
 // 开发模式下后端端口是 3001，打包模式下是 11053
 const DEV_SERVER_PORT = 3001;
 const PACKAGED_SERVER_PORT = 11053;
-const ENV_API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.replace(/\/+$/, '');
+const importMetaEnv = (import.meta as ImportMeta & {
+  env?: {
+    DEV?: boolean;
+    VITE_API_BASE_URL?: string;
+  };
+}).env;
+const ENV_API_BASE_URL = importMetaEnv?.VITE_API_BASE_URL?.replace(/\/+$/, '');
 
 // 根据环境判断默认端口
-const WEB_FALLBACK_URL = import.meta.env.DEV
+const WEB_FALLBACK_URL = importMetaEnv?.DEV
   ? `http://localhost:${DEV_SERVER_PORT}`
   : `http://localhost:${PACKAGED_SERVER_PORT}`;
 
@@ -18,7 +24,7 @@ function getBrowserApiBaseUrl(): string {
   if (typeof window !== 'undefined' && window.location.protocol.startsWith('http')) {
     const { hostname, protocol } = window.location;
 
-    if (import.meta.env.DEV) {
+    if (importMetaEnv?.DEV) {
       return `${protocol}//${hostname}:${DEV_SERVER_PORT}`;
     }
 

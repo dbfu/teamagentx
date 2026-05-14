@@ -126,6 +126,7 @@ export function ScreenshotRenderer({
             key={message.id}
             message={message}
             isRight={message.isHuman}
+            showSpeechButton={false}
             mentionAgents={mentionAgents}
             currentUser={currentUser}
             // 不传递 replyCount 和 replyTo，避免渲染回复相关元素

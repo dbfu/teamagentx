@@ -1,12 +1,17 @@
 import prisma from '../../lib/prisma.js';
+import { uploadService } from '../upload/upload.service.js';
 
 interface AttachmentData {
+  type?: 'image' | 'audio' | 'file';
   filename: string;
   mimeType: string;
   size: number;
   url: string;
   width?: number;
   height?: number;
+  durationMs?: number;
+  transcript?: string;
+  waveform?: string;
 }
 
 export const messageService = {
@@ -62,13 +67,16 @@ export const messageService = {
         updatedAt: now,
         attachments: data.attachments ? {
           create: data.attachments.map(att => ({
-            type: 'image',
+            type: att.type ?? 'image',
             filename: att.filename,
             mimeType: att.mimeType,
             size: att.size,
             url: att.url,
             width: att.width,
             height: att.height,
+            durationMs: att.durationMs,
+            transcript: att.transcript,
+            waveform: att.waveform,
           })),
         } : undefined,
       },
@@ -131,13 +139,27 @@ export const messageService = {
   },
 
   async deleteByChatRoomId(chatRoomId: string) {
-    return prisma.message.deleteMany({
+    // 删除消息前先收集音频附件，删完数据库再清理磁盘文件
+    const audioAttachments = await prisma.attachment.findMany({
+      where: { type: 'audio', message: { chatRoomId } },
+      select: { url: true },
+    });
+    const result = await prisma.message.deleteMany({
       where: { chatRoomId },
     });
+    for (const att of audioAttachments) {
+      await uploadService.deleteAudio(att.url).catch(() => {});
+    }
+    return result;
   },
 
   async deleteById(id: string) {
-    return prisma.$transaction(async (tx) => {
+    // 删除消息前先收集音频附件，事务结束后清理磁盘
+    const audioAttachments = await prisma.attachment.findMany({
+      where: { type: 'audio', messageId: id },
+      select: { url: true },
+    });
+    const result = await prisma.$transaction(async (tx) => {
       await tx.message.updateMany({
         where: { replyMessageId: id },
         data: { replyMessageId: null },
@@ -147,6 +169,10 @@ export const messageService = {
         where: { id },
       });
     });
+    for (const att of audioAttachments) {
+      await uploadService.deleteAudio(att.url).catch(() => {});
+    }
+    return result;
   },
 
   // 批量更新 executionRecordId、executionDuration 和 token 信息

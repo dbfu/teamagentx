@@ -51,6 +51,81 @@ claude（Claude）、codex（Codex）
 - **acpTool** (可选但 type=acp 时必填): ACP 工具名称，如 "claude"、"codex"
 - **workDir** (可选): 工作目录路径
 - **llmProviderId** (可选): LLM供应商ID；builtin 可使用，acp 目前仅支持 claude/codex 的最小闭环
+- **speechPresetId** (可选): 内置语音预设 ID，优先使用，见下方说明
+- **speechConfig** (可选): 语音播报配置；如果和 speechPresetId 一起传，会在预设基础上做覆盖
+
+## 语音预设与 speechConfig 说明
+
+创建或编辑助手前，优先调用 **list_voice_presets** 读取系统当前可用语音预设，再为助手选择最合适的语音。
+
+当前内置语音预设：
+- **system-default**: 自然默认，适合通用助手、日常对话
+- **gentle-guide**: 温和讲解，适合客服、教学、引导
+- **steady-pro**: 沉稳专业，适合法律、分析、咨询
+- **bright-host**: 活力播报，适合主持、热点播报、娱乐
+
+推荐规则：
+- 如果用户没有明确要求细调语音参数，优先传 **speechPresetId**
+- 如果用户有细化要求，再在 **speechConfig** 里覆盖 outputMode、speed、volume 等字段
+- 创建助手前，必须结合助手的角色、描述、提示词和已有语音预设选择最匹配的语音
+- 编辑助手时也一样，先读 **list_agents** 里的最新语音配置，再决定是保留、切换预设还是局部覆盖
+
+### speechConfig 结构
+
+用于配置助手的语音播报行为（浏览器端 TTS 朗读），结构如下：
+
+- **behavior.enabled** (必填): 是否启用语音播报，true/false
+- **behavior.outputMode** (必填): 播报模式
+  - "off" - 关闭
+  - "manual" - 手动播放（用户点击播放按钮）
+  - "auto_final_only" - 自动播报最终回答（每次助手回答完成后自动朗读）
+- **behavior.autoPlay** (可选): 是否自动播放，默认 false
+- **profile.provider** (可选): provider，默认 \`browser-local\`
+- **profile.voice** (可选): 音色 ID，null 表示自动选择系统默认语音
+- **profile.speed** (可选): 语速，0.5-2，默认 1
+- **profile.volume** (可选): 音量，0-1，默认 1
+
+### 根据助手特点选择语音参数
+
+配置语音时，必须结合助手的角色和使用场景，不要千篇一律使用默认值：
+
+| 助手特点 | speed 建议 | volume 建议 | 说明 |
+|---------|-----------|------------|------|
+| 专业/严肃（法律、医疗、分析） | 0.9 | 0.9 | 稳重、清晰 |
+| 教学/解说类 | 0.85 | 1.0 | 缓慢清楚，便于理解 |
+| 日常对话/聊天 | 1.0 | 0.9 | 自然节奏 |
+| 活泼/娱乐/主持 | 1.15 | 1.0 | 轻快、有活力 |
+| 新闻/播报/朗读 | 1.1 | 1.0 | 流畅、标准 |
+| 辩论/演讲 | 1.1 | 1.0 | 有力、清晰 |
+| 儿童/教育类 | 0.85 | 0.95 | 清晰、亲切 |
+
+- **profile.voice**: 不了解用户系统可用音色时一律设 null（自动选择），不要猜测音色名称
+- **behavior.outputMode**: 用户主动要求"自动播报"时才设 auto_final_only；只说"开启语音"时设 manual
+- **behavior.autoPlay**: 通常与 outputMode=auto_final_only 搭配，其余情况设 false
+
+⚠️ 群聊场景中多助手依次发言时，语音会自动排队串行播放，上一条播完才播下一条，不必担心声音叠加。
+
+## 更新助手工具说明
+
+在创建、编辑、批量编辑助手前：
+1. 先调用 **list_voice_presets** 获取现有语音列表
+2. 再调用 **list_agents** 读取最新助手语音配置
+3. 结合助手定义，为每个助手选择最合适的 **speechPresetId**，必要时再补充 **speechConfig**
+
+### update_agents（推荐，批量串行）
+
+**需要同时修改多个助手时必须使用此工具**，串行执行避免并发写库冲突。流程：
+1. 调用 **list_agents** 查询助手列表获取 ID
+2. 向用户展示将要修改的内容，确认后调用 **update_agents**，一次性传入所有修改
+
+参数：
+- **agents** (必填): 数组，每项包含：
+  - **agentId** (必填): 助手 ID
+  - **speechPresetId/speechConfig/name/description/prompt/llmProviderId/categoryId** (均可选)
+
+### update_agent（单个更新）
+
+仅在只需要修改**一个**助手时使用。参数同 update_agents 的单个项。
 
 ## 决策规则
 
@@ -113,6 +188,48 @@ claude（Claude）、codex（Codex）
      "avatarColor": "bg-blue-500",
      "type": "acp",
      "acpTool": "claude"
+   }
+
+### 示例 3：为多个助手批量配置语音
+
+用户说："给所有助手都开启自动播报语音"
+
+你应该：
+1. 调用 list_agents 查询所有助手及其 ID
+2. 调用 list_voice_presets 查看可用语音预设
+3. 向用户展示将要修改的助手列表，确认后调用 update_agents（一次调用，串行执行）：
+   {
+     "agents": [
+       { "agentId": "<id1>", "speechPresetId": "system-default", "speechConfig": { "behavior": { "enabled": true, "outputMode": "auto_final_only", "autoPlay": false } } },
+       { "agentId": "<id2>", "speechPresetId": "system-default", "speechConfig": { "behavior": { "enabled": true, "outputMode": "auto_final_only", "autoPlay": false } } }
+     ]
+   }
+
+### 示例 4：为单个助手配置语音
+
+用户说："给辩论主持人助手配置语音，自动播报，语速快一点"
+
+你应该：
+1. 调用 list_agents 查询助手列表找到 ID
+2. 调用 list_voice_presets，为“辩论主持人”选择最接近的预设（通常是 bright-host）
+3. 向用户展示配置："将为「辩论主持人」配置：活力播报预设 + 自动播报 + 语速 1.3x，是否确认？"
+3. 用户确认后调用 update_agent（单个）：
+   {
+     "agentId": "<从 list_agents 获取的 ID>",
+     "speechPresetId": "bright-host",
+     "speechConfig": {
+       "behavior": {
+         "enabled": true,
+         "outputMode": "auto_final_only",
+         "autoPlay": false
+       },
+       "profile": {
+         "provider": "browser-local",
+         "speed": 1.3,
+         "volume": 1,
+         "voice": null
+       }
+     }
    }
 
 ## Skills 安装（可选）

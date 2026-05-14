@@ -9,6 +9,7 @@ import {quickChatSessionService} from '../modules/quick-chat-session/quick-chat-
 import {checkpointService} from '../modules/checkpoint/checkpoint.service.js';
 import {promptOptimizeService} from '../modules/prompt-optimize/prompt-optimize.service.js';
 import {spawnAcpToolInstall} from '../core/agent/acp-tool-install.service.js';
+import { deserializeAgentSpeechConfig } from '../modules/speech/speech-config.js';
 
 // 所有支持的 LLM 供应商类型（与 Prisma 保持一致）
 const LLM_PROVIDER_TYPES = [
@@ -37,6 +38,20 @@ function isAgentValidationError(error: unknown): error is Error {
   ].some((prefix) => error.message.startsWith(prefix));
 }
 
+function serializeAgentForResponse<T extends { speechConfig?: string | null }>(agent: T): Omit<T, 'speechConfig'> & { speechConfig: unknown | null } {
+  if (!agent.speechConfig) {
+    return {
+      ...agent,
+      speechConfig: null,
+    };
+  }
+
+  return {
+    ...agent,
+    speechConfig: deserializeAgentSpeechConfig(agent.speechConfig),
+  };
+}
+
 // JSON Schema for response
 const agentResponseSchema = {
   type: 'object',
@@ -52,6 +67,40 @@ const agentResponseSchema = {
     agentLevel: { type: 'string', enum: ['normal', 'system'] },
     acpTool: { type: 'string', nullable: true },
     workDir: { type: 'string', nullable: true },
+    speechConfig: {
+      type: 'object',
+      nullable: true,
+      properties: {
+        behavior: {
+          type: 'object',
+          properties: {
+            enabled: { type: 'boolean' },
+            outputMode: { type: 'string', enum: ['off', 'manual', 'auto_final_only'] },
+            autoPlay: { type: 'boolean' },
+          },
+        },
+        profile: {
+          type: 'object',
+          additionalProperties: true,
+          properties: {
+            provider: { type: 'string', nullable: true },
+            model: { type: 'string', nullable: true },
+            voice: { type: 'string', nullable: true },
+            fallbackProvider: { type: 'string', nullable: true },
+            speed: { type: 'number', nullable: true },
+            volume: { type: 'number', nullable: true },
+            pitch: { type: 'number', nullable: true },
+            emotion: { type: 'string', nullable: true },
+            style: { type: 'string', nullable: true },
+            format: { type: 'string', nullable: true },
+            sampleRate: { type: 'number', nullable: true },
+            temperature: { type: 'number', nullable: true },
+            prompt: { type: 'string', nullable: true },
+            vendorOptions: { type: 'object', nullable: true, additionalProperties: true },
+          },
+        },
+      },
+    },
     isActive: { type: 'boolean' },
     categoryId: { type: 'string', nullable: true },
     category: {
@@ -119,6 +168,40 @@ const createAgentBodySchema = {
     type: { type: 'string', enum: ['builtin', 'acp'], description: '助手类型' },
     acpTool: { type: 'string', description: 'ACP 工具名称（仅 type=acp 时有效，如 claude, codex）' },
     workDir: { type: 'string', description: '工作目录（适用于所有类型）' },
+    speechConfig: {
+      type: 'object',
+      description: '助手语音配置',
+      properties: {
+        behavior: {
+          type: 'object',
+          properties: {
+            enabled: { type: 'boolean' },
+            outputMode: { type: 'string', enum: ['off', 'manual', 'auto_final_only'] },
+            autoPlay: { type: 'boolean' },
+          },
+        },
+        profile: {
+          type: 'object',
+          additionalProperties: true,
+          properties: {
+            provider: { type: 'string', nullable: true },
+            model: { type: 'string', nullable: true },
+            voice: { type: 'string', nullable: true },
+            fallbackProvider: { type: 'string', nullable: true },
+            speed: { type: 'number', nullable: true },
+            volume: { type: 'number', nullable: true },
+            pitch: { type: 'number', nullable: true },
+            emotion: { type: 'string', nullable: true },
+            style: { type: 'string', nullable: true },
+            format: { type: 'string', nullable: true },
+            sampleRate: { type: 'number', nullable: true },
+            temperature: { type: 'number', nullable: true },
+            prompt: { type: 'string', nullable: true },
+            vendorOptions: { type: 'object', nullable: true, additionalProperties: true },
+          },
+        },
+      },
+    },
     categoryId: { type: 'string', description: '分类 ID' },
     llmProviderId: { type: 'string', description: 'LLM 供应商 ID（builtin 直接使用；acp 目前仅支持 claude/codex 最小闭环）' },
     imageGeneration: {
@@ -144,6 +227,39 @@ const updateAgentBodySchema = {
     type: { type: 'string', enum: ['builtin', 'acp'] },
     acpTool: { type: 'string' },
     workDir: { type: 'string' },
+    speechConfig: {
+      type: 'object',
+      properties: {
+        behavior: {
+          type: 'object',
+          properties: {
+            enabled: { type: 'boolean' },
+            outputMode: { type: 'string', enum: ['off', 'manual', 'auto_final_only'] },
+            autoPlay: { type: 'boolean' },
+          },
+        },
+        profile: {
+          type: 'object',
+          additionalProperties: true,
+          properties: {
+            provider: { type: 'string', nullable: true },
+            model: { type: 'string', nullable: true },
+            voice: { type: 'string', nullable: true },
+            fallbackProvider: { type: 'string', nullable: true },
+            speed: { type: 'number', nullable: true },
+            volume: { type: 'number', nullable: true },
+            pitch: { type: 'number', nullable: true },
+            emotion: { type: 'string', nullable: true },
+            style: { type: 'string', nullable: true },
+            format: { type: 'string', nullable: true },
+            sampleRate: { type: 'number', nullable: true },
+            temperature: { type: 'number', nullable: true },
+            prompt: { type: 'string', nullable: true },
+            vendorOptions: { type: 'object', nullable: true, additionalProperties: true },
+          },
+        },
+      },
+    },
     isActive: { type: 'boolean' },
     categoryId: { type: 'string', description: '分类 ID，设为 null 移除分类' },
     llmProviderId: { type: 'string', description: 'LLM 供应商 ID，设为 null 移除供应商' },
@@ -174,6 +290,7 @@ interface CreateAgentBody {
   type?: 'builtin' | 'acp';
   acpTool?: string;
   workDir?: string;
+  speechConfig?: UpdateAgentInput['speechConfig'];
   categoryId?: string;
   llmProviderId?: string;
   imageGeneration?: ImageGenerationCapabilityBody;
@@ -188,6 +305,7 @@ interface UpdateAgentBody {
   type?: 'builtin' | 'acp';
   acpTool?: string;
   workDir?: string;
+  speechConfig?: UpdateAgentInput['speechConfig'];
   isActive?: boolean;
   categoryId?: string | null;
   llmProviderId?: string | null;
@@ -219,7 +337,7 @@ export async function agentGateway(app: FastifyInstance) {
     },
     async (_request, reply) => {
       const agents = await agentService.findAll();
-      return reply.send({ success: true, data: agents });
+      return reply.send({ success: true, data: agents.map(serializeAgentForResponse) });
     },
   );
 
@@ -243,7 +361,7 @@ export async function agentGateway(app: FastifyInstance) {
     },
     async (_request, reply) => {
       const agents = await agentService.findActive();
-      return reply.send({ success: true, data: agents });
+      return reply.send({ success: true, data: agents.map(serializeAgentForResponse) });
     },
   );
 
@@ -290,8 +408,11 @@ export async function agentGateway(app: FastifyInstance) {
     },
     async (_request, reply) => {
       const { categorized, uncategorized } = await agentService.findAllGroupedByCategory();
-      const categories = Array.from(categorized.values());
-      return reply.send({ success: true, data: { categories, uncategorized } });
+      const categories = Array.from(categorized.values()).map((group) => ({
+        ...group,
+        agents: group.agents.map(serializeAgentForResponse),
+      }));
+      return reply.send({ success: true, data: { categories, uncategorized: uncategorized.map(serializeAgentForResponse) } });
     },
   );
 
@@ -430,7 +551,7 @@ export async function agentGateway(app: FastifyInstance) {
         return reply.code(404).send({ success: false, error: '助手不存在' });
       }
 
-      return reply.send({ success: true, data: agent });
+      return reply.send({ success: true, data: serializeAgentForResponse(agent) });
     },
   );
 
@@ -461,7 +582,7 @@ export async function agentGateway(app: FastifyInstance) {
       },
     },
     async (request, reply) => {
-      const {name, avatar, avatarColor, description, prompt, type, acpTool, workDir, categoryId, llmProviderId, imageGeneration} = request.body;
+      const {name, avatar, avatarColor, description, prompt, type, acpTool, workDir, speechConfig, categoryId, llmProviderId, imageGeneration} = request.body;
 
       try {
         const agent = await agentService.create({
@@ -473,11 +594,12 @@ export async function agentGateway(app: FastifyInstance) {
           type,
           acpTool,
           workDir,
+          speechConfig,
           categoryId,
           llmProviderId,
           imageGeneration,
         });
-        return reply.code(201).send({ success: true, data: agent });
+        return reply.code(201).send({ success: true, data: serializeAgentForResponse(agent) });
       } catch (error: any) {
         if (error.code === 'P2002') {
           return reply
@@ -540,7 +662,7 @@ export async function agentGateway(app: FastifyInstance) {
         // 也清除新名字的缓存（以防万一）
         console.log(`[AgentUpdate] 清除助手 ${agent.name} 的缓存`);
         clearExecutorCache(agent.name);
-        return reply.send({ success: true, data: agent });
+        return reply.send({ success: true, data: serializeAgentForResponse(agent) });
       } catch (error: any) {
         if (isSystemAgentMutationError(error)) {
           return reply
@@ -597,7 +719,7 @@ export async function agentGateway(app: FastifyInstance) {
       try {
         const agent = await agentService.delete(id);
         clearExecutorCache(agent.name);
-        return reply.send({ success: true, data: agent });
+        return reply.send({ success: true, data: serializeAgentForResponse(agent) });
       } catch (error: any) {
         if (isSystemAgentMutationError(error)) {
           return reply
@@ -654,7 +776,7 @@ export async function agentGateway(app: FastifyInstance) {
       try {
         const agent = await agentService.setActive(id, isActive);
         clearExecutorCache(agent.name);
-        return reply.send({ success: true, data: agent });
+        return reply.send({ success: true, data: serializeAgentForResponse(agent) });
       } catch (error: any) {
         if (isSystemAgentMutationError(error)) {
           return reply
@@ -712,7 +834,18 @@ export async function agentGateway(app: FastifyInstance) {
                   threadId: { type: 'string' },
                   chatRoomId: { type: 'string' },
                   injectGroupHistory: { type: 'boolean' },
-                  chatRoomAgents: { type: 'array', items: { type: 'string' } },
+                  chatRoomAgents: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        name: { type: 'string' },
+                        agentId: { type: 'string' },
+                        workDir: { type: 'string', nullable: true },
+                        customWorkDir: { type: 'string', nullable: true },
+                      },
+                    },
+                  },
                 },
               },
             },

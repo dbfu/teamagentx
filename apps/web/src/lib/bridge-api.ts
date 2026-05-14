@@ -144,8 +144,20 @@ export const bridgeApi = {
   },
 
   deleteChannel: async (id: string): Promise<void> => {
-    const res = await request<void>(`/api/bridge/channels/${id}`, { method: 'DELETE' })
-    if (res && 'success' in res && !res.success) throw new Error((res as { error?: string }).error || '删除失败')
+    const baseUrl = await getApiBaseUrl()
+    const token = localStorage.getItem('auth_token')
+    const response = await fetch(`${baseUrl}/api/bridge/channels/${id}`, {
+      method: 'DELETE',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      cache: 'no-store',
+    })
+
+    if (response.status === 204) return
+
+    const res = await response.json().catch(() => null) as { success?: boolean; error?: string } | null
+    if (!response.ok || !res?.success) {
+      throw new Error(res?.error || '删除失败')
+    }
   },
 
   getWebhookUrls: async (): Promise<WebhookUrls> => {
@@ -160,7 +172,7 @@ export const bridgeApi = {
     return res.data
   },
 
-  setPlatformConfig: async (platform: Platform, data: { botToken?: string; defaultAgentId?: string | null; config?: Record<string, unknown> }): Promise<PlatformConfig> => {
+  setPlatformConfig: async (platform: Platform, data: { botToken?: string; defaultAgentId?: string | null; config?: Record<string, unknown> | null }): Promise<PlatformConfig> => {
     const res = await request<PlatformConfig>(`/api/bridge/platform-config/${platform}`, {
       method: 'PUT',
       body: JSON.stringify(data),

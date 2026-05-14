@@ -32,6 +32,7 @@ enum CronTaskState {
 
 enum AttachmentType {
   image
+  audio
   file // 未来扩展
 }
 
@@ -117,6 +118,7 @@ model Agent {
   category          AgentCategory?     @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   llmProviderId     String? // LLM 供应商 ID
   llmProvider       LlmProvider?       @relation(fields: [llmProviderId], references: [id], onDelete: SetNull)
+  speechConfig      String? // 助手语音配置（JSON 字符串）
   sortOrder         Int                @default(0) // 同分类内的排序顺序
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
@@ -407,12 +409,16 @@ model Attachment {
   url       String // 访问 URL
   width     Int? // 图片宽度（像素）
   height    Int? // 图片高度（像素）
+  durationMs Int? // 音频时长（毫秒）
+  transcript String? // 音频转写文本
+  waveform  String? // 预留波形数据
   createdAt DateTime       @default(now())
 
   message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
 
   @@index([messageId])
   @@index([createdAt])
+  @@index([type])
 }
 
 model User {

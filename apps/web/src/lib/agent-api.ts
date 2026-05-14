@@ -1,4 +1,5 @@
 import { getApiBaseUrl } from './config'
+import type { SpeechProfile } from '@/speech'
 
 // 分类相关类型
 export interface AgentCategory {
@@ -36,6 +37,7 @@ export interface Agent {
   agentLevel: 'normal' | 'system'
   acpTool: string | null
   workDir: string | null
+  speechConfig: AgentSpeechConfig | null
   isActive: boolean
   categoryId: string | null
   category: AgentCategory | null
@@ -80,6 +82,17 @@ export interface ImageGenerationCapabilityRequest {
   config?: Record<string, unknown> | null
 }
 
+export interface AgentSpeechBehaviorConfig {
+  enabled: boolean
+  outputMode: 'off' | 'manual' | 'auto_final_only'
+  autoPlay: boolean
+}
+
+export interface AgentSpeechConfig {
+  behavior: AgentSpeechBehaviorConfig
+  profile: SpeechProfile
+}
+
 export interface CreateAgentRequest {
   name: string
   avatar?: string
@@ -89,6 +102,7 @@ export interface CreateAgentRequest {
   type?: 'builtin' | 'acp'
   acpTool?: string
   workDir?: string
+  speechConfig?: AgentSpeechConfig | null
   categoryId?: string
   llmProviderId?: string | null
   imageGeneration?: ImageGenerationCapabilityRequest
@@ -105,6 +119,7 @@ export interface UpdateAgentRequest {
   type?: 'builtin' | 'acp'
   acpTool?: string
   workDir?: string
+  speechConfig?: AgentSpeechConfig | null
   categoryId?: string | null
   llmProviderId?: string | null
   imageGeneration?: ImageGenerationCapabilityRequest
@@ -178,6 +193,7 @@ export interface ChatRoomAgent {
     type?: 'builtin' | 'acp'
     agentLevel?: 'normal' | 'system'
     workDir?: string | null
+    speechConfig?: AgentSpeechConfig | null
   }
   user?: {
     id: string
@@ -425,13 +441,16 @@ export const chatRoomApi = {
 // 消息附件类型
 export interface Attachment {
   id: string
-  type: 'image' | 'file'
+  type: 'image' | 'audio' | 'file'
   filename: string
   mimeType: string
   size: number
   url: string
   width: number | null
   height: number | null
+  durationMs?: number | null
+  transcript?: string | null
+  waveform?: string | null
   createdAt: string
 }
 
@@ -827,12 +846,15 @@ export interface QuickChatSession {
 export interface UploadResult {
   success: boolean
   data?: {
+    type: 'image' | 'audio'
     filename: string
     mimeType: string
     size: number
     url: string
     width?: number
     height?: number
+    durationMs?: number
+    transcript?: string | null
   }
   error?: string
 }
@@ -846,6 +868,19 @@ export const uploadApi = {
     formData.append('file', file)
 
     const response = await fetch(`${baseUrl}/upload/image`, {
+      method: 'POST',
+      body: formData,
+    })
+
+    return response.json()
+  },
+
+  async uploadAudio(file: File): Promise<UploadResult> {
+    const baseUrl = await getApiBaseUrl()
+    const formData = new FormData()
+    formData.append('file', file)
+
+    const response = await fetch(`${baseUrl}/upload/audio`, {
       method: 'POST',
       body: formData,
     })

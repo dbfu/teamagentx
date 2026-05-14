@@ -1,10 +1,12 @@
 import { cn } from '@/lib/utils'
-import { Image, Send } from 'lucide-react'
+import { Image, Loader2, Mic, Send, Square } from 'lucide-react'
 import { MentionInput } from './mention-input'
 import { ImagePreviewList, PendingImage } from './image-preview-list'
-import { useRef, useState, DragEvent, ChangeEvent, ClipboardEvent, memo } from 'react'
+import { useRef, useState, useEffect, DragEvent, ChangeEvent, ClipboardEvent, memo } from 'react'
 import { useChatStore } from '@/stores/chat-store'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { toast } from 'sonner'
+import { startBrowserSpeechRecognition, supportsBrowserSpeechRecognition } from '@/lib/browser-speech'
 
 interface MentionAgent {
   id: string
@@ -16,19 +18,15 @@ interface MentionAgent {
 
 interface ChatInputAreaProps {
   chatRoomName: string
-  // inputValue 和 setInputValue 现在从 store 直接获取，避免父组件重渲染导致的问题
   handleKeyDown: (e: React.KeyboardEvent) => void
   handleSend: () => void
   mentionAgents: MentionAgent[]
   onMentionClick?: (agentId: string, agentName: string) => void
-  // 图片上传相关
   pendingImages?: PendingImage[]
   onImageSelect?: (files: File[]) => void
   onImageRemove?: (id: string) => void
 }
 
-// 使用 memo 包装组件，避免因父组件其他状态更新而重渲染
-// 由于 inputValue 和 setInputValue 直接从 store 获取，输入状态不受父组件影响
 export const ChatInputArea = memo(function ChatInputArea({
   chatRoomName,
   handleKeyDown,
@@ -39,33 +37,36 @@ export const ChatInputArea = memo(function ChatInputArea({
   onImageSelect,
   onImageRemove,
 }: ChatInputAreaProps) {
-  // 直接从 store 获取 inputValue 和 setInputValue，避免因父组件其他状态更新而重渲染
   const inputValue = useChatStore((s) => s.inputValue)
   const setInputValue = useChatStore((s) => s.setInputValue)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const speechSessionRef = useRef<ReturnType<typeof startBrowserSpeechRecognition> | null>(null)
   const [isDragging, setIsDragging] = useState(false)
+  const [isRecording, setIsRecording] = useState(false)
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [recordingSeconds, setRecordingSeconds] = useState(0)
   const isMobile = useIsMobile()
 
-  // 点击图片按钮
-  const handleImageButtonClick = () => {
-    fileInputRef.current?.click()
-  }
+  useEffect(() => {
+    if (!isRecording) {
+      setRecordingSeconds(0)
+      return
+    }
+    const timer = setInterval(() => setRecordingSeconds((s) => s + 1), 1000)
+    return () => clearInterval(timer)
+  }, [isRecording])
 
-  // 文件选择
+  const handleImageButtonClick = () => fileInputRef.current?.click()
+
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (files && files.length > 0 && onImageSelect) {
-      // 过滤只保留图片文件
       const imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'))
-      if (imageFiles.length > 0) {
-        onImageSelect(imageFiles)
-      }
+      if (imageFiles.length > 0) onImageSelect(imageFiles)
     }
-    // 清空 input，允许再次选择相同文件
     e.target.value = ''
   }
 
-  // 拖拽处理
   const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault()
     e.stopPropagation()
@@ -82,41 +83,68 @@ export const ChatInputArea = memo(function ChatInputArea({
     e.preventDefault()
     e.stopPropagation()
     setIsDragging(false)
-
     const files = e.dataTransfer.files
     if (files && files.length > 0 && onImageSelect) {
       const imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'))
-      if (imageFiles.length > 0) {
-        onImageSelect(imageFiles)
-      }
+      if (imageFiles.length > 0) onImageSelect(imageFiles)
     }
   }
 
-  // 粘贴处理
   const handlePaste = (e: ClipboardEvent<HTMLDivElement>) => {
     const items = e.clipboardData.items
     if (!items || !onImageSelect) return
-
     const imageFiles: File[] = []
     for (const item of items) {
       if (item.type.startsWith('image/')) {
         const file = item.getAsFile()
-        if (file) {
-          imageFiles.push(file)
-        }
+        if (file) imageFiles.push(file)
       }
     }
-
-    if (imageFiles.length > 0) {
-      onImageSelect(imageFiles)
-    }
+    if (imageFiles.length > 0) onImageSelect(imageFiles)
   }
 
-  // 是否可以发送
   const canSend = inputValue.trim() || pendingImages.some(img => img.uploadedData && !img.error)
-
-  // 是否有正在上传的图片
   const hasUploadingImages = pendingImages.some(img => img.uploading)
+
+  const handleAudioButtonClick = async () => {
+    // 停止录音
+    if (isRecording) {
+      const session = speechSessionRef.current
+      if (!session) return
+      setIsRecording(false)
+      setIsProcessing(true)
+      try {
+        const transcript = await session.stop()
+        speechSessionRef.current = null
+        if (transcript.trim()) {
+          const current = useChatStore.getState().inputValue
+          setInputValue(current ? `${current} ${transcript}` : transcript)
+        } else {
+          toast.info('未识别到语音内容，请手动输入或重试')
+        }
+      } catch {
+        toast.error('语音识别失败')
+      } finally {
+        setIsProcessing(false)
+      }
+      return
+    }
+
+    // 启动录音
+    if (!supportsBrowserSpeechRecognition()) {
+      toast.error('当前浏览器不支持语音输入，请手动输入')
+      return
+    }
+
+    const session = startBrowserSpeechRecognition()
+    if (!session) {
+      toast.error('无法启动语音识别')
+      return
+    }
+
+    speechSessionRef.current = session
+    setIsRecording(true)
+  }
 
   return (
     <div
@@ -130,21 +158,18 @@ export const ChatInputArea = memo(function ChatInputArea({
       onDrop={handleDrop}
       onPaste={handlePaste}
     >
-      {/* 拖拽提示 */}
       {isDragging && (
         <div className="absolute inset-0 flex items-center justify-center bg-primary/5 border-2 border-dashed border-primary/50 rounded-lg z-10">
           <p className="text-primary font-medium">拖放图片到这里上传</p>
         </div>
       )}
 
-      {/* 图片预览区域 */}
       {pendingImages.length > 0 && (
         <div className="mb-2">
           <ImagePreviewList images={pendingImages} onRemove={onImageRemove} />
         </div>
       )}
 
-      {/* 单行输入框 */}
       <div className="flex items-center gap-2 rounded-lg border border-border px-3 py-2">
         <MentionInput
           value={inputValue}
@@ -156,9 +181,36 @@ export const ChatInputArea = memo(function ChatInputArea({
           onMentionClick={onMentionClick}
         />
 
-        {/* 工具按钮 */}
         <div className="flex items-center gap-1 shrink-0">
-          {/* 图片上传按钮 */}
+          {isRecording && (
+            <span className="min-w-[2.5rem] text-center text-xs font-mono text-red-500">
+              {`${Math.floor(recordingSeconds / 60)}:${String(recordingSeconds % 60).padStart(2, '0')}`}
+            </span>
+          )}
+
+          <button
+            type="button"
+            className={cn(
+              "rounded transition-colors touch-manipulation",
+              isMobile ? "p-2.5" : "p-1.5",
+              isRecording
+                ? "bg-red-500/10 text-red-500 hover:bg-red-500/20"
+                : "text-muted-foreground hover:text-foreground hover:bg-accent",
+              isProcessing && "opacity-70"
+            )}
+            onClick={handleAudioButtonClick}
+            title={isRecording ? '完成录音' : '语音输入'}
+            disabled={isProcessing}
+          >
+            {isProcessing ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : isRecording ? (
+              <Square className="size-4 fill-current" />
+            ) : (
+              <Mic className="size-4" />
+            )}
+          </button>
+
           <button
             type="button"
             className={cn(
@@ -170,7 +222,6 @@ export const ChatInputArea = memo(function ChatInputArea({
           >
             <Image className="size-4" />
           </button>
-          {/* 隐藏的文件输入 */}
           <input
             ref={fileInputRef}
             type="file"
@@ -180,31 +231,25 @@ export const ChatInputArea = memo(function ChatInputArea({
             onChange={handleFileChange}
           />
 
-          {/* 发送按钮 */}
           <button
             type="button"
             disabled={!canSend || hasUploadingImages}
             className={cn(
               "rounded transition-colors touch-manipulation",
               isMobile ? "p-2.5" : "p-1.5",
-              canSend && !hasUploadingImages
+              canSend && !hasUploadingImages && !isRecording
                 ? "text-blue-500 hover:bg-blue-500/10 active:bg-blue-500/20"
                 : "text-muted-foreground hover:bg-accent disabled:opacity-50"
             )}
             title="发送"
-            onMouseDown={(e) => {
-              // 阻止mousedown导致contentEditable blur
-              e.preventDefault()
-            }}
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => {
-              // 直接从 store 获取最新值，避免渲染延迟问题
               const currentInputValue = useChatStore.getState().inputValue
               const currentPendingImages = useChatStore.getState().pendingImages
               const trimmedInput = currentInputValue.trim()
               const uploadedImages = currentPendingImages.filter(img => img.uploadedData && !img.error)
               const currentHasUploadingImages = currentPendingImages.some(img => img.uploading)
-
-              if ((trimmedInput || uploadedImages.length > 0) && !currentHasUploadingImages) {
+              if ((trimmedInput || uploadedImages.length > 0) && !currentHasUploadingImages && !isRecording) {
                 handleSend()
               }
             }}

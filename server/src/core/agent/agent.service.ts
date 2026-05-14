@@ -1,6 +1,11 @@
 import prisma from '../../lib/prisma.js';
 import { Agent, AgentType, LlmProvider, AgentCategory, AgentLevel, AgentCapability } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import {
+  type AgentSpeechConfig,
+  serializeAgentSpeechConfig,
+} from '../../modules/speech/speech-config.js';
+import { invalidateSystemAgentsCache } from '../../modules/chatroom/system-agents-cache.js';
 
 // 包含关联的 Agent 类型
 export type AgentWithRelations = Agent & {
@@ -29,6 +34,7 @@ export type CreateAgentInput = {
   categoryId?: string;
   llmProviderId?: string;
   imageGeneration?: AgentCapabilityInput;
+  speechConfig?: AgentSpeechConfig | null;
 };
 
 export type UpdateAgentInput = Partial<CreateAgentInput> & {
@@ -192,6 +198,7 @@ export const agentService = {
           workDir: data.workDir,
           categoryId,
           llmProviderId,
+          speechConfig: serializeAgentSpeechConfig(data.speechConfig),
           updatedAt: now,
         },
       });
@@ -205,7 +212,7 @@ export const agentService = {
     });
   },
 
-  async findAll(): Promise<Agent[]> {
+  async findAll(): Promise<AgentWithRelations[]> {
     return prisma.agent.findMany({
       orderBy: { createdAt: 'desc' },
       include: {
@@ -214,7 +221,7 @@ export const agentService = {
     });
   },
 
-  async findActive(): Promise<Agent[]> {
+  async findActive(): Promise<AgentWithRelations[]> {
     return prisma.agent.findMany({
       where: { isActive: true },
       orderBy: { createdAt: 'desc' },
@@ -224,7 +231,7 @@ export const agentService = {
     });
   },
 
-  async findById(id: string): Promise<Agent | null> {
+  async findById(id: string): Promise<AgentWithRelations | null> {
     return prisma.agent.findUnique({
       where: { id },
       include: {
@@ -243,10 +250,40 @@ export const agentService = {
   },
 
   async update(id: string, data: UpdateAgentInput): Promise<AgentWithRelations> {
-    await assertAgentIsUserEditable(id, '修改');
+    // 系统助手允许更新的字段白名单（仅展示/偏好类字段）
+    // 任何不在白名单中的字段（包括未来新增的字段）都会被拦截，避免字段保护失效
+    const SYSTEM_AGENT_UPDATABLE_FIELDS = ['speechConfig'] as const;
+
+    const existingAgent = await prisma.agent.findUnique({
+      where: { id },
+      select: { agentLevel: true },
+    });
+    if (!existingAgent) {
+      const error = new Error('助手不存在') as Error & { code?: string };
+      error.code = 'P2025';
+      throw error;
+    }
+
+    let effectiveData: UpdateAgentInput = data;
+    if (existingAgent.agentLevel === 'system') {
+      const filtered: UpdateAgentInput = {};
+      for (const key of SYSTEM_AGENT_UPDATABLE_FIELDS) {
+        if (key in data) {
+          (filtered as Record<string, unknown>)[key] = (data as Record<string, unknown>)[key];
+        }
+      }
+      // 若调用方尝试更新白名单外的字段，直接拒绝以保持原有错误语义
+      const attemptedKeys = Object.keys(data).filter(
+        (k) => !(SYSTEM_AGENT_UPDATABLE_FIELDS as readonly string[]).includes(k)
+      );
+      if (attemptedKeys.length > 0) {
+        throw new Error('系统助手不允许修改');
+      }
+      effectiveData = filtered;
+    }
 
     // 处理外键字段：空字符串转换为 undefined（表示不更新），'null' 字符串转换为 null（表示移除）
-    const { categoryId, llmProviderId, imageGeneration, ...restData } = data;
+    const { categoryId, llmProviderId, speechConfig, imageGeneration, ...restData } = effectiveData;
     const processedCategoryId = categoryId === '' ? undefined : categoryId === 'null' ? null : categoryId;
     const processedLlmProviderId = llmProviderId === '' ? undefined : llmProviderId === 'null' ? null : llmProviderId;
     const currentAgent = await prisma.agent.findUnique({
@@ -271,13 +308,14 @@ export const agentService = {
       await assertImageProviderCompatible(imageGeneration.llmProviderId);
     }
 
-    return prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       await tx.agent.update({
         where: { id },
         data: {
           ...restData,
           ...(processedCategoryId !== undefined && { categoryId: processedCategoryId }),
           ...(processedLlmProviderId !== undefined && { llmProviderId: processedLlmProviderId }),
+          ...(speechConfig !== undefined && { speechConfig: serializeAgentSpeechConfig(speechConfig) }),
           updatedAt: new Date(),
         },
       });
@@ -289,6 +327,11 @@ export const agentService = {
         include: agentInclude,
       });
     });
+    // 系统助手字段变更可能影响群聊列表展示，主动清空缓存
+    if (existingAgent.agentLevel === 'system') {
+      invalidateSystemAgentsCache();
+    }
+    return result;
   },
 
   async delete(id: string): Promise<AgentWithRelations> {

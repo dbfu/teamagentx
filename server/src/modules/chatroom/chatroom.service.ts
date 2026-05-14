@@ -5,6 +5,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { agentService } from '../../core/agent/agent.service.js';
+import {
+  getSystemAgentsCached,
+  type SystemAgentInfo as CachedSystemAgentInfo,
+} from './system-agents-cache.js';
 
 export interface CreateChatRoomData {
   name: string;
@@ -77,40 +81,17 @@ const agentInclude = {
       type: true,
       agentLevel: true,
       workDir: true,
+      speechConfig: true,
     },
   },
 };
 
-// 系统助手类型
-type SystemAgentInfo = {
-  id: string;
-  name: string;
-  avatar: string | null;
-  avatarColor: string | null;
-  description: string | null;
-  type: string;
-  agentLevel: string;
-};
+// 系统助手类型（与缓存模块共用同一结构）
+type SystemAgentInfo = CachedSystemAgentInfo;
 
-// 缓存系统助手列表
-let cachedSystemAgents: SystemAgentInfo[] | null = null;
-
-// 获取系统助手列表
+// 获取系统助手列表（带 30 秒缓存，缓存实现见 ./system-agents-cache）
 async function getSystemAgents(): Promise<SystemAgentInfo[]> {
-  if (cachedSystemAgents) return cachedSystemAgents;
-  cachedSystemAgents = await prisma.agent.findMany({
-    where: { agentLevel: 'system', isActive: true },
-    select: {
-      id: true,
-      name: true,
-      avatar: true,
-      avatarColor: true,
-      description: true,
-      type: true,
-      agentLevel: true,
-    },
-  });
-  return cachedSystemAgents;
+  return getSystemAgentsCached();
 }
 
 async function normalizeDefaultAgentId(chatRoomId: string, defaultAgentId: string | null): Promise<string | null> {
@@ -179,6 +160,7 @@ function addVirtualSystemAgents<T extends { id: string; chatRoomAgents: any[] }>
         description: agent.description,
         type: agent.type,
         agentLevel: agent.agentLevel,
+        speechConfig: agent.speechConfig,
       },
     }));
 

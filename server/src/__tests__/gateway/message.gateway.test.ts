@@ -63,7 +63,7 @@ describe('Message Gateway API', () => {
 
       const body = response.json();
       assert.strictEqual(body.success, false);
-      assert.strictEqual(body.error, 'Message not found');
+      assert.strictEqual(body.error, '消息不存在');
     });
   });
 
