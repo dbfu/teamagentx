@@ -93,7 +93,7 @@ export async function createBridgeBot(input: CreateBridgeBotInput) {
         },
         include: {
           chatRoom: {
-            select: { id: true, name: true, defaultAgentId: true },
+            select: { id: true, name: true, defaultAgentId: true, ownerId: true },
           },
           defaultAgent: {
             select: { id: true, name: true, avatar: true, avatarColor: true },
@@ -128,7 +128,7 @@ export async function listBridgeBots(
     where: Object.keys(where).length > 0 ? where : undefined,
     include: {
       chatRoom: {
-        select: { id: true, name: true, defaultAgentId: true },
+        select: { id: true, name: true, defaultAgentId: true, ownerId: true },
       },
       defaultAgent: {
         select: { id: true, name: true, avatar: true, avatarColor: true },
@@ -146,7 +146,7 @@ export async function getBridgeBotById(id: string) {
     where: { id },
     include: {
       chatRoom: {
-        select: { id: true, name: true, defaultAgentId: true },
+        select: { id: true, name: true, defaultAgentId: true, ownerId: true },
       },
       defaultAgent: {
         select: { id: true, name: true, avatar: true, avatarColor: true },
@@ -160,7 +160,7 @@ export async function getBridgeBotByChatRoom(chatRoomId: string) {
     where: { chatRoomId },
     include: {
       chatRoom: {
-        select: { id: true, name: true, defaultAgentId: true },
+        select: { id: true, name: true, defaultAgentId: true, ownerId: true },
       },
       defaultAgent: {
         select: { id: true, name: true, avatar: true, avatarColor: true },
@@ -208,7 +208,7 @@ export async function updateBridgeBot(id: string, input: UpdateBridgeBotInput) {
     data,
     include: {
       chatRoom: {
-        select: { id: true, name: true, defaultAgentId: true },
+        select: { id: true, name: true, defaultAgentId: true, ownerId: true },
       },
       defaultAgent: {
         select: { id: true, name: true, avatar: true, avatarColor: true },
@@ -242,7 +242,7 @@ export async function bindBridgeBotToChatRoom(
     },
     include: {
       chatRoom: {
-        select: { id: true, name: true, defaultAgentId: true },
+        select: { id: true, name: true, defaultAgentId: true, ownerId: true },
       },
       defaultAgent: {
         select: { id: true, name: true, avatar: true, avatarColor: true },

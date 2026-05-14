@@ -101,6 +101,18 @@ export function consumeBridgeBindCode(
   return { platform: record.platform, botId: record.botId, chatRoomId: record.chatRoomId };
 }
 
+export function peekBridgeBindCode(
+  platform: Platform,
+  code: string,
+): { platform: Platform; botId?: string; chatRoomId: string } | null {
+  cleanExpiredBridgeBindCodes();
+  const normalizedCode = code.trim().toUpperCase();
+  const record = bindCodes.get(normalizedCode);
+  if (!record) return null;
+  if (record.platform !== platform) return null;
+  return { platform: record.platform, botId: record.botId, chatRoomId: record.chatRoomId };
+}
+
 export function clearBridgeBindCodesForTest(): void {
   bindCodes.clear();
 }

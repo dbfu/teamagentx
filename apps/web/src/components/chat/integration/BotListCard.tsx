@@ -1,5 +1,5 @@
 import { type ChatRoom } from '@/lib/agent-api'
-import { type BridgeBot, type BridgePlatformDefinition, type Platform } from '@/lib/bridge-api'
+import { type BridgeBot, type BridgePlatformDefinition } from '@/lib/bridge-api'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,10 +29,6 @@ interface BotListCardProps {
   onSelectRoom: (bot: BridgeBot, roomId: string) => void
   onCopyWebhook: (bot: BridgeBot) => void
   onDeleteBot: (bot: BridgeBot) => void
-}
-
-function platformLabel(platforms: BridgePlatformDefinition[], platform: Platform) {
-  return platforms.find((item) => item.key === platform)?.label ?? platform
 }
 
 /** Returns the webhook URL for platforms that require a public endpoint. */

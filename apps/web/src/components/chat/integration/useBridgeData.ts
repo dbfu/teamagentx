@@ -1,6 +1,6 @@
 import { chatRoomApi, type ChatRoom } from '@/lib/agent-api'
 import { bridgeApi, type BridgeBot, type BridgeEvent, type BridgePlatformDefinition, type BridgePlatformPlaybook, type Platform } from '@/lib/bridge-api'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 export interface BridgeData {
@@ -26,6 +26,7 @@ export function useBridgeData(activePlatform: Platform): BridgeData {
   const [loading, setLoading] = useState(true)
   const [hasError, setHasError] = useState(false)
   const [reloadTick, setReloadTick] = useState(0)
+  const platformRequestIdRef = useRef(0)
 
   const reload = useCallback(() => setReloadTick((n) => n + 1), [])
 
@@ -34,55 +35,34 @@ export function useBridgeData(activePlatform: Platform): BridgeData {
     setHasError(false)
     try {
       const [platformDefs, roomRes, systemConfig] = await Promise.all([
-        bridgeApi.listPlatforms().catch((err: unknown) => {
-          console.error('[bridge] listPlatforms failed', err)
-          return null
-        }),
-        chatRoomApi.getAll().catch((err: unknown) => {
-          console.error('[bridge] getAll rooms failed', err)
-          return null
-        }),
-        bridgeApi.getSystemConfig().catch((err: unknown) => {
-          console.error('[bridge] getSystemConfig failed', err)
-          return null
-        }),
+        bridgeApi.listPlatforms(),
+        chatRoomApi.getAll(),
+        bridgeApi.getSystemConfig(),
       ])
-
-      if (platformDefs === null || roomRes === null || systemConfig === null) {
-        setHasError(true)
-        toast.error('加载失败，请重试')
-        return
-      }
 
       setPlatforms(platformDefs)
       setRooms(roomRes.data ?? [])
       setBaseUrl(systemConfig.baseUrl)
+    } catch (err) {
+      console.error('[bridge] loadInitial failed', err)
+      setHasError(true)
+      toast.error('加载失败，请重试')
     } finally {
       setLoading(false)
     }
   }, [reloadTick]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadPlatformData = useCallback(async (platform: Platform) => {
+    const requestId = ++platformRequestIdRef.current
     setHasError(false)
     try {
       const [botList, nextPlaybook, nextEvents] = await Promise.all([
-        bridgeApi.listBots(platform).catch((err: unknown) => {
-          console.error('[bridge] listBots failed', err)
-          return null
-        }),
-        bridgeApi.getPlaybook(platform).catch((err: unknown) => {
-          console.error('[bridge] getPlaybook failed', err)
-          return null
-        }),
-        bridgeApi.listEvents(platform, 20).catch((err: unknown) => {
-          console.error('[bridge] listEvents failed', err)
-          return null
-        }),
+        bridgeApi.listBots(platform),
+        bridgeApi.getPlaybook(platform),
+        bridgeApi.listEvents(platform, 20),
       ])
 
-      if (botList === null || nextEvents === null) {
-        setHasError(true)
-        toast.error('加载失败，请重试')
+      if (requestId !== platformRequestIdRef.current) {
         return
       }
 
@@ -114,7 +94,7 @@ export function useBridgeData(activePlatform: Platform): BridgeData {
     if (!loading) {
       void loadPlatformData(activePlatform)
     }
-  }, [activePlatform]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activePlatform, loading, reloadTick, loadPlatformData])
 
   return { platforms, bots, rooms, playbook, events, baseUrl, loading, hasError, loadBots, reload }
 }

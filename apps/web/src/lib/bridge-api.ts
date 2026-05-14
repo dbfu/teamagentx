@@ -106,6 +106,10 @@ async function request<T>(
       throw new Error(err.message ?? err.error ?? `HTTP ${response.status}`)
     }
 
+    if (response.status === 204) {
+      return { success: true as const }
+    }
+
     const data = await response.json() as { success: boolean; data?: T; message?: string; error?: string }
     return data
   } catch (err) {
@@ -117,13 +121,15 @@ async function request<T>(
 export const bridgeApi = {
   listPlatforms: async (): Promise<BridgePlatformDefinition[]> => {
     const res = await request<BridgePlatformDefinition[]>('/api/bridge/platforms')
-    return res.success && res.data ? res.data : []
+    if (!res.success || !res.data) throw new Error(res.error || '获取平台列表失败')
+    return res.data
   },
 
   listBots: async (platform?: Platform): Promise<BridgeBot[]> => {
     const query = platform ? `?platform=${platform}` : ''
     const res = await request<BridgeBot[]>(`/api/bridge/bots${query}`)
-    return res.success && res.data ? res.data : []
+    if (!res.success || !res.data) throw new Error(res.error || '获取机器人列表失败')
+    return res.data
   },
 
   createBot: async (data: CreateBridgeBotRequest): Promise<BridgeBot> => {
@@ -145,7 +151,8 @@ export const bridgeApi = {
   },
 
   deleteBot: async (id: string): Promise<void> => {
-    await request<void>(`/api/bridge/bots/${id}`, { method: 'DELETE' })
+    const res = await request<void>(`/api/bridge/bots/${id}`, { method: 'DELETE' })
+    if (!res.success) throw new Error(res.error || '删除失败')
   },
 
   bindBot: async (id: string, chatRoomId: string, forceRebind = false): Promise<BridgeBot> => {
@@ -188,7 +195,8 @@ export const bridgeApi = {
 
   getSystemConfig: async (): Promise<{ baseUrl: string }> => {
     const res = await request<{ baseUrl: string }>('/api/bridge/system-config')
-    return res.data ?? { baseUrl: '' }
+    if (!res.success || !res.data) throw new Error(res.error || '获取系统配置失败')
+    return res.data
   },
 
   setSystemConfig: async (baseUrl: string): Promise<{ baseUrl: string }> => {
@@ -202,7 +210,8 @@ export const bridgeApi = {
 
   getPlaybook: async (platform: Platform): Promise<BridgePlatformPlaybook | null> => {
     const res = await request<BridgePlatformPlaybook>(`/api/bridge/playbooks/${platform}`)
-    return res.success && res.data ? res.data : null
+    if (!res.success || !res.data) throw new Error(res.error || '获取接入说明失败')
+    return res.data
   },
 
   listEvents: async (platform?: Platform, limit = 20): Promise<BridgeEvent[]> => {
@@ -210,6 +219,7 @@ export const bridgeApi = {
     if (platform) params.set('platform', platform)
     params.set('limit', String(limit))
     const res = await request<BridgeEvent[]>(`/api/bridge/events?${params.toString()}`)
-    return res.success && res.data ? res.data : []
+    if (!res.success || !res.data) throw new Error(res.error || '获取事件列表失败')
+    return res.data
   },
 }

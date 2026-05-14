@@ -67,7 +67,7 @@ function setSourceConversation(chatRoomId: string, botId: string, platform: Plat
   });
 }
 
-function getSourceConversation(botId: string, externalId?: string) {
+function getSourceConversation(botId: string, externalId?: string, chatRoomId?: string) {
   // 没有 externalId 时，返回该 botId 任一最新有效会话（向后兼容）
   if (!externalId) {
     let latest: SourceConversation | null = null;
@@ -75,6 +75,9 @@ function getSourceConversation(botId: string, externalId?: string) {
       if (!k.startsWith(`${botId}:`)) continue;
       if (Date.now() > entry.expiresAt) {
         lastSourceConversation.delete(k);
+        continue;
+      }
+      if (chatRoomId && entry.chatRoomId !== chatRoomId) {
         continue;
       }
       if (!latest || entry.expiresAt > latest.expiresAt) latest = entry;
@@ -148,7 +151,7 @@ async function getActiveBridgeTargets(chatRoomId: string) {
   });
   return bots
     .map((bot) => {
-      const source = getSourceConversation(bot.id);
+      const source = getSourceConversation(bot.id, undefined, chatRoomId);
       if (!source) return null;
       return { bot, source };
     })
@@ -315,8 +318,7 @@ export const bridgeService = {
     const prefixedContent = `[${platformLabel[params.platform]}·${params.senderName}] ${params.content}`;
 
     // Sanitize external content for routing: strip @ mentions to prevent injection
-    const sanitizedForRouting = params.content.replace(/@\S+/g, '');
-    const hasAgentMention = /@\S+/.test(sanitizedForRouting);
+    const hasAgentMention = /@\S+/.test(params.content);
     const roomAgents = !binding.chatRoom.defaultAgentId
       ? await prisma.chatRoomAgent.findMany({
           where: {

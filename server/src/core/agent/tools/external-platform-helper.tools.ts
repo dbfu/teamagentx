@@ -8,6 +8,7 @@ import {
   buildBridgePlatformConfigPayload,
   getBridgePlatformPlaybook,
 } from '../../../modules/bridge/bridge-platform-playbooks.js';
+import { parseStoredBridgeConfig, resolveStoredBridgeBotToken } from '../../../modules/bridge/bridge-platform-config.js';
 import { listBridgePlatformDefinitions } from '../../../modules/bridge/bridge-platform-registry.js';
 import { getBridgeBotById, listBridgeBots } from '../../../modules/bridge/bridge-bot-store.js';
 import { syncBridgeBotRuntime } from '../../../modules/bridge/bridge-runtime-sync.js';
@@ -276,7 +277,12 @@ export function createExternalPlatformHelperTools(chatRoomId: string) {
 
         let saved;
         try {
-          saved = await bridgeService.createBot({ platform, name: botName, ...payload });
+          saved = await bridgeService.createBot({
+            platform,
+            name: botName,
+            ownerId: room.ownerId ?? undefined,
+            ...payload,
+          });
         } catch (err: unknown) {
           if (isDuplicateCredentialError(err)) {
             return JSON.stringify({
@@ -443,13 +449,23 @@ export function createExternalPlatformHelperTools(chatRoomId: string) {
 
         const normalizedValues = parseCredentialInput(values ?? {});
         if (botToken && !normalizedValues.botToken) normalizedValues.botToken = botToken;
+        validatePlatformConfig(bot.platform, normalizedValues);
 
-        const validation = await validateCredentials(bot.platform as Platform, normalizedValues);
+        const mergedValues = {
+          ...(parseStoredBridgeConfig(bot) ?? {}),
+          ...normalizedValues,
+        } as Record<string, string>;
+        const existingBotToken = resolveStoredBridgeBotToken(bot);
+        if (existingBotToken && !mergedValues.botToken) {
+          mergedValues.botToken = existingBotToken;
+        }
+
+        const validation = await validateCredentials(bot.platform as Platform, mergedValues);
         if (!validation.valid) {
           return JSON.stringify({ success: false, invalidCredentials: true, error: validation.error });
         }
 
-        const payload = buildBridgePlatformConfigPayload(bot.platform as Platform, normalizedValues);
+        const payload = buildBridgePlatformConfigPayload(bot.platform as Platform, mergedValues);
         const log = {
           info: (...args: unknown[]) => console.log(...args),
           warn: (...args: unknown[]) => console.warn(...args),
@@ -548,9 +564,9 @@ export function createExternalPlatformHelperTools(chatRoomId: string) {
           configured: Boolean(baseUrl),
           webhookUrls: baseUrl
             ? {
-                wecom: `${baseUrl}/api/bridge/webhook/wecom`,
-                qq: `${baseUrl}/api/bridge/webhook/qq`,
-                telegram: `${baseUrl}/api/bridge/webhook/telegram`,
+                wecom: `${baseUrl}/api/bridge/webhook/wecom/:botId`,
+                qq: `${baseUrl}/api/bridge/webhook/qq/:botId`,
+                telegram: `${baseUrl}/api/bridge/webhook/telegram/:botId`,
               }
             : null,
           message: baseUrl

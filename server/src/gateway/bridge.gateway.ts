@@ -2,7 +2,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { bridgeService, Platform } from '../modules/bridge/bridge.service.js';
 import { config } from '../config/index.js';
 import { resolveStoredBridgeBotToken, parseStoredBridgeConfig } from '../modules/bridge/bridge-platform-config.js';
-import { consumeBridgeBindCode, createBridgeBotBindCode } from '../modules/bridge/bridge-bind-code-store.js';
+import { consumeBridgeBindCode, createBridgeBotBindCode, peekBridgeBindCode } from '../modules/bridge/bridge-bind-code-store.js';
 import { getBridgeInboundTextAdapter } from '../modules/bridge/platform-inbound-adapters.js';
 import {
   BRIDGE_WEBHOOK_ADAPTERS,
@@ -34,7 +34,14 @@ const processedMessages = new Set<string>();
 async function assertBotOwner(botId: string, userId: string) {
   const bot = await getBridgeBotById(botId);
   if (!bot) throw { statusCode: 404, message: '机器人实例不存在' };
-  if (bot.ownerId && bot.ownerId !== userId) throw { statusCode: 403, message: '无权操作此机器人' };
+  if (bot.ownerId) {
+    if (bot.ownerId !== userId) throw { statusCode: 403, message: '无权操作此机器人' };
+    return bot;
+  }
+  if (bot.chatRoom?.ownerId && bot.chatRoom.ownerId === userId) {
+    return bot;
+  }
+  throw { statusCode: 403, message: '无权操作此机器人' };
   return bot;
 }
 
@@ -55,13 +62,14 @@ export async function handleBindCode(
   sendReply: (text: string) => Promise<void>,
   log: { info: (...a: unknown[]) => void; error: (...a: unknown[]) => void },
 ): Promise<boolean> {
-  const pending = consumeBridgeBindCode(platform as Platform, code);
+  const pending = peekBridgeBindCode(platform as Platform, code);
   if (!pending) return false;
   try {
     if (!pending.botId || pending.botId !== botId) {
       await sendReply('❌ 该绑定码不属于当前机器人，请在正确的机器人会话里发送。').catch(() => {});
       return true;
     }
+    consumeBridgeBindCode(platform as Platform, code);
     await bridgeService.bindBot(botId, pending.chatRoomId);
     log.info({ platform, botId, externalId, chatRoomId: pending.chatRoomId }, '[Bridge] 绑定码绑定成功');
     await sendReply('✅ 机器人已绑定到 TeamAgentX 群聊。\n后续在这个机器人里发消息，都会进入对应群聊。').catch(() => {});
@@ -92,21 +100,6 @@ async function handleTelegramMessage(
 ) {
   if (!msg.chat?.id) return;
   const telegramAdapter = getBridgeInboundTextAdapter('telegram');
-
-  // 入站消息去重
-  const telegramMsgKey = `telegram:${String(msg.message_id ?? '')}`;
-  if (msg.message_id != null) {
-    if (processedMessages.has(telegramMsgKey)) return;
-    if (processedMessages.size >= 10000) {
-      const keys = processedMessages.values();
-      for (let i = 0; i < 1000; i++) {
-        const { value, done } = keys.next();
-        if (done) break;
-        processedMessages.delete(value);
-      }
-    }
-    processedMessages.add(telegramMsgKey);
-  }
 
   const externalId = String(msg.chat.id);
 
@@ -167,10 +160,10 @@ async function telegramPollOnce(botId: string, token: string, state: TelegramPol
     if (!data.ok || !data.result?.length) return;
     state.failCount = 0;
     for (const update of data.result) {
-      state.offset = update.update_id + 1;
       if (update.message) {
-        await handleTelegramMessage(botId, token, update.message, log).catch(err => log.error({ err, botId }, '[Bridge] polling 消息处理失败'));
+        await handleTelegramMessage(botId, token, update.message, log);
       }
+      state.offset = update.update_id + 1;
     }
   } catch (err) {
     state.failCount++;
@@ -193,6 +186,9 @@ export function startTelegramPolling(botId: string, token: string, log: { info: 
   log.info({ botId }, '[Bridge] 启动 Telegram polling 模式');
   const loop = () => {
     telegramPollOnce(botId, token, state, log).finally(() => {
+      if (telegramPollingStates.get(botId) !== state) {
+        return;
+      }
       const delay = state.failCount > 0 ? Math.min(2 ** state.failCount * 1000, 30000) : 1000;
       state.timer = setTimeout(loop, delay);
     });
@@ -494,12 +490,23 @@ export async function bridgeGateway(app: FastifyInstance) {
       if (!body.platform || !body.name?.trim()) {
         return reply.status(400).send({ success: false, error: 'platform、name 为必填项' });
       }
+      if (body.chatRoomId) {
+        await assertChatRoomOwner(body.chatRoomId, user.id);
+      }
       const bot = await bridgeService.createBot({ ...body, ownerId: user.id });
       await syncBridgeBotRuntime(bot.id, app.log);
       return reply.status(201).send({ success: true, data: maskBridgeBot(bot) });
     } catch (err) {
       app.log.error({ err }, '[Bridge] 创建机器人实例失败');
-      return reply.status(400).send({ success: false, error: err instanceof Error ? err.message : '创建机器人实例失败' });
+      const statusCode = typeof (err as { statusCode?: unknown })?.statusCode === 'number'
+        ? (err as { statusCode: number }).statusCode
+        : 400;
+      const message = err instanceof Error
+        ? err.message
+        : typeof (err as { message?: unknown })?.message === 'string'
+          ? (err as { message: string }).message
+          : '创建机器人实例失败';
+      return reply.status(statusCode).send({ success: false, error: message });
     }
   });
 
@@ -725,24 +732,28 @@ export async function bridgeGateway(app: FastifyInstance) {
     try {
       const { platform, limit: limitStr } = req.query as { platform?: string; limit?: string };
       const limit = Math.max(1, Math.min(parseInt(limitStr ?? '20', 10) || 20, 100));
-      const events = await prisma.bridgeEvent.findMany({
+      const rawEvents = await prisma.bridgeEvent.findMany({
         where: platform ? { platform } : undefined,
         orderBy: { createdAt: 'desc' },
-        take: limit,
+        take: limit * 5,
       });
-      const messageIds = Array.from(new Set(events.map((event) => event.messageId).filter(Boolean))) as string[];
+      const messageIds = Array.from(new Set(rawEvents.map((event) => event.messageId).filter(Boolean))) as string[];
       const messages = messageIds.length > 0
         ? await prisma.message.findMany({
             where: { id: { in: messageIds } },
-            select: { id: true, content: true },
+            select: { id: true, content: true, chatRoom: { select: { ownerId: true } } },
           })
         : [];
-      const messageMap = new Map(messages.map((message) => [message.id, message.content]));
+      const messageMap = new Map(messages.map((message) => [message.id, message]));
+      const events = rawEvents.filter((event) => {
+        if (!event.messageId) return false;
+        return messageMap.get(event.messageId)?.chatRoom.ownerId === user.id;
+      }).slice(0, limit);
       return reply.send({
         success: true,
         data: events.map((event) => ({
           ...event,
-          contentPreview: event.contentPreview || (event.messageId ? messageMap.get(event.messageId) ?? '' : ''),
+          contentPreview: event.contentPreview || (event.messageId ? messageMap.get(event.messageId)?.content ?? '' : ''),
         })),
       });
     } catch (err) {

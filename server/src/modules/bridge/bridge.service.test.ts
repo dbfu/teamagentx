@@ -28,28 +28,42 @@ test.beforeEach(async () => {
   };
   await prisma.message.deleteMany({
     where: {
-      chatRoomId: 'bridge-service-room',
+      chatRoomId: {
+        in: ['bridge-service-room', 'bridge-service-room-2'],
+      },
     },
   });
   await prisma.bridgeEvent.deleteMany({});
   await prisma.chatRoomAgent.deleteMany({
     where: {
-      chatRoomId: 'bridge-service-room',
+      chatRoomId: {
+        in: ['bridge-service-room', 'bridge-service-room-2'],
+      },
     },
   });
   await prisma.bridgeBot.deleteMany({
     where: {
-      chatRoomId: 'bridge-service-room',
+      chatRoomId: {
+        in: ['bridge-service-room', 'bridge-service-room-2'],
+      },
     },
   });
   await prisma.chatRoom.deleteMany({
     where: {
-      id: 'bridge-service-room',
+      id: {
+        in: ['bridge-service-room', 'bridge-service-room-2'],
+      },
     },
   });
   await prisma.agent.deleteMany({
     where: {
-      name: 'BridgeServiceDefaultAgent',
+      id: {
+        in: [
+          'bridge-service-agent',
+          'bridge-service-agent-single-room',
+          'bridge-service-agent-explicit',
+        ],
+      },
     },
   });
 });
@@ -362,6 +376,53 @@ test('receiveBridgeMessage falls back to the only active room agent when no defa
   assert.match(savedMessage.content, /@BridgeServiceDefaultAgent/);
 });
 
+test('receiveBridgeMessage preserves explicit agent mentions from external platforms without appending default agent', async () => {
+  const agent = await prisma.agent.create({
+    data: {
+      id: 'bridge-service-agent-explicit',
+      name: 'BridgeServiceDefaultAgent',
+      prompt: 'test prompt',
+      updatedAt: new Date(),
+    },
+  });
+
+  await prisma.chatRoom.create({
+    data: {
+      id: 'bridge-service-room',
+      name: 'Bridge Service Room',
+      defaultAgentId: agent.id,
+      updatedAt: new Date(),
+    },
+  });
+
+  const bot = await bridgeService.createBot({
+    platform: 'telegram',
+    name: 'Bridge Service Bot',
+    botToken: 'test-token',
+  });
+
+  await bridgeService.bindBot(bot.id, 'bridge-service-room');
+
+  await bridgeService.receiveBridgeMessage({
+    botId: bot.id,
+    platform: 'telegram',
+    externalId: 'tg-chat-explicit-agent',
+    senderName: 'tester',
+    content: '@other-agent 你好',
+  });
+
+  const savedMessage = await prisma.message.findFirst({
+    where: {
+      chatRoomId: 'bridge-service-room',
+    },
+    orderBy: { time: 'desc' },
+  });
+
+  assert.ok(savedMessage);
+  assert.equal(savedMessage.content.includes('@BridgeServiceDefaultAgent'), false);
+  assert.match(savedMessage.content, /@other-agent/);
+});
+
 test('bridge events store content preview for new inbound and outbound syncs', async () => {
   await prisma.chatRoom.create({
     data: {
@@ -441,4 +502,57 @@ test('bridge events keep only the last 20 days when new events are written', asy
 
   assert.equal(expired, null);
   assert.equal(freshCount, 1);
+});
+
+test('sendAgentResponse does not leak an old room response into the latest conversation after rebind', async () => {
+  await prisma.chatRoom.createMany({
+    data: [
+      {
+        id: 'bridge-service-room',
+        name: 'Bridge Service Room',
+        updatedAt: new Date(),
+      },
+      {
+        id: 'bridge-service-room-2',
+        name: 'Bridge Service Room 2',
+        updatedAt: new Date(),
+      },
+    ],
+  });
+
+  const bot = await bridgeService.createBot({
+    platform: 'telegram',
+    name: 'Shared Telegram Bridge Bot',
+    botToken: 'telegram-token',
+  });
+
+  await bridgeService.bindBot(bot.id, 'bridge-service-room');
+  await bridgeService.receiveBridgeMessage({
+    botId: bot.id,
+    platform: 'telegram',
+    externalId: 'tg-chat-room-1',
+    senderName: 'user-1',
+    content: 'room-1 source',
+  });
+
+  await bridgeService.bindBot(bot.id, 'bridge-service-room-2', { forceRebind: true });
+  await bridgeService.receiveBridgeMessage({
+    botId: bot.id,
+    platform: 'telegram',
+    externalId: 'tg-chat-room-2',
+    senderName: 'user-2',
+    content: 'room-2 source',
+  });
+
+  const sent: Array<{ externalId: string; text: string }> = [];
+  bridgeService.registerSender('telegram', async (_botId, externalId, text) => {
+    sent.push({ externalId, text });
+  });
+
+  await bridgeService.sendAgentResponse('bridge-service-room', '助手A', '旧房间的回复不应串到新会话');
+  await bridgeService.sendAgentResponse('bridge-service-room-2', '助手B', '只应发回 room-2');
+
+  assert.deepEqual(sent, [
+    { externalId: 'tg-chat-room-2', text: '只应发回 room-2' },
+  ]);
 });

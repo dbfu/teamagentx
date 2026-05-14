@@ -1,7 +1,7 @@
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ChatRoom, chatRoomApi } from '@/lib/agent-api'
-import { bridgeApi, BridgeBot, BridgePlatformDefinition } from '@/lib/bridge-api'
+import { bridgeApi, BridgeBot } from '@/lib/bridge-api'
 import { groupAvatarOptions, GroupAvatarImage, normalizeGroupAvatarIndex } from '@/lib/group-avatars'
 import { cn } from '@/lib/utils'
 import { Bot, Eraser, Pencil, Trash2 } from 'lucide-react'

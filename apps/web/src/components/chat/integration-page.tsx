@@ -12,7 +12,7 @@ import {
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { cn } from '@/lib/utils'
 import { ArrowDownLeft, ArrowUpRight, Check, Clock3, Globe, Loader2, Pencil, RefreshCw, Trash2 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { BotEditorForm } from './integration/BotEditorForm'
 import { BotListCard } from './integration/BotListCard'
@@ -58,14 +58,6 @@ export function IntegrationPage() {
   const [editingBaseUrl, setEditingBaseUrl] = useState(false)
   const [savingBaseUrl, setSavingBaseUrl] = useState(false)
 
-  // Sync baseUrl from hook on initial load
-  const [baseUrlSynced, setBaseUrlSynced] = useState(false)
-  if (!baseUrlSynced && !loading && loadedBaseUrl !== undefined) {
-    setBaseUrl(loadedBaseUrl)
-    setBaseUrlInput(loadedBaseUrl)
-    setBaseUrlSynced(true)
-  }
-
   const [savingBot, setSavingBot] = useState(false)
   const [editingBotId, setEditingBotId] = useState<string | null>(null)
   const [botName, setBotName] = useState('')
@@ -78,6 +70,15 @@ export function IntegrationPage() {
 
   const platformInfo = platforms.find((item) => item.key === activePlatform) ?? null
   const activeFields = platformInfo?.configFields ?? []
+
+  useEffect(() => {
+    if (loading) return
+    const nextBaseUrl = loadedBaseUrl ?? ''
+    setBaseUrl(nextBaseUrl)
+    if (!editingBaseUrl) {
+      setBaseUrlInput(nextBaseUrl)
+    }
+  }, [editingBaseUrl, loadedBaseUrl, loading])
 
   const botsByRoomId = useMemo(() => {
     const map = new Map<string, BridgeBot[]>()
@@ -154,24 +155,20 @@ export function IntegrationPage() {
     }
     setSavingBot(true)
     try {
-      // Build config: always include non-secret fields so server receives complete config (Fix #61).
-      // Secret fields are omitted when blank (meaning "keep existing").
       const configData: Record<string, unknown> = {}
       for (const field of activeFields) {
-        if (field.secret) continue
         const value = botFields[field.key]?.trim()
-        if (value) configData[field.key] = value
+        if (field.key === 'botToken') continue
+        if (value) {
+          configData[field.key] = value
+        }
       }
 
       if (editingBotId) {
-        // Collect secret fields that were explicitly filled
-        const secretToken = activeFields.find((f) => f.secret && f.key === 'botToken')
-          ? botFields.botToken?.trim() || undefined
-          : undefined
         await bridgeApi.updateBot(editingBotId, {
           name: botName.trim(),
-          config: Object.keys(configData).length > 0 ? configData : null,
-          botToken: secretToken,
+          config: Object.keys(configData).length > 0 ? configData : undefined,
+          botToken: botFields.botToken?.trim() || undefined,
         })
         toast.success('机器人实例已更新')
       } else {
