@@ -2,29 +2,44 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
 
 const ALGORITHM = 'aes-256-gcm';
 const KEY_ENV = process.env.BRIDGE_ENCRYPTION_KEY;
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
 if (!KEY_ENV) {
-  console.warn('[Bridge] BRIDGE_ENCRYPTION_KEY 未设置，凭证将以明文存储。生产环境请务必配置。');
+  if (IS_PRODUCTION) {
+    console.error('[Bridge] CRITICAL: BRIDGE_ENCRYPTION_KEY 未设置，生产环境必须配置 32 字节密钥。凭证无法加密。');
+  } else {
+    console.warn('[Bridge] BRIDGE_ENCRYPTION_KEY 未设置，凭证将以明文存储。生产环境请务必配置。');
+  }
 } else {
   const keyByteLen = Buffer.byteLength(KEY_ENV, 'utf8');
   if (keyByteLen !== 32) {
-    console.warn(
-      `[Bridge] BRIDGE_ENCRYPTION_KEY 长度应为 32 字节，当前为 ${keyByteLen} 字节。密钥将被截断或零填充，安全性降低。`,
-    );
+    if (IS_PRODUCTION) {
+      throw new Error(
+        `[Bridge] BRIDGE_ENCRYPTION_KEY 长度必须为 32 字节，当前为 ${keyByteLen} 字节。请修正后重启。`,
+      );
+    } else {
+      console.warn(
+        `[Bridge] BRIDGE_ENCRYPTION_KEY 长度应为 32 字节，当前为 ${keyByteLen} 字节。非生产环境将拒绝使用此密钥。`,
+      );
+    }
   }
 }
 
-// Key must be 32 bytes for AES-256. Derive from env var with padding/truncation.
+// Key must be exactly 32 bytes for AES-256. Throws if key length is wrong.
 function getKey(): Buffer | null {
   if (!KEY_ENV) return null;
-  const buf = Buffer.alloc(32, 0);
-  Buffer.from(KEY_ENV, 'utf8').copy(buf);
-  return buf;
+  const keyBuf = Buffer.from(KEY_ENV, 'utf8');
+  if (keyBuf.byteLength !== 32) {
+    throw new Error(
+      `[Bridge] BRIDGE_ENCRYPTION_KEY 长度必须为 32 字节，当前为 ${keyBuf.byteLength} 字节。`,
+    );
+  }
+  return keyBuf;
 }
 
 export function encrypt(plaintext: string): string {
   const key = getKey();
-  if (!key) return plaintext; // dev: no encryption
+  if (!key) return plaintext; // no key configured (dev only)
 
   const iv = randomBytes(12); // 96-bit IV for GCM
   const cipher = createCipheriv(ALGORITHM, key, iv);

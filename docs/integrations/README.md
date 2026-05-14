@@ -1,81 +1,103 @@
-# TeamAgentX 外部平台集成总览
+# TeamAgentX 外部平台接入总览
 
-TeamAgentX 通过 **Bridge Service** 与外部聊天平台对接，让外部群聊用户无需安装 TeamAgentX 客户端即可使用多 Agent 能力。
+## 当前模型
 
-## 核心映射模型
+TeamAgentX 现在的外部平台接入统一采用下面这套模型：
 
-```
-外部群聊（Telegram / 飞书 / 钉钉 / 企业微信 / QQ）
-    ↕ Bridge Service 双向桥接
-TeamAgentX ChatRoom（含多个 AI 助手）
-```
+- `BridgeBot` 表示一个“机器人实例”
+- 一个机器人实例对应一套外部平台凭证
+- 一个机器人实例最多绑定一个 TeamAgentX 群聊
+- 一个 TeamAgentX 群聊可以同时绑定多个机器人实例
+- 这些机器人实例可以来自不同平台，也可以来自同一平台
+- 机器人只负责通信，不负责决定默认由哪个助手回复
 
-**关键设计：**
-- 外部群成员**无需注册** TeamAgentX 账号，身份信息嵌入消息内容
-- 每个平台只需 **1 个机器人账号**，代理所有 AI 助手发言
-- 机器人被拉入群后**自动创建** ChatRoom 并关联默认助手
+已经废弃的旧概念：
 
-## 支持平台
+- `ExternalChannel` 风格的“外部平台群聊映射”
+- “一个外部群对应一个内部群”的强绑定叙事
+- “一个群聊只能绑定一个机器人”
+- “机器人默认助手决定回复逻辑”
 
-| 平台 | 文档 | 对接方式 | 注册难度 |
-|------|------|---------|---------|
-| Telegram | [telegram.md](./telegram.md) | Bot API + Webhook | ★☆☆☆☆ |
-| 飞书 | [feishu.md](./feishu.md) | 自建应用 + 事件订阅 | ★★☆☆☆ |
-| 钉钉 | [dingtalk.md](./dingtalk.md) | 企业内部应用 | ★★★☆☆ |
-| 企业微信 | [wecom.md](./wecom.md) | 企业微信应用 | ★★★☆☆ |
-| QQ | [qq.md](./qq.md) | QQ 开放平台 Bot | ★★☆☆☆ |
+## 核心行为
 
-## 专项建议
+### 1. 外部平台 -> TeamAgentX
 
-- [bridge-recommendations.md](./bridge-recommendations.md)  
-  基于分支 `feat/external-platform-bridge` 当前代码现状整理的专项建议，包含产品方向、架构优化、可靠性、安全、接入体验和阶段性优先级。
+- 某个机器人实例收到外部消息
+- 只要它已经绑定了 TeamAgentX 群聊，就会把消息写入这个群
+- 写入后的消息会继续走群聊原本的助手触发逻辑
+- 是否自动回复，取决于群自己的默认助手和 `@助手` 规则，不取决于机器人实例
 
-- [external-platform-helper-design.md](./external-platform-helper-design.md)
-  外部平台接入系统助手的详细设计，覆盖平台说明模型、聊天式配置流程、绑定码共享、运行态同步和当前边界。
+### 2. TeamAgentX -> 外部平台
 
-## 消息流程
+- 当群里有人发消息时，系统会尝试把这条消息同步到该群绑定的机器人实例
+- 只有“已经建立过来源会话”的机器人，才会继续向对应外部会话发消息
+- 当助手开始执行时，系统会向这些外部会话发送“输入中”状态
+- 当助手产出回复时，系统会把回复同步到这些外部会话
 
-```
-外部用户发送：@机器人 @claude 帮我分析这段代码
-                   ↓
-          Bridge Service 解析
-          发送者: Alice | 目标: claude
-                   ↓
-     POST /api/bridge/message（内部 HTTP 接口）
-                   ↓
-     TeamAgentX 路由到 Claude Agent 执行
-                   ↓
-     Bridge Service 收到响应，回发到外部群：
-          [Claude] 好的，以下是分析结果...
-```
+### 3. 绑定方式
 
-## Agent 路由规则
+- 在集成页面创建机器人实例时直接选择群聊绑定
+- 在集成页面创建后再绑定到群聊
+- 在群里通过“外部平台接入”系统助手录入平台凭证并自动绑定当前群聊
+- `/bind CODE` 仍然可以作为辅助能力保留，但不再是主流程
 
-| 用户输入 | 路由结果 |
-|---------|---------|
-| `@机器人 @claude 内容` | 触发 Claude Agent |
-| `@机器人 @codex 内容` | 触发 Codex Agent |
-| `@机器人 内容`（无 @agent）| 触发该群默认 Agent |
+## UI 约定
 
-## 数据库模型
+### 集成页面
 
-外部群聊与 TeamAgentX ChatRoom 的映射存储在 `ExternalChannel` 表：
+- 按平台查看机器人实例
+- 每张卡片尽量压缩到 1 到 2 行核心信息
+- 展示：机器人名称、平台、状态、当前绑定群聊、凭证是否已保存
+- 允许直接切换绑定群聊
+- 右侧展示“群聊 -> 已连接机器人列表”的概览
+
+### 群设置页面
+
+- 不再展示“单一绑定关系”
+- 改为展示当前群已连接的机器人列表
+- 每行展示：机器人名称、平台、状态、解绑按钮
+
+## 数据模型
+
+当前接入主模型：
 
 ```prisma
-model ExternalChannel {
-  platform      String   // telegram | feishu | dingtalk | wecom | qq
-  externalId    String   // 平台侧群 ID
-  chatRoomId    String   // 关联的 TeamAgentX ChatRoom
-  botToken      String?  // 平台机器人 Token（加密存储）
-  defaultAgentId String? // 该群默认 Agent
-  @@unique([platform, externalId])
+model BridgeBot {
+  id             String   @id @default(uuid())
+  platform       String
+  name           String
+  botToken       String?
+  config         String?
+  defaultAgentId String?
+  chatRoomId     String?
+  enabled        Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 }
 ```
 
-## 快速开始
+注意：
 
-1. 在各平台注册机器人，获取 Bot Token
-2. 在 TeamAgentX 后台 → 外部集成 → 填写 Bot Token
-3. 将机器人添加到外部群聊
-4. 机器人自动创建 ChatRoom 并发送欢迎消息
-5. 群成员使用 `@机器人 @助手名 内容` 开始对话
+- `chatRoomId` 现在不是唯一值
+- 这意味着一个群聊下可以挂多个 `BridgeBot`
+- `defaultAgentId` 仍是兼容字段，但新的桥接主逻辑不依赖它
+
+## 平台清单
+
+| 平台 | 文档 | 当前接入方式 |
+| --- | --- | --- |
+| Telegram | [telegram.md](./telegram.md) | Bot Token + Webhook / Bot API |
+| 飞书 | [feishu.md](./feishu.md) | App ID / App Secret + 长连接 |
+| 钉钉 | [dingtalk.md](./dingtalk.md) | 应用凭证 + Stream / Session Webhook |
+| 企业微信 | [wecom.md](./wecom.md) | 企业应用凭证 + 回调 |
+| QQ | [qq.md](./qq.md) | 机器人凭证 + Webhook / 开放平台 API |
+
+## 相关文档
+
+- [external-platform-helper-design.md](./external-platform-helper-design.md)
+- [bridge-recommendations.md](./bridge-recommendations.md)
+- [feishu.md](./feishu.md)
+- [telegram.md](./telegram.md)
+- [dingtalk.md](./dingtalk.md)
+- [wecom.md](./wecom.md)
+- [qq.md](./qq.md)

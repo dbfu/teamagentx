@@ -34,6 +34,8 @@ import {
   cronTaskHelperTools,
   SKILL_MANAGER_AGENT_ID,
   skillManagerTools,
+  EXTERNAL_PLATFORM_HELPER_AGENT_ID,
+  createExternalPlatformHelperTools,
 } from './tools/index.js';
 import type {
   AgentDebugInfo,
@@ -808,6 +810,8 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
         return cronTaskHelperTools;
       case CHATROOM_HELPER_AGENT_ID:
         return chatroomHelperTools;
+      case EXTERNAL_PLATFORM_HELPER_AGENT_ID:
+        return createExternalPlatformHelperTools(this.chatRoomId);
       default:
         return [];
     }

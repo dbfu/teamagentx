@@ -17,37 +17,41 @@ export interface BridgePlatformDefinition {
   supportsBindCode: boolean
   supportsManualChannelCreate: boolean
   configFields: BridgePlatformConfigFieldDefinition[]
+  /** Whether this platform requires a public webhook URL to receive events */
+  requiresPublicWebhook?: boolean
 }
 
-export interface ExternalChannel {
+export interface BridgeBot {
   id: string
   platform: Platform
-  externalId: string
-  chatRoomId: string
-  chatRoom: { id: string; name: string }
+  name: string
+  chatRoomId: string | null
+  chatRoom: { id: string; name: string } | null
   botToken?: string
-  webhookSecret?: string
   defaultAgentId?: string
   defaultAgent?: { id: string; name: string; avatar?: string | null; avatarColor?: string | null }
   config?: string
+  hasConfig?: boolean
+  configValues?: Record<string, string>
   enabled: boolean
   createdAt: string
+  updatedAt: string
 }
 
-export interface CreateChannelRequest {
+export interface CreateBridgeBotRequest {
   platform: Platform
-  externalId: string
-  chatRoomId: string
+  name: string
   botToken?: string
-  webhookSecret?: string
   defaultAgentId?: string
-  config?: string
+  config?: Record<string, unknown>
+  chatRoomId?: string
 }
 
-export interface UpdateChannelRequest {
+export interface UpdateBridgeBotRequest {
+  name?: string
   botToken?: string
-  webhookSecret?: string
   defaultAgentId?: string
+  config?: Record<string, unknown> | null
   enabled?: boolean
 }
 
@@ -60,6 +64,7 @@ export interface BridgeEvent {
   direction: 'inbound' | 'outbound'
   status: 'success' | 'failed'
   messageId?: string
+  contentPreview?: string
   agentName?: string
   errorMsg?: string
   createdAt: string
@@ -76,19 +81,10 @@ export interface BridgePlatformPlaybook {
   notes: string[]
 }
 
-export interface PlatformConfig {
-  platform: Platform
-  botToken: string       // 脱敏后的值，非空表示已配置
-  hasConfig: boolean     // config 字段是否已设置
-  defaultAgentId: string | null
-  defaultAgent: { id: string; name: string } | null
-  configValues: Record<string, string>  // 非密字段明文值，供展示
-}
-
 async function request<T>(
   endpoint: string,
   options?: RequestInit
-): Promise<{ success: boolean; data?: T; error?: string }> {
+): Promise<{ success: boolean; data?: T; message?: string; error?: string }> {
   const baseUrl = await getApiBaseUrl()
   const token = localStorage.getItem('auth_token')
   const hasBody = options?.body !== undefined
@@ -105,7 +101,12 @@ async function request<T>(
       cache: 'no-store',
     })
 
-    const data = await response.json()
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({})) as { message?: string; error?: string }
+      throw new Error(err.message ?? err.error ?? `HTTP ${response.status}`)
+    }
+
+    const data = await response.json() as { success: boolean; data?: T; message?: string; error?: string }
     return data
   } catch (err) {
     console.error('[bridge-api] 请求失败', err)
@@ -119,14 +120,14 @@ export const bridgeApi = {
     return res.success && res.data ? res.data : []
   },
 
-  listChannels: async (platform?: Platform): Promise<ExternalChannel[]> => {
+  listBots: async (platform?: Platform): Promise<BridgeBot[]> => {
     const query = platform ? `?platform=${platform}` : ''
-    const res = await request<ExternalChannel[]>(`/api/bridge/channels${query}`)
+    const res = await request<BridgeBot[]>(`/api/bridge/bots${query}`)
     return res.success && res.data ? res.data : []
   },
 
-  createChannel: async (data: CreateChannelRequest): Promise<ExternalChannel> => {
-    const res = await request<ExternalChannel>('/api/bridge/channels', {
+  createBot: async (data: CreateBridgeBotRequest): Promise<BridgeBot> => {
+    const res = await request<BridgeBot>('/api/bridge/bots', {
       method: 'POST',
       body: JSON.stringify(data),
     })
@@ -134,8 +135,8 @@ export const bridgeApi = {
     return res.data
   },
 
-  updateChannel: async (id: string, data: UpdateChannelRequest): Promise<ExternalChannel> => {
-    const res = await request<ExternalChannel>(`/api/bridge/channels/${id}`, {
+  updateBot: async (id: string, data: UpdateBridgeBotRequest): Promise<BridgeBot> => {
+    const res = await request<BridgeBot>(`/api/bridge/bots/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     })
@@ -143,50 +144,45 @@ export const bridgeApi = {
     return res.data
   },
 
-  deleteChannel: async (id: string): Promise<void> => {
-    const baseUrl = await getApiBaseUrl()
-    const token = localStorage.getItem('auth_token')
-    const response = await fetch(`${baseUrl}/api/bridge/channels/${id}`, {
-      method: 'DELETE',
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      cache: 'no-store',
+  deleteBot: async (id: string): Promise<void> => {
+    await request<void>(`/api/bridge/bots/${id}`, { method: 'DELETE' })
+  },
+
+  bindBot: async (id: string, chatRoomId: string, forceRebind = false): Promise<BridgeBot> => {
+    const res = await request<BridgeBot>(`/api/bridge/bots/${id}/bind`, {
+      method: 'POST',
+      body: JSON.stringify({ chatRoomId, forceRebind }),
     })
+    if (!res.success || !res.data) throw new Error(res.error || '绑定失败')
+    return res.data
+  },
 
-    if (response.status === 204) return
+  unbindBot: async (id: string): Promise<BridgeBot> => {
+    const res = await request<BridgeBot>(`/api/bridge/bots/${id}/unbind`, {
+      method: 'POST',
+    })
+    if (!res.success || !res.data) throw new Error(res.error || '解绑失败')
+    return res.data
+  },
 
-    const res = await response.json().catch(() => null) as { success?: boolean; error?: string } | null
-    if (!response.ok || !res?.success) {
-      throw new Error(res?.error || '删除失败')
-    }
+  getBindCode: async (botId: string, chatRoomId: string): Promise<{ code: string; expiresIn: number }> => {
+    const res = await request<{ code: string; expiresIn: number }>(`/api/bridge/bots/${botId}/bind-code`, {
+      method: 'POST',
+      body: JSON.stringify({ chatRoomId }),
+    })
+    if (!res.success || !res.data) throw new Error(res.error || '生成绑定码失败')
+    return res.data
+  },
+
+  getBotWebhookUrl: async (botId: string): Promise<{ webhookUrl: string }> => {
+    const res = await request<{ webhookUrl: string }>(`/api/bridge/bots/${botId}/webhook-url`)
+    if (!res.success || !res.data) throw new Error(res.error || '获取 webhook 地址失败')
+    return res.data
   },
 
   getWebhookUrls: async (): Promise<WebhookUrls> => {
     const res = await request<WebhookUrls>('/api/bridge/webhook-url')
     if (!res.success || !res.data) throw new Error(res.error || '获取 Webhook 地址失败')
-    return res.data
-  },
-
-  getPlatformConfig: async (platform: Platform): Promise<PlatformConfig> => {
-    const res = await request<PlatformConfig>(`/api/bridge/platform-config/${platform}`)
-    if (!res.success || !res.data) throw new Error(res.error || '获取配置失败')
-    return res.data
-  },
-
-  setPlatformConfig: async (platform: Platform, data: { botToken?: string; defaultAgentId?: string | null; config?: Record<string, unknown> | null }): Promise<PlatformConfig> => {
-    const res = await request<PlatformConfig>(`/api/bridge/platform-config/${platform}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    })
-    if (!res.success || !res.data) throw new Error(res.error || '保存配置失败')
-    return res.data
-  },
-
-  getBindCode: async (platform: Platform, chatRoomId: string): Promise<{ code: string; expiresIn: number }> => {
-    const res = await request<{ code: string; expiresIn: number }>('/api/bridge/bind-code', {
-      method: 'POST',
-      body: JSON.stringify({ platform, chatRoomId }),
-    })
-    if (!res.success || !res.data) throw new Error(res.error || '生成绑定码失败')
     return res.data
   },
 

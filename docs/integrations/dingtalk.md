@@ -1,61 +1,33 @@
 # 钉钉集成
 
-难度：★★★☆☆ | 对接方式：企业内部应用 | 方向：双向
+## 适用模型
 
-## 创建企业内部应用
+钉钉在 TeamAgentX 中同样是“机器人实例”模式：
 
-1. 打开[钉钉开放平台](https://open.dingtalk.com)，进入开发者后台
-2. 创建**企业内部应用**（H5 微应用或机器人）
-3. 在**消息推送**中配置机器人，开启消息接收模式
-4. 配置消息接收地址（Request URL）：
-   ```
-   https://your-domain.com/api/bridge/webhook/dingtalk
-   ```
-5. 在**权限管理**中开启：
-   - `qyapi_chat_manage`（管理群聊）
-   - `Message.read`（读取消息）
-   - `Message.send`（发送消息）
-6. 获取 **AppKey**、**AppSecret**
+- 一套钉钉应用凭证对应一个机器人实例
+- 一个实例最多绑定一个 TeamAgentX 群聊
+- 一个 TeamAgentX 群聊可以同时绑定多个钉钉或其他平台实例
 
-## 配置到 TeamAgentX
+## 需要准备
 
-1. TeamAgentX 后台 → 外部集成 → 钉钉
-2. 填写 AppKey、AppSecret → 保存
+- 钉钉应用凭证
+- 如果需要公网回调，准备 TeamAgentX 对外地址
 
-## 使用方式
+## 推荐接入步骤
 
-**将机器人添加到钉钉群：**
-- 群设置 → 智能群助手 → 添加机器人 → 选择应用机器人
-- 机器人自动在 TeamAgentX 创建对应 ChatRoom
+1. 在钉钉开放平台创建应用
+2. 开启机器人能力和消息接收能力
+3. 在 TeamAgentX 集成页面新建钉钉机器人实例
+4. 填入钉钉所需凭证
+5. 保存时直接选择目标群聊
 
-**群成员发送消息：**
-```
-@TeamAgentX @claude 帮我分析这份数据
-@TeamAgentX @codex 优化这段 SQL
-@TeamAgentX 项目进度如何          ← 触发默认助手
-```
+## 运行行为
 
-## Webhook 接收的消息格式
+- 钉钉会话里的消息会进入绑定群聊
+- 群里的消息会同步回钉钉最近活跃的来源会话
+- 系统支持按会话来源回发，避免不同来源串线
 
-钉钉发送的消息回调：
+## 说明
 
-```json
-{
-  "conversationId": "cidXxx",
-  "conversationType": "2",
-  "senderId": "user_xxx",
-  "senderNick": "张三",
-  "text": { "content": "@TeamAgentX @claude 帮我分析这份数据" },
-  "atUsers": [
-    { "dingtalkId": "bot_xxx", "staffId": "teamagentx" }
-  ],
-  "msgtype": "text"
-}
-```
-
-## 注意事项
-
-- 钉钉企业内部应用需要企业管理员在后台审批开通
-- 机器人回调请求需要验证签名（时间戳 + Secret 的 HMAC-SHA256）
-- 发送消息支持 Markdown 格式，适合展示代码块
-- 单条消息内容上限 20000 字符
+- 当前文档不再使用“外部群 ID 映射内部群”的旧说法
+- 钉钉相关特殊会话目标会在桥接层内部按 `replyTarget` 处理

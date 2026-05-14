@@ -2,9 +2,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { bridgeService, Platform } from '../modules/bridge/bridge.service.js';
 import { config } from '../config/index.js';
 import { resolveStoredBridgeBotToken, parseStoredBridgeConfig } from '../modules/bridge/bridge-platform-config.js';
-import { consumeBridgeBindCode, createBridgeBindCode } from '../modules/bridge/bridge-bind-code-store.js';
-import { getBridgePlatformConfig, hasBridgePlatformCredentials, saveBridgePlatformConfig } from '../modules/bridge/bridge-platform-config-store.js';
-import { syncBridgePlatformRuntime } from '../modules/bridge/bridge-runtime-sync.js';
+import { consumeBridgeBindCode, createBridgeBotBindCode } from '../modules/bridge/bridge-bind-code-store.js';
 import { getBridgeInboundTextAdapter } from '../modules/bridge/platform-inbound-adapters.js';
 import {
   BRIDGE_WEBHOOK_ADAPTERS,
@@ -16,14 +14,41 @@ import { BRIDGE_PLATFORM_PLAYBOOKS } from '../modules/bridge/bridge-platform-pla
 import prisma from '../lib/prisma.js';
 import { authService } from '../modules/auth/auth.service.js';
 import { decryptWecomMessage } from '../modules/bridge/wecom-crypto.js';
+import { createHash } from 'crypto';
+import { decrypt } from '../modules/bridge/crypto.js';
+import {
+  createBridgeBot,
+  getBridgeBotById,
+  hasBridgeBotCredentials,
+  listBridgeBots,
+  updateBridgeBot,
+} from '../modules/bridge/bridge-bot-store.js';
+import { syncBridgeBotRuntime } from '../modules/bridge/bridge-runtime-sync.js';
+import { registerTelegramPolling } from '../modules/bridge/telegram-polling-registry.js';
 
 // 入站消息去重 Set，防止 webhook 重投导致重复处理
 const processedMessages = new Set<string>();
+
+// ──────────────── 权限校验辅助 ────────────────
+
+async function assertBotOwner(botId: string, userId: string) {
+  const bot = await getBridgeBotById(botId);
+  if (!bot) throw { statusCode: 404, message: '机器人实例不存在' };
+  if (bot.ownerId && bot.ownerId !== userId) throw { statusCode: 403, message: '无权操作此机器人' };
+  return bot;
+}
+
+async function assertChatRoomOwner(chatRoomId: string, userId: string) {
+  const room = await prisma.chatRoom.findUnique({ where: { id: chatRoomId }, select: { ownerId: true } });
+  if (!room) throw { statusCode: 404, message: '聊天室不存在' };
+  if (room.ownerId !== userId) throw { statusCode: 403, message: '无权操作此聊天室' };
+}
 
 // ──────────────── 通用绑定码处理 ────────────────
 
 export async function handleBindCode(
   platform: string,
+  botId: string,
   externalId: string,
   _groupName: string,
   code: string,
@@ -32,21 +57,18 @@ export async function handleBindCode(
 ): Promise<boolean> {
   const pending = consumeBridgeBindCode(platform as Platform, code);
   if (!pending) return false;
-  const platformCfg = await prisma.platformConfig.findUnique({ where: { platform } });
-  const botToken = platformCfg ? resolveStoredBridgeBotToken(platformCfg) : undefined;
   try {
-    await bridgeService.createChannel({
-      platform: platform as Platform,
-      externalId,
-      chatRoomId: pending.chatRoomId,
-      botToken,
-      defaultAgentId: platformCfg?.defaultAgentId ?? undefined,
-    });
-    log.info({ platform, externalId, chatRoomId: pending.chatRoomId }, '[Bridge] 绑定码绑定成功');
-    await sendReply('✅ 已与 TeamAgentX 群聊绑定！\n发消息即可触发 AI 助手。').catch(() => {});
+    if (!pending.botId || pending.botId !== botId) {
+      await sendReply('❌ 该绑定码不属于当前机器人，请在正确的机器人会话里发送。').catch(() => {});
+      return true;
+    }
+    await bridgeService.bindBot(botId, pending.chatRoomId);
+    log.info({ platform, botId, externalId, chatRoomId: pending.chatRoomId }, '[Bridge] 绑定码绑定成功');
+    await sendReply('✅ 机器人已绑定到 TeamAgentX 群聊。\n后续在这个机器人里发消息，都会进入对应群聊。').catch(() => {});
   } catch (err) {
-    log.error({ err, platform, externalId }, '[Bridge] 绑定码绑定失败');
-    await sendReply('❌ 绑定失败，请重新获取绑定码重试。').catch(() => {});
+    log.error({ err, platform, botId, externalId }, '[Bridge] 绑定码绑定失败');
+    const errorMessage = err instanceof Error ? err.message : '绑定失败，请重新获取绑定码重试。';
+    await sendReply(`❌ ${errorMessage}`).catch(() => {});
   }
   return true;
 }
@@ -62,7 +84,12 @@ type TelegramMessage = {
   new_chat_members?: { id: number; is_bot?: boolean }[];
 };
 
-async function handleTelegramMessage(msg: TelegramMessage, log: { info: (...a: unknown[]) => void; warn: (...a: unknown[]) => void; error: (...a: unknown[]) => void }) {
+async function handleTelegramMessage(
+  botId: string,
+  botToken: string,
+  msg: TelegramMessage,
+  log: { info: (...a: unknown[]) => void; warn: (...a: unknown[]) => void; error: (...a: unknown[]) => void },
+) {
   if (!msg.chat?.id) return;
   const telegramAdapter = getBridgeInboundTextAdapter('telegram');
 
@@ -88,25 +115,16 @@ async function handleTelegramMessage(msg: TelegramMessage, log: { info: (...a: u
   // 处理 /bind CODE 命令——私聊和群聊都可能收到
   const telegramBindCode = telegramAdapter.extractBindCode(msg.text);
   if (telegramBindCode) {
-    const platformCfg = await prisma.platformConfig.findUnique({ where: { platform: 'telegram' } });
-    const botToken = platformCfg ? resolveStoredBridgeBotToken(platformCfg) : undefined;
     const sendReply = async (text: string) => {
-      if (!botToken) return;
       await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ chat_id: externalId, text }),
       });
     };
-    await handleBindCode('telegram', externalId, msg.chat.title ?? `Telegram 群 ${externalId}`, telegramBindCode, sendReply, log);
+    await handleBindCode('telegram', botId, externalId, msg.chat.title ?? `Telegram 群 ${externalId}`, telegramBindCode, sendReply, log);
     return;
   }
-
-  // 只处理群组消息
-  if (msg.chat.type !== 'group' && msg.chat.type !== 'supergroup') return;
-
-  const channel = await prisma.externalChannel.findFirst({ where: { platform: 'telegram', externalId } });
-  if (!channel) return; // 未绑定，静默忽略
 
   const senderName = msg.from?.username
     ? `${msg.from.first_name ?? ''}(@${msg.from.username})`
@@ -116,6 +134,7 @@ async function handleTelegramMessage(msg: TelegramMessage, log: { info: (...a: u
   if (!content) return;
 
   await bridgeService.receiveBridgeMessage({
+    botId,
     platform: 'telegram',
     externalId,
     senderName,
@@ -125,44 +144,82 @@ async function handleTelegramMessage(msg: TelegramMessage, log: { info: (...a: u
 
 // ──────────────── Telegram Polling（本地开发 / 无公网时使用）────────────────
 
-let telegramPollingOffset = 0;
-let telegramPollingTimer: ReturnType<typeof setTimeout> | null = null;
+type TelegramPollingState = {
+  offset: number;
+  timer: ReturnType<typeof setTimeout> | null;
+  token: string;
+  failCount: number;
+};
 
-async function telegramPollOnce(token: string, log: { info: (...a: unknown[]) => void; warn: (...a: unknown[]) => void; error: (...a: unknown[]) => void }) {
+const telegramPollingStates = new Map<string, TelegramPollingState>();
+
+async function telegramPollOnce(botId: string, token: string, state: TelegramPollingState, log: { info: (...a: unknown[]) => void; warn: (...a: unknown[]) => void; error: (...a: unknown[]) => void }) {
   try {
     const res = await fetch(
-      `https://api.telegram.org/bot${token}/getUpdates?offset=${telegramPollingOffset}&timeout=0&allowed_updates=["message"]`,
+      `https://api.telegram.org/bot${encodeURIComponent(token)}/getUpdates?offset=${state.offset}&timeout=25&allowed_updates=["message"]`,
     );
+    if (res.status === 401 || res.status === 404) {
+      log.error({ botId, status: res.status }, '[Bridge] Telegram token 无效，停止 polling');
+      stopTelegramPolling(botId);
+      return;
+    }
     const data = await res.json() as { ok: boolean; result?: { update_id: number; message?: TelegramMessage }[] };
     if (!data.ok || !data.result?.length) return;
+    state.failCount = 0;
     for (const update of data.result) {
-      telegramPollingOffset = update.update_id + 1;
+      state.offset = update.update_id + 1;
       if (update.message) {
-        await handleTelegramMessage(update.message, log).catch(err => log.error({ err }, '[Bridge] polling 消息处理失败'));
+        await handleTelegramMessage(botId, token, update.message, log).catch(err => log.error({ err, botId }, '[Bridge] polling 消息处理失败'));
       }
     }
   } catch (err) {
-    log.error({ err }, '[Bridge] Telegram polling 失败');
+    state.failCount++;
+    log.error({ err, botId, failCount: state.failCount }, '[Bridge] Telegram polling 失败');
   }
 }
 
-export function startTelegramPolling(token: string, log: { info: (...a: unknown[]) => void; warn: (...a: unknown[]) => void; error: (...a: unknown[]) => void }) {
-  if (telegramPollingTimer) return;
-  log.info('[Bridge] 启动 Telegram polling 模式');
+export function startTelegramPolling(botId: string, token: string, log: { info: (...a: unknown[]) => void; warn: (...a: unknown[]) => void; error: (...a: unknown[]) => void }) {
+  if (!/^\d+:[A-Za-z0-9_-]+$/.test(token)) {
+    log.error({ botId }, '[Bridge] Telegram bot token 格式无效，跳过 polling');
+    return;
+  }
+  const existing = telegramPollingStates.get(botId);
+  if (existing?.timer && existing.token === token) return;
+  if (existing?.timer) {
+    clearTimeout(existing.timer);
+  }
+  const state: TelegramPollingState = { offset: existing?.offset ?? 0, timer: null, token, failCount: 0 };
+  telegramPollingStates.set(botId, state);
+  log.info({ botId }, '[Bridge] 启动 Telegram polling 模式');
   const loop = () => {
-    telegramPollOnce(token, log).finally(() => {
-      telegramPollingTimer = setTimeout(loop, 1000);
+    telegramPollOnce(botId, token, state, log).finally(() => {
+      const delay = state.failCount > 0 ? Math.min(2 ** state.failCount * 1000, 30000) : 1000;
+      state.timer = setTimeout(loop, delay);
     });
   };
   loop();
 }
 
-export function stopTelegramPolling() {
-  if (telegramPollingTimer) {
-    clearTimeout(telegramPollingTimer);
-    telegramPollingTimer = null;
+export function stopTelegramPolling(botId?: string) {
+  if (botId) {
+    const state = telegramPollingStates.get(botId);
+    if (state?.timer) {
+      clearTimeout(state.timer);
+    }
+    telegramPollingStates.delete(botId);
+    return;
   }
+
+  for (const state of telegramPollingStates.values()) {
+    if (state.timer) {
+      clearTimeout(state.timer);
+    }
+  }
+  telegramPollingStates.clear();
 }
+
+// 向注册表注册 Telegram polling 函数，解除与 bridge-runtime-sync 的循环依赖
+registerTelegramPolling({ start: startTelegramPolling, stop: stopTelegramPolling });
 
 function rememberProcessedMessage(dedupeKey?: string): boolean {
   if (!dedupeKey) return false;
@@ -179,11 +236,64 @@ function rememberProcessedMessage(dedupeKey?: string): boolean {
   return false;
 }
 
+function buildBotWebhookUrls(baseUrl: string, botId: string, platform: Platform) {
+  const cleanBase = baseUrl.replace(/\/$/, '');
+  switch (platform) {
+    case 'telegram':
+      return `${cleanBase}/api/bridge/webhook/telegram/${botId}`;
+    case 'wecom':
+      return `${cleanBase}/api/bridge/webhook/wecom/${botId}`;
+    case 'qq':
+      return `${cleanBase}/api/bridge/webhook/qq/${botId}`;
+    default:
+      return '';
+  }
+}
+
+function maskBridgeBot(bot: {
+  id: string;
+  platform: string;
+  name: string;
+  botToken?: string | null;
+  config?: string | null;
+  defaultAgentId?: string | null;
+  defaultAgent?: unknown;
+  chatRoomId?: string | null;
+  chatRoom?: unknown;
+  enabled: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  const configValues: Record<string, string> = {};
+  if (bot.config) {
+    const parsed = parseStoredBridgeConfig(bot);
+    if (parsed) {
+      let platformDef: ReturnType<typeof getBridgePlatformDefinition> | null = null;
+      try { platformDef = getBridgePlatformDefinition(bot.platform as Platform); } catch {}
+      for (const field of platformDef?.configFields ?? []) {
+        if (!field.secret && typeof parsed[field.key] === 'string') {
+          configValues[field.key] = parsed[field.key] as string;
+        }
+      }
+    }
+  }
+
+  return {
+    ...bot,
+    botToken: bot.botToken ? '••••••••' : '',
+    hasConfig: !!bot.config,
+    config: null,
+    configValues,
+  };
+}
+
 async function handleWebhookByAdapter(
   app: FastifyInstance,
   adapter: BridgeWebhookAdapter,
   requestData: BridgeWebhookRequest,
+  botId?: string,
 ) {
+  const bridgeBot = botId ? await getBridgeBotById(botId) : null;
   const parsed = await adapter.parse(requestData);
 
   if (parsed.kind === 'challenge') {
@@ -194,7 +304,7 @@ async function handleWebhookByAdapter(
     return { statusCode: 200, body: adapter.okResponse };
   }
 
-  if (rememberProcessedMessage(parsed.dedupeKey)) {
+  if (parsed.dedupeKey && processedMessages.has(parsed.dedupeKey)) {
     return { statusCode: 200, body: adapter.okResponse };
   }
 
@@ -202,8 +312,7 @@ async function handleWebhookByAdapter(
     const noop = async (_text: string) => {};
     const sendReply = adapter.platform === 'telegram'
       ? async (text: string) => {
-          const platformCfg = await prisma.platformConfig.findUnique({ where: { platform: 'telegram' } });
-          const botToken = platformCfg ? resolveStoredBridgeBotToken(platformCfg) : undefined;
+          const botToken = bridgeBot ? resolveStoredBridgeBotToken(bridgeBot) : undefined;
           if (!botToken) return;
           await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
             method: 'POST',
@@ -215,6 +324,7 @@ async function handleWebhookByAdapter(
 
     await handleBindCode(
       adapter.platform,
+      botId ?? '',
       parsed.externalId,
       parsed.groupName,
       parsed.bindCode,
@@ -224,19 +334,14 @@ async function handleWebhookByAdapter(
     return { statusCode: 200, body: adapter.okResponse };
   }
 
-  const channel = await prisma.externalChannel.findFirst({
-    where: { platform: adapter.platform, externalId: parsed.externalId },
-  });
-
-  if (config.bridge?.requireSignature && !channel?.webhookSecret) {
+  if (config.bridge?.requireSignature && !bridgeBot?.config) {
     app.log.warn({ externalId: parsed.externalId, platform: adapter.platform }, '[Bridge] 拒绝未配置验签的请求');
     return { statusCode: 401, body: 'Signature required' };
   }
 
-  let verificationSecret = channel?.webhookSecret ?? undefined;
+  let verificationSecret: string | undefined;
   if (!verificationSecret && adapter.platform === 'wecom') {
-    const platformCfg = await getBridgePlatformConfig('wecom');
-    const parsedCfg = parseStoredBridgeConfig(platformCfg ?? {}) as { token?: string } | null;
+    const parsedCfg = parseStoredBridgeConfig(bridgeBot ?? {}) as { token?: string } | null;
     verificationSecret = parsedCfg?.token ?? undefined;
   }
 
@@ -245,16 +350,30 @@ async function handleWebhookByAdapter(
     return { statusCode: 401, body: 'Unauthorized' };
   }
 
-  if (!channel || !parsed.text) {
+  if (!bridgeBot?.chatRoomId || !bridgeBot.enabled || !parsed.text) {
     return { statusCode: 200, body: adapter.okResponse };
   }
 
   await bridgeService.receiveBridgeMessage({
+    botId: bridgeBot.id,
     platform: adapter.platform,
     externalId: parsed.externalId,
     senderName: parsed.senderName,
     content: parsed.text,
   });
+
+  // Dedupe after successful processing so retries work on transient failures
+  if (parsed.dedupeKey) {
+    if (processedMessages.size >= 10000) {
+      const keys = processedMessages.values();
+      for (let i = 0; i < 1000; i++) {
+        const { value, done } = keys.next();
+        if (done) break;
+        processedMessages.delete(value);
+      }
+    }
+    processedMessages.add(parsed.dedupeKey);
+  }
 
   return { statusCode: 200, body: adapter.okResponse };
 }
@@ -345,158 +464,157 @@ export async function bridgeGateway(app: FastifyInstance) {
     return reply.send({ success: true, data: playbook });
   });
 
-  // ──────────────── ExternalChannel 管理 ────────────────
+  // ──────────────── 机器人实例管理 ────────────────
 
-  // 列出所有外部频道
-  app.get('/api/bridge/channels', async (req, reply) => {
+  app.get('/api/bridge/bots', async (req, reply) => {
     const user = await requireAuth(req, reply);
     if (!user) return;
     try {
       const { platform } = req.query as { platform?: Platform };
-      const channels = await bridgeService.listChannels(platform);
-      return reply.send({ success: true, data: channels });
+      const bots = await listBridgeBots({ platform, ownerId: user.id });
+      return reply.send({ success: true, data: bots.map(maskBridgeBot) });
     } catch (err) {
-      app.log.error({ err }, '[Bridge] 获取频道列表失败');
-      return reply.status(500).send({ success: false, error: '获取频道列表失败' });
+      app.log.error({ err }, '[Bridge] 获取机器人实例列表失败');
+      return reply.status(500).send({ success: false, error: '获取机器人实例列表失败' });
     }
   });
 
-  // 创建外部频道（绑定外部群 ↔ TeamAgentX ChatRoom）
-  app.post('/api/bridge/channels', async (req, reply) => {
+  app.post('/api/bridge/bots', async (req, reply) => {
     const user = await requireAuth(req, reply);
     if (!user) return;
     try {
       const body = req.body as {
         platform: Platform;
-        externalId: string;
-        chatRoomId: string;
+        name: string;
         botToken?: string;
-        webhookSecret?: string;
-        defaultAgentId?: string;
+        defaultAgentId?: string | null;
         config?: Record<string, unknown>;
+        chatRoomId?: string;
       };
-
-      if (!body.platform || !body.externalId || !body.chatRoomId) {
-        return reply.status(400).send({ success: false, error: 'platform、externalId、chatRoomId 为必填项' });
+      if (!body.platform || !body.name?.trim()) {
+        return reply.status(400).send({ success: false, error: 'platform、name 为必填项' });
       }
-
-      const channel = await bridgeService.createChannel(body);
-      return reply.status(201).send({ success: true, data: channel });
+      const bot = await bridgeService.createBot({ ...body, ownerId: user.id });
+      await syncBridgeBotRuntime(bot.id, app.log);
+      return reply.status(201).send({ success: true, data: maskBridgeBot(bot) });
     } catch (err) {
-      const prismaErr = err as { code?: string };
-      if (prismaErr?.code === 'P2002') {
-        return reply.code(409).send({ success: false, error: '该外部群已存在映射' });
-      }
-      app.log.error({ err }, '[Bridge] 创建频道失败');
-      return reply.status(500).send({ success: false, error: '创建频道失败' });
+      app.log.error({ err }, '[Bridge] 创建机器人实例失败');
+      return reply.status(400).send({ success: false, error: err instanceof Error ? err.message : '创建机器人实例失败' });
     }
   });
 
-  // 更新外部频道配置
-  app.patch('/api/bridge/channels/:id', async (req, reply) => {
+  app.patch('/api/bridge/bots/:id', async (req, reply) => {
     const user = await requireAuth(req, reply);
     if (!user) return;
     try {
       const { id } = req.params as { id: string };
+      await assertBotOwner(id, user.id);
       const body = req.body as {
+        name?: string;
         botToken?: string;
-        webhookSecret?: string;
-        defaultAgentId?: string;
-        config?: Record<string, unknown>;
+        defaultAgentId?: string | null;
+        config?: Record<string, unknown> | null;
         enabled?: boolean;
       };
-      const channel = await bridgeService.updateChannel(id, body);
-      return reply.send({ success: true, data: channel });
+      const bot = await bridgeService.updateBot(id, body);
+      await syncBridgeBotRuntime(bot.id, app.log);
+      return reply.send({ success: true, data: maskBridgeBot(bot) });
     } catch (err) {
-      app.log.error({ err }, '[Bridge] 更新频道失败');
-      return reply.status(500).send({ success: false, error: '更新频道失败' });
+      app.log.error({ err }, '[Bridge] 更新机器人实例失败');
+      return reply.status(400).send({ success: false, error: err instanceof Error ? err.message : '更新机器人实例失败' });
     }
   });
 
-  // 删除外部频道
-  app.delete('/api/bridge/channels/:id', async (req, reply) => {
+  app.delete('/api/bridge/bots/:id', async (req, reply) => {
     const user = await requireAuth(req, reply);
     if (!user) return;
     try {
       const { id } = req.params as { id: string };
-      await bridgeService.deleteChannel(id);
+      await assertBotOwner(id, user.id);
+      await bridgeService.deleteBot(id);
+      await syncBridgeBotRuntime(id, app.log).catch(() => {});
       return reply.status(204).send();
     } catch (err) {
-      app.log.error({ err }, '[Bridge] 删除频道失败');
-      return reply.status(500).send({ success: false, error: '删除频道失败' });
+      app.log.error({ err }, '[Bridge] 删除机器人实例失败');
+      return reply.status(500).send({ success: false, error: '删除机器人实例失败' });
     }
   });
 
-  // ──────────────── 平台全局配置（Bot Token + 默认助手）────────────────
-
-  app.get('/api/bridge/platform-config/:platform', async (req, reply) => {
+  app.post('/api/bridge/bots/:id/bind', async (req, reply) => {
     const user = await requireAuth(req, reply);
     if (!user) return;
     try {
-      const { platform } = req.params as { platform: string };
-      const cfg = await getBridgePlatformConfig(platform as Platform);
-      if (!cfg) return reply.send({ success: true, data: { platform, botToken: '', hasConfig: false, defaultAgentId: null, defaultAgent: null, configValues: {} } });
-
-      // 解密 config，仅返回非密字段的明文值，供前端显示
-      const configValues: Record<string, string> = {};
-      if (cfg.config) {
-        const parsed = parseStoredBridgeConfig(cfg);
-        if (parsed) {
-          let platformDef: ReturnType<typeof getBridgePlatformDefinition> | null = null;
-          try { platformDef = getBridgePlatformDefinition(platform as Parameters<typeof getBridgePlatformDefinition>[0]); } catch {}
-          for (const field of platformDef?.configFields ?? []) {
-            if (!field.secret && typeof parsed[field.key] === 'string') {
-              configValues[field.key] = parsed[field.key] as string;
-            }
-          }
-        }
+      const { id } = req.params as { id: string };
+      const body = req.body as { chatRoomId?: string; forceRebind?: boolean };
+      if (!body.chatRoomId) {
+        return reply.status(400).send({ success: false, error: 'chatRoomId 为必填项' });
       }
-
-      return reply.send({
-        success: true,
-        data: { ...cfg, botToken: cfg.botToken ? '••••••••' : '', config: null, hasConfig: !!cfg.config, configValues },
-      });
+      await assertBotOwner(id, user.id);
+      await assertChatRoomOwner(body.chatRoomId, user.id);
+      const bot = await bridgeService.bindBot(id, body.chatRoomId, { forceRebind: body.forceRebind });
+      return reply.send({ success: true, data: maskBridgeBot(bot) });
     } catch (err) {
-      app.log.error({ err }, '[Bridge] 获取平台配置失败');
-      return reply.status(500).send({ success: false, error: '获取平台配置失败' });
+      const message = err instanceof Error ? err.message : '绑定失败';
+      return reply.status(409).send({ success: false, error: message });
     }
   });
 
-  app.put('/api/bridge/platform-config/:platform', async (req, reply) => {
+  app.post('/api/bridge/bots/:id/unbind', async (req, reply) => {
     const user = await requireAuth(req, reply);
     if (!user) return;
     try {
-      const { platform } = req.params as { platform: string };
-      const body = req.body as { botToken?: string; defaultAgentId?: string | null; config?: Record<string, unknown> | null };
-      const cfg = await saveBridgePlatformConfig(platform as Platform, body);
-
-      await syncBridgePlatformRuntime(platform as Platform, cfg, app.log);
-
-      return reply.send({ success: true, data: { ...cfg, botToken: cfg.botToken ? '••••••••' : '', config: null, hasConfig: !!cfg.config } });
+      const { id } = req.params as { id: string };
+      await assertBotOwner(id, user.id);
+      const bot = await bridgeService.unbindBot(id);
+      return reply.send({ success: true, data: maskBridgeBot(bot) });
     } catch (err) {
-      app.log.error({ err }, '[Bridge] 保存平台配置失败');
-      return reply.status(500).send({ success: false, error: '保存平台配置失败' });
+      app.log.error({ err }, '[Bridge] 解绑机器人实例失败');
+      return reply.status(500).send({ success: false, error: '解绑机器人实例失败' });
     }
   });
 
-  // ──────────────── 绑定码生成（通用，所有平台）────────────────
-
-  app.post('/api/bridge/bind-code', async (req, reply) => {
+  app.post('/api/bridge/bots/:id/bind-code', async (req, reply) => {
     const user = await requireAuth(req, reply);
     if (!user) return;
     try {
-      const { platform, chatRoomId } = req.body as { platform: string; chatRoomId: string };
-      if (!platform || !chatRoomId) {
-        return reply.status(400).send({ success: false, error: 'platform 和 chatRoomId 为必填项' });
+      const { id } = req.params as { id: string };
+      const { chatRoomId } = req.body as { chatRoomId?: string };
+      const bot = await getBridgeBotById(id);
+      if (!bot || !chatRoomId) {
+        return reply.status(400).send({ success: false, error: 'botId 或 chatRoomId 无效' });
       }
-      if (!(await hasBridgePlatformCredentials(platform as Platform))) {
-        return reply.status(400).send({ success: false, error: `请先在外部平台集成页配置 ${platform} 凭证` });
+      if (bot.ownerId && bot.ownerId !== user.id) {
+        return reply.status(403).send({ success: false, error: '无权操作此机器人' });
       }
-      return reply.send({ success: true, data: createBridgeBindCode(platform as Platform, chatRoomId) });
+      await assertChatRoomOwner(chatRoomId, user.id);
+      if (!(await hasBridgeBotCredentials(bot.id))) {
+        return reply.status(400).send({ success: false, error: `请先配置 ${bot.platform} 机器人凭证` });
+      }
+      return reply.send({ success: true, data: createBridgeBotBindCode(bot.platform as Platform, bot.id, chatRoomId) });
     } catch (err) {
       app.log.error({ err }, '[Bridge] 生成绑定码失败');
       return reply.status(500).send({ success: false, error: '生成绑定码失败' });
     }
+  });
+
+  app.get('/api/bridge/bots/:id/webhook-url', async (req, reply) => {
+    const user = await requireAuth(req, reply);
+    if (!user) return;
+    const { id } = req.params as { id: string };
+    const bot = await getBridgeBotById(id);
+    if (!bot) {
+      return reply.status(404).send({ success: false, error: '机器人实例不存在' });
+    }
+    if (bot.ownerId && bot.ownerId !== user.id) {
+      return reply.status(403).send({ success: false, error: '无权操作此机器人' });
+    }
+    const base = await getBaseUrl();
+    return reply.send({
+      success: true,
+      data: {
+        webhookUrl: base ? buildBotWebhookUrls(base, id, bot.platform as Platform) : '',
+      },
+    });
   });
 
   // ──────────────── 消息接入（内部调用 / Bridge Service 调用）────────────────
@@ -510,6 +628,7 @@ export async function bridgeGateway(app: FastifyInstance) {
     if (!user) return;
     try {
       const body = req.body as {
+        botId?: string;
         platform: Platform;
         externalId: string;
         senderName: string;
@@ -521,6 +640,7 @@ export async function bridgeGateway(app: FastifyInstance) {
       }
 
       const result = await bridgeService.receiveBridgeMessage({
+        botId: body.botId,
         platform: body.platform,
         externalId: body.externalId,
         senderName: body.senderName,
@@ -541,13 +661,16 @@ export async function bridgeGateway(app: FastifyInstance) {
   // ──────────────── Webhook 入口（各平台回调）────────────────
 
   for (const adapter of BRIDGE_WEBHOOK_ADAPTERS) {
-    app.post(adapter.path, async (req, reply) => {
+    const supportsBotScopedPath = ['telegram', 'wecom', 'qq'].includes(adapter.platform);
+    const routePath = supportsBotScopedPath ? `${adapter.path}/:botId` : adapter.path;
+    app.post(routePath, async (req, reply) => {
       try {
+        const { botId } = (req.params as { botId?: string }) ?? {};
         const result = await handleWebhookByAdapter(app, adapter, {
           body: req.body,
           headers: req.headers as Record<string, string | string[] | undefined>,
-          query: req.query as Record<string, string>,
-        });
+          query: { ...(req.query as Record<string, string>), ...(botId ? { botId } : {}) },
+        }, botId);
         return reply.status(result.statusCode).send(result.body);
       } catch (err) {
         app.log.error({ err, platform: adapter.platform }, '[Bridge] webhook 消息处理失败');
@@ -560,14 +683,32 @@ export async function bridgeGateway(app: FastifyInstance) {
    * GET /api/bridge/webhook/wecom
    * 企业微信 URL 验证（首次配置时发送 GET 请求）
    */
-  app.get('/api/bridge/webhook/wecom', async (req, reply) => {
+  app.get('/api/bridge/webhook/wecom/:botId', async (req, reply) => {
+    const { botId } = req.params as { botId?: string };
     const query = req.query as { msg_signature?: string; timestamp?: string; nonce?: string; echostr?: string };
-    const echostr = query.echostr ?? 'ok';
+    const { msg_signature, timestamp, nonce, echostr } = query;
+    if (!echostr) return reply.status(400).send('Missing echostr');
     try {
-      const platformCfg = await getBridgePlatformConfig('wecom');
-      const parsedCfg = parseStoredBridgeConfig(platformCfg ?? {}) as { encodingAESKey?: string } | null;
+      const bridgeBot = botId ? await getBridgeBotById(botId) : null;
+      const parsedCfg = parseStoredBridgeConfig(bridgeBot ?? {}) as {
+        encodingAESKey?: string;
+        token?: string;
+        corpId?: string;
+      } | null;
       if (parsedCfg?.encodingAESKey) {
-        const decrypted = decryptWecomMessage(parsedCfg.encodingAESKey, echostr);
+        // Fix #7: verify msg_signature BEFORE decrypting echostr
+        if (parsedCfg.token) {
+          if (!msg_signature || !timestamp || !nonce) {
+            return reply.status(403).send('Forbidden');
+          }
+          const token = decrypt(parsedCfg.token);
+          const str = [token, timestamp, nonce, echostr].sort().join('');
+          const expected = createHash('sha1').update(str).digest('hex');
+          if (expected !== msg_signature) {
+            return reply.status(403).send('Forbidden');
+          }
+        }
+        const decrypted = decryptWecomMessage(parsedCfg.encodingAESKey, echostr, parsedCfg.corpId);
         return reply.send(decrypted);
       }
     } catch {
@@ -589,7 +730,21 @@ export async function bridgeGateway(app: FastifyInstance) {
         orderBy: { createdAt: 'desc' },
         take: limit,
       });
-      return reply.send({ success: true, data: events });
+      const messageIds = Array.from(new Set(events.map((event) => event.messageId).filter(Boolean))) as string[];
+      const messages = messageIds.length > 0
+        ? await prisma.message.findMany({
+            where: { id: { in: messageIds } },
+            select: { id: true, content: true },
+          })
+        : [];
+      const messageMap = new Map(messages.map((message) => [message.id, message.content]));
+      return reply.send({
+        success: true,
+        data: events.map((event) => ({
+          ...event,
+          contentPreview: event.contentPreview || (event.messageId ? messageMap.get(event.messageId) ?? '' : ''),
+        })),
+      });
     } catch (err) {
       app.log.error({ err }, '[Bridge] 获取事件列表失败');
       return reply.status(500).send({ success: false, error: '获取事件列表失败' });

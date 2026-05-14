@@ -1,4 +1,4 @@
-import { bridgeApi, type BridgeEvent, type BridgePlatformDefinition, type BridgePlatformPlaybook, type ExternalChannel, type Platform, type PlatformConfig } from '@/lib/bridge-api'
+import { bridgeApi, type BridgeBot, type BridgeEvent, type BridgePlatformDefinition, type Platform } from '@/lib/bridge-api'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -9,240 +9,381 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { cn } from '@/lib/utils'
-import { AlertTriangle, Bot, Check, ChevronDown, ChevronRight, Copy, Globe, Loader2, Pencil, Trash2 } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
-import { useEffect, useState } from 'react'
+import { ArrowDownLeft, ArrowUpRight, Check, Clock3, Globe, Loader2, Pencil, RefreshCw, Trash2 } from 'lucide-react'
+import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
+import { BotEditorForm } from './integration/BotEditorForm'
+import { BotListCard } from './integration/BotListCard'
+import { useBridgeData } from './integration/useBridgeData'
 
+const ELECTRON_DRAG_STYLE = window.electronAPI?.isElectron
+  ? { WebkitAppRegion: 'drag' as const }
+  : {}
+
+const NO_DRAG_STYLE = window.electronAPI?.isElectron
+  ? { WebkitAppRegion: 'no-drag' as const }
+  : {}
+
+type PendingRebind = {
+  botId: string
+  chatRoomId: string
+  fromRoomName: string
+  toRoomName: string
+}
+
+function formatEventTime(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date)
+}
+
+function platformLabel(platforms: BridgePlatformDefinition[], platform: Platform) {
+  return platforms.find((item) => item.key === platform)?.label ?? platform
+}
 
 export function IntegrationPage() {
   const [activePlatform, setActivePlatform] = useState<Platform>('telegram')
-  const [platforms, setPlatforms] = useState<BridgePlatformDefinition[]>([])
-  const [channels, setChannels] = useState<ExternalChannel[]>([])
-  const [webhookUrls, setWebhookUrls] = useState<Partial<Record<Platform, string>> | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [copiedUrl, setCopiedUrl] = useState(false)
-  // 平台凭证配置
-  const [platformConfig, setPlatformConfig] = useState<PlatformConfig | null>(null)
-  const [configForm, setConfigForm] = useState<Record<string, string>>({})
-  const [isSavingConfig, setIsSavingConfig] = useState(false)
-  const [isEditingConfig, setIsEditingConfig] = useState(false)
-  const [clearDialogOpen, setClearDialogOpen] = useState(false)
-  // 配置手册
-  const [playbook, setPlaybook] = useState<BridgePlatformPlaybook | null>(null)
-  const [playbookOpen, setPlaybookOpen] = useState(false)
-  // 最近事件
-  const [events, setEvents] = useState<BridgeEvent[]>([])
-  const [eventsOpen, setEventsOpen] = useState(false)
-  // 公网地址配置
+  const { platforms, bots, rooms, playbook, events, baseUrl: loadedBaseUrl, loading, hasError, loadBots, reload } =
+    useBridgeData(activePlatform)
+
   const [baseUrl, setBaseUrl] = useState('')
   const [baseUrlInput, setBaseUrlInput] = useState('')
-  const [isEditingBaseUrl, setIsEditingBaseUrl] = useState(false)
-  const [isSavingBaseUrl, setIsSavingBaseUrl] = useState(false)
+  const [editingBaseUrl, setEditingBaseUrl] = useState(false)
+  const [savingBaseUrl, setSavingBaseUrl] = useState(false)
 
-  const platformInfo = platforms.find(p => p.key === activePlatform) ?? null
-  const activePlatformFields = platformInfo?.configFields ?? []
-  const isConfigured = !!(platformConfig?.botToken || platformConfig?.hasConfig)
+  // Sync baseUrl from hook on initial load
+  const [baseUrlSynced, setBaseUrlSynced] = useState(false)
+  if (!baseUrlSynced && !loading && loadedBaseUrl !== undefined) {
+    setBaseUrl(loadedBaseUrl)
+    setBaseUrlInput(loadedBaseUrl)
+    setBaseUrlSynced(true)
+  }
 
-  useEffect(() => {
-    loadInitial()
-  }, [])
+  const [savingBot, setSavingBot] = useState(false)
+  const [editingBotId, setEditingBotId] = useState<string | null>(null)
+  const [botName, setBotName] = useState('')
+  const [botFields, setBotFields] = useState<Record<string, string>>({})
+  const [draftChatRoomId, setDraftChatRoomId] = useState('__none__')
+  const [pendingRebind, setPendingRebind] = useState<PendingRebind | null>(null)
+  const [pendingDeleteBot, setPendingDeleteBot] = useState<BridgeBot | null>(null)
+  const [botSearch, setBotSearch] = useState('')
+  const [pendingBotIds, setPendingBotIds] = useState<Set<string>>(new Set())
 
-  useEffect(() => {
-    let cancelled = false
-    const load = async () => {
-      setConfigForm({})
-      setPlatformConfig(null)
-      setIsEditingConfig(false)
-      setPlaybook(null)
-      const [chns, cfg, evts, pb] = await Promise.all([
-        bridgeApi.listChannels(activePlatform).catch(() => [] as ExternalChannel[]),
-        bridgeApi.getPlatformConfig(activePlatform).catch(() => null),
-        bridgeApi.listEvents(activePlatform, 20).catch(() => [] as BridgeEvent[]),
-        bridgeApi.getPlaybook(activePlatform).catch(() => null),
-      ])
-      if (cancelled) return
-      setChannels(chns)
-      setPlatformConfig(cfg)
-      setEvents(evts)
-      setPlaybook(pb)
+  const platformInfo = platforms.find((item) => item.key === activePlatform) ?? null
+  const activeFields = platformInfo?.configFields ?? []
+
+  const botsByRoomId = useMemo(() => {
+    const map = new Map<string, BridgeBot[]>()
+    for (const bot of bots) {
+      if (!bot.chatRoomId) continue
+      const next = map.get(bot.chatRoomId) ?? []
+      next.push(bot)
+      map.set(bot.chatRoomId, next)
     }
-    load()
-    return () => { cancelled = true }
-  }, [activePlatform])
+    return map
+  }, [bots])
 
-  const loadInitial = async () => {
-    setIsLoading(true)
+  const linkedRooms = useMemo(
+    () => rooms.filter((room) => (botsByRoomId.get(room.id)?.length ?? 0) > 0),
+    [rooms, botsByRoomId],
+  )
+
+  const filteredBots = useMemo(() => {
+    const keyword = botSearch.trim().toLowerCase()
+    if (!keyword) return bots
+    return bots.filter((bot) => {
+      const roomName = bot.chatRoom?.name ?? ''
+      const pLabel = platformLabel(platforms, bot.platform)
+      return [bot.name, roomName, pLabel].some((v) => v.toLowerCase().includes(keyword))
+    })
+  }, [botSearch, bots, platforms])
+
+  const cancelBotEditor = () => {
+    setEditingBotId(null)
+    setBotName('')
+    setBotFields({})
+    setDraftChatRoomId('__none__')
+  }
+
+  const startCreateBot = () => {
+    if (editingBotId || botName.trim()) {
+      if (!window.confirm('当前有未保存的编辑内容，确定要丢弃吗？')) return
+    }
+    setEditingBotId(null)
+    setBotName(platformInfo?.label ? `${platformInfo.label} 机器人` : '')
+    setBotFields({})
+    setDraftChatRoomId('__none__')
+  }
+
+  const startEditBot = (bot: BridgeBot) => {
+    setEditingBotId(bot.id)
+    setBotName(bot.name)
+    const nextFields: Record<string, string> = {}
+    for (const field of activeFields) {
+      // Never pre-fill secret fields (Fix #60 / Fix #69)
+      if (field.secret) continue
+      nextFields[field.key] = bot.configValues?.[field.key] ?? ''
+    }
+    setBotFields(nextFields)
+    setDraftChatRoomId(bot.chatRoomId ?? '__none__')
+  }
+
+  const handleSaveBot = async () => {
+    if (!botName.trim()) {
+      toast.error('请输入机器人名称')
+      return
+    }
+    const missingFields = activeFields
+      .filter((field) => {
+        const value = botFields[field.key]?.trim()
+        if (editingBotId && field.secret && !value) return false
+        return !value
+      })
+      .map((field) => field.label)
+
+    if (missingFields.length > 0) {
+      toast.error(`请填写：${missingFields.join('、')}`)
+      return
+    }
+    setSavingBot(true)
     try {
-      const [platformDefs, urlsRes, sysCfg] = await Promise.all([
-        bridgeApi.listPlatforms().catch(() => []),
-        bridgeApi.getWebhookUrls().catch(() => null),
-        bridgeApi.getSystemConfig().catch(() => ({ baseUrl: '' })),
-      ])
-      setPlatforms(platformDefs)
-      if (urlsRes) setWebhookUrls(urlsRes)
-      setBaseUrl(sysCfg.baseUrl)
-      setBaseUrlInput(sysCfg.baseUrl)
-      if (platformDefs.length > 0 && !platformDefs.find(p => p.key === activePlatform)) {
-        setActivePlatform(platformDefs[0].key)
+      // Build config: always include non-secret fields so server receives complete config (Fix #61).
+      // Secret fields are omitted when blank (meaning "keep existing").
+      const configData: Record<string, unknown> = {}
+      for (const field of activeFields) {
+        if (field.secret) continue
+        const value = botFields[field.key]?.trim()
+        if (value) configData[field.key] = value
       }
-    } catch (e) {
-      console.error('加载失败', e)
+
+      if (editingBotId) {
+        // Collect secret fields that were explicitly filled
+        const secretToken = activeFields.find((f) => f.secret && f.key === 'botToken')
+          ? botFields.botToken?.trim() || undefined
+          : undefined
+        await bridgeApi.updateBot(editingBotId, {
+          name: botName.trim(),
+          config: Object.keys(configData).length > 0 ? configData : null,
+          botToken: secretToken,
+        })
+        toast.success('机器人实例已更新')
+      } else {
+        const targetRoomId = draftChatRoomId === '__none__' ? undefined : draftChatRoomId
+        await bridgeApi.createBot({
+          platform: activePlatform,
+          name: botName.trim(),
+          config: Object.keys(configData).length > 0 ? configData : undefined,
+          botToken: botFields.botToken?.trim() || undefined,
+          chatRoomId: targetRoomId,
+        })
+        toast.success('机器人实例已创建')
+      }
+      // After mutation only refetch bots (Fix #70)
+      await loadBots(activePlatform)
+      cancelBotEditor()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '保存失败')
     } finally {
-      setIsLoading(false)
+      setSavingBot(false)
+    }
+  }
+
+  const addPending = (botId: string) =>
+    setPendingBotIds((prev) => new Set(prev).add(botId))
+  const removePending = (botId: string) =>
+    setPendingBotIds((prev) => { const next = new Set(prev); next.delete(botId); return next })
+
+  const handleDeleteBot = async (bot: BridgeBot) => {
+    addPending(bot.id)
+    try {
+      await bridgeApi.deleteBot(bot.id)
+      toast.success('机器人实例已删除')
+      if (editingBotId === bot.id) cancelBotEditor()
+      await loadBots(activePlatform)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '删除失败')
+    } finally {
+      removePending(bot.id)
+    }
+  }
+
+  const handleToggleBot = async (bot: BridgeBot) => {
+    addPending(bot.id)
+    try {
+      await bridgeApi.updateBot(bot.id, { enabled: !bot.enabled })
+      await loadBots(activePlatform)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '更新失败')
+    } finally {
+      removePending(bot.id)
+    }
+  }
+
+  const handleBindBot = async (bot: BridgeBot, chatRoomId: string, forceRebind = false) => {
+    addPending(bot.id)
+    try {
+      await bridgeApi.bindBot(bot.id, chatRoomId, forceRebind)
+      toast.success('绑定关系已更新')
+      await loadBots(activePlatform)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '绑定失败')
+    } finally {
+      removePending(bot.id)
+    }
+  }
+
+  const handleSelectRoom = async (bot: BridgeBot, chatRoomId: string) => {
+    const room = rooms.find((item) => item.id === chatRoomId)
+    if (!room) return
+    if (bot.chatRoomId && bot.chatRoomId !== chatRoomId) {
+      setPendingRebind({
+        botId: bot.id,
+        chatRoomId,
+        fromRoomName: bot.chatRoom?.name ?? bot.chatRoomId,
+        toRoomName: room.name,
+      })
+      return
+    }
+    await handleBindBot(bot, chatRoomId)
+  }
+
+  const handleCopyWebhook = async (bot: BridgeBot) => {
+    const platformDef = platforms.find((p) => p.key === bot.platform)
+    if (!baseUrl || !platformDef?.requiresPublicWebhook) {
+      toast.error('当前平台不需要 webhook，或尚未配置公网地址')
+      return
+    }
+    const url = `${baseUrl.replace(/\/$/, '')}/api/bridge/webhook/${bot.platform}/${bot.id}`
+    try {
+      await navigator.clipboard.writeText(url)
+      toast.success('Webhook 地址已复制')
+    } catch {
+      toast.error('复制失败')
+    }
+  }
+
+  const handleUnbindBot = async (bot: BridgeBot) => {
+    addPending(bot.id)
+    try {
+      await bridgeApi.unbindBot(bot.id)
+      toast.success('已解绑')
+      await loadBots(activePlatform)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '解绑失败')
+    } finally {
+      removePending(bot.id)
     }
   }
 
   const handleSaveBaseUrl = async () => {
-    setIsSavingBaseUrl(true)
+    setSavingBaseUrl(true)
     try {
       const result = await bridgeApi.setSystemConfig(baseUrlInput.trim())
       setBaseUrl(result.baseUrl)
       setBaseUrlInput(result.baseUrl)
-      setIsEditingBaseUrl(false)
-      const urls = await bridgeApi.getWebhookUrls().catch(() => null)
-      if (urls) setWebhookUrls(urls)
+      setEditingBaseUrl(false)
       toast.success('公网地址已保存')
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : '保存失败')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '保存失败')
     } finally {
-      setIsSavingBaseUrl(false)
+      setSavingBaseUrl(false)
     }
   }
 
-  const loadChannels = async () => {
-    const data = await bridgeApi.listChannels(activePlatform)
-    setChannels(data)
+  if (loading) {
+    return (
+      <div className="flex flex-1 items-center justify-center bg-background">
+        <Loader2 className="size-5 animate-spin text-muted-foreground" />
+      </div>
+    )
   }
 
-  const handleSaveConfig = async () => {
-    setIsSavingConfig(true)
-    try {
-      const configData: Record<string, unknown> = {}
-      for (const field of activePlatformFields) {
-        if (configForm[field.key]) configData[field.key] = configForm[field.key].trim()
-      }
-      const usesBotToken = activePlatformFields.some(f => f.key === 'botToken')
-      const cfg = await bridgeApi.setPlatformConfig(activePlatform, {
-        botToken: usesBotToken ? (configForm.botToken?.trim() || undefined) : undefined,
-        config: Object.keys(configData).length > 0 ? configData : undefined,
-      })
-      setPlatformConfig(cfg)
-      setConfigForm({})
-      setIsEditingConfig(false)
-      toast.success('凭证已保存，可在房间设置中生成绑定码完成群聊映射')
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : '保存失败')
-    } finally {
-      setIsSavingConfig(false)
-    }
+  if (hasError) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 bg-background text-sm text-muted-foreground">
+        <span>加载失败，请重试</span>
+        <button
+          onClick={reload}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50"
+        >
+          <RefreshCw className="size-3.5" />
+          重试
+        </button>
+      </div>
+    )
   }
-
-  const handleClearConfig = async () => {
-    const channelCount = channels.length
-    setIsSavingConfig(true)
-    try {
-      if (channelCount > 0) {
-        await Promise.all(channels.map(channel => bridgeApi.deleteChannel(channel.id)))
-      }
-      const cfg = await bridgeApi.setPlatformConfig(activePlatform, {
-        botToken: '',
-        config: null,
-      })
-      setChannels([])
-      setPlatformConfig(cfg)
-      setConfigForm({})
-      setIsEditingConfig(false)
-      setClearDialogOpen(false)
-      toast.success(channelCount > 0 ? `平台配置已清空，并删除了 ${channelCount} 个群聊映射` : '平台配置已清空')
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : '清空失败')
-    } finally {
-      setIsSavingConfig(false)
-    }
-  }
-
-  const handleCopyWebhook = async () => {
-    const url = webhookUrls?.[activePlatform]
-    if (!url) return
-    try {
-      await navigator.clipboard.writeText(url)
-      setCopiedUrl(true)
-      setTimeout(() => setCopiedUrl(false), 2000)
-    } catch {
-      toast.error('复制失败，请手动复制')
-    }
-  }
-
-  const handleDelete = async (id: string) => {
-    if (!confirm('确认删除该连接？')) return
-    try {
-      await bridgeApi.deleteChannel(id)
-      toast.success('已删除')
-      await loadChannels()
-    } catch {
-      toast.error('删除失败')
-    }
-  }
-
-  const handleToggleEnabled = async (ch: ExternalChannel) => {
-    try {
-      await bridgeApi.updateChannel(ch.id, { enabled: !ch.enabled })
-      await loadChannels()
-    } catch {
-      toast.error('更新失败')
-    }
-  }
-
-  const webhookUrl = webhookUrls?.[activePlatform]
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden bg-background">
-      {/* Header */}
-      <div className="flex items-center border-b border-border px-6 h-14 shrink-0">
-        <Globe className="size-5 text-primary mr-2" />
-        <h1 className="text-base font-semibold">外部平台集成</h1>
+      <div
+        className="flex h-14 shrink-0 items-center justify-between border-b border-border px-6"
+        style={ELECTRON_DRAG_STYLE}
+      >
+        <div className="flex items-center gap-2">
+          <Globe className="size-5 text-primary" />
+          <h1 className="text-base font-semibold">外部平台集成</h1>
+        </div>
+        <div className="flex items-center gap-2" style={NO_DRAG_STYLE}>
+          <button
+            onClick={startCreateBot}
+            className="rounded-lg bg-blue-500 px-3 py-1.5 text-sm text-white hover:bg-blue-600"
+          >
+            新建机器人实例
+          </button>
+        </div>
       </div>
 
-      {/* 公网地址配置 */}
-      <div className="border-b border-border px-6 py-3 bg-muted/30">
+      {/* Base URL bar */}
+      <div className="border-b border-border bg-muted/30 px-6 py-3">
         <div className="flex items-center gap-3">
-          <span className="text-xs text-muted-foreground shrink-0">服务公网地址</span>
-          {isEditingBaseUrl ? (
+          <span className="shrink-0 text-xs text-muted-foreground">服务公网地址</span>
+          {editingBaseUrl ? (
             <>
               <input
-                className="flex-1 rounded border border-gray-200 px-2 py-1 text-xs focus:border-blue-500 focus:outline-none bg-background"
-                placeholder="https://your-domain.com"
+                className="flex-1 rounded-lg border border-gray-200 bg-background px-3 py-2 text-xs focus:border-blue-500 focus:outline-none"
                 value={baseUrlInput}
-                onChange={e => setBaseUrlInput(e.target.value)}
-                onKeyDown={e => { if (e.nativeEvent.isComposing) return; if (e.key === 'Enter') handleSaveBaseUrl(); if (e.key === 'Escape') { setIsEditingBaseUrl(false); setBaseUrlInput(baseUrl) } }}
-                autoFocus
+                placeholder="https://your-domain.com"
+                onChange={(event) => setBaseUrlInput(event.target.value)}
+                style={NO_DRAG_STYLE}
               />
               <button
                 onClick={handleSaveBaseUrl}
-                disabled={isSavingBaseUrl}
-                className="shrink-0 rounded bg-blue-500 px-2.5 py-1 text-xs text-white hover:bg-blue-600 disabled:opacity-50"
+                disabled={savingBaseUrl}
+                className="rounded bg-blue-500 px-2.5 py-1 text-xs text-white hover:bg-blue-600 disabled:opacity-50"
+                style={NO_DRAG_STYLE}
               >
-                {isSavingBaseUrl ? '保存中…' : '保存'}
+                {savingBaseUrl ? '保存中…' : '保存'}
               </button>
+              {/* Fix #73: cancel button for base URL edit */}
               <button
-                onClick={() => { setIsEditingBaseUrl(false); setBaseUrlInput(baseUrl) }}
-                className="shrink-0 rounded border border-gray-200 px-2.5 py-1 text-xs text-gray-600 hover:bg-gray-50"
+                onClick={() => {
+                  setEditingBaseUrl(false)
+                  setBaseUrlInput(baseUrl)
+                }}
+                className="rounded border border-gray-200 px-2.5 py-1 text-xs text-gray-600 hover:bg-gray-50"
+                style={NO_DRAG_STYLE}
               >
                 取消
               </button>
             </>
           ) : (
             <>
-              <span className={cn('flex-1 text-xs', baseUrl ? 'text-foreground font-mono' : 'text-muted-foreground italic')}>
-                {baseUrl || '未配置（企业微信 / QQ webhook 需要）'}
+              <span className={cn('flex-1 text-xs', baseUrl ? 'font-mono text-foreground' : 'italic text-muted-foreground')}>
+                {baseUrl || '未配置（企业微信 / QQ / Telegram Webhook 场景需要）'}
               </span>
               <button
-                onClick={() => { setIsEditingBaseUrl(true); setBaseUrlInput(baseUrl) }}
-                className="shrink-0 flex items-center gap-1 rounded border border-gray-200 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50"
+                onClick={() => setEditingBaseUrl(true)}
+                className="rounded border border-gray-200 px-2.5 py-1 text-xs text-gray-600 hover:bg-gray-50"
+                style={NO_DRAG_STYLE}
               >
-                <Pencil className="size-3" />
+                <Pencil className="mr-1 inline size-3" />
                 {baseUrl ? '修改' : '配置'}
               </button>
             </>
@@ -251,510 +392,231 @@ export function IntegrationPage() {
       </div>
 
       {/* Platform tabs */}
-      <div className="flex gap-1 border-b border-border px-6 pt-3">
-        {platforms.map(p => (
+      <div
+        className="flex shrink-0 gap-2 border-b border-border px-6 pt-3"
+        role="tablist"
+      >
+        {platforms.map((platform) => (
           <button
-            key={p.key}
-            onClick={() => setActivePlatform(p.key)}
+            key={platform.key}
+            role="tab"
+            aria-selected={activePlatform === platform.key}
+            onClick={() => setActivePlatform(platform.key)}
             className={cn(
-              'relative flex items-center gap-1.5 rounded-t-lg px-4 py-2 text-sm font-medium transition-colors',
-              activePlatform === p.key
-                ? 'border border-b-0 border-border bg-card text-foreground'
-                : 'text-muted-foreground hover:text-foreground'
+              'rounded-t-lg border border-b-0 px-4 py-2 text-sm font-medium',
+              activePlatform === platform.key
+                ? 'border-border bg-background text-foreground'
+                : 'border-transparent text-muted-foreground hover:text-foreground',
             )}
+            style={NO_DRAG_STYLE}
           >
-            <span>{p.emoji}</span>
-            {p.label}
+            {platform.emoji} {platform.label}
           </button>
         ))}
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto px-6 py-5">
-        {isLoading ? (
-          <div className="flex items-center justify-center py-20 text-muted-foreground text-sm">
-            加载中...
-          </div>
-        ) : (
-          <div className="max-w-4xl space-y-5">
-            {/* 连接方式说明 */}
-            {(activePlatform === 'feishu' || activePlatform === 'dingtalk') ? (
-              <div className="rounded-xl border border-green-100 bg-green-50 p-4 flex items-start gap-3">
-                <span className="text-lg leading-none mt-0.5">🔌</span>
-                <div>
-                  <p className="text-sm font-medium text-green-800">WebSocket 长连接模式</p>
-                  <p className="mt-0.5 text-xs text-green-700">
-                    {activePlatform === 'feishu' ? '飞书' : '钉钉'}填写凭证后，服务端自动建立长连接接收消息，<strong>无需公网地址或 ngrok</strong>。
-                  </p>
-                </div>
-              </div>
-            ) : activePlatform === 'telegram' ? (
-              <div className="rounded-xl border border-green-100 bg-green-50 p-4 flex items-start gap-3">
-                <span className="text-lg leading-none mt-0.5">🔌</span>
-                <div>
-                  <p className="text-sm font-medium text-green-800">Polling 轮询模式</p>
-                  <p className="mt-0.5 text-xs text-green-700">
-                    Telegram 使用长轮询主动拉取消息，<strong>无需公网地址</strong>。已注册 Webhook 时自动切换为 Webhook 模式。
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <div className="rounded-xl border border-amber-100 bg-amber-50 p-4 flex items-start gap-3">
-                <span className="text-lg leading-none mt-0.5">⚠️</span>
-                <div>
-                  <p className="text-sm font-medium text-amber-800">需要公网地址</p>
-                  <p className="mt-0.5 text-xs text-amber-700">
-                    {activePlatform === 'wecom' ? '企业微信' : 'QQ'} 仅支持 Webhook 回调，需要服务器有公网 IP 或使用{' '}
-                    <a href="https://ngrok.com" target="_blank" rel="noopener noreferrer" className="underline">ngrok</a>
-                    {' / '}
-                    <a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/" target="_blank" rel="noopener noreferrer" className="underline">Cloudflare Tunnel</a>
-                    {' '}暴露本地端口。
-                  </p>
-                  <div className="mt-2">
-                    <p className="text-xs font-medium text-amber-800 mb-1">Webhook 回调地址：</p>
-                    {webhookUrl ? (
-                      <div className="flex items-center gap-2">
-                        <code className="flex-1 rounded border border-amber-200 bg-white px-2 py-1 text-xs text-gray-600 break-all">
-                          {webhookUrl}
-                        </code>
-                        <button
-                          onClick={handleCopyWebhook}
-                          className="flex items-center gap-1 rounded border border-amber-200 bg-white px-2 py-1 text-xs text-gray-600 hover:bg-amber-50 shrink-0"
-                        >
-                          {copiedUrl ? <Check className="size-3 text-green-500" /> : <Copy className="size-3" />}
-                          {copiedUrl ? '已复制' : '复制'}
-                        </button>
-                      </div>
-                    ) : (
-                      <span className="text-xs text-amber-600">无法获取地址，请检查服务配置</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
+      <div className="grid min-h-0 flex-1 grid-cols-[360px_1fr] gap-0">
+        {/* Left: editor form */}
+        <div className="border-r border-border overflow-y-auto p-5">
+          <BotEditorForm
+            activePlatform={activePlatform}
+            platformInfo={platformInfo}
+            playbook={playbook}
+            editingBotId={editingBotId}
+            botName={botName}
+            botFields={botFields}
+            draftChatRoomId={draftChatRoomId}
+            rooms={rooms}
+            botsByRoomId={botsByRoomId}
+            savingBot={savingBot}
+            noDragStyle={NO_DRAG_STYLE}
+            onBotNameChange={setBotName}
+            onFieldChange={(key, value) => setBotFields((cur) => ({ ...cur, [key]: value }))}
+            onDraftChatRoomIdChange={setDraftChatRoomId}
+            onSave={handleSaveBot}
+            onCancel={cancelBotEditor}
+          />
+        </div>
 
-            {/* 平台凭证配置 */}
-            <div className="rounded-xl border border-border bg-card p-4">
-              <div className="mb-3 flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-800">🔗 平台凭证</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    填写后，到房间设置里生成绑定码，在外部群发送 /bind CODE 完成绑定
-                  </p>
-                </div>
-                {isConfigured && !isEditingConfig && (
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setIsEditingConfig(true)}
-                      className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
-                    >
-                      <Pencil className="size-3" />
-                      修改
-                    </button>
-                    <button
-                      onClick={() => setClearDialogOpen(true)}
-                      disabled={isSavingConfig}
-                      className="flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50"
-                    >
-                      <Trash2 className="size-3" />
-                      清空
-                    </button>
-                  </div>
-                )}
-              </div>
+        {/* Right: bot list + sidebar */}
+        <div className="min-h-0 overflow-hidden p-5">
+          <div className="grid h-full gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
+            <BotListCard
+              bots={bots}
+              filteredBots={filteredBots}
+              botSearch={botSearch}
+              rooms={rooms}
+              platforms={platforms}
+              platformInfo={platformInfo}
+              editingBotId={editingBotId}
+              pendingBotIds={pendingBotIds}
+              baseUrl={baseUrl}
+              noDragStyle={NO_DRAG_STYLE}
+              onBotSearchChange={setBotSearch}
+              onStartEditBot={startEditBot}
+              onToggleBot={handleToggleBot}
+              onUnbindBot={handleUnbindBot}
+              onSelectRoom={handleSelectRoom}
+              onCopyWebhook={handleCopyWebhook}
+              onDeleteBot={(bot) => setPendingDeleteBot(bot)}
+            />
 
-              {/* 已配置展示态 */}
-              {isConfigured && !isEditingConfig ? (
-                <div className="space-y-2">
-                  {activePlatformFields.map(field => (
-                    <div key={field.key} className="flex items-center gap-3 rounded-lg bg-gray-50 px-3 py-2">
-                      <span className="w-28 shrink-0 text-xs text-muted-foreground">{field.label}</span>
-                      <span className="text-sm font-mono text-gray-700">
-                        {field.secret ? '••••••••' : (platformConfig?.configValues?.[field.key] || '••••••••')}
-                      </span>
+            <div className="space-y-4 self-start">
+              {/* Linked rooms overview */}
+              <div className="rounded-xl border border-border bg-card p-4">
+                <div className="mb-4">
+                  <div className="text-sm font-semibold">群聊连接概览</div>
+                  <div className="mt-1 text-xs text-muted-foreground">只展示已经接入外部机器人的群聊。</div>
+                </div>
+                <div className="max-h-[220px] space-y-3 overflow-y-auto pr-1">
+                  {linkedRooms.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-border px-3 py-4 text-xs text-muted-foreground">
+                      还没有已连接的群聊
                     </div>
-                  ))}
-                  <div className="flex items-center gap-1.5 pt-1">
-                    <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-700">
-                      <Check className="size-3" />
-                      凭证已配置
-                    </span>
-                  </div>
-                </div>
-              ) : (
-                /* 编辑/填写态 */
-                <div className="space-y-3">
-                  {activePlatformFields.map(field => (
-                    <div key={field.key}>
-                      <label className="mb-1.5 block text-sm font-medium text-gray-700">{field.label}</label>
-                      <input
-                        type={field.secret ? 'password' : 'text'}
-                        value={configForm[field.key] ?? ''}
-                        onChange={e => setConfigForm(f => ({ ...f, [field.key]: e.target.value }))}
-                        placeholder={isEditingConfig && field.secret ? '留空不修改' : field.label}
-                        className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-                      />
-                    </div>
-                  ))}
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleSaveConfig}
-                      disabled={isSavingConfig}
-                      className="rounded-lg bg-blue-500 px-4 py-2 text-sm text-white hover:bg-blue-600 disabled:opacity-50"
-                    >
-                      {isSavingConfig ? '保存中...' : '保存凭证'}
-                    </button>
-                    {isEditingConfig && (
-                      <button
-                        onClick={() => { setIsEditingConfig(false); setConfigForm({}) }}
-                        className="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50"
-                      >
-                        取消
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* 配置指南（playbook） */}
-            {playbook && (
-              <div className="rounded-xl border border-border bg-card overflow-hidden">
-                <button
-                  onClick={() => setPlaybookOpen(o => !o)}
-                  className="flex w-full items-center justify-between px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-                >
-                  <span className="flex items-center gap-2">
-                    <span>📖</span>
-                    配置指南 — {playbook.consoleName}
-                  </span>
-                  {playbookOpen ? <ChevronDown className="size-4 text-muted-foreground" /> : <ChevronRight className="size-4 text-muted-foreground" />}
-                </button>
-                {playbookOpen && (
-                  <div className="border-t border-border px-5 py-4 space-y-4 text-sm">
-                    {/* 前置条件 */}
-                    {playbook.prerequisites.length > 0 && (
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">前置条件</p>
-                        <ul className="space-y-1">
-                          {playbook.prerequisites.map((item, i) => (
-                            <li key={i} className="flex items-start gap-2 text-sm text-gray-700">
-                              <span className="mt-0.5 text-blue-400 shrink-0">•</span>
-                              <span>{item}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-
-                    {/* 控制台步骤 */}
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
-                        第一步：在 {playbook.consoleName} 完成配置
-                      </p>
-                      <ol className="space-y-2">
-                        {playbook.consoleSteps.map((step, i) => (
-                          <li key={i} className="flex items-start gap-3">
-                            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-100 text-[11px] font-bold text-blue-600">
-                              {i + 1}
-                            </span>
-                            <PlaybookStepText text={step} />
-                          </li>
-                        ))}
-                      </ol>
-                    </div>
-
-                    {/* 绑定步骤 */}
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
-                        第二步：绑定到 TeamAgentX
-                      </p>
-                      <ol className="space-y-2">
-                        {playbook.bindSteps.map((step, i) => (
-                          <li key={i} className="flex items-start gap-3">
-                            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green-100 text-[11px] font-bold text-green-600">
-                              {i + 1}
-                            </span>
-                            <PlaybookStepText text={step} />
-                          </li>
-                        ))}
-                      </ol>
-                    </div>
-
-                    {/* 注意事项 */}
-                    {playbook.notes.length > 0 && (
-                      <div className="rounded-lg bg-amber-50 border border-amber-100 px-4 py-3">
-                        <p className="text-xs font-semibold text-amber-700 mb-1.5">注意事项</p>
-                        <ul className="space-y-1">
-                          {playbook.notes.map((note, i) => (
-                            <li key={i} className="text-xs text-amber-800 flex items-start gap-2">
-                              <span className="shrink-0 mt-0.5">⚠️</span>
-                              <span>{note}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* 已连接群组 */}
-            <div>
-              <h2 className="mb-3 text-sm font-medium text-gray-700">
-                已连接的群组
-                <span className="ml-1.5 text-muted-foreground">({channels.length})</span>
-              </h2>
-
-              {channels.length === 0 ? (
-                <div className="flex flex-col items-center rounded-xl border border-dashed border-border bg-card py-12 text-center">
-                  <div className="mb-3 text-4xl">{platformInfo?.emoji}</div>
-                  <p className="mb-1 font-medium text-gray-700">尚未连接任何 {platformInfo?.label} 群组</p>
-                  <p className="text-sm text-muted-foreground">
-                    先配置平台凭证，再到房间设置里生成绑定码，在外部群发送 /bind CODE 完成绑定
-                  </p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {channels.map(ch => (
-                    <ChannelCard
-                      key={ch.id}
-                      channel={ch}
-                      platformColor={platformInfo?.color ?? '#2563eb'}
-                      onDelete={() => handleDelete(ch.id)}
-                      onToggle={() => handleToggleEnabled(ch)}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* 最近事件 */}
-            <div className="border-t border-border pt-4">
-              <button
-                onClick={() => setEventsOpen(o => !o)}
-                className="flex w-full items-center justify-between text-sm font-medium text-gray-700 hover:text-gray-900"
-              >
-                <span>
-                  最近事件
-                  <span className="ml-1.5 font-normal text-muted-foreground">({events.length})</span>
-                </span>
-                {eventsOpen ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-              </button>
-              {eventsOpen && (
-                <div className="mt-3 overflow-x-auto rounded-lg border border-border">
-                  {events.length === 0 ? (
-                    <p className="py-6 text-center text-sm text-muted-foreground">暂无事件记录</p>
                   ) : (
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="border-b border-border bg-gray-50 text-left text-muted-foreground">
-                          <th scope="col" className="px-3 py-2 font-medium">时间</th>
-                          <th scope="col" className="px-3 py-2 font-medium">方向</th>
-                          <th scope="col" className="px-3 py-2 font-medium">状态</th>
-                          <th scope="col" className="px-3 py-2 font-medium">来源群组</th>
-                          <th scope="col" className="px-3 py-2 font-medium">助手</th>
-                          <th scope="col" className="px-3 py-2 font-medium">错误</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {events.map(ev => (
-                          <tr key={ev.id} className="border-b border-border last:border-0 hover:bg-gray-50">
-                            <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
-                              {new Date(ev.createdAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                            </td>
-                            <td className="px-3 py-2">
-                              <span className={cn(
-                                'inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium',
-                                ev.direction === 'inbound'
-                                  ? 'bg-blue-100 text-blue-700'
-                                  : 'bg-purple-100 text-purple-700'
-                              )}>
-                                {ev.direction === 'inbound' ? '↓ 入站' : '↑ 出站'}
+                    linkedRooms.map((room) => {
+                      const roomBindings = botsByRoomId.get(room.id) ?? []
+                      return (
+                        <div key={room.id} className="rounded-lg border border-border bg-muted/30 px-3 py-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-medium text-foreground">{room.name}</div>
+                              <div className="mt-1 text-[11px] text-muted-foreground">
+                                已连接 {roomBindings.length} 个机器人
+                              </div>
+                            </div>
+                            <div className="shrink-0 rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-700">
+                              在线桥接
+                            </div>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {roomBindings.map((item) => (
+                              <span
+                                key={item.id}
+                                className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[11px] text-gray-700"
+                              >
+                                <span className="font-medium">{item.name}</span>
+                                <span className="text-gray-400">·</span>
+                                <span>{platformLabel(platforms, item.platform)}</span>
                               </span>
-                            </td>
-                            <td className="px-3 py-2">
-                              <span className={cn(
-                                'inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium',
-                                ev.status === 'success'
-                                  ? 'bg-green-100 text-green-700'
-                                  : 'bg-red-100 text-red-700'
-                              )}>
-                                {ev.status === 'success' ? '✓ 成功' : '✗ 失败'}
-                              </span>
-                            </td>
-                            <td className="max-w-[120px] truncate px-3 py-2 text-muted-foreground font-mono" title={ev.externalId}>
-                              {ev.externalId}
-                            </td>
-                            <td className="px-3 py-2">
-                              {ev.agentName ? (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">
-                                  <Bot className="size-2.5" />
-                                  {ev.agentName}
-                                </span>
-                              ) : (
-                                <span className="text-muted-foreground">—</span>
-                              )}
-                            </td>
-                            <td className="max-w-[160px] truncate px-3 py-2 text-red-500" title={ev.errorMsg ?? ''}>
-                              {ev.errorMsg ?? '—'}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                            ))}
+                          </div>
+                        </div>
+                      )
+                    })
                   )}
                 </div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
-      <AlertDialog open={clearDialogOpen} onOpenChange={setClearDialogOpen}>
-        <AlertDialogContent className="max-w-lg">
-          <AlertDialogHeader className="text-left">
-            <div className="flex items-start gap-3">
-              <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-red-500/10">
-                <AlertTriangle className="size-5 text-red-500" />
               </div>
-              <div className="space-y-1">
-                <AlertDialogTitle className="text-base">
-                  清空 {platformInfo?.label ?? '当前平台'} 接入配置
-                </AlertDialogTitle>
-                <AlertDialogDescription className="text-sm leading-6">
-                  这会删除当前平台的凭证，并移除所有已绑定的群聊映射。清空后，这些群聊需要重新绑定才能继续使用。
-                </AlertDialogDescription>
-              </div>
-            </div>
-          </AlertDialogHeader>
 
-          <div className="space-y-3">
-            <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">
-              {channels.length > 0
-                ? `即将删除 ${channels.length} 个已绑定群聊：`
-                : '当前没有已绑定群聊，会只清空平台凭证。'}
-            </div>
-
-            {channels.length > 0 && (
-              <div className="max-h-56 overflow-y-auto rounded-lg border border-gray-200 bg-gray-50">
-                <div className="divide-y divide-gray-200">
-                  {channels.map(channel => (
-                    <div key={channel.id} className="flex items-center justify-between gap-3 px-3 py-2">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-gray-800">{channel.chatRoom.name}</p>
-                        <p className="truncate text-xs text-muted-foreground">{channel.externalId}</p>
-                      </div>
-                      <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-xs text-gray-500">
-                        已绑定
-                      </span>
+              {/* Recent events */}
+              <div className="rounded-xl border border-border bg-card p-4">
+                <div className="mb-4">
+                  <div className="text-sm font-semibold">最近同步事件</div>
+                  <div className="mt-1 text-xs text-muted-foreground">展示最近一次流入或流出的消息情况。</div>
+                </div>
+                <div className="max-h-[360px] space-y-2 overflow-y-auto pr-1">
+                  {events.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-border px-3 py-4 text-xs text-muted-foreground">
+                      暂无事件
                     </div>
-                  ))}
+                  ) : (
+                    events.map((event: BridgeEvent) => (
+                      <div key={event.id} className="rounded-xl border border-border bg-white px-3 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700">
+                                {platformLabel(platforms, event.platform)}
+                              </span>
+                              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-foreground">
+                                {event.direction === 'inbound'
+                                  ? <ArrowDownLeft className="size-3.5 text-emerald-600" />
+                                  : <ArrowUpRight className="size-3.5 text-blue-600" />}
+                                {event.direction === 'inbound' ? '流入' : '流出'}
+                              </span>
+                            </div>
+                            <div className="mt-2 line-clamp-3 text-[12px] leading-5 text-foreground">
+                              {event.contentPreview || '这次同步还没有拿到可展示的消息内容。'}
+                            </div>
+                            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                              <span className="inline-flex items-center gap-1">
+                                <Clock3 className="size-3" />
+                                {formatEventTime(event.createdAt)}
+                              </span>
+                              {event.agentName && <span>助手：{event.agentName}</span>}
+                              {event.errorMsg ? (
+                                <span className="text-red-500">{event.errorMsg}</span>
+                              ) : (
+                                <span className="truncate max-w-[160px]">会话：{event.externalId}</span>
+                              )}
+                            </div>
+                          </div>
+                          <span className={cn(
+                            'shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium',
+                            event.status === 'success' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500',
+                          )}>
+                            {event.status === 'success' ? (
+                              <span className="inline-flex items-center gap-1">
+                                <Check className="size-3.5" />
+                                成功
+                              </span>
+                            ) : '失败'}
+                          </span>
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
-            )}
+            </div>
           </div>
+        </div>
+      </div>
 
+      {/* Rebind confirmation dialog (Fix #66: safe null check) */}
+      <AlertDialog open={!!pendingRebind} onOpenChange={(open) => !open && setPendingRebind(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认换绑机器人</AlertDialogTitle>
+            <AlertDialogDescription>
+              这个机器人当前绑定在「{pendingRebind?.fromRoomName}」，确认后会自动解绑并改绑到「{pendingRebind?.toRoomName}」。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isSavingConfig}>取消</AlertDialogCancel>
+            <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction
-              onClick={(event) => {
-                event.preventDefault()
-                void handleClearConfig()
+              className="bg-blue-500 hover:bg-blue-600"
+              onClick={() => {
+                if (!pendingRebind) return
+                const rebindBot = bots.find((bot) => bot.id === pendingRebind.botId)
+                if (!rebindBot) {
+                  toast.error('机器人已不存在')
+                  setPendingRebind(null)
+                  return
+                }
+                void handleBindBot(rebindBot, pendingRebind.chatRoomId, true)
+                setPendingRebind(null)
               }}
-              className="bg-red-500 text-white hover:bg-red-600"
-              disabled={isSavingConfig}
             >
-              {isSavingConfig && <Loader2 className="mr-2 size-4 animate-spin" />}
-              确认清空
+              确认换绑
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
-  )
-}
 
-/** 步骤文本：将 `code` 包裹内容渲染为代码样式，支持 **bold** */
-function PlaybookStepText({ text }: { text: string }) {
-  return (
-    <ReactMarkdown
-      components={{
-        p: ({ children }) => <span className="text-sm text-gray-700 leading-relaxed">{children}</span>,
-        code: ({ children }) => (
-          <code className="rounded bg-gray-100 px-1.5 py-0.5 text-xs font-mono text-gray-800">{children}</code>
-        ),
-        strong: ({ children }) => <strong className="font-semibold text-gray-900">{children}</strong>,
-        a: ({ href, children }) => (
-          <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-700">{children}</a>
-        ),
-      }}
-    >
-      {text}
-    </ReactMarkdown>
-  )
-}
-
-function ChannelCard({
-  channel,
-  platformColor,
-  onDelete,
-  onToggle,
-}: {
-  channel: ExternalChannel
-  platformColor: string
-  onDelete: () => void
-  onToggle: () => void
-}) {
-  return (
-    <div className={cn(
-      'relative flex flex-col rounded-xl border border-border bg-card overflow-hidden transition-opacity',
-      !channel.enabled && 'opacity-60'
-    )}>
-      {/* 平台色左边条 */}
-      <div className="absolute left-0 top-0 bottom-0 w-1 rounded-l-xl" style={{ backgroundColor: platformColor }} />
-
-      <div className="pl-4 pr-4 pt-4 pb-3 flex flex-col gap-2.5">
-        {/* 群组名（房间） */}
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-foreground truncate leading-tight" title={channel.chatRoom.name}>
-              {channel.chatRoom.name}
-            </p>
-            <p className="mt-0.5 text-[11px] font-mono text-muted-foreground truncate" title={channel.externalId}>
-              {channel.externalId}
-            </p>
-          </div>
-          <button
-            onClick={onDelete}
-            className="shrink-0 rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-500 transition-colors"
-            title="删除"
-          >
-            <Trash2 className="size-3.5" />
-          </button>
-        </div>
-
-      </div>
-
-      {/* 底部操作栏 */}
-      <div className="flex items-center justify-between border-t border-border px-4 py-2">
-        <button
-          onClick={onToggle}
-          className="flex items-center gap-1.5 text-xs font-medium transition-colors"
-        >
-          <span className={cn(
-            'inline-block h-2 w-2 rounded-full transition-colors',
-            channel.enabled ? 'bg-green-500' : 'bg-gray-300'
-          )} />
-          <span className={channel.enabled ? 'text-green-600' : 'text-gray-400'}>
-            {channel.enabled ? '已启用' : '已停用'}
-          </span>
-        </button>
-        <span className="text-[10px] text-muted-foreground">
-          {new Date(channel.createdAt).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })}
-        </span>
-      </div>
+      <ConfirmDialog
+        open={!!pendingDeleteBot}
+        onOpenChange={(open) => !open && setPendingDeleteBot(null)}
+        title="删除机器人实例"
+        description={`确定删除「${pendingDeleteBot?.name ?? ''}」吗？删除后需要重新录入凭证。`}
+        confirmText="删除"
+        onConfirm={async () => {
+          if (!pendingDeleteBot) return
+          await handleDeleteBot(pendingDeleteBot)
+          setPendingDeleteBot(null)
+        }}
+        icon={Trash2}
+      />
     </div>
   )
 }

@@ -1,164 +1,351 @@
 import { randomUUID } from 'crypto';
 import prisma from '../../lib/prisma.js';
-import { messageService } from '../message/message.service.js';
 import { messageEventEmitter } from '../../core/agent/agent-handler/index.js';
-import { encrypt, decrypt } from './crypto.js';
-
-function decryptChannel<T extends { botToken?: string | null; webhookSecret?: string | null; config?: string | null }>(ch: T): T {
-  if (ch.botToken) ch.botToken = decrypt(ch.botToken);
-  if (ch.webhookSecret) ch.webhookSecret = decrypt(ch.webhookSecret);
-  if (ch.config) ch.config = decrypt(ch.config);
-  return ch;
-}
+import { registerTypingLoopSender } from './typing-loop.js';
+import type { Message } from '../../types/message.js';
+import { messageService } from '../message/message.service.js';
+import { getBridgePlatformDefinition } from './bridge-platform-registry.js';
+import { decrypt } from './crypto.js';
+import {
+  bindBridgeBotToChatRoom,
+  createBridgeBot,
+  deleteBridgeBot,
+  getBridgeBotById,
+  listBridgeBots,
+  unbindBridgeBot,
+  updateBridgeBot,
+} from './bridge-bot-store.js';
 
 export type Platform = 'telegram' | 'feishu' | 'dingtalk' | 'wecom' | 'qq';
 
-// 去重 Set，防止重复消息被多次处理
-const seenDedupeKeys = new Set<string>();
+// Dedupe key: TTL based with map-backed eviction. Keys are namespaced by botId.
+const DEDUPE_TTL_MS = 24 * 60 * 60 * 1000;
+const dedupeKeys = new Map<string, number>();
 
-// 平台响应回调，由各平台适配器注册
-const platformSenders = new Map<string, (externalId: string, text: string, agentName: string) => Promise<void>>();
-
-// 记录"最近一次触发该房间的来源 channel"，用于防串音
-// key = chatRoomId, value = { channelId, expiresAt }
-const lastSourceChannel = new Map<string, { channelId: string; expiresAt: number }>();
-const SOURCE_CHANNEL_TTL_MS = 30 * 60 * 1000; // 30 分钟
-
-function setSourceChannel(chatRoomId: string, channelId: string) {
-  lastSourceChannel.set(chatRoomId, { channelId, expiresAt: Date.now() + SOURCE_CHANNEL_TTL_MS });
+function addDedupeKey(key: string): void {
+  if (dedupeKeys.size > 10000) {
+    const now = Date.now();
+    for (const [k, exp] of dedupeKeys) {
+      if (exp < now) dedupeKeys.delete(k);
+      if (dedupeKeys.size <= 5000) break;
+    }
+  }
+  dedupeKeys.set(key, Date.now() + DEDUPE_TTL_MS);
 }
 
-function getSourceChannelId(chatRoomId: string): string | null {
-  const entry = lastSourceChannel.get(chatRoomId);
+function hasDedupeKey(key: string): boolean {
+  const exp = dedupeKeys.get(key);
+  if (exp === undefined) return false;
+  if (exp < Date.now()) {
+    dedupeKeys.delete(key);
+    return false;
+  }
+  return true;
+}
+
+const platformSenders = new Map<string, (botId: string, externalId: string, text: string, agentName: string) => Promise<void>>();
+const platformTypingSenders = new Map<string, (botId: string, externalId: string) => Promise<void>>();
+
+const SOURCE_CHANNEL_TTL_MS = 30 * 60 * 1000;
+const BRIDGE_EVENT_RETENTION_DAYS = parseInt(process.env.BRIDGE_EVENT_RETENTION_DAYS ?? '20', 10) || 20;
+
+type SourceConversation = { chatRoomId: string; botId: string; platform: Platform; externalId: string; replyTarget: string; expiresAt: number };
+const lastSourceConversation = new Map<string, SourceConversation>();
+
+function sourceKey(botId: string, externalId: string): string {
+  return `${botId}:${externalId}`;
+}
+
+function setSourceConversation(chatRoomId: string, botId: string, platform: Platform, externalId: string, replyTarget: string) {
+  lastSourceConversation.set(sourceKey(botId, externalId), {
+    chatRoomId,
+    botId,
+    platform,
+    externalId,
+    replyTarget,
+    expiresAt: Date.now() + SOURCE_CHANNEL_TTL_MS,
+  });
+}
+
+function getSourceConversation(botId: string, externalId?: string) {
+  // 没有 externalId 时，返回该 botId 任一最新有效会话（向后兼容）
+  if (!externalId) {
+    let latest: SourceConversation | null = null;
+    for (const [k, entry] of lastSourceConversation) {
+      if (!k.startsWith(`${botId}:`)) continue;
+      if (Date.now() > entry.expiresAt) {
+        lastSourceConversation.delete(k);
+        continue;
+      }
+      if (!latest || entry.expiresAt > latest.expiresAt) latest = entry;
+    }
+    return latest;
+  }
+  const entry = lastSourceConversation.get(sourceKey(botId, externalId));
   if (!entry) return null;
   if (Date.now() > entry.expiresAt) {
-    lastSourceChannel.delete(chatRoomId);
+    lastSourceConversation.delete(sourceKey(botId, externalId));
     return null;
   }
-  return entry.channelId;
+  return entry;
+}
+
+// Periodic cleanup of old bridge events (replaces per-write delete).
+const bridgeEventCleanupInterval = setInterval(async () => {
+  const cutoff = new Date(Date.now() - BRIDGE_EVENT_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  await prisma.bridgeEvent.deleteMany({ where: { createdAt: { lt: cutoff } } }).catch(() => {});
+}, 60 * 60 * 1000);
+bridgeEventCleanupInterval.unref?.();
+
+async function validateBridgeCredentials(platform: Platform, body: { botToken?: string; config?: Record<string, unknown> | null }) {
+  if (platform === 'telegram') {
+    const token = body.botToken?.trim();
+    if (!token) return;
+
+    const response = await fetch(`https://api.telegram.org/bot${token}/getMe`).catch(() => null);
+    if (!response?.ok) {
+      throw new Error('Telegram 机器人不存在或 Token 无效');
+    }
+
+    const payload = await response.json().catch(() => null) as { ok?: boolean } | null;
+    if (!payload?.ok) {
+      throw new Error('Telegram 机器人不存在或 Token 无效');
+    }
+  }
+
+  if (platform === 'feishu') {
+    const appId = typeof body.config?.appId === 'string' ? body.config.appId.trim() : '';
+    const appSecret = typeof body.config?.appSecret === 'string' ? body.config.appSecret.trim() : '';
+    if (!appId || !appSecret) return;
+
+    const response = await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        app_id: appId,
+        app_secret: appSecret,
+      }),
+    }).catch(() => null);
+
+    if (!response?.ok) {
+      throw new Error('飞书机器人不存在或凭证无效');
+    }
+
+    const payload = await response.json().catch(() => null) as { code?: number; tenant_access_token?: string } | null;
+    if (payload?.code !== 0 || !payload.tenant_access_token) {
+      throw new Error('飞书机器人不存在或凭证无效');
+    }
+  }
+}
+
+async function getActiveBridgeTargets(chatRoomId: string) {
+  const bots = await prisma.bridgeBot.findMany({
+    where: { chatRoomId, enabled: true },
+    include: {
+      chatRoom: { select: { id: true, name: true, defaultAgentId: true } },
+      defaultAgent: { select: { id: true, name: true, avatar: true, avatarColor: true } },
+    },
+  });
+  return bots
+    .map((bot) => {
+      const source = getSourceConversation(bot.id);
+      if (!source) return null;
+      return { bot, source };
+    })
+    .filter((item): item is { bot: (typeof bots)[number]; source: NonNullable<ReturnType<typeof getSourceConversation>> } => !!item);
+}
+
+async function createBridgeEvent(data: {
+  platform: string;
+  externalId: string;
+  direction: string;
+  status: string;
+  messageId?: string | null;
+  contentPreview?: string | null;
+  agentName?: string | null;
+  errorMsg?: string | null;
+}) {
+  const cutoff = new Date(Date.now() - BRIDGE_EVENT_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  await prisma.bridgeEvent.deleteMany({
+    where: {
+      createdAt: { lt: cutoff },
+    },
+  });
+
+  return prisma.bridgeEvent.create({
+    data: {
+      ...data,
+      contentPreview: data.contentPreview ?? null,
+      messageId: data.messageId ?? null,
+      agentName: data.agentName ?? null,
+      errorMsg: data.errorMsg ?? null,
+    },
+  });
 }
 
 export const bridgeService = {
-  // ──────────────── ExternalChannel CRUD ────────────────
-
-  async createChannel(data: {
+  async createBot(data: {
     platform: Platform;
-    externalId: string;
-    chatRoomId: string;
+    name: string;
     botToken?: string;
-    webhookSecret?: string;
-    defaultAgentId?: string;
+    defaultAgentId?: string | null;
     config?: Record<string, unknown>;
+    chatRoomId?: string;
+    ownerId?: string;
   }) {
-    return prisma.externalChannel.create({
-      data: {
-        platform: data.platform,
-        externalId: data.externalId,
-        chatRoomId: data.chatRoomId,
-        botToken: data.botToken ? encrypt(data.botToken) : undefined,
-        webhookSecret: data.webhookSecret ? encrypt(data.webhookSecret) : undefined,
-        defaultAgentId: data.defaultAgentId,
-        config: data.config ? encrypt(JSON.stringify(data.config)) : undefined,
-      },
-      include: { chatRoom: true, defaultAgent: true },
+    const definition = getBridgePlatformDefinition(data.platform);
+    const missingFields = definition.configFields
+      .filter((field) => {
+        if (field.key === 'botToken') {
+          return !data.botToken?.trim();
+        }
+        const value = data.config?.[field.key];
+        return typeof value !== 'string' || !value.trim();
+      })
+      .map((field) => field.label);
+
+    if (missingFields.length > 0) {
+      throw new Error(`缺少必填凭证：${missingFields.join('、')}`);
+    }
+
+    await validateBridgeCredentials(data.platform, {
+      botToken: data.botToken,
+      config: data.config ?? null,
     });
+
+    const bot = await createBridgeBot(data);
+    if (data.chatRoomId) {
+      return bindBridgeBotToChatRoom(bot.id, data.chatRoomId);
+    }
+    return bot;
   },
 
-  async findChannelByExternal(platform: Platform, externalId: string) {
-    const channel = await prisma.externalChannel.findUnique({
-      where: { platform_externalId: { platform, externalId } },
-      include: { chatRoom: true, defaultAgent: true },
-    });
-    return channel ? decryptChannel(channel) : null;
+  async listBots(platform?: Platform) {
+    return listBridgeBots(platform);
+  },
+
+  async updateBot(id: string, data: {
+    name?: string;
+    botToken?: string;
+    defaultAgentId?: string | null;
+    config?: Record<string, unknown> | null;
+    enabled?: boolean;
+  }) {
+    const existing = await getBridgeBotById(id);
+    if (!existing) {
+      throw new Error('机器人实例不存在');
+    }
+
+    const needsValidation = data.botToken !== undefined || data.config !== undefined;
+    if (needsValidation) {
+      const existingDecrypted = existing.botToken ? decrypt(existing.botToken) : undefined;
+      const existingConfig = existing.config ? (() => { try { return JSON.parse(decrypt(existing.config!)); } catch { return undefined; } })() : undefined;
+      const mergedToken = data.botToken ?? existingDecrypted;
+      const mergedConfig = data.config !== undefined ? { ...existingConfig, ...data.config } : existingConfig;
+      await validateBridgeCredentials(existing.platform as Platform, {
+        botToken: mergedToken,
+        config: mergedConfig ?? null,
+      });
+    }
+
+    return updateBridgeBot(id, data);
+  },
+
+  async deleteBot(id: string) {
+    return deleteBridgeBot(id);
+  },
+
+  async bindBot(botId: string, chatRoomId: string, options?: { forceRebind?: boolean }) {
+    return bindBridgeBotToChatRoom(botId, chatRoomId, options);
+  },
+
+  async unbindBot(botId: string) {
+    return unbindBridgeBot(botId);
   },
 
   async listChannels(platform?: Platform) {
-    const channels = await prisma.externalChannel.findMany({
-      where: platform ? { platform } : undefined,
-      include: { chatRoom: { select: { id: true, name: true } }, defaultAgent: { select: { id: true, name: true, avatar: true, avatarColor: true } } },
-      orderBy: { createdAt: 'desc' },
-    });
-    return channels.map(decryptChannel);
+    const bots = await listBridgeBots(platform);
+    return bots.filter((bot) => bot.chatRoomId);
   },
 
   async updateChannel(id: string, data: {
-    botToken?: string;
-    webhookSecret?: string;
-    defaultAgentId?: string;
-    config?: Record<string, unknown>;
     enabled?: boolean;
   }) {
-    return prisma.externalChannel.update({
-      where: { id },
-      data: {
-        ...(data.defaultAgentId !== undefined ? { defaultAgentId: data.defaultAgentId } : {}),
-        ...(data.enabled !== undefined ? { enabled: data.enabled } : {}),
-        botToken: data.botToken ? encrypt(data.botToken) : data.botToken,
-        webhookSecret: data.webhookSecret ? encrypt(data.webhookSecret) : data.webhookSecret,
-        config: data.config ? encrypt(JSON.stringify(data.config)) : undefined,
-      },
-    });
+    return updateBridgeBot(id, { enabled: data.enabled });
   },
 
   async deleteChannel(id: string) {
-    return prisma.externalChannel.delete({ where: { id } });
+    return unbindBridgeBot(id);
   },
 
-  // ──────────────── 消息接入 ────────────────
-
-  /**
-   * 外部平台消息进入 TeamAgentX，触发对应 Agent
-   * senderName: 发送者昵称（如 "Alice(@alice_tg)"），嵌入消息内容
-   * content: 原始消息内容（可含 @agent-name）
-   */
   async receiveBridgeMessage(params: {
+    botId?: string;
     platform: Platform;
-    externalId: string;   // 平台侧群 ID
+    externalId: string;
+    replyTarget?: string;
     senderName: string;
     content: string;
     dedupeKey?: string;
   }) {
     if (params.dedupeKey) {
-      if (seenDedupeKeys.has(params.dedupeKey)) {
+      if (hasDedupeKey(params.dedupeKey)) {
         console.info(`[Bridge] 重复消息已过滤: ${params.dedupeKey}`);
         return null;
       }
-      seenDedupeKeys.add(params.dedupeKey);
-      if (seenDedupeKeys.size > 5000) {
-        const oldest = seenDedupeKeys.values().next().value;
-        if (oldest) seenDedupeKeys.delete(oldest);
-      }
+      addDedupeKey(params.dedupeKey);
     }
 
-    const channel = await this.findChannelByExternal(params.platform, params.externalId);
-    if (!channel || !channel.enabled) return null;
+    const binding = params.botId
+      ? await getBridgeBotById(params.botId)
+      : (await listBridgeBots(params.platform)).find((bot) => bot.chatRoomId && bot.enabled) ?? null;
+    if (!binding?.chatRoomId || !binding.enabled || !binding.chatRoom) {
+      return null;
+    }
 
-    const { chatRoomId } = channel;
+    const { chatRoomId } = binding;
+    setSourceConversation(chatRoomId, binding.id, params.platform, params.externalId, params.replyTarget ?? params.externalId);
 
-    // 记录本次触发的来源 channel，用于防串音
-    setSourceChannel(chatRoomId, channel.id);
-
-    // 内容前缀标注来源，让 Agent 知道是谁发的
     const platformLabel: Record<Platform, string> = {
-      telegram: 'TG', feishu: '飞书', dingtalk: '钉钉', wecom: '企微', qq: 'QQ',
+      telegram: 'TG',
+      feishu: '飞书',
+      dingtalk: '钉钉',
+      wecom: '企微',
+      qq: 'QQ',
     };
-    const prefixedContent = `[${platformLabel[params.platform as Platform]}·${params.senderName}] ${params.content}`;
+    const prefixedContent = `[${platformLabel[params.platform]}·${params.senderName}] ${params.content}`;
 
-    // 若内容未 @ 任何 Agent，自动注入默认 Agent
-    const hasAgentMention = /@\S+/.test(params.content);
-    const defaultAgent = channel.defaultAgent
-      ?? (channel.chatRoom.defaultAgentId
-        ? await prisma.agent.findUnique({ where: { id: channel.chatRoom.defaultAgentId } })
-        : null);
+    // Sanitize external content for routing: strip @ mentions to prevent injection
+    const sanitizedForRouting = params.content.replace(/@\S+/g, '');
+    const hasAgentMention = /@\S+/.test(sanitizedForRouting);
+    const roomAgents = !binding.chatRoom.defaultAgentId
+      ? await prisma.chatRoomAgent.findMany({
+          where: {
+            chatRoomId,
+            agentId: { not: null },
+            agent: { is: { isActive: true } },
+          },
+          include: {
+            agent: {
+              select: { id: true, name: true },
+            },
+          },
+          orderBy: { joinedAt: 'asc' },
+          take: 2,
+        })
+      : [];
 
-    const finalContent = (!hasAgentMention && defaultAgent)
+    const fallbackDefaultAgentId = binding.chatRoom.defaultAgentId
+      || (roomAgents.length === 1 ? roomAgents[0]?.agentId ?? null : null);
+    const defaultAgent = fallbackDefaultAgentId
+      ? await prisma.agent.findUnique({ where: { id: fallbackDefaultAgentId } })
+      : null;
+
+    const finalContent = !hasAgentMention && defaultAgent
       ? `${prefixedContent} @${defaultAgent.name}`
       : prefixedContent;
 
     const msgId = randomUUID();
     const now = new Date();
-
-    // 桥接消息无真实 userId，userId 留空
     const savedMsg = await messageService.create({
       id: msgId,
       type: 'MESSAGE',
@@ -169,8 +356,7 @@ export const bridgeService = {
       isHuman: true,
     });
 
-    // 触发 Agent 处理（与 Socket.io 路径相同）
-    const msgWithUser: import('../../types/message.js').Message = {
+    const msgWithUser: Message = {
       id: savedMsg.id,
       type: 'message',
       content: savedMsg.content,
@@ -182,72 +368,94 @@ export const bridgeService = {
     };
     messageEventEmitter.emit('receivedMessage', { message: msgWithUser, chatRoomId });
 
-    // 记录 inbound 事件
-    prisma.bridgeEvent.create({
-      data: {
-        platform: params.platform,
-        externalId: params.externalId,
-        direction: 'inbound',
-        status: 'success',
-        messageId: msgId,
-      },
-    }).catch(e => console.error('[Bridge] 写入 inbound success 事件失败:', e));
+    await createBridgeEvent({
+      platform: params.platform,
+      externalId: params.externalId,
+      direction: 'inbound',
+      status: 'success',
+      messageId: msgId,
+      contentPreview: finalContent.slice(0, 280),
+    }).catch((error) => console.error('[Bridge] 写入 inbound success 事件失败:', error));
 
-    return { messageId: msgId, chatRoomId, channelId: channel.id };
+    return { messageId: msgId, chatRoomId, channelId: binding.id };
   },
 
-  // ──────────────── 响应回传 ────────────────
-
-  /**
-   * 注册某平台的消息发送函数（由各平台 webhook 模块调用）
-   */
-  registerSender(platform: Platform, sender: (externalId: string, text: string, agentName: string) => Promise<void>) {
+  registerSender(platform: Platform, sender: (botId: string, externalId: string, text: string, agentName: string) => Promise<void>) {
     platformSenders.set(platform, sender);
   },
 
-  /**
-   * 将 Agent 响应发回对应的外部平台群聊
-   * 优先只发回触发本次对话的来源 channel，防止多平台绑定同一房间时串音
-   */
-  async sendAgentResponse(chatRoomId: string, agentName: string, content: string) {
-    const sourceChannelId = getSourceChannelId(chatRoomId);
+  registerTypingSender(platform: Platform, sender: (botId: string, externalId: string) => Promise<void>) {
+    platformTypingSenders.set(platform, sender);
+  },
 
-    const channels = await prisma.externalChannel.findMany({
-      where: { chatRoomId, enabled: true },
-    });
+  async syncRoomMessage(chatRoomId: string, senderName: string, content: string, messageId?: string) {
+    const targets = await getActiveBridgeTargets(chatRoomId);
+    if (targets.length === 0) return;
 
-    // 若能找到来源 channel，只发回那个 channel；否则广播（兼容旧行为）
-    const targets = sourceChannelId
-      ? channels.filter(c => c.id === sourceChannelId)
-      : channels;
+    const text = `[群聊·${senderName}] ${content}`;
+    await Promise.all(targets.map(async ({ bot, source }) => {
+      const sender = platformSenders.get(bot.platform);
+      if (!sender) return;
+      await sender(bot.id, source.replyTarget, text, senderName);
+      await createBridgeEvent({
+        platform: bot.platform,
+        externalId: source.externalId,
+        direction: 'outbound',
+        status: 'success',
+        messageId: messageId ?? null,
+        contentPreview: text.slice(0, 280),
+        agentName: senderName,
+      });
+    }));
+  },
 
-    for (const channel of targets) {
-      const sender = platformSenders.get(channel.platform as Platform);
-      if (!sender) continue;
+  async sendTypingIndicator(chatRoomId: string) {
+    const targets = await getActiveBridgeTargets(chatRoomId);
+    if (targets.length === 0) return;
+
+    await Promise.all(targets.map(async ({ bot, source }) => {
+      const sender = platformTypingSenders.get(bot.platform);
+      if (!sender) return;
+      await sender(bot.id, source.replyTarget);
+    }));
+  },
+
+
+  async sendAgentResponse(chatRoomId: string, agentName: string, content: string, messageId?: string) {
+    const targets = await getActiveBridgeTargets(chatRoomId);
+    if (targets.length === 0) return;
+
+    await Promise.all(targets.map(async ({ bot, source }) => {
+      const sender = platformSenders.get(bot.platform);
+      if (!sender) return;
+
       try {
-        await sender(channel.externalId, content, agentName);
-        await prisma.bridgeEvent.create({
-          data: {
-            platform: channel.platform,
-            externalId: channel.externalId,
-            direction: 'outbound',
-            status: 'success',
-            agentName,
-          },
-        }).catch(e => console.error('[Bridge] 写入 outbound success 事件失败:', e));
-      } catch (err) {
-        console.error(`[Bridge] 发送响应到 ${channel.platform} 群 ${channel.externalId} 失败:`, err);
-        prisma.bridgeEvent.create({
-          data: {
-            platform: channel.platform,
-            externalId: channel.externalId,
-            direction: 'outbound',
-            status: 'failed',
-            agentName,
-            errorMsg: err instanceof Error ? err.message : String(err),
-          },
-        }).catch(e => console.error('[Bridge] 写入 outbound failed 事件失败:', e));
+        await sender(source.botId, source.replyTarget, content, agentName);
+        await createBridgeEvent({
+          platform: bot.platform,
+          externalId: source.externalId,
+          direction: 'outbound',
+          status: 'success',
+          messageId: messageId ?? null,
+          contentPreview: content.slice(0, 280),
+          agentName,
+        });
+      } catch (error) {
+        console.error(`[Bridge] 发送响应到 ${bot.platform} 会话 ${source.externalId} 失败:`, error);
+        await createBridgeEvent({
+          platform: bot.platform,
+          externalId: source.externalId,
+          direction: 'outbound',
+          status: 'failed',
+          messageId: messageId ?? null,
+          contentPreview: content.slice(0, 280),
+          agentName,
+          errorMsg: error instanceof Error ? error.message : String(error),
+        }).catch((eventError) => console.error('[Bridge] 写入 outbound failed 事件失败:', eventError));
       }
-    }
+    }));
   },
 };
+
+// 把 sendTypingIndicator 注册给 typing-loop 模块（避免循环依赖）
+registerTypingLoopSender((chatRoomId) => bridgeService.sendTypingIndicator(chatRoomId));

@@ -4,30 +4,118 @@ import prisma from '../../../lib/prisma.js';
 import { chatRoomService } from '../../../modules/chatroom/chatroom.service.js';
 import { bridgeService } from '../../../modules/bridge/bridge.service.js';
 import type { Platform } from '../../../modules/bridge/bridge.service.js';
-import { createBridgeBindCode } from '../../../modules/bridge/bridge-bind-code-store.js';
 import {
   buildBridgePlatformConfigPayload,
   getBridgePlatformPlaybook,
 } from '../../../modules/bridge/bridge-platform-playbooks.js';
-import {
-  getBridgePlatformConfig,
-  hasBridgePlatformCredentials,
-  maskBridgePlatformConfig,
-  saveBridgePlatformConfig,
-} from '../../../modules/bridge/bridge-platform-config-store.js';
 import { listBridgePlatformDefinitions } from '../../../modules/bridge/bridge-platform-registry.js';
-import { syncBridgePlatformRuntime } from '../../../modules/bridge/bridge-runtime-sync.js';
+import { getBridgeBotById, listBridgeBots } from '../../../modules/bridge/bridge-bot-store.js';
+import { syncBridgeBotRuntime } from '../../../modules/bridge/bridge-runtime-sync.js';
 import { listAgentsTool, listChatRoomsTool } from './chatroom-helper.tools.js';
 
 export const EXTERNAL_PLATFORM_HELPER_AGENT_ID = '8f7d1f9a-4e08-4c2d-a489-67b02c9d4101';
 
 const PLATFORM_VALUES = ['telegram', 'feishu', 'dingtalk', 'wecom', 'qq'] as const;
 
+interface DuplicateCredentialError extends Error {
+  code: string;
+  existingBotId?: string;
+  existingBotName?: string;
+}
+
+function isDuplicateCredentialError(err: unknown): err is DuplicateCredentialError {
+  return err instanceof Error && (err as { code?: string }).code === 'DUPLICATE_CREDENTIAL';
+}
+
+const PLATFORM_CONFIG_FIELDS: Record<string, string[]> = {
+  telegram: ['botToken'],
+  feishu: ['appId', 'appSecret'],
+  dingtalk: ['appKey', 'appSecret'],
+  wecom: ['corpId', 'agentSecret', 'token', 'encodingAESKey'],
+  qq: ['appId', 'clientSecret'],
+};
+
+function validatePlatformConfig(platform: string, config: Record<string, string>): void {
+  const allowed = PLATFORM_CONFIG_FIELDS[platform];
+  if (!allowed) return;
+  const unknown = Object.keys(config).filter((k) => !allowed.includes(k));
+  if (unknown.length > 0) {
+    throw new Error(`Unknown config fields for ${platform}: ${unknown.join(', ')}`);
+  }
+}
+
 function formatCredentialList(platform: Platform): string {
   const playbook = getBridgePlatformPlaybook(platform);
   return playbook.requiredCredentials
     .map((field) => `- ${field.label}（${field.key}）：${field.howToGet}`)
     .join('\n');
+}
+
+async function validateCredentials(
+  platform: Platform,
+  values: Record<string, string>,
+): Promise<{ valid: boolean; error?: string }> {
+  try {
+    if (platform === 'telegram') {
+      const token = values.botToken;
+      if (!token) return { valid: false, error: 'Bot Token 不能为空' };
+      const res = await fetch(`https://api.telegram.org/bot${token}/getMe`);
+      const data = await res.json() as { ok: boolean; description?: string };
+      if (!data.ok) return { valid: false, error: `Token 无效：${data.description ?? '请检查 Token 是否正确'}` };
+      return { valid: true };
+    }
+
+    if (platform === 'feishu') {
+      const { appId, appSecret } = values;
+      if (!appId || !appSecret) return { valid: false, error: 'App ID 和 App Secret 不能为空' };
+      const res = await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ app_id: appId, app_secret: appSecret }),
+      });
+      const data = await res.json() as { code: number; msg?: string };
+      if (data.code !== 0) return { valid: false, error: `凭证无效：${data.msg ?? '请检查 App ID / App Secret'}` };
+      return { valid: true };
+    }
+
+    if (platform === 'dingtalk') {
+      const { appKey, appSecret } = values;
+      if (!appKey || !appSecret) return { valid: false, error: 'App Key 和 App Secret 不能为空' };
+      const res = await fetch('https://api.dingtalk.com/v1.0/oauth2/accessToken', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ appKey, appSecret }),
+      });
+      const data = await res.json() as { accessToken?: string; message?: string };
+      if (!data.accessToken) return { valid: false, error: `凭证无效：${data.message ?? '请检查 App Key / App Secret'}` };
+      return { valid: true };
+    }
+
+    if (platform === 'wecom') {
+      const { corpId, agentSecret } = values;
+      if (!corpId || !agentSecret) return { valid: false, error: 'Corp ID 和 Agent Secret 不能为空' };
+      const res = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=${encodeURIComponent(corpId)}&corpsecret=${encodeURIComponent(agentSecret)}`);
+      const data = await res.json() as { errcode: number; errmsg?: string };
+      if (data.errcode !== 0) return { valid: false, error: `凭证无效：${data.errmsg ?? '请检查 Corp ID / Agent Secret'}` };
+      return { valid: true };
+    }
+
+    if (platform === 'qq') {
+      const { appId, clientSecret } = values;
+      if (!appId || !clientSecret) return { valid: false, error: 'App ID 和 Client Secret 不能为空' };
+      const res = await fetch('https://bots.qq.com/app/getAppAccessToken', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ appId, clientSecret }),
+      });
+      const data = await res.json() as { access_token?: string; message?: string };
+      if (!data.access_token) return { valid: false, error: `凭证无效：${data.message ?? '请检查 App ID / Client Secret'}` };
+      return { valid: true };
+    }
+  } catch {
+    return { valid: false, error: `无法连接 ${platform} API，请检查网络后重试` };
+  }
+  return { valid: true };
 }
 
 function parseCredentialInput(values: Record<string, string | undefined>): Record<string, string> {
@@ -46,7 +134,7 @@ export function createExternalPlatformHelperTools(chatRoomId: string) {
         return JSON.stringify({ success: false, error: `当前群聊不存在: ${chatRoomId}` });
       }
 
-      const channels = (await bridgeService.listChannels()).filter((channel) => channel.chatRoomId === chatRoomId);
+      const bots = (await bridgeService.listBots()).filter((bot) => bot.chatRoomId === chatRoomId);
 
       return JSON.stringify({
         success: true,
@@ -55,19 +143,20 @@ export function createExternalPlatformHelperTools(chatRoomId: string) {
           name: chatRoom.name,
           description: chatRoom.description || '',
           defaultAgentId: chatRoom.defaultAgentId || null,
+          ownerUsername: chatRoom.owner?.username ?? null,
         },
-        externalMappings: channels.map((channel) => ({
-          id: channel.id,
-          platform: channel.platform,
-          externalId: channel.externalId,
-          enabled: channel.enabled,
-          defaultAgentId: channel.defaultAgentId || null,
+        externalBindings: bots.map((bot) => ({
+          id: bot.id,
+          platform: bot.platform,
+          name: bot.name,
+          enabled: bot.enabled,
+          boundMode: 'any-conversation',
         })),
       });
     },
     {
       name: 'get_current_chatroom',
-      description: '获取当前对话所在的 TeamAgentX 群聊信息，以及该群聊现有的外部平台映射。',
+      description: '获取当前对话所在的 TeamAgentX 群聊信息，以及该群聊现有的外部平台机器人绑定。',
       schema: z.object({}),
     },
   );
@@ -80,8 +169,8 @@ export function createExternalPlatformHelperTools(chatRoomId: string) {
         return [
           `${definition.label}（${definition.key}）`,
           `- 所需凭证：${playbook.requiredCredentials.map((field) => field.label).join('、')}`,
-          `- 绑定方式：${definition.supportsBindCode ? '支持绑定码' : '仅手工映射'}`,
-          `- 群标识：${definition.groupIdHint}`,
+          '- 绑定方式：保存凭证后直接绑定 TeamAgentX 群聊',
+          `- 触达方式：机器人收到消息后直接转入绑定群聊`,
         ].join('\n');
       }).join('\n\n')}`;
     },
@@ -109,14 +198,13 @@ export function createExternalPlatformHelperTools(chatRoomId: string) {
         ...playbook.consoleSteps.map((item, index) => `${index + 1}. ${item}`),
         '',
         '拿到数据后交给我，我会在 TeamAgentX 内完成：',
-        '- 保存平台凭证',
-        '- 绑定当前房间或指定房间',
-        '- 生成绑定码或直接创建映射',
+        '- 保存一个新的机器人凭证实例',
+        '- 直接把这个机器人绑定到当前房间或指定房间',
         '',
-        '完成映射后在群里这样做：',
+        '完成绑定后这样做：',
         ...playbook.bindSteps.map((item, index) => `${index + 1}. ${item}`),
         '',
-        `群标识说明：${definition?.groupIdHint ?? '按平台群 ID 提供'}`,
+        `说明：${definition?.label ?? platform} 机器人绑定后，任何打到该机器人的消息都会进入对应 TeamAgentX 群聊。`,
         '',
         '注意事项：',
         ...playbook.notes.map((item) => `- ${item}`),
@@ -131,43 +219,17 @@ export function createExternalPlatformHelperTools(chatRoomId: string) {
     },
   );
 
-  const getBridgePlatformConfigStatusTool = tool(
-    async ({ platform }: { platform: Platform }) => {
-      const cfg = await getBridgePlatformConfig(platform);
-      if (!cfg) {
-        return JSON.stringify({
-          success: true,
-          configured: false,
-          platform,
-          message: `平台 ${platform} 还没有配置凭证。`,
-        });
-      }
-
-      return JSON.stringify({
-        success: true,
-        configured: true,
-        platform,
-        config: maskBridgePlatformConfig(cfg),
-      });
-    },
-    {
-      name: 'get_bridge_platform_config_status',
-      description: '查看某个平台是否已经配置凭证、是否已设置默认助手。',
-      schema: z.object({
-        platform: z.enum(PLATFORM_VALUES).describe('外部平台标识'),
-      }),
-    },
-  );
-
   const saveBridgePlatformConfigTool = tool(
     async ({
       platform,
-      defaultAgentId,
+      name,
+      targetChatRoomId,
       botToken,
       values,
     }: {
       platform: Platform;
-      defaultAgentId?: string;
+      name?: string;
+      targetChatRoomId?: string;
       botToken?: string;
       values?: Record<string, string>;
     }) => {
@@ -176,31 +238,89 @@ export function createExternalPlatformHelperTools(chatRoomId: string) {
         normalizedValues.botToken = botToken;
       }
 
-      const payload = buildBridgePlatformConfigPayload(platform, normalizedValues);
-      const saved = await saveBridgePlatformConfig(platform, {
-        ...payload,
-        defaultAgentId: defaultAgentId || null,
-      });
-      await syncBridgePlatformRuntime(platform, saved, {
-        info: (...args: unknown[]) => console.log(...args),
-        warn: (...args: unknown[]) => console.warn(...args),
-        error: (...args: unknown[]) => console.error(...args),
-      });
+      try {
+        const finalChatRoomId = targetChatRoomId || chatRoomId;
 
-      return JSON.stringify({
-        success: true,
-        platform,
-        config: maskBridgePlatformConfig(saved),
-        savedFields: Object.keys(normalizedValues),
-        message: `已保存 ${platform} 平台凭证。后续你只需要继续做群绑定，不需要再打开外部集成页手动配置。`,
-      });
+        if (targetChatRoomId && targetChatRoomId !== chatRoomId) {
+          const currentRoom = await chatRoomService.findById(chatRoomId);
+          const targetRoom = await chatRoomService.findById(targetChatRoomId);
+          if (!targetRoom) {
+            return JSON.stringify({ success: false, error: '目标群聊不存在，请重新选择一个群聊。' });
+          }
+          if (targetRoom.ownerId !== currentRoom?.ownerId) {
+            return JSON.stringify({ success: false, error: '无权操作目标群聊，只能绑定到你拥有的群聊。' });
+          }
+        }
+
+        const room = await chatRoomService.findById(finalChatRoomId);
+        if (!room) {
+          return JSON.stringify({ success: false, error: '目标群聊不存在，请重新选择一个群聊。' });
+        }
+
+        validatePlatformConfig(platform, normalizedValues);
+
+        const validation = await validateCredentials(platform, normalizedValues);
+        if (!validation.valid) {
+          return JSON.stringify({ success: false, invalidCredentials: true, error: validation.error });
+        }
+
+        const botName = name?.trim() || `${platform}-bot`;
+        const ownerUsername = room.owner?.username;
+        const log = {
+          info: (...args: unknown[]) => console.log(...args),
+          warn: (...args: unknown[]) => console.warn(...args),
+          error: (...args: unknown[]) => console.error(...args),
+        };
+
+        const payload = buildBridgePlatformConfigPayload(platform, normalizedValues);
+
+        let saved;
+        try {
+          saved = await bridgeService.createBot({ platform, name: botName, ...payload });
+        } catch (err: unknown) {
+          if (isDuplicateCredentialError(err)) {
+            return JSON.stringify({
+              success: false,
+              duplicateCredential: true,
+              platform,
+              existingBot: { id: err.existingBotId, name: err.existingBotName },
+              ownerUsername: ownerUsername ?? null,
+              message: `该 ${platform} 凭证已被机器人「${err.existingBotName}」使用，不能重复保存。如需把它换绑到当前群聊，请使用 rebind_bridge_bot。`,
+            });
+          }
+          const message = err instanceof Error ? err.message : '未知错误，请稍后重试';
+          return JSON.stringify({ success: false, error: `保存凭证失败：${message}` });
+        }
+
+        try {
+          await syncBridgeBotRuntime(saved.id, log);
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : '请检查凭证是否正确';
+          return JSON.stringify({ success: false, error: `凭证已保存，但启动连接失败：${message}` });
+        }
+
+        const bound = await bridgeService.bindBot(saved.id, finalChatRoomId);
+
+        return JSON.stringify({
+          success: true,
+          platform,
+          bot: { id: bound.id, name: bound.name, chatRoomId: bound.chatRoomId, chatRoomName: bound.chatRoom?.name ?? null },
+          savedFields: Object.keys(normalizedValues),
+          ownerUsername: ownerUsername ?? null,
+          message: `已保存 ${platform} 机器人凭证，并绑定到群聊「${room.name}」。`,
+        });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : '未知错误，请稍后重试';
+        return JSON.stringify({ success: false, error: `操作失败：${message}` });
+      }
     },
     {
       name: 'save_bridge_platform_config',
-      description: '保存某个平台的接入凭证和默认助手。用户把平台上拿到的值告诉你后，必须调用这个工具真正写入系统，而不是只给出说明。',
+      description: '用新凭证创建一个平台机器人实例并立即绑定到当前群聊或指定群聊。用户把凭证和名字给你后，必须调用此工具写入系统。',
       schema: z.object({
         platform: z.enum(PLATFORM_VALUES).describe('外部平台标识'),
-        defaultAgentId: z.string().optional().describe('设为该平台默认响应的助手 ID，可选'),
+        name: z.string().describe('机器人实例名称，用户提供，便于在集成页区分'),
+        targetChatRoomId: z.string().optional().describe('要绑定的目标 TeamAgentX 群聊，默认当前群聊'),
         botToken: z.string().optional().describe('Telegram Bot Token，可选；也可放进 values.botToken'),
         values: z.record(z.string(), z.string()).optional().describe(`平台凭证键值对。请只传该平台需要的字段。\n${PLATFORM_VALUES.map((platform) => `${platform}:\n${formatCredentialList(platform)}`).join('\n')}`),
       }),
@@ -215,27 +335,26 @@ export function createExternalPlatformHelperTools(chatRoomId: string) {
       platform?: Platform;
       targetChatRoomId?: string;
     }) => {
-      let channels = await bridgeService.listChannels(platform);
-      if (targetChatRoomId) {
-        channels = channels.filter((channel) => channel.chatRoomId === targetChatRoomId);
+      let bots = await bridgeService.listBots(platform);
+      const filterRoomId = targetChatRoomId || chatRoomId;
+      bots = bots.filter((bot) => bot.chatRoomId === filterRoomId);
+
+      if (bots.length === 0) {
+        return '当前没有匹配的外部平台机器人绑定。';
       }
 
-      if (channels.length === 0) {
-        return '当前没有匹配的外部平台映射。';
-      }
-
-      return channels.map((channel) => [
-        `ID: ${channel.id}`,
-        `平台: ${channel.platform}`,
-        `外部群 ID: ${channel.externalId}`,
-        `内部房间: ${channel.chatRoom.name} (${channel.chatRoomId})`,
-        `状态: ${channel.enabled ? '启用' : '停用'}`,
-        `默认助手: ${channel.defaultAgent?.name || '未指定'}`,
+      return bots.map((bot) => [
+        `ID: ${bot.id}`,
+        `平台: ${bot.platform}`,
+        `名称: ${bot.name}`,
+        `绑定房间: ${bot.chatRoom?.name ?? '未绑定'} (${bot.chatRoomId ?? '-'})`,
+        '触达范围: 机器人收到的任意会话',
+        `状态: ${bot.enabled ? '启用' : '停用'}`,
       ].join('\n')).join('\n\n');
     },
     {
       name: 'list_bridge_mappings',
-      description: '查看现有的外部平台群聊映射，可按平台或房间过滤。',
+      description: '查看现有的外部平台机器人绑定，可按平台或房间过滤。',
       schema: z.object({
         platform: z.enum(PLATFORM_VALUES).optional().describe('按平台过滤，可选'),
         targetChatRoomId: z.string().optional().describe('按房间 ID 过滤，可选'),
@@ -245,172 +364,203 @@ export function createExternalPlatformHelperTools(chatRoomId: string) {
 
   const createBridgeMappingTool = tool(
     async ({
-      platform,
-      externalId,
+      botId,
       targetChatRoomId,
-      defaultAgentId,
-      webhookSecret,
-      configValues,
+      confirmed,
     }: {
-      platform: Platform;
-      externalId: string;
+      botId: string;
       targetChatRoomId?: string;
-      defaultAgentId?: string;
-      webhookSecret?: string;
-      configValues?: Record<string, string>;
+      confirmed?: boolean;
     }) => {
-      const finalChatRoomId = targetChatRoomId || chatRoomId;
-      const room = await chatRoomService.findById(finalChatRoomId);
-      if (!room) {
-        return JSON.stringify({ success: false, error: `目标房间不存在: ${finalChatRoomId}` });
+      if (!confirmed) {
+        return JSON.stringify({ success: false, message: '此操作需要确认，请传入 confirmed: true' });
       }
 
-      const channel = await bridgeService.createChannel({
-        platform,
-        externalId: externalId.trim(),
-        chatRoomId: finalChatRoomId,
-        defaultAgentId: defaultAgentId || undefined,
-        webhookSecret: webhookSecret || undefined,
-        config: configValues ? parseCredentialInput(configValues) : undefined,
-      });
+      try {
+        const finalChatRoomId = targetChatRoomId || chatRoomId;
 
-      return JSON.stringify({
-        success: true,
-        channel: {
-          id: channel.id,
-          platform: channel.platform,
-          externalId: channel.externalId,
-          chatRoomId: channel.chatRoomId,
-        },
-        message: `已把 ${platform} 群 ${externalId} 映射到 TeamAgentX 房间「${room.name}」。`,
-      });
+        if (targetChatRoomId && targetChatRoomId !== chatRoomId) {
+          const currentRoom = await chatRoomService.findById(chatRoomId);
+          const targetRoom = await chatRoomService.findById(targetChatRoomId);
+          if (!targetRoom) {
+            return JSON.stringify({ success: false, error: '目标群聊不存在，请重新选择一个群聊。' });
+          }
+          if (targetRoom.ownerId !== currentRoom?.ownerId) {
+            return JSON.stringify({ success: false, error: '无权操作目标群聊，只能绑定到你拥有的群聊。' });
+          }
+        }
+
+        const room = await chatRoomService.findById(finalChatRoomId);
+        if (!room) {
+          return JSON.stringify({ success: false, error: '目标群聊不存在，请重新选择一个群聊。' });
+        }
+
+        const bot = await getBridgeBotById(botId);
+        if (!bot) {
+          return JSON.stringify({ success: false, error: '找不到该机器人，请重新从列表中选择。' });
+        }
+
+        const channel = await bridgeService.bindBot(botId, finalChatRoomId, { forceRebind: true });
+        const ownerUsername = room.owner?.username;
+
+        return JSON.stringify({
+          success: true,
+          channel: { id: channel.id, platform: channel.platform, chatRoomId: channel.chatRoomId },
+          ownerUsername: ownerUsername ?? null,
+          message: `已把 ${bot.platform} 机器人「${bot.name}」换绑到群聊「${room.name}」。`,
+        });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : '未知错误，请稍后重试';
+        return JSON.stringify({ success: false, error: `换绑失败：${message}` });
+      }
     },
     {
-      name: 'create_bridge_mapping',
-      description: '【仅当用户已经明确提供外部群 ID 时调用】直接创建外部平台群聊到 TeamAgentX 房间的映射。',
+      name: 'rebind_bridge_bot',
+      description: '把已有机器人（含已绑定其他房间的）换绑到当前群聊或指定群聊。用户从列表中选好机器人后调用此工具。',
       schema: z.object({
-        platform: z.enum(PLATFORM_VALUES).describe('外部平台标识'),
-        externalId: z.string().describe('外部群 ID / chat_id / conversationId 等平台群标识'),
+        botId: z.string().describe('要换绑的机器人 ID，从 list_bridge_mappings 结果中获取'),
         targetChatRoomId: z.string().optional().describe('目标 TeamAgentX 房间 ID；默认当前房间'),
-        defaultAgentId: z.string().optional().describe('该映射的默认助手 ID，可选'),
-        webhookSecret: z.string().optional().describe('群级回调 Secret / Token，可选；企业微信等平台可传'),
-        configValues: z.record(z.string(), z.string()).optional().describe('群级额外配置，例如企业微信的 encodingAESKey。'),
+        confirmed: z.boolean().optional().describe('确认换绑操作，必须传入 true 才会执行'),
       }),
     },
   );
 
-  const generateBridgeBindCodeTool = tool(
+  const updateBotCredentialsTool = tool(
     async ({
-      platform,
-      targetChatRoomId,
+      botId,
+      values,
+      botToken,
     }: {
-      platform: Platform;
-      targetChatRoomId?: string;
+      botId: string;
+      values?: Record<string, string>;
+      botToken?: string;
     }) => {
-      const finalChatRoomId = targetChatRoomId || chatRoomId;
-      const room = await chatRoomService.findById(finalChatRoomId);
-      if (!room) {
-        return JSON.stringify({ success: false, error: `目标房间不存在: ${finalChatRoomId}` });
-      }
+      try {
+        const bot = await getBridgeBotById(botId);
+        if (!bot) {
+          return JSON.stringify({ success: false, error: '找不到该机器人，请重新从列表中选择。' });
+        }
 
-      const ready = await hasBridgePlatformCredentials(platform);
-      if (!ready) {
+        const normalizedValues = parseCredentialInput(values ?? {});
+        if (botToken && !normalizedValues.botToken) normalizedValues.botToken = botToken;
+
+        const validation = await validateCredentials(bot.platform as Platform, normalizedValues);
+        if (!validation.valid) {
+          return JSON.stringify({ success: false, invalidCredentials: true, error: validation.error });
+        }
+
+        const payload = buildBridgePlatformConfigPayload(bot.platform as Platform, normalizedValues);
+        const log = {
+          info: (...args: unknown[]) => console.log(...args),
+          warn: (...args: unknown[]) => console.warn(...args),
+          error: (...args: unknown[]) => console.error(...args),
+        };
+        await bridgeService.updateBot(botId, payload);
+        await syncBridgeBotRuntime(botId, log);
+
         return JSON.stringify({
-          success: false,
-          error: `平台 ${platform} 还没有保存凭证，请先调用 save_bridge_platform_config。`,
+          success: true,
+          bot: { id: bot.id, name: bot.name, platform: bot.platform },
+          message: `已更新机器人「${bot.name}」的凭证并重新连接。`,
         });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : '请稍后重试';
+        return JSON.stringify({ success: false, error: `更新凭证失败：${message}` });
       }
-
-      const bindCode = createBridgeBindCode(platform, finalChatRoomId);
-      return JSON.stringify({
-        success: true,
-        platform,
-        chatRoom: { id: room.id, name: room.name },
-        bindCode,
-        command: `/bind ${bindCode.code}`,
-        message: `请把机器人加入目标群，然后在群里发送 /bind ${bindCode.code} 完成映射。`,
-      });
     },
     {
-      name: 'generate_bridge_bind_code',
-      description: '为指定房间生成外部平台绑定码。适合用户还不知道外部群 ID，但可以在目标群里发命令的场景。',
+      name: 'update_bot_credentials',
+      description: '更新已有机器人的凭证（不改变绑定关系）。用于更换 Token / Secret 等，适合"换凭证但保留绑定"的场景。',
       schema: z.object({
-        platform: z.enum(PLATFORM_VALUES).describe('外部平台标识'),
-        targetChatRoomId: z.string().optional().describe('目标 TeamAgentX 房间 ID；默认当前房间'),
+        botId: z.string().describe('机器人 ID，从 get_current_chatroom 或 list_bridge_mappings 获取'),
+        botToken: z.string().optional().describe('新 Bot Token（Telegram）'),
+        values: z.record(z.string(), z.string()).optional().describe('新凭证键值对，只传需要更新的字段'),
       }),
     },
   );
 
   const toggleBridgeMappingTool = tool(
     async ({ channelId, enabled }: { channelId: string; enabled: boolean }) => {
-      const existing = await prisma.externalChannel.findUnique({
-        where: { id: channelId },
-        select: { id: true, platform: true, externalId: true, enabled: true },
-      });
-      if (!existing) {
-        return JSON.stringify({ success: false, error: `映射不存在: ${channelId}` });
+      try {
+        const existing = (await bridgeService.listBots()).find((bot) => bot.id === channelId);
+        if (!existing) {
+          return JSON.stringify({ success: false, error: '找不到该机器人，请重新从列表中选择。' });
+        }
+        await bridgeService.updateBot(channelId, { enabled });
+        return JSON.stringify({
+          success: true,
+          message: `已将 ${existing.platform} 机器人「${existing.name}」${enabled ? '启用' : '停用'}。`,
+        });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : '未知错误，请稍后重试';
+        return JSON.stringify({ success: false, error: `操作失败：${message}` });
       }
-      await bridgeService.updateChannel(channelId, { enabled });
-      return JSON.stringify({
-        success: true,
-        message: `已将 ${existing.platform} 群 ${existing.externalId} 的映射${enabled ? '启用' : '停用'}。`,
-      });
     },
     {
       name: 'toggle_bridge_mapping',
-      description: '启用或停用一个外部平台映射（不删除数据）。',
+      description: '启用或停用一个外部平台机器人绑定（不删除凭证）。',
       schema: z.object({
-        channelId: z.string().describe('ExternalChannel 记录 ID'),
+        channelId: z.string().describe('绑定记录 ID'),
         enabled: z.boolean().describe('true = 启用，false = 停用'),
       }),
     },
   );
 
   const deleteBridgeMappingTool = tool(
-    async ({ channelId }: { channelId: string }) => {
-      const existing = await prisma.externalChannel.findUnique({
-        where: { id: channelId },
-        select: { id: true, platform: true, externalId: true },
-      });
-
-      if (!existing) {
-        return JSON.stringify({ success: false, error: `映射不存在: ${channelId}` });
+    async ({ channelId, confirmed }: { channelId: string; confirmed?: boolean }) => {
+      if (!confirmed) {
+        return JSON.stringify({ success: false, message: '此操作需要确认，请传入 confirmed: true' });
       }
 
-      await bridgeService.deleteChannel(channelId);
-      return JSON.stringify({
-        success: true,
-        message: `已删除 ${existing.platform} 群 ${existing.externalId} 的映射。`,
-      });
+      try {
+        const existing = (await bridgeService.listBots()).find((bot) => bot.id === channelId);
+        if (!existing) {
+          return JSON.stringify({ success: false, error: '找不到该机器人，请重新从列表中选择。' });
+        }
+        await bridgeService.deleteBot(channelId);
+        return JSON.stringify({
+          success: true,
+          message: `已删除 ${existing.platform} 机器人「${existing.name}」及其凭证。`,
+        });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : '未知错误，请稍后重试';
+        return JSON.stringify({ success: false, error: `删除失败：${message}` });
+      }
     },
     {
       name: 'delete_bridge_mapping',
-      description: '【必须用户确认后才能调用】删除一个外部平台映射。',
+      description: '【必须用户确认后才能调用】删除一个外部平台机器人绑定。',
       schema: z.object({
-        channelId: z.string().describe('ExternalChannel 记录 ID'),
+        channelId: z.string().describe('绑定记录 ID'),
+        confirmed: z.boolean().optional().describe('确认删除操作，必须传入 true 才会执行'),
       }),
     },
   );
 
   const getPublicBaseUrlTool = tool(
     async () => {
-      const systemCfg = await prisma.platformConfig.findUnique({ where: { platform: 'system' } });
-      const baseUrl = (systemCfg?.config ? (JSON.parse(systemCfg.config) as { baseUrl?: string }).baseUrl : null) ?? '';
-      return JSON.stringify({
-        success: true,
-        baseUrl: baseUrl || null,
-        configured: Boolean(baseUrl),
-        webhookUrls: baseUrl
-          ? {
-              wecom: `${baseUrl}/api/bridge/webhook/wecom`,
-              qq: `${baseUrl}/api/bridge/webhook/qq`,
-              telegram: `${baseUrl}/api/bridge/webhook/telegram`,
-            }
-          : null,
-        message: baseUrl
-          ? `已配置公网地址：${baseUrl}`
-          : '尚未配置公网地址。企业微信和 QQ 需要公网地址才能接收消息。可在 TeamAgentX 集成页面顶部配置，或让用户自行运行 ngrok http 3001 后告诉你 URL。',
-      });
+      try {
+        const systemCfg = await prisma.platformConfig.findUnique({ where: { platform: 'system' } });
+        const baseUrl = (systemCfg?.config ? (JSON.parse(systemCfg.config) as { baseUrl?: string }).baseUrl : null) ?? '';
+        return JSON.stringify({
+          success: true,
+          baseUrl: baseUrl || null,
+          configured: Boolean(baseUrl),
+          webhookUrls: baseUrl
+            ? {
+                wecom: `${baseUrl}/api/bridge/webhook/wecom`,
+                qq: `${baseUrl}/api/bridge/webhook/qq`,
+                telegram: `${baseUrl}/api/bridge/webhook/telegram`,
+              }
+            : null,
+          message: baseUrl
+            ? `已配置公网地址：${baseUrl}`
+            : '尚未配置公网地址。企业微信和 QQ 需要公网地址才能接收消息。可在 TeamAgentX 集成页面顶部配置，或让用户自行运行 ngrok http 3001 后告诉你 URL。',
+        });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : '请稍后重试';
+        return JSON.stringify({ success: false, error: `读取公网地址配置失败：${message}` });
+      }
     },
     {
       name: 'get_public_base_url',
@@ -423,11 +573,10 @@ export function createExternalPlatformHelperTools(chatRoomId: string) {
     getCurrentChatRoomTool,
     listBridgePlatformsTool,
     getBridgePlatformGuideTool,
-    getBridgePlatformConfigStatusTool,
     saveBridgePlatformConfigTool,
+    updateBotCredentialsTool,
     listBridgeMappingsTool,
     createBridgeMappingTool,
-    generateBridgeBindCodeTool,
     toggleBridgeMappingTool,
     deleteBridgeMappingTool,
     getPublicBaseUrlTool,

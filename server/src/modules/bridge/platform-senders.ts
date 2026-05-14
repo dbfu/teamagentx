@@ -1,14 +1,22 @@
 import prisma from '../../lib/prisma.js';
 import { bridgeService } from './bridge.service.js';
-import { decrypt } from './crypto.js';
 import { parseStoredBridgeConfig, resolveStoredBridgeBotToken } from './bridge-platform-config.js';
 
 type Platform = 'telegram' | 'feishu' | 'dingtalk' | 'wecom' | 'qq';
-type SenderFn = (externalId: string, text: string, agentName: string) => Promise<void>;
+type SenderFn = (botId: string, externalId: string, text: string, agentName: string) => Promise<void>;
+type TypingSenderFn = (botId: string, externalId: string) => Promise<void>;
+const DINGTALK_SESSION_WEBHOOK_PREFIX = 'sessionWebhook:';
+
+// DingTalk session webhook 允许的外发 host（与 dingtalk-stream-client 保持一致）
+const ALLOWED_WEBHOOK_HOSTS = ['oapi.dingtalk.com', 'api.dingtalk.com'];
+
+// Telegram per-(botToken+chatId) 发送序列化队列，防止并发 flood
+const sendQueues = new Map<string, Promise<void>>();
 
 export interface BridgePlatformAdapter {
   platform: Platform;
   sendMessage: SenderFn;
+  sendTyping?: TypingSenderFn;
 }
 
 // Simple in-memory access token cache: key → { token, expiresAt }
@@ -48,7 +56,7 @@ function escapeHtml(s: string): string {
  * 将 Markdown 文本转为 Telegram HTML (parse_mode=HTML)。
  * 先提取代码块/行内代码占位，再处理其他 markdown，最后还原。
  */
-function markdownToTelegramHtml(md: string): string {
+export function markdownToTelegramHtml(md: string): string {
   const saved: string[] = [];
   const PLACEHOLDER = '\x01';
 
@@ -114,13 +122,9 @@ function splitTelegramHtml(html: string, maxLen = 3800): string[] {
 }
 
 // ─── Telegram sender ───
-async function telegramSend(externalId: string, text: string, agentName: string): Promise<void> {
-  const channel = await prisma.externalChannel.findFirst({
-    where: { platform: 'telegram', externalId, enabled: true },
-  });
-  if (!channel) return;
-
-  const botToken = resolveStoredBridgeBotToken(channel);
+async function telegramSend(botId: string, externalId: string, text: string, agentName: string): Promise<void> {
+  const bridgeBot = await prisma.bridgeBot.findUnique({ where: { id: botId } });
+  const botToken = bridgeBot ? resolveStoredBridgeBotToken(bridgeBot) : undefined;
   if (!botToken) return;
 
   // <blockquote> 渲染为带色竖线的引用块，视觉上最突出
@@ -128,30 +132,70 @@ async function telegramSend(externalId: string, text: string, agentName: string)
   const body = markdownToTelegramHtml(text);
   const full = header + '\n' + body;
   const chunks = splitTelegramHtml(full);
+  const chatId = externalId;
 
   for (const chunk of chunks) {
-    const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: externalId, text: chunk, parse_mode: 'HTML', disable_web_page_preview: true }),
-    });
-    if (!res.ok) {
-      const errBody = await res.text().catch(() => '');
-      // Telegram HTML 解析失败时降级为纯文本
-      if (res.status === 400 && errBody.includes("can't parse entities")) {
-        const fallback = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: externalId, text: `[${agentName}] ${text}`.slice(0, 4096) }),
-        });
-        if (!fallback.ok) {
-          console.error(`[Bridge/telegram] 降级发送失败 ${fallback.status}`);
+    const chatKey = `${botToken}:${chatId}`;
+    const prev = sendQueues.get(chatKey) ?? Promise.resolve();
+    const next = prev.then(async () => {
+      const res = await fetch(`https://api.telegram.org/bot${encodeURIComponent(botToken)}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text: chunk, parse_mode: 'HTML', disable_web_page_preview: true }),
+      });
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => '');
+        // Telegram HTML 解析失败时降级为纯文本
+        if (res.status === 400 && errBody.includes("can't parse entities")) {
+          const fallback = await fetch(`https://api.telegram.org/bot${encodeURIComponent(botToken)}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: chatId, text: `[${agentName}] ${text}`.slice(0, 4096) }),
+          });
+          if (!fallback.ok) {
+            const fallbackBody = await fallback.text().catch(() => '');
+            console.error(`[Bridge/telegram] 降级发送失败 ${fallback.status}`);
+            throw new Error(`[Telegram] send failed: ${fallback.status} ${fallbackBody.slice(0, 200)}`);
+          }
+          // 降级成功后跳出循环（通过 signal 机制：抛一个特殊标记）
+          throw new TelegramFallbackSent();
+        } else {
+          console.error(`[Bridge/telegram] 发送失败 ${res.status}: ${errBody.slice(0, 200)}`);
+          throw new Error(`[Telegram] send failed: ${res.status} ${errBody.slice(0, 200)}`);
         }
-      } else {
-        console.error(`[Bridge/telegram] 发送失败 ${res.status}: ${errBody.slice(0, 200)}`);
       }
+      // 清理已完成队列项（队列超过 500 条时触发）
+      if (sendQueues.size > 500) {
+        sendQueues.delete(chatKey);
+      }
+    });
+    sendQueues.set(chatKey, next.catch(() => {}));
+    try {
+      await next;
+    } catch (err) {
+      if (err instanceof TelegramFallbackSent) break;
+      throw err;
     }
   }
+}
+
+/** 内部信号类：表示 Telegram HTML 降级已发送，应跳出 chunk 循环 */
+class TelegramFallbackSent extends Error {
+  constructor() { super('fallback sent'); }
+}
+
+async function telegramTyping(botId: string, externalId: string): Promise<void> {
+  const bridgeBot = await prisma.bridgeBot.findUnique({ where: { id: botId } });
+  const botToken = bridgeBot ? resolveStoredBridgeBotToken(bridgeBot) : undefined;
+  if (!botToken) return;
+
+  await fetch(`https://api.telegram.org/bot${botToken}/sendChatAction`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: externalId, action: 'typing' }),
+  }).catch((error) => {
+    console.error('[Bridge/telegram] typing 发送失败:', error);
+  });
 }
 
 // ─── 飞书 Post 富文本转换 ───
@@ -242,8 +286,8 @@ function parseFeishuInline(line: string): FeishuPostElement[] {
 }
 
 // ─── 飞书 sender ───
-async function getFeishuToken(appId: string, appSecret: string): Promise<string> {
-  const cacheKey = `feishu:${appId}`;
+async function getFeishuToken(botId: string, appId: string, appSecret: string): Promise<string> {
+  const cacheKey = `feishu:${botId}`;
   const cached = getCachedToken(cacheKey);
   if (cached) return cached;
 
@@ -252,27 +296,24 @@ async function getFeishuToken(appId: string, appSecret: string): Promise<string>
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ app_id: appId, app_secret: appSecret }),
   });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`[Feishu] token fetch failed: ${res.status} ${text.slice(0, 200)}`);
+  }
   const data = await res.json() as { tenant_access_token: string; expire: number };
   const safeExpiry = (typeof data.expire === 'number' && isFinite(data.expire) && data.expire > 0) ? data.expire - 60 : 60;
   setCachedToken(cacheKey, data.tenant_access_token, safeExpiry);
   return data.tenant_access_token;
 }
 
-async function feishuSend(externalId: string, text: string, agentName: string): Promise<void> {
-  const channel = await prisma.externalChannel.findFirst({
-    where: { platform: 'feishu', externalId, enabled: true },
-  });
-
-  let configJson: string | null = channel?.config ?? null;
-  if (!configJson) {
-    const platformCfg = await prisma.platformConfig.findUnique({ where: { platform: 'feishu' } });
-    configJson = platformCfg?.config ?? null;
-  }
+async function feishuSend(botId: string, externalId: string, text: string, agentName: string): Promise<void> {
+  const bridgeBot = await prisma.bridgeBot.findUnique({ where: { id: botId } });
+  const configJson = bridgeBot?.config ?? null;
   if (!configJson) return;
 
   const cfg = parseStoredBridgeConfig({ config: configJson }) as { appId: string; appSecret: string } | null;
   if (!cfg?.appId || !cfg.appSecret) return;
-  const token = await getFeishuToken(cfg.appId, cfg.appSecret);
+  const token = await getFeishuToken(botId, cfg.appId, cfg.appSecret);
 
   const feishuRes = await fetch('https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id', {
     method: 'POST',
@@ -286,12 +327,13 @@ async function feishuSend(externalId: string, text: string, agentName: string): 
   if (!feishuRes.ok) {
     const body = await feishuRes.text().catch(() => '');
     console.error(`[Bridge/feishu] 发送失败 ${feishuRes.status}: ${body.slice(0, 200)}`);
+    throw new Error(`[Feishu] send failed: ${feishuRes.status} ${body.slice(0, 200)}`);
   }
 }
 
 // ─── 钉钉 sender ───
-async function getDingtalkToken(appKey: string, appSecret: string): Promise<string> {
-  const cacheKey = `dingtalk:${appKey}`;
+async function getDingtalkToken(botId: string, appKey: string, appSecret: string): Promise<string> {
+  const cacheKey = `dingtalk:${botId}`;
   const cached = getCachedToken(cacheKey);
   if (cached) return cached;
 
@@ -300,27 +342,29 @@ async function getDingtalkToken(appKey: string, appSecret: string): Promise<stri
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ appKey, appSecret }),
   });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`[DingTalk] token fetch failed: ${res.status} ${text.slice(0, 200)}`);
+  }
   const data = await res.json() as { accessToken: string; expireIn: number };
   const safeExpiryDd = (typeof data.expireIn === 'number' && isFinite(data.expireIn) && data.expireIn > 0) ? data.expireIn - 60 : 60;
   setCachedToken(cacheKey, data.accessToken, safeExpiryDd);
   return data.accessToken;
 }
 
-async function dingtalkSend(externalId: string, text: string, agentName: string): Promise<void> {
-  const channel = await prisma.externalChannel.findFirst({
-    where: { platform: 'dingtalk', externalId, enabled: true },
-  });
-
-  let configJson: string | null = channel?.config ?? null;
-  if (!configJson) {
-    const platformCfg = await prisma.platformConfig.findUnique({ where: { platform: 'dingtalk' } });
-    configJson = platformCfg?.config ?? null;
+async function dingtalkSend(botId: string, externalId: string, text: string, agentName: string): Promise<void> {
+  if (externalId.startsWith(DINGTALK_SESSION_WEBHOOK_PREFIX)) {
+    await sendViaSessionWebhook(externalId.slice(DINGTALK_SESSION_WEBHOOK_PREFIX.length), `[${agentName}] ${text}`);
+    return;
   }
+
+  const bridgeBot = await prisma.bridgeBot.findUnique({ where: { id: botId } });
+  const configJson = bridgeBot?.config ?? null;
   if (!configJson) return;
 
   const cfg = parseStoredBridgeConfig({ config: configJson }) as { appKey: string; appSecret: string } | null;
   if (!cfg?.appKey || !cfg.appSecret) return;
-  const token = await getDingtalkToken(cfg.appKey, cfg.appSecret);
+  const token = await getDingtalkToken(botId, cfg.appKey, cfg.appSecret);
 
   // robotCode 与 appKey (clientId) 相同，Stream 模式无需单独配置
   const ddRes = await fetch('https://api.dingtalk.com/v1.0/robot/groupMessages/send', {
@@ -336,39 +380,63 @@ async function dingtalkSend(externalId: string, text: string, agentName: string)
   if (!ddRes.ok) {
     const body = await ddRes.text().catch(() => '');
     console.error(`[Bridge/dingtalk] 发送失败 ${ddRes.status}: ${body.slice(0, 200)}`);
+    throw new Error(`[DingTalk] send failed: ${ddRes.status} ${body.slice(0, 200)}`);
+  }
+}
+
+async function sendViaSessionWebhook(sessionWebhook: string, text: string): Promise<void> {
+  // SSRF 防护：仅允许 https 且 host 在白名单内
+  let webhookUrl: URL;
+  try {
+    webhookUrl = new URL(sessionWebhook);
+  } catch {
+    throw new Error(`[DingTalk] invalid session webhook URL: ${sessionWebhook.slice(0, 100)}`);
+  }
+  if (webhookUrl.protocol !== 'https:') {
+    throw new Error(`[DingTalk] session webhook must use HTTPS`);
+  }
+  if (!ALLOWED_WEBHOOK_HOSTS.includes(webhookUrl.hostname)) {
+    throw new Error(`[DingTalk] session webhook host not allowed: ${webhookUrl.hostname}`);
+  }
+
+  const res = await fetch(sessionWebhook, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ msgtype: 'text', text: { content: text } }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`[DingTalk] session webhook send failed: ${res.status} ${body.slice(0, 200)}`);
   }
 }
 
 // ─── 企业微信 sender ───
-async function getWecomToken(corpId: string, agentSecret: string): Promise<string> {
-  const cacheKey = `wecom:${corpId}`;
+async function getWecomToken(botId: string, corpId: string, agentSecret: string): Promise<string> {
+  const cacheKey = `wecom:${botId}`;
   const cached = getCachedToken(cacheKey);
   if (cached) return cached;
 
   const res = await fetch(
-    `https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=${corpId}&corpsecret=${agentSecret}`,
+    `https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=${encodeURIComponent(corpId)}&corpsecret=${encodeURIComponent(agentSecret)}`,
   );
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`[WeCom] token fetch failed: ${res.status} ${text.slice(0, 200)}`);
+  }
   const data = await res.json() as { access_token: string; expires_in: number };
   const safeExpiryWc = (typeof data.expires_in === 'number' && isFinite(data.expires_in) && data.expires_in > 0) ? data.expires_in - 60 : 60;
   setCachedToken(cacheKey, data.access_token, safeExpiryWc);
   return data.access_token;
 }
 
-async function wecomSend(externalId: string, text: string, agentName: string): Promise<void> {
-  const channel = await prisma.externalChannel.findFirst({
-    where: { platform: 'wecom', externalId, enabled: true },
-  });
-
-  let configJson: string | null = channel?.config ?? null;
-  if (!configJson) {
-    const platformCfg = await prisma.platformConfig.findUnique({ where: { platform: 'wecom' } });
-    configJson = platformCfg?.config ?? null;
-  }
+async function wecomSend(botId: string, externalId: string, text: string, agentName: string): Promise<void> {
+  const bridgeBot = await prisma.bridgeBot.findUnique({ where: { id: botId } });
+  const configJson = bridgeBot?.config ?? null;
   if (!configJson) return;
 
   const cfg = parseStoredBridgeConfig({ config: configJson }) as { corpId: string; agentSecret: string } | null;
   if (!cfg?.corpId || !cfg.agentSecret) return;
-  const token = await getWecomToken(cfg.corpId, cfg.agentSecret);
+  const token = await getWecomToken(botId, cfg.corpId, cfg.agentSecret);
 
   const wecomRes = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/appchat/send?access_token=${token}`, {
     method: 'POST',
@@ -382,12 +450,13 @@ async function wecomSend(externalId: string, text: string, agentName: string): P
   if (!wecomRes.ok) {
     const body = await wecomRes.text().catch(() => '');
     console.error(`[Bridge/wecom] 发送失败 ${wecomRes.status}: ${body.slice(0, 200)}`);
+    throw new Error(`[WeCom] send failed: ${wecomRes.status} ${body.slice(0, 200)}`);
   }
 }
 
 // ─── QQ sender ───
-async function getQQToken(appId: string, clientSecret: string): Promise<string> {
-  const cacheKey = `qq:${appId}`;
+async function getQQToken(botId: string, appId: string, clientSecret: string): Promise<string> {
+  const cacheKey = `qq:${botId}`;
   const cached = getCachedToken(cacheKey);
   if (cached) return cached;
 
@@ -396,6 +465,10 @@ async function getQQToken(appId: string, clientSecret: string): Promise<string> 
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ appId, clientSecret }),
   });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`[QQ] token fetch failed: ${res.status} ${text.slice(0, 200)}`);
+  }
   const data = await res.json() as { access_token: string; expires_in: string };
   const parsedExpiry = parseInt(data.expires_in, 10);
   const safeExpiryQq = (isFinite(parsedExpiry) && parsedExpiry > 0) ? parsedExpiry - 60 : 60;
@@ -403,21 +476,14 @@ async function getQQToken(appId: string, clientSecret: string): Promise<string> 
   return data.access_token;
 }
 
-async function qqSend(externalId: string, text: string, agentName: string): Promise<void> {
-  const channel = await prisma.externalChannel.findFirst({
-    where: { platform: 'qq', externalId, enabled: true },
-  });
-
-  let configJson: string | null = channel?.config ?? null;
-  if (!configJson) {
-    const platformCfg = await prisma.platformConfig.findUnique({ where: { platform: 'qq' } });
-    configJson = platformCfg?.config ?? null;
-  }
+async function qqSend(botId: string, externalId: string, text: string, agentName: string): Promise<void> {
+  const bridgeBot = await prisma.bridgeBot.findUnique({ where: { id: botId } });
+  const configJson = bridgeBot?.config ?? null;
   if (!configJson) return;
 
   const cfg = parseStoredBridgeConfig({ config: configJson }) as { appId: string; clientSecret: string } | null;
   if (!cfg?.appId || !cfg.clientSecret) return;
-  const token = await getQQToken(cfg.appId, cfg.clientSecret);
+  const token = await getQQToken(botId, cfg.appId, cfg.clientSecret);
 
   const qqRes = await fetch(`https://api.sgroup.qq.com/v2/groups/${externalId}/messages`, {
     method: 'POST',
@@ -427,11 +493,12 @@ async function qqSend(externalId: string, text: string, agentName: string): Prom
   if (!qqRes.ok) {
     const body = await qqRes.text().catch(() => '');
     console.error(`[Bridge/qq] 发送失败 ${qqRes.status}: ${body.slice(0, 200)}`);
+    throw new Error(`[QQ] send failed: ${qqRes.status} ${body.slice(0, 200)}`);
   }
 }
 
 export const BRIDGE_PLATFORM_ADAPTERS: BridgePlatformAdapter[] = [
-  { platform: 'telegram', sendMessage: telegramSend },
+  { platform: 'telegram', sendMessage: telegramSend, sendTyping: telegramTyping },
   { platform: 'feishu', sendMessage: feishuSend },
   { platform: 'dingtalk', sendMessage: dingtalkSend },
   { platform: 'wecom', sendMessage: wecomSend },
@@ -439,10 +506,13 @@ export const BRIDGE_PLATFORM_ADAPTERS: BridgePlatformAdapter[] = [
 ];
 
 export function registerBridgePlatformAdapters(
-  service: Pick<typeof bridgeService, 'registerSender'> = bridgeService,
+  service: Pick<typeof bridgeService, 'registerSender' | 'registerTypingSender'> = bridgeService,
 ): void {
   for (const adapter of BRIDGE_PLATFORM_ADAPTERS) {
     service.registerSender(adapter.platform, adapter.sendMessage);
+    if (adapter.sendTyping) {
+      service.registerTypingSender(adapter.platform, adapter.sendTyping);
+    }
   }
 }
 

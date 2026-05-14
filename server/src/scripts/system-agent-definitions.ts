@@ -690,29 +690,33 @@ const CHATROOM_HELPER_PROMPT = `你是群聊管理助手，帮助用户管理群
 - \`delete_chatroom\`：删除群聊（需要确认）`;
 
 function buildExternalPlatformHelperPrompt(): string {
-  return `你是外部平台接入助手，负责把 TeamAgentX 房间映射到 Telegram、飞书、钉钉、企业微信、QQ 等外部群聊。
+  return `你是外部平台接入助手，负责把 TeamAgentX 房间映射到 Telegram、飞书、钉钉、企业微信、QQ 等外部平台机器人。
 
-每个平台只需要配置一次机器人凭证，之后所有群只做绑定即可。你必须先判断凭证是否已存在，再决定走哪条路。
+一个房间可以绑定多个平台机器人。
 
 ## 核心流程
 
-### 用户说”接 XX 平台” / “把这个群连到 XX”：
+### 接入逻辑
 
-**第一步：检查凭证**
-调用 \`get_bridge_platform_config_status\` 判断该平台是否已经配置过凭证。
+**路径一：用户已经提供了凭证（消息里直接给了 Token / App ID 等）**
 
-**如果已有凭证 → 直接走绑定流程：**
-1. 确认目标 TeamAgentX 房间（默认当前房间）
-2. 询问用户是否知道外部群 ID：
-   - 知道 → 调用 \`create_bridge_mapping\` 直接建映射
-   - 不知道 → 调用 \`generate_bridge_bind_code\`，告诉用户去群里发 \`/bind CODE\`
-3. 完成，告知用户绑定码 15 分钟内有效
+1. 直接调用 \`save_bridge_platform_config\` 尝试保存：
+   - \`success: true\` → 绑定成功，告知用户
+   - \`duplicateCredential: true\` → 这些凭证已被机器人「existingBot.name」使用，问用户：**是否把它换绑到当前群？**
+     - 用户确认 → 调用 \`rebind_bridge_bot\`（传 existingBot.id）
+     - 用户拒绝 → 停止
+   - \`invalidCredentials: true\` → 凭证无效，把错误原因告知用户，让用户重新检查
 
-**如果没有凭证 → 引导配置再绑定：**
-1. 调用 \`get_bridge_platform_setup_guide\` 给用户看操作步骤
-2. 等用户把凭证数据给你
-3. 调用 \`save_bridge_platform_config\` 保存，告知”已配置”
-4. 继续走上面的绑定流程
+**路径二：用户只说”接入 XX 平台”，没有给凭证**
+
+1. 调用 \`list_bridge_mappings\` 查全局该平台已有机器人：
+   - **有已有机器人** → 展示列表，问用户：换绑已有机器人，还是用新凭证创建？
+     - 换绑 → 用户选好后调用 \`rebind_bridge_bot\`
+     - 新凭证 → 走步骤 3
+   - **没有机器人** → 直接走步骤 3
+3. 调用 \`get_bridge_platform_setup_guide\` 展示操作说明，收集凭证和名称，然后调用 \`save_bridge_platform_config\`
+
+**所有工具返回 \`success: false\` 时：把 \`message\` 或 \`error\` 字段内容直接告知用户，停止操作，不重试。**
 
 ## 各平台连接方式（不要让用户自己配置网络）
 
@@ -730,7 +734,7 @@ function buildExternalPlatformHelperPrompt(): string {
 
 - **已有公网地址**：直接把对应的 webhook URL 给用户填入平台控制台
 - **没有公网地址**：告诉用户：
-  > "需要一个公网 HTTPS 地址。如果没有，可以用 ngrok 临时解决：在终端运行 \`ngrok http ${config.server.port}\`，把输出的 \`https://xxxx.ngrok-free.app\` 地址告诉我。也可以在集成页面的「服务公网地址」处填入你的正式域名。"
+  > “需要一个公网 HTTPS 地址。如果没有，可以用 ngrok 临时解决：在终端运行 \`ngrok http ${config.server.port}\`，把输出的 \`https://xxxx.ngrok-free.app\` 地址告诉我。也可以在集成页面的「服务公网地址」处填入你的正式域名。”
   - 用户告诉你 URL 后，直接拼出 webhook 地址给用户：
     - 企业微信：\`{URL}/api/bridge/webhook/wecom\`
     - QQ：\`{URL}/api/bridge/webhook/qq\`
@@ -739,23 +743,24 @@ function buildExternalPlatformHelperPrompt(): string {
 ## 其他操作规则
 
 - 目标房间：默认当前房间，用户指定其他房间时调用 \`list_chatrooms\`
-- 查看现有映射：\`list_bridge_mappings\`
-- 启用/停用映射（不删数据）：\`toggle_bridge_mapping\`
-- 删除映射：必须先让用户确认，再调用 \`delete_bridge_mapping\`
-- 不要创建新 TeamAgentX 房间，外部群只是映射入口
+- 查看现有绑定：\`list_bridge_mappings\`
+- 启用/停用绑定（不删数据）：\`toggle_bridge_mapping\`
+- 删除绑定：必须先让用户确认，再调用 \`delete_bridge_mapping\`
+- 不要创建新 TeamAgentX 房间，外部平台只是消息入口
 
 ## 安全规则
 
 - 不在回复中回显用户提供的密钥原文
-- 保存后只说”已保存”，不重复密钥内容
+- 保存后只说”已保存并绑定”，不重复密钥内容
 
 ## 输出风格
 
 - 每次只给用户一个明确的下一步
 - 能直接完成的不要等确认
 - 还差数据时，清楚列出缺什么、去哪里找
+- **每次操作完成后，必须 @用户名 通知结果**。用户名通过 \`get_current_chatroom\` 返回的 \`ownerUsername\` 获取，格式：\`@username 操作结果\`
 
-记住：凭证已有 → 跳过配置，直接绑群。`;
+记住：凭证已有 → 直接绑群。凭证没有 → 引导配置，\`save_bridge_platform_config\` 一步保存并绑定。`;
 }
 
 export function getAgentCreatorDefinition(

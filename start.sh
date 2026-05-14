@@ -35,7 +35,8 @@ if [ "$MODE" = "electron" ]; then
   # 检查端口 11053（Electron 内置后端）
   kill_port 11053
 
-  cd "$SCRIPT_DIR/apps/desktop" && pnpm dev
+  echo "Building embedded server for Electron..."
+  cd "$SCRIPT_DIR/apps/desktop" && pnpm dev:full
 else
   # Web 模式：分别启动后端和前端
   echo "Starting in Web mode..."
@@ -58,7 +59,7 @@ else
 
   # 启动后端
   echo "Starting server..."
-  cd "$SCRIPT_DIR/server" && pnpm exec tsx src/index.ts &
+  cd "$SCRIPT_DIR/server" && pnpm start &
 
   # 启动前端（纯网页模式）
   echo "Starting client..."

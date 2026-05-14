@@ -15,6 +15,8 @@ export interface BridgePlatformDefinition {
   supportsBindCode: boolean;
   supportsManualChannelCreate: boolean;
   configFields: BridgePlatformConfigFieldDefinition[];
+  /** Whether this platform receives events via a public webhook URL */
+  requiresPublicWebhook?: boolean;
 }
 
 export const BRIDGE_PLATFORM_REGISTRY: BridgePlatformDefinition[] = [
@@ -26,6 +28,7 @@ export const BRIDGE_PLATFORM_REGISTRY: BridgePlatformDefinition[] = [
     groupIdHint: 'Telegram Chat ID（如 -100123456789）',
     supportsBindCode: true,
     supportsManualChannelCreate: true,
+    requiresPublicWebhook: true,
     configFields: [{ key: 'botToken', label: 'Bot Token', secret: true }],
   },
   {
@@ -62,6 +65,7 @@ export const BRIDGE_PLATFORM_REGISTRY: BridgePlatformDefinition[] = [
     groupIdHint: '企业微信群 chat_id',
     supportsBindCode: true,
     supportsManualChannelCreate: true,
+    requiresPublicWebhook: true,
     configFields: [
       { key: 'corpId', label: 'Corp ID' },
       { key: 'agentSecret', label: 'Agent Secret', secret: true },
@@ -77,6 +81,7 @@ export const BRIDGE_PLATFORM_REGISTRY: BridgePlatformDefinition[] = [
     groupIdHint: 'QQ 群号',
     supportsBindCode: true,
     supportsManualChannelCreate: true,
+    requiresPublicWebhook: true,
     configFields: [
       { key: 'appId', label: 'App ID' },
       { key: 'clientSecret', label: 'Client Secret', secret: true },

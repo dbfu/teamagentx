@@ -3,6 +3,7 @@ import { taskQueueService, type HistoryMessage } from '../../../modules/task-que
 import { agentMemoryService } from '../../../modules/agent-memory/agent-memory.service.js';
 import { executionRecordService, type ExecutionEvent } from '../../../modules/execution-record/execution-record.service.js';
 import { recoveryService } from '../../../modules/recovery/recovery.service.js';
+import { stopTypingLoop } from '../../../modules/bridge/typing-loop.js';
 import { messageService } from '../../../modules/message/message.service.js';
 import { chatRoomService } from '../../../modules/chatroom/chatroom.service.js';
 import { userService } from '../../../modules/user/user.service.js';
@@ -551,6 +552,8 @@ export async function processQueue(chatRoomId: string, agentId: string) {
       } catch (error) {
         // 清理 AbortController
         abortControllers.delete(key);
+        // 出错时停止外部平台输入状态循环
+        stopTypingLoop(chatRoomId);
         console.error(
           `Task execution failed for agent ${task.agentName}:`,
           error,

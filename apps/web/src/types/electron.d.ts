@@ -32,3 +32,10 @@ interface Window {
   electronAPI?: ElectronAPI;
   FlutterChannel?: FlutterChannel;
 }
+
+import 'react';
+declare module 'react' {
+  interface CSSProperties {
+    WebkitAppRegion?: 'drag' | 'no-drag';
+  }
+}

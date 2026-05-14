@@ -8,6 +8,7 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "cd ../web && vite --config ../desktop/vite.config.ts --mode electron",
+    "dev:full": "pnpm build:server && pnpm dev",
     "typecheck": "tsc -p electron/tsconfig.json --noEmit",
     "build:renderer": "pnpm typecheck && tsc -p ../web/tsconfig.json && cd ../web && vite --config ../desktop/vite.config.ts --mode electron build",
     "build:server": "cd ../../server && pnpm db:generate && pnpm build && pnpm prebuild:electron",

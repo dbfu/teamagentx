@@ -1,62 +1,35 @@
 # 企业微信集成
 
-难度：★★★☆☆ | 对接方式：企业微信应用 | 方向：双向
+## 适用模型
 
-## 前提条件
+企业微信接入使用“企业微信机器人实例 -> TeamAgentX 群聊”的直接绑定模型。
 
-- 需要企业微信认证的企业账号
-- 企业管理员权限
+规则：
 
-## 创建企业微信应用
+- 一套企业微信应用凭证创建一个机器人实例
+- 一个实例最多绑定一个群聊
+- 一个群聊可以连接多个企业微信或其他平台机器人
 
-1. 打开[企业微信管理后台](https://work.weixin.qq.com/wework_admin)
-2. 应用管理 → 创建应用 → 选择**机器人**或**自建应用**
-3. 在应用设置中配置消息接收：
-   - 接收消息 URL：`https://your-domain.com/api/bridge/webhook/wecom`
-   - Token 和 EncodingAESKey 由系统生成，填入后台保存
-4. 开启权限：
-   - 发送消息到群聊（`EXTERNAL_CHAT`）
-   - 读取成员信息
+## 需要准备
 
-5. 获取 **Corp ID**、**Agent ID**、**Agent Secret**
+- 企业微信应用相关凭证
+- 可访问 TeamAgentX 的公网地址
 
-## 配置到 TeamAgentX
+## 推荐接入步骤
 
-1. TeamAgentX 后台 → 外部集成 → 企业微信
-2. 填写 Corp ID、Agent ID、Agent Secret、Token、EncodingAESKey → 保存
+1. 在企业微信管理后台创建企业应用
+2. 打开接收消息与发送消息能力
+3. 配置回调地址
+4. 在 TeamAgentX 集成页面新建企业微信机器人实例
+5. 填写凭证并直接绑定到目标群聊
 
-## 使用方式
+## 运行行为
 
-**将应用添加到企业微信群：**
-- 在企业微信群中，点击 `+` → 添加机器人 → 选择已创建的应用
-- 机器人自动在 TeamAgentX 创建对应 ChatRoom
+- 企业微信消息进入 TeamAgentX 后，仍按群自己的助手规则触发
+- TeamAgentX 群消息会同步回该企业微信实例关联的活跃会话
+- 助手执行时会先同步输入状态，再发送最终结果
 
-**群成员发送消息：**
-```
-@TeamAgentX @claude 帮我写周报
-@TeamAgentX @codex 把这段代码重构一下
-@TeamAgentX 下周的计划安排        ← 触发默认助手
-```
+## 说明
 
-## Webhook 接收的消息格式
-
-企业微信消息回调（XML 格式，需解密）：
-
-```xml
-<xml>
-  <ToUserName>ww_corp_id</ToUserName>
-  <FromUserName>user_xxx</FromUserName>
-  <CreateTime>1706000000</CreateTime>
-  <MsgType>text</MsgType>
-  <Content>@TeamAgentX @claude 帮我写周报</Content>
-  <ChatId>group_xxx</ChatId>
-  <MsgId>msg_xxx</MsgId>
-</xml>
-```
-
-## 注意事项
-
-- 企业微信消息回调使用 **AES 加密**，需用 EncodingAESKey 解密
-- 应用消息发送有频率限制：每个应用每天可发送消息数有上限
-- 企业微信群机器人（Webhook 单向）适合简单通知场景，双向集成需使用企业应用
-- 外部群（含外部联系人）需要额外配置外部联系人权限
+- 企业微信群机器人这种单向 Webhook 能力不等同于本方案
+- 当前双向接入以企业应用方式为主
