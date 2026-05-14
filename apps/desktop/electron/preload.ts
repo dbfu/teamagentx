@@ -52,12 +52,28 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   getServerStatus: () => ipcRenderer.invoke('get-server-status'),
   openLogFolder: () => ipcRenderer.invoke('open-log-folder'),
-  // Runtime（server 从 resources 拷贝到 userData）准备事件。
-  // 首次启动或升级后会触发 start → done/error，UI 可借此显示"正在准备运行环境"。
+  // Runtime（server 从 resources 解压/拷贝到 userData）准备事件。
+  // 首次启动或升级后会触发 start → progress* → done/error，
+  // UI 可借此显示"正在准备运行环境"和文件级进度。
   onRuntimePrepareStart: (callback: () => void) => {
     const handler = () => callback();
     ipcRenderer.on('runtime:prepare-start', handler);
     return () => ipcRenderer.removeListener('runtime:prepare-start', handler);
+  },
+  onRuntimePrepareProgress: (
+    callback: (progress: {
+      phase: 'extract' | 'copy';
+      percent: number | null;
+      files: number;
+      bytes: number;
+      totalBytes: number | null;
+      message: string;
+    }) => void,
+  ) => {
+    const handler = (_event: Electron.IpcRendererEvent, progress: Parameters<typeof callback>[0]) =>
+      callback(progress);
+    ipcRenderer.on('runtime:prepare-progress', handler);
+    return () => ipcRenderer.removeListener('runtime:prepare-progress', handler);
   },
   onRuntimePrepareDone: (callback: () => void) => {
     const handler = () => callback();

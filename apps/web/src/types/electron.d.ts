@@ -29,7 +29,32 @@ interface ElectronAPI {
   // 服务启动状态监听
   onServerReady: (callback: (port: number) => void) => () => void;
   onServerError: (callback: (error: string) => void) => () => void;
-  getServerStatus: () => Promise<{ ready: boolean; port: number | null; error: string | null }>;
+  getServerStatus: () => Promise<{
+    ready: boolean;
+    port: number | null;
+    error: string | null;
+    logPath?: string;
+    runtime?: {
+      phase: 'idle' | 'preparing' | 'ready' | 'failed';
+      progress: RuntimePrepareProgress | null;
+    };
+  }>;
+  openLogFolder?: () => Promise<{ success: boolean; error?: string }>;
+  // Runtime 准备事件（首次启动 / 升级时把 server 解压到 userData）
+  onRuntimePrepareStart?: (callback: () => void) => () => void;
+  onRuntimePrepareProgress?: (callback: (progress: RuntimePrepareProgress) => void) => () => void;
+  onRuntimePrepareDone?: (callback: () => void) => () => void;
+  onRuntimePrepareError?: (callback: (error: string) => void) => () => void;
+}
+
+interface RuntimePrepareProgress {
+  phase: 'extract' | 'copy';
+  /** 0~100；总量未知（拷贝兜底分支）时为 null */
+  percent: number | null;
+  files: number;
+  bytes: number;
+  totalBytes: number | null;
+  message: string;
 }
 
 interface UpdateInfo {

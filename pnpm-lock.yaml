@@ -16,6 +16,9 @@ importers:
       react:
         specifier: 19.1.0
         version: 19.1.0
+      tar:
+        specifier: ^7.5.15
+        version: 7.5.15
     devDependencies:
       '@locator/babel-jsx':
         specifier: ^0.5.1

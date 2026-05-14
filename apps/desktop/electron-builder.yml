@@ -1,5 +1,9 @@
 appId: com.teamagentx.app
 productName: TeamAgentX
+compression: maximum
+electronLanguages:
+  - en-US
+  - zh-CN
 directories:
   output: release
 

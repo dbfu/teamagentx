@@ -1,6 +1,9 @@
 const path = require('path');
 const fs = require('fs');
 const { createRequire } = require('module');
+const { pipeline } = require('stream/promises');
+const zlib = require('zlib');
+const tar = require('tar');
 
 /**
  * After pack hook: ensure Prisma client is available in the bundled server/
@@ -105,9 +108,16 @@ exports.default = async function (context) {
       '@prisma+query-plan-executor@',
       '@prisma+studio-core@',
       '@prisma+dev@',
+      '@radix-ui+',
       '@electric-sql+pglite@',
       '@electric-sql+pglite-tools@',
+      '@types+react@',
+      '@types+react-dom@',
+      'prisma@',
+      'react@',
+      'react-dom@',
       'tsx@',
+      'typescript@',
       'esbuild@',
     ]),
     ...prunePlatformPackages(nodeModulesDir, targetPlatform, targetArch),
@@ -148,10 +158,9 @@ exports.default = async function (context) {
     cleanupLogs.push(
       ...pruneNestedPlatformPackageCopies(nodeModulesDir, targetPlatform, targetArch),
       ...hoistPnpmPackageCopies(nodeModulesDir),
-      // 临时注释以二分定位 Windows "Server not running" 启动失败：
-      // ...pruneHoistedPnpmDuplicates(nodeModulesDir),
-      // ...removeJunkDocFiles(nodeModulesDir),
-      // ...removeDevDirectories(nodeModulesDir),
+      ...pruneHoistedPnpmDuplicates(nodeModulesDir),
+      ...removeJunkDocFiles(nodeModulesDir),
+      ...removeDevDirectories(nodeModulesDir),
       ...removeFilesByPattern(nodeModulesDir, (fullPath) => (
         fullPath.endsWith('.map')
         || fullPath.endsWith('.d.ts')
@@ -172,6 +181,7 @@ exports.default = async function (context) {
     }
   }
 
+  await createServerRuntimeArchive(serverDir, resourcesDir);
 };
 
 function copyDirSync(src, dest) {
@@ -214,6 +224,45 @@ function removeDanglingSymlinks(rootDir) {
 
   walk(rootDir);
   return removed;
+}
+
+async function createServerRuntimeArchive(serverDir, resourcesDir) {
+  const useZstd = typeof zlib.createZstdCompress === 'function';
+  const archivePath = path.join(resourcesDir, useZstd ? 'server.tar.zst' : 'server.tar.gz');
+  const startedAt = Date.now();
+
+  if (fs.existsSync(archivePath)) {
+    fs.rmSync(archivePath, { force: true });
+  }
+
+  const beforeBytes = getPathSize(serverDir);
+  console.log(`[afterPack] Creating server runtime archive: ${archivePath}`);
+
+  await pipeline(
+    tar.c(
+      {
+        cwd: serverDir,
+        portable: true,
+        noMtime: true,
+      },
+      ['.'],
+    ),
+    useZstd
+      ? zlib.createZstdCompress({
+          params: {
+            [zlib.constants.ZSTD_c_compressionLevel]: 6,
+          },
+        })
+      : zlib.createGzip({ level: 6 }),
+    fs.createWriteStream(archivePath),
+  );
+
+  const archiveBytes = fs.statSync(archivePath).size;
+  fs.rmSync(serverDir, { recursive: true, force: true });
+  console.log(
+    `[afterPack] Archived server runtime ${formatBytes(beforeBytes)} -> ${formatBytes(archiveBytes)} `
+    + `in ${Date.now() - startedAt}ms; removed loose server directory`,
+  );
 }
 
 /**

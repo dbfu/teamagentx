@@ -6,9 +6,11 @@ import http from 'node:http';
 import https from 'node:https';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import os from 'node:os';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+import zlib from 'node:zlib';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -47,6 +49,31 @@ let quitRequestedByInstaller = false;
 let shutdownPromise: Promise<void> | null = null;
 let shutdownCompleted = false;
 let downloadedUpdatePath: string | null = null;
+
+// Runtime 准备阶段（首次启动 / 升级时把 server 解压/拷贝到 userData）。
+// 用于让前端区分「正在准备运行环境」和「服务真的失败」。
+type RuntimePhase = 'idle' | 'preparing' | 'ready' | 'failed';
+let runtimePhase: RuntimePhase = 'idle';
+let lastRuntimeProgress: RuntimeProgress | null = null;
+
+type RuntimeProgress = {
+  phase: 'extract' | 'copy';
+  /** 0~100；未知时为 null */
+  percent: number | null;
+  /** 已处理文件数 */
+  files: number;
+  /** 已写入字节数 */
+  bytes: number;
+  /** 期望总字节数；未知时为 null */
+  totalBytes: number | null;
+  /** 阶段性提示，如「正在解压运行环境…」 */
+  message: string;
+};
+
+function emitRuntimeProgress(progress: RuntimeProgress): void {
+  lastRuntimeProgress = progress;
+  mainWindow?.webContents.send('runtime:prepare-progress', progress);
+}
 
 const MOBILE_WEB_PORT = 11054;
 const MOBILE_WEB_HOST = '0.0.0.0';
@@ -517,9 +544,12 @@ async function ensureRuntimeServer(): Promise<string | null> {
     return null; // dev 模式直接用源码目录，无需准备
   }
 
+  const resourcesRoot = process.resourcesPath;
   const sourceRoot = getResourcesServerRoot();
-  if (!fs.existsSync(sourceRoot)) {
-    writeLog(`[Runtime] resources server 不存在：${sourceRoot}`);
+  const tarball = findServerTarball(resourcesRoot);
+
+  if (!tarball && !fs.existsSync(sourceRoot)) {
+    writeLog(`[Runtime] resources 中既无 server tarball 也无 server 目录：${resourcesRoot}`);
     return null;
   }
 
@@ -530,11 +560,13 @@ async function ensureRuntimeServer(): Promise<string | null> {
 
   if (fs.existsSync(sentinel)) {
     writeLog(`[Runtime] server runtime 已就绪：${targetRoot}`);
+    runtimePhase = 'ready';
     void cleanupOldRuntimeVersions(runtimeBase, version);
     return targetRoot;
   }
 
-  writeLog(`[Runtime] 首次启动或升级，开始拷贝 server → ${targetRoot}`);
+  runtimePhase = 'preparing';
+  lastRuntimeProgress = null;
   mainWindow?.webContents.send('runtime:prepare-start');
 
   try {
@@ -546,24 +578,26 @@ async function ensureRuntimeServer(): Promise<string | null> {
 
     await fs.promises.mkdir(targetRoot, { recursive: true });
     const start = Date.now();
-    await fs.promises.cp(sourceRoot, targetRoot, {
-      recursive: true,
-      force: true,
-      // 跳过符号链接（pnpm 的 .pnpm/ 目录里有大量链接，但 electron-builder
-      // 已经把它们解引用复制成实体文件，这里保险起见用 dereference: false）
-      dereference: false,
-      // 保留原始权限/时间戳
-      preserveTimestamps: true,
-    });
-    await fs.promises.writeFile(sentinel, version, 'utf8');
-    writeLog(`[Runtime] server 拷贝完成，耗时 ${Date.now() - start}ms`);
 
+    if (tarball) {
+      writeLog(`[Runtime] 首次启动或升级，开始解压 server tarball → ${targetRoot}`);
+      await extractServerTarball(tarball, targetRoot);
+    } else {
+      writeLog(`[Runtime] 首次启动或升级，开始拷贝 server → ${targetRoot}`);
+      await copyServerWithProgress(sourceRoot, targetRoot);
+    }
+
+    await fs.promises.writeFile(sentinel, version, 'utf8');
+    writeLog(`[Runtime] server 准备完成，耗时 ${Date.now() - start}ms`);
+
+    runtimePhase = 'ready';
     void cleanupOldRuntimeVersions(runtimeBase, version);
     mainWindow?.webContents.send('runtime:prepare-done');
     return targetRoot;
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    writeLog(`[Runtime] server 拷贝失败：${msg}`);
+    writeLog(`[Runtime] server 准备失败：${msg}`);
+    runtimePhase = 'failed';
     mainWindow?.webContents.send('runtime:prepare-error', msg);
     // 清理半成品，下次启动重试
     try {
@@ -573,6 +607,139 @@ async function ensureRuntimeServer(): Promise<string | null> {
     }
     return null;
   }
+}
+
+/**
+ * 在 resources 目录下寻找 server tarball（方案 B 产物）。
+ * 优先匹配 .tar.zst；若不存在返回 null，调用方回退到目录拷贝。
+ */
+function findServerTarball(resourcesRoot: string): string | null {
+  const candidates = [
+    path.join(resourcesRoot, 'server.tar.zst'),
+    path.join(resourcesRoot, 'server-runtime.tar.zst'),
+    path.join(resourcesRoot, 'server.tar.gz'),
+    path.join(resourcesRoot, 'server-runtime.tar.gz'),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
+ * 流式解压 server tarball 到目标目录，按压缩包字节进度向前端汇报。
+ * 使用动态 import 避免在没有 tar 包时编译报错。
+ */
+async function extractServerTarball(tarballPath: string, targetRoot: string): Promise<void> {
+  const stat = await fs.promises.stat(tarballPath);
+  const totalBytes = stat.size;
+  let processedBytes = 0;
+  let processedFiles = 0;
+  let lastEmit = 0;
+
+  emitRuntimeProgress({
+    phase: 'extract',
+    percent: 0,
+    files: 0,
+    bytes: 0,
+    totalBytes,
+    message: '正在解压运行环境…',
+  });
+
+  // 注：Windows 10+ 自带 tar.exe，但行为在不同版本上不一致；
+  // 使用 npm 'tar' 包（pure-JS）跨平台更稳，会被 Vite bundle 进 main.js。
+  const tar = await import('tar');
+  const stream = fs.createReadStream(tarballPath);
+  stream.on('data', (chunk) => {
+    processedBytes += chunk.length;
+    const now = Date.now();
+    if (now - lastEmit >= 250) {
+      lastEmit = now;
+      emitRuntimeProgress({
+        phase: 'extract',
+        percent: totalBytes > 0 ? Math.min(99, Math.round((processedBytes / totalBytes) * 100)) : null,
+        files: processedFiles,
+        bytes: processedBytes,
+        totalBytes,
+        message: '正在解压运行环境…',
+      });
+    }
+  });
+
+  const extractor = tar.x({ cwd: targetRoot, onentry: () => { processedFiles += 1; } });
+  if (tarballPath.endsWith('.tar.zst')) {
+    await pipeline(stream, zlib.createZstdDecompress(), extractor);
+  } else if (tarballPath.endsWith('.tar.gz') || tarballPath.endsWith('.tgz')) {
+    await pipeline(stream, zlib.createGunzip(), extractor);
+  } else {
+    await pipeline(stream, extractor);
+  }
+
+  emitRuntimeProgress({
+    phase: 'extract',
+    percent: 100,
+    files: processedFiles,
+    bytes: processedBytes,
+    totalBytes,
+    message: '解压完成',
+  });
+}
+
+/**
+ * 兜底：当没有 tarball 时（旧打包产物或 dev 调试），递归拷贝目录并汇报进度。
+ * 自己实现而不用 fs.cp，是为了能在拷贝过程中按文件数发心跳，让用户感知进度。
+ */
+async function copyServerWithProgress(sourceRoot: string, targetRoot: string): Promise<void> {
+  let copiedFiles = 0;
+  let copiedBytes = 0;
+  let lastEmit = 0;
+
+  const emit = (force = false) => {
+    const now = Date.now();
+    if (!force && now - lastEmit < 500) return;
+    lastEmit = now;
+    emitRuntimeProgress({
+      phase: 'copy',
+      percent: null, // 总量未知，前端用 indeterminate 进度条
+      files: copiedFiles,
+      bytes: copiedBytes,
+      totalBytes: null,
+      message: `正在准备运行环境（已复制 ${copiedFiles} 个文件）…`,
+    });
+  };
+
+  emit(true);
+
+  async function walk(src: string, dest: string): Promise<void> {
+    await fs.promises.mkdir(dest, { recursive: true });
+    const entries = await fs.promises.readdir(src, { withFileTypes: true });
+    for (const entry of entries) {
+      const srcPath = path.join(src, entry.name);
+      const destPath = path.join(dest, entry.name);
+      if (entry.isSymbolicLink()) {
+        // electron-builder 已展开 symlink；保留 link 信息（极少情况）
+        try {
+          const linkTarget = await fs.promises.readlink(srcPath);
+          await fs.promises.symlink(linkTarget, destPath);
+        } catch {
+          // 失败就跳过
+        }
+        continue;
+      }
+      if (entry.isDirectory()) {
+        await walk(srcPath, destPath);
+        continue;
+      }
+      await fs.promises.copyFile(srcPath, destPath);
+      const stat = await fs.promises.stat(destPath).catch(() => null);
+      copiedBytes += stat?.size ?? 0;
+      copiedFiles += 1;
+      emit();
+    }
+  }
+
+  await walk(sourceRoot, targetRoot);
+  emit(true);
 }
 
 async function cleanupOldRuntimeVersions(runtimeBase: string, currentVersion: string): Promise<void> {
@@ -1611,14 +1778,25 @@ app.whenReady().then(async () => {
   // 服务状态查询（供渲染器判断后端是否就绪）
   ipcMain.handle('get-server-status', () => {
     let error: string | null = null;
-    if (serverPort === null && !serverProcess) {
-      error = lastServerError ?? `服务尚未启动。详细日志：${getLogPath()}`;
+    // 只有当不是「正在准备运行环境」、且没有进程在跑、也没有端口时才算失败。
+    // 否则前端会在解压阶段误判为「服务启动失败」。
+    if (serverPort === null && !serverProcess && runtimePhase !== 'preparing') {
+      if (lastServerError) {
+        error = lastServerError;
+      } else if (runtimePhase === 'failed') {
+        error = `运行环境准备失败。详细日志：${getLogPath()}`;
+      }
+      // runtimePhase === 'idle' 时返回 error=null，由前端继续等待事件
     }
     return {
       ready: serverPort !== null,
       port: serverPort,
       error,
       logPath: getLogPath(),
+      runtime: {
+        phase: runtimePhase,
+        progress: lastRuntimeProgress,
+      },
     };
   });
 

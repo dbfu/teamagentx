@@ -33,6 +33,18 @@ import { useAuthStore, useChatRoomStore, useSocketStore, useUIStore } from './st
 import { useChatStore } from './stores/chat-store'
 import { TodoData } from './stores/socket-store'
 
+function formatRuntimeBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let value = bytes
+  let unitIndex = 0
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024
+    unitIndex += 1
+  }
+  return `${value >= 10 || unitIndex === 0 ? Math.round(value) : value.toFixed(1)} ${units[unitIndex]}`
+}
+
 // 移动端群聊列表页面
 function MobileChatListPage({
   chatRooms,
@@ -517,6 +529,8 @@ export default function App() {
     isElectron() ? 'waiting' : 'ready'
   )
   const [serverError, setServerError] = useState('')
+  const [runtimePhase, setRuntimePhase] = useState<'idle' | 'preparing' | 'ready' | 'failed'>('idle')
+  const [runtimeProgress, setRuntimeProgress] = useState<RuntimePrepareProgress | null>(null)
 
   useEffect(() => {
     if (serverState !== 'waiting') return
@@ -527,6 +541,45 @@ export default function App() {
         setServerState('error')
       })
   }, [serverState])
+
+  useEffect(() => {
+    if (!isElectron()) return
+    const electronAPI = window.electronAPI
+    if (!electronAPI) return
+
+    let disposed = false
+    electronAPI.getServerStatus?.().then((status) => {
+      if (disposed) return
+      if (status.runtime) {
+        setRuntimePhase(status.runtime.phase)
+        setRuntimeProgress(status.runtime.progress)
+      }
+    }).catch(() => {})
+
+    const disposers = [
+      electronAPI.onRuntimePrepareStart?.(() => {
+        setRuntimePhase('preparing')
+        setRuntimeProgress(null)
+      }),
+      electronAPI.onRuntimePrepareProgress?.((progress) => {
+        setRuntimePhase('preparing')
+        setRuntimeProgress(progress)
+      }),
+      electronAPI.onRuntimePrepareDone?.(() => {
+        setRuntimePhase('ready')
+        setRuntimeProgress((progress) => progress ? { ...progress, percent: 100, message: '运行环境准备完成' } : progress)
+      }),
+      electronAPI.onRuntimePrepareError?.((error) => {
+        setRuntimePhase('failed')
+        setServerError(`运行环境准备失败：${error}`)
+      }),
+    ].filter(Boolean) as Array<() => void>
+
+    return () => {
+      disposed = true
+      disposers.forEach((dispose) => dispose())
+    }
+  }, [])
 
   // Check auth once server is ready
   useEffect(() => {
@@ -592,13 +645,52 @@ export default function App() {
 
   // Electron: 等待后端服务启动
   if (serverState === 'waiting') {
+    const isPreparingRuntime = runtimePhase === 'preparing' || runtimeProgress !== null
+    const progressPercent = runtimeProgress?.percent ?? null
+    const progressLabel = runtimeProgress?.message
+      || (isPreparingRuntime ? '首次启动或升级正在准备运行环境…' : '正在启动服务…')
+    const detailText = isPreparingRuntime
+      ? runtimeProgress?.phase === 'extract'
+        ? '首次启动需要解压运行环境，通常只需几秒，请稍候。'
+        : '首次启动需要复制运行环境，约 1 分钟，请不要关闭应用。'
+      : '正在启动本地服务，请稍候。'
+    const bytesText = runtimeProgress
+      ? runtimeProgress.totalBytes
+        ? `${formatRuntimeBytes(runtimeProgress.bytes)} / ${formatRuntimeBytes(runtimeProgress.totalBytes)}`
+        : `${formatRuntimeBytes(runtimeProgress.bytes)}`
+      : null
+
     return (
       <div className="flex flex-col h-screen w-full bg-background">
         <WindowTitleBar />
-        <div className="flex flex-1 flex-col items-center justify-center">
-          <div className="flex flex-col items-center gap-4">
-            <Loader2 className="size-6 animate-spin text-primary" />
-            正在启动服务...
+        <div className="flex flex-1 flex-col items-center justify-center px-6">
+          <div className="flex w-full max-w-md flex-col items-center gap-4 text-center">
+            <Loader2 className="size-6 animate-spin text-blue-500" />
+            <div className="space-y-1">
+              <div className="text-lg font-semibold text-foreground">
+                {isPreparingRuntime ? '正在准备运行环境' : '正在启动服务'}
+              </div>
+              <div className="text-sm text-muted-foreground">{detailText}</div>
+            </div>
+            <div className="w-full space-y-2">
+              <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100">
+                <div
+                  className={`h-full rounded-full bg-blue-500 transition-all duration-300 ${
+                    progressPercent === null ? 'w-1/3 animate-pulse' : ''
+                  }`}
+                  style={progressPercent === null ? undefined : { width: `${progressPercent}%` }}
+                />
+              </div>
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>{progressLabel}</span>
+                <span>
+                  {progressPercent !== null ? `${progressPercent}%` : runtimeProgress?.files ? `${runtimeProgress.files} 个文件` : ''}
+                </span>
+              </div>
+              {bytesText && (
+                <div className="text-xs text-muted-foreground">{bytesText}</div>
+              )}
+            </div>
           </div>
         </div>
       </div>
