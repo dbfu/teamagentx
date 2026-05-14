@@ -11,6 +11,7 @@ import os from 'node:os';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import zlib from 'node:zlib';
+import { isLanzouShareUrl, resolveLanzouDownloadUrl } from './update-download';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -493,7 +494,11 @@ function downloadFile(downloadUrl: string, destination: string, redirectCount = 
 }
 
 async function downloadUpdate(update: UpdateInfo): Promise<{ success: true; filePath: string }> {
-  const downloadUrl = getPlatformDownloadUrl(update);
+  const originalDownloadUrl = getPlatformDownloadUrl(update);
+  const downloadUrl = await resolveLanzouDownloadUrl(originalDownloadUrl);
+  if (downloadUrl !== originalDownloadUrl && isLanzouShareUrl(originalDownloadUrl)) {
+    writeLog(`[Update] 已解析蓝奏分享链接为真实下载地址：${downloadUrl}`);
+  }
   const filePath = path.join(app.getPath('userData'), UPDATE_DOWNLOAD_DIR, getDownloadFileName(downloadUrl));
   downloadedUpdatePath = await downloadFile(downloadUrl, filePath);
   sendUpdateProgress({ percent: 100, transferred: 1, total: 1 });
