@@ -516,7 +516,7 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
               </Select>
               <p className="mt-1 text-xs text-muted-foreground">
                 {selectedProviderInfo
-                  ? `当前已绑定：${selectedProviderInfo.name} · ${selectedProviderInfo.model}`
+                  ? ``
                   : selectedAcpTool && assistantType === 'acp' && selectedAcpTool.localConfigAvailable
                     ? `当前可直接使用 ${selectedAcpTool.localConfigLabel || selectedAcpTool.name} 本地配置`
                     : '请选择模型供应商'}

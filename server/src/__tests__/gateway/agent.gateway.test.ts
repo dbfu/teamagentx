@@ -213,6 +213,24 @@ describe('Agent Gateway API', () => {
         },
       });
     });
+
+    test('应该允许创建时显式传入空 speechConfig', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/agents',
+        payload: {
+          name: 'No Voice Agent ' + Date.now(),
+          prompt: 'No voice configured',
+          speechConfig: null,
+        },
+      });
+
+      assert.strictEqual(response.statusCode, 201);
+
+      const body = response.json();
+      assert.strictEqual(body.success, true);
+      assert.strictEqual(body.data.speechConfig, null);
+    });
   });
 
   describe('PUT /agents/:id', () => {
@@ -242,6 +260,45 @@ describe('Agent Gateway API', () => {
       const body = response.json();
       assert.strictEqual(body.success, true);
       assert.strictEqual(body.data.prompt, 'Updated prompt');
+    });
+
+    test('应该允许更新时显式清空 speechConfig', async () => {
+      const createResponse = await app.inject({
+        method: 'POST',
+        url: '/agents',
+        payload: {
+          name: 'Clear Voice Agent ' + Date.now(),
+          prompt: 'Original prompt',
+          speechConfig: {
+            behavior: {
+              enabled: true,
+              outputMode: 'manual',
+              autoPlay: false,
+            },
+            profile: {
+              provider: 'browser-local',
+              voice: 'voice-zh-female-001',
+            },
+          },
+        },
+      });
+      const created = createResponse.json();
+
+      const response = await app.inject({
+        method: 'PUT',
+        url: `/agents/${created.data.id}`,
+        payload: {
+          llmProviderId: null,
+          speechConfig: null,
+        },
+      });
+
+      assert.strictEqual(response.statusCode, 200);
+
+      const body = response.json();
+      assert.strictEqual(body.success, true);
+      assert.strictEqual(body.data.llmProviderId, null);
+      assert.strictEqual(body.data.speechConfig, null);
     });
 
     test('应该返回 404 当 Agent 不存在时', async () => {

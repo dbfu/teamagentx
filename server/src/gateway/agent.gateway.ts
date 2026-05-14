@@ -170,6 +170,7 @@ const createAgentBodySchema = {
     workDir: { type: 'string', description: '工作目录（适用于所有类型）' },
     speechConfig: {
       type: 'object',
+      nullable: true,
       description: '助手语音配置',
       properties: {
         behavior: {
@@ -229,6 +230,7 @@ const updateAgentBodySchema = {
     workDir: { type: 'string' },
     speechConfig: {
       type: 'object',
+      nullable: true,
       properties: {
         behavior: {
           type: 'object',
