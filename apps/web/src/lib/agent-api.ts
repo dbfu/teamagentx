@@ -239,6 +239,11 @@ export interface AcpToolInfo {
   description: string
   installed: boolean
   version?: string
+  cliInstalled: boolean
+  cliVersion?: string
+  sdkInstalled: boolean
+  sdkVersion?: string
+  preferredRuntime?: 'sdk' | 'cli'
   localConfigAvailable?: boolean
   localConfigPath?: string
   localConfigLabel?: string
@@ -248,6 +253,41 @@ export const acpToolsApi = {
   // 获取 ACP/SDK 工具列表及安装状态
   async getAll(): Promise<ApiResponse<AcpToolInfo[]>> {
     return request<AcpToolInfo[]>('/acp-tools')
+  },
+
+  /**
+   * 安装 ACP/SDK 工具，流式返回安装日志
+   * @returns 最终退出码（0 = 成功）
+   */
+  async installTool(toolId: string, onLog: (text: string) => void): Promise<number> {
+    const baseUrl = await getApiBaseUrl()
+    const res = await fetch(`${baseUrl}/acp-tools/${toolId}/install`, {
+      method: 'POST',
+    })
+
+    const reader = res.body?.getReader()
+    if (!reader) throw new Error('无法读取安装输出')
+
+    const decoder = new TextDecoder()
+    let exitCode = 1
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      const text = decoder.decode(value, { stream: true })
+      const exitMatch = text.match(/__EXIT_CODE__:(\d+)/)
+      if (exitMatch) {
+        exitCode = parseInt(exitMatch[1], 10)
+      }
+
+      const filtered = text.replace(/__EXIT_CODE__:\d+/g, '').replace(/__ERROR__:.+/g, '')
+      if (filtered.trim()) {
+        onLog(filtered)
+      }
+    }
+
+    return exitCode
   },
 }
 

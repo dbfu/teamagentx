@@ -8,6 +8,7 @@ import {chatRoomService} from '../modules/chatroom/chatroom.service.js';
 import {quickChatSessionService} from '../modules/quick-chat-session/quick-chat-session.service.js';
 import {checkpointService} from '../modules/checkpoint/checkpoint.service.js';
 import {promptOptimizeService} from '../modules/prompt-optimize/prompt-optimize.service.js';
+import {spawnAcpToolInstall} from '../core/agent/acp-tool-install.service.js';
 
 // 所有支持的 LLM 供应商类型（与 Prisma 保持一致）
 const LLM_PROVIDER_TYPES = [
@@ -316,6 +317,11 @@ export async function agentGateway(app: FastifyInstance) {
                     description: { type: 'string' },
                     installed: { type: 'boolean' },
                     version: { type: 'string', nullable: true },
+                    cliInstalled: { type: 'boolean' },
+                    cliVersion: { type: 'string', nullable: true },
+                    sdkInstalled: { type: 'boolean' },
+                    sdkVersion: { type: 'string', nullable: true },
+                    preferredRuntime: { type: 'string', enum: ['sdk', 'cli'], nullable: true },
                     localConfigAvailable: { type: 'boolean', nullable: true },
                     localConfigPath: { type: 'string', nullable: true },
                     localConfigLabel: { type: 'string', nullable: true },
@@ -330,6 +336,60 @@ export async function agentGateway(app: FastifyInstance) {
     async (_request, reply) => {
       const tools = checkAllAcpTools();
       return reply.send({ success: true, data: tools });
+    },
+  );
+
+  // 手动安装 ACP/SDK 工具到应用本地目录
+  app.post<{Params: {toolId: string}}>(
+    '/acp-tools/:toolId/install',
+    {
+      schema: {
+        description: '手动安装 ACP/SDK 工具到应用本地目录',
+        tags: ['Agents'],
+        params: {
+          type: 'object',
+          required: ['toolId'],
+          properties: {
+            toolId: { type: 'string', enum: ['claude', 'codex'] },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const {toolId} = request.params;
+
+      reply.raw.writeHead(200, {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Transfer-Encoding': 'chunked',
+        'Cache-Control': 'no-cache',
+      });
+
+      let child: ReturnType<typeof spawnAcpToolInstall>['child'];
+      try {
+        child = spawnAcpToolInstall(toolId).child;
+      } catch (error: any) {
+        reply.raw.write(`__ERROR__:${error.message || '安装失败'}`);
+        reply.raw.end();
+        return;
+      }
+
+      child.stdout?.on('data', (chunk: Buffer) => {
+        reply.raw.write(chunk.toString());
+      });
+
+      child.stderr?.on('data', (chunk: Buffer) => {
+        reply.raw.write(chunk.toString());
+      });
+
+      child.on('close', (code) => {
+        reply.raw.write(`\n__EXIT_CODE__:${code}`);
+        reply.raw.end();
+      });
+
+      child.on('error', (err) => {
+        reply.raw.write(`\n__ERROR__:${err.message}`);
+        reply.raw.end();
+      });
     },
   );
 
