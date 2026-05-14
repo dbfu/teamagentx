@@ -1,6 +1,9 @@
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
+import os from 'node:os';
+import path from 'node:path';
 import Fastify, { FastifyInstance } from 'fastify';
+import { agentService } from '../../core/agent/agent.service.js';
 import { chatRoomGateway } from '../../gateway/chatroom.gateway.js';
 
 // Helper to build test app
@@ -11,9 +14,11 @@ function buildTestApp(): FastifyInstance {
 
 describe('ChatRoom Gateway API', () => {
   let app: FastifyInstance;
+  let workDirRoot: string;
 
   beforeEach(async () => {
     app = buildTestApp();
+    workDirRoot = path.join(os.tmpdir(), `teamagentx-chatroom-tests-${Date.now()}`);
     await app.register(chatRoomGateway);
   });
 
@@ -43,6 +48,7 @@ describe('ChatRoom Gateway API', () => {
         url: '/chatrooms',
         payload: {
           name: 'Test Room ' + Date.now(),
+          workDir: path.join(workDirRoot, 'create-room'),
         },
       });
 
@@ -63,6 +69,7 @@ describe('ChatRoom Gateway API', () => {
           avatar: '🏠',
           avatarColor: '#1890ff',
           description: 'A test chatroom',
+          workDir: path.join(workDirRoot, 'full-room'),
         },
       });
 
@@ -87,7 +94,7 @@ describe('ChatRoom Gateway API', () => {
 
       const body = response.json();
       assert.strictEqual(body.success, false);
-      assert.strictEqual(body.error, 'ChatRoom not found');
+      assert.strictEqual(body.error, '群聊不存在');
     });
 
     test('应该根据 ID 返回聊天室', async () => {
@@ -97,6 +104,7 @@ describe('ChatRoom Gateway API', () => {
         url: '/chatrooms',
         payload: {
           name: 'Find Test ' + Date.now(),
+          workDir: path.join(workDirRoot, 'find-room'),
         },
       });
       const created = createResponse.json();
@@ -112,6 +120,149 @@ describe('ChatRoom Gateway API', () => {
       const body = response.json();
       assert.strictEqual(body.success, true);
       assert.strictEqual(body.data.id, created.data.id);
+    });
+
+    test('应该返回群聊助手的 speechConfig', async () => {
+      const createdAgent = await agentService.create({
+        name: 'Room Voice Agent ' + Date.now(),
+        description: 'Voice test agent',
+        prompt: 'Speak in room',
+        speechConfig: {
+          behavior: {
+            enabled: true,
+            outputMode: 'manual',
+            autoPlay: false,
+          },
+          profile: {
+            provider: 'browser-local',
+            voice: 'voice-zh-female-001',
+            speed: 1,
+            volume: 1,
+          },
+        },
+      });
+
+      const chatRoomResponse = await app.inject({
+        method: 'POST',
+        url: '/chatrooms',
+        payload: {
+          name: 'Voice Room ' + Date.now(),
+          workDir: path.join(workDirRoot, 'voice-room'),
+        },
+      });
+      assert.strictEqual(chatRoomResponse.statusCode, 201);
+      const createdRoom = chatRoomResponse.json();
+
+      const addAgentResponse = await app.inject({
+        method: 'POST',
+        url: `/chatrooms/${createdRoom.data.id}/agents`,
+        payload: {
+          agentId: createdAgent.id,
+        },
+      });
+      assert.strictEqual(addAgentResponse.statusCode, 201);
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/chatrooms/${createdRoom.data.id}`,
+      });
+
+      assert.strictEqual(response.statusCode, 200);
+      const body = response.json();
+      const roomAgent = body.data.chatRoomAgents.find((item: any) => item.agent?.id === createdAgent.id);
+      assert.ok(roomAgent);
+      assert.deepStrictEqual(roomAgent.agent.speechConfig, {
+        behavior: {
+          enabled: true,
+          outputMode: 'manual',
+          autoPlay: false,
+        },
+        profile: {
+          provider: 'browser-local',
+          model: null,
+          voice: 'voice-zh-female-001',
+          fallbackProvider: null,
+          speed: 1,
+          volume: 1,
+          pitch: null,
+          emotion: null,
+          style: null,
+          format: null,
+          sampleRate: null,
+          temperature: null,
+          prompt: null,
+          vendorOptions: null,
+        },
+      });
+    });
+
+    test('应该返回虚拟系统助手的 speechConfig', async () => {
+      const systemAgent = await agentService.create({
+        name: 'System Voice Agent ' + Date.now(),
+        description: 'System voice test agent',
+        prompt: 'Speak like a system agent',
+        agentLevel: 'system',
+      });
+
+      await agentService.update(systemAgent.id, {
+        speechConfig: {
+          behavior: {
+            enabled: true,
+            outputMode: 'manual',
+            autoPlay: false,
+          },
+          profile: {
+            provider: 'browser-local',
+            speed: 1,
+            volume: 1,
+            style: 'professional',
+          },
+        },
+      });
+
+      const chatRoomResponse = await app.inject({
+        method: 'POST',
+        url: '/chatrooms',
+        payload: {
+          name: 'System Voice Room ' + Date.now(),
+          workDir: path.join(workDirRoot, 'system-voice-room'),
+        },
+      });
+      assert.strictEqual(chatRoomResponse.statusCode, 201);
+      const createdRoom = chatRoomResponse.json();
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/chatrooms/${createdRoom.data.id}`,
+      });
+
+      assert.strictEqual(response.statusCode, 200);
+      const body = response.json();
+      const roomAgent = body.data.chatRoomAgents.find((item: any) => item.agent?.id === systemAgent.id);
+      assert.ok(roomAgent);
+      assert.deepStrictEqual(roomAgent.agent.speechConfig, {
+        behavior: {
+          enabled: true,
+          outputMode: 'manual',
+          autoPlay: false,
+        },
+        profile: {
+          provider: 'browser-local',
+          model: null,
+          voice: null,
+          fallbackProvider: null,
+          speed: 1,
+          volume: 1,
+          pitch: null,
+          emotion: null,
+          style: 'professional',
+          format: null,
+          sampleRate: null,
+          temperature: null,
+          prompt: null,
+          vendorOptions: null,
+        },
+      });
     });
   });
 
@@ -132,6 +283,7 @@ describe('ChatRoom Gateway API', () => {
         url: '/chatrooms',
         payload: {
           name: 'Delete Test ' + Date.now(),
+          workDir: path.join(workDirRoot, 'delete-room'),
         },
       });
       const created = createResponse.json();

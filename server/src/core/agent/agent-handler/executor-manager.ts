@@ -150,34 +150,35 @@ export function _testInjectDebugInfo(
   debugInfo: Partial<AgentDebugInfo>,
 ): void {
   const cacheKey = getCacheKey(chatRoomId, agentName);
+  const fullDebugInfo: AgentDebugInfo = {
+    name: debugInfo.name ?? agentName,
+    type: 'acp',
+    systemPrompt: debugInfo.systemPrompt ?? 'test prompt',
+    lastContext: debugInfo.lastContext ?? null,
+    lastInvokeResult: debugInfo.lastInvokeResult ?? null,
+    lastHistory: debugInfo.lastHistory ?? null,
+    threadId: debugInfo.threadId ?? cacheKey,
+    chatRoomId: debugInfo.chatRoomId ?? chatRoomId,
+    injectGroupHistory: debugInfo.injectGroupHistory ?? true,
+    chatRoomAgents: debugInfo.chatRoomAgents ?? [],
+    workDir: debugInfo.workDir,
+    lastResponse: debugInfo.lastResponse ?? null,
+    acpTool: debugInfo.acpTool,
+    agentId: debugInfo.agentId,
+    llmProvider: debugInfo.llmProvider,
+  };
 
   const executor: IAgentExecutor = {
-    name: debugInfo.name ?? agentName,
-    chatRoomId,
-    injectGroupHistory: debugInfo.injectGroupHistory ?? true,
-    workDir: debugInfo.workDir,
+    name: fullDebugInfo.name,
+    chatRoomId: fullDebugInfo.chatRoomId,
+    injectGroupHistory: fullDebugInfo.injectGroupHistory,
+    workDir: fullDebugInfo.workDir,
     lastInjectedMessageId: undefined,
     async exec() {
       return { actions: [] };
     },
     getDebugInfo(): AgentDebugInfo {
-      return {
-        name: debugInfo.name ?? agentName,
-        systemPrompt: debugInfo.systemPrompt ?? 'test prompt',
-        lastContext: debugInfo.lastContext ?? null,
-        lastInvokeResult: debugInfo.lastInvokeResult ?? null,
-        lastResponse: debugInfo.lastResponse ?? null,
-        lastHistory: debugInfo.lastHistory ?? null,
-        threadId: debugInfo.threadId ?? cacheKey,
-        chatRoomId,
-        injectGroupHistory: debugInfo.injectGroupHistory ?? true,
-        chatRoomAgents: debugInfo.chatRoomAgents ?? [],
-        type: debugInfo.type ?? 'acp',
-        acpTool: debugInfo.acpTool,
-        workDir: debugInfo.workDir,
-        agentId: debugInfo.agentId ?? null,
-        llmProvider: debugInfo.llmProvider,
-      };
+      return fullDebugInfo;
     },
     setLastInjectedMessageId() {
       // Test helper only needs debug info injection.

@@ -1,7 +1,16 @@
 import { bridgeApi, type BridgeEvent, type BridgePlatformDefinition, type BridgePlatformPlaybook, type ExternalChannel, type Platform, type PlatformConfig } from '@/lib/bridge-api'
-import { AgentAvatarImage } from '@/lib/agent-avatars'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
-import { Bot, Check, ChevronDown, ChevronRight, Copy, Globe, Pencil, Trash2 } from 'lucide-react'
+import { AlertTriangle, Bot, Check, ChevronDown, ChevronRight, Copy, Globe, Loader2, Pencil, Trash2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
@@ -19,6 +28,7 @@ export function IntegrationPage() {
   const [configForm, setConfigForm] = useState<Record<string, string>>({})
   const [isSavingConfig, setIsSavingConfig] = useState(false)
   const [isEditingConfig, setIsEditingConfig] = useState(false)
+  const [clearDialogOpen, setClearDialogOpen] = useState(false)
   // 配置手册
   const [playbook, setPlaybook] = useState<BridgePlatformPlaybook | null>(null)
   const [playbookOpen, setPlaybookOpen] = useState(false)
@@ -124,6 +134,30 @@ export function IntegrationPage() {
       toast.success('凭证已保存，可在房间设置中生成绑定码完成群聊映射')
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : '保存失败')
+    } finally {
+      setIsSavingConfig(false)
+    }
+  }
+
+  const handleClearConfig = async () => {
+    const channelCount = channels.length
+    setIsSavingConfig(true)
+    try {
+      if (channelCount > 0) {
+        await Promise.all(channels.map(channel => bridgeApi.deleteChannel(channel.id)))
+      }
+      const cfg = await bridgeApi.setPlatformConfig(activePlatform, {
+        botToken: '',
+        config: null,
+      })
+      setChannels([])
+      setPlatformConfig(cfg)
+      setConfigForm({})
+      setIsEditingConfig(false)
+      setClearDialogOpen(false)
+      toast.success(channelCount > 0 ? `平台配置已清空，并删除了 ${channelCount} 个群聊映射` : '平台配置已清空')
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : '清空失败')
     } finally {
       setIsSavingConfig(false)
     }
@@ -309,13 +343,23 @@ export function IntegrationPage() {
                   </p>
                 </div>
                 {isConfigured && !isEditingConfig && (
-                  <button
-                    onClick={() => setIsEditingConfig(true)}
-                    className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
-                  >
-                    <Pencil className="size-3" />
-                    修改
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setIsEditingConfig(true)}
+                      className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+                    >
+                      <Pencil className="size-3" />
+                      修改
+                    </button>
+                    <button
+                      onClick={() => setClearDialogOpen(true)}
+                      disabled={isSavingConfig}
+                      className="flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50"
+                    >
+                      <Trash2 className="size-3" />
+                      清空
+                    </button>
+                  </div>
                 )}
               </div>
 
@@ -567,6 +611,67 @@ export function IntegrationPage() {
           </div>
         )}
       </div>
+
+      <AlertDialog open={clearDialogOpen} onOpenChange={setClearDialogOpen}>
+        <AlertDialogContent className="max-w-lg">
+          <AlertDialogHeader className="text-left">
+            <div className="flex items-start gap-3">
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-red-500/10">
+                <AlertTriangle className="size-5 text-red-500" />
+              </div>
+              <div className="space-y-1">
+                <AlertDialogTitle className="text-base">
+                  清空 {platformInfo?.label ?? '当前平台'} 接入配置
+                </AlertDialogTitle>
+                <AlertDialogDescription className="text-sm leading-6">
+                  这会删除当前平台的凭证，并移除所有已绑定的群聊映射。清空后，这些群聊需要重新绑定才能继续使用。
+                </AlertDialogDescription>
+              </div>
+            </div>
+          </AlertDialogHeader>
+
+          <div className="space-y-3">
+            <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {channels.length > 0
+                ? `即将删除 ${channels.length} 个已绑定群聊：`
+                : '当前没有已绑定群聊，会只清空平台凭证。'}
+            </div>
+
+            {channels.length > 0 && (
+              <div className="max-h-56 overflow-y-auto rounded-lg border border-gray-200 bg-gray-50">
+                <div className="divide-y divide-gray-200">
+                  {channels.map(channel => (
+                    <div key={channel.id} className="flex items-center justify-between gap-3 px-3 py-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-gray-800">{channel.chatRoom.name}</p>
+                        <p className="truncate text-xs text-muted-foreground">{channel.externalId}</p>
+                      </div>
+                      <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-xs text-gray-500">
+                        已绑定
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isSavingConfig}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => {
+                event.preventDefault()
+                void handleClearConfig()
+              }}
+              className="bg-red-500 text-white hover:bg-red-600"
+              disabled={isSavingConfig}
+            >
+              {isSavingConfig && <Loader2 className="mr-2 size-4 animate-spin" />}
+              确认清空
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -630,21 +735,6 @@ function ChannelCard({
           </button>
         </div>
 
-        {/* 默认助手 */}
-        {channel.defaultAgent ? (
-          <div className="flex items-center gap-2 rounded-lg bg-blue-50 border border-blue-100 px-2.5 py-1.5">
-            <div className="size-5 shrink-0 overflow-hidden rounded-full ring-1 ring-blue-200">
-              <AgentAvatarImage avatar={channel.defaultAgent.avatar} className="size-full" />
-            </div>
-            <span className="text-xs font-medium text-blue-700 truncate">{channel.defaultAgent.name}</span>
-            <span className="ml-auto shrink-0 text-[10px] text-blue-400">默认助手</span>
-          </div>
-        ) : (
-          <div className="flex items-center gap-1.5 rounded-lg bg-gray-50 px-2.5 py-1.5">
-            <Bot className="size-3.5 text-muted-foreground shrink-0" />
-            <span className="text-xs text-muted-foreground">未指定默认助手</span>
-          </div>
-        )}
       </div>
 
       {/* 底部操作栏 */}

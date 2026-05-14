@@ -1,10 +1,14 @@
 export interface Attachment {
+  type?: 'image' | 'audio' | 'file';
   url: string;
   filename: string;
   mimeType: string;
   size: number;
   width?: number;
   height?: number;
+  durationMs?: number;
+  transcript?: string;
+  waveform?: string;
   base64?: string;  // 用于传递给大模型
 }
 

@@ -467,7 +467,7 @@ export async function bridgeGateway(app: FastifyInstance) {
     if (!user) return;
     try {
       const { platform } = req.params as { platform: string };
-      const body = req.body as { botToken?: string; defaultAgentId?: string | null; config?: Record<string, unknown> };
+      const body = req.body as { botToken?: string; defaultAgentId?: string | null; config?: Record<string, unknown> | null };
       const cfg = await saveBridgePlatformConfig(platform as Platform, body);
 
       await syncBridgePlatformRuntime(platform as Platform, cfg, app.log);

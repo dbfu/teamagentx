@@ -36,11 +36,15 @@ function stripDingtalkBotMention(text: string): string {
   return text.replace(/^@\S+\s*/, '').trim();
 }
 
+function stripLeadingBotMention(text: string): string {
+  return text.replace(/^@\S+\s*/, '').trim();
+}
+
 /**
  * QQ：删除平台 <@mention> 格式，保留普通 @文字 供 parseMentions 使用。
  */
 function stripQQMentions(text: string): string {
-  return text.replace(/<@[^>]+>\s*/g, '').trim();
+  return stripLeadingBotMention(text.replace(/<@[^>]+>\s*/g, '').trim());
 }
 
 export const BRIDGE_INBOUND_TEXT_ADAPTERS: BridgeInboundTextAdapter[] = [
@@ -67,9 +71,8 @@ export const BRIDGE_INBOUND_TEXT_ADAPTERS: BridgeInboundTextAdapter[] = [
   },
   {
     platform: 'wecom',
-    // 企微 webhook Content 字段不带机器人 @ 前缀，直接 trim 即可
     normalizeText(rawText) {
-      return rawText.trim();
+      return stripLeadingBotMention(rawText.trim());
     },
     extractBindCode,
   },

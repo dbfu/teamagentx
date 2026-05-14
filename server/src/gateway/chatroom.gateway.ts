@@ -10,6 +10,7 @@ import { executionRecordService } from '../modules/execution-record/execution-re
 import { taskQueueService } from '../modules/task-queue/task-queue.service.js';
 import { messageService } from '../modules/message/message.service.js';
 import { agentMemoryService } from '../modules/agent-memory/agent-memory.service.js';
+import { deserializeAgentSpeechConfig } from '../modules/speech/speech-config.js';
 
 // Schema definitions
 const lastMessageSchema = {
@@ -103,6 +104,40 @@ const chatRoomSchema = {
               description: { type: 'string', nullable: true },
               type: { type: 'string', enum: ['builtin', 'acp'] },
               agentLevel: { type: 'string', enum: ['normal', 'system'] },
+              speechConfig: {
+                type: 'object',
+                nullable: true,
+                properties: {
+                  behavior: {
+                    type: 'object',
+                    properties: {
+                      enabled: { type: 'boolean' },
+                      outputMode: { type: 'string', enum: ['off', 'manual', 'auto_final_only'] },
+                      autoPlay: { type: 'boolean' },
+                    },
+                  },
+                  profile: {
+                    type: 'object',
+                    additionalProperties: true,
+                    properties: {
+                      provider: { type: 'string', nullable: true },
+                      model: { type: 'string', nullable: true },
+                      voice: { type: 'string', nullable: true },
+                      fallbackProvider: { type: 'string', nullable: true },
+                      speed: { type: 'number', nullable: true },
+                      volume: { type: 'number', nullable: true },
+                      pitch: { type: 'number', nullable: true },
+                      emotion: { type: 'string', nullable: true },
+                      style: { type: 'string', nullable: true },
+                      format: { type: 'string', nullable: true },
+                      sampleRate: { type: 'number', nullable: true },
+                      temperature: { type: 'number', nullable: true },
+                      prompt: { type: 'string', nullable: true },
+                      vendorOptions: { type: 'object', nullable: true, additionalProperties: true },
+                    },
+                  },
+                },
+              },
             },
           },
         },
@@ -110,6 +145,28 @@ const chatRoomSchema = {
     },
   },
 };
+
+function serializeChatRoomForResponse<T extends { chatRoomAgents?: Array<{ agent?: { speechConfig?: string | null } | null }> }>(chatRoom: T): T {
+  if (!chatRoom.chatRoomAgents?.length) {
+    return chatRoom;
+  }
+
+  return {
+    ...chatRoom,
+    chatRoomAgents: chatRoom.chatRoomAgents.map((item) => {
+      if (!item.agent) return item;
+      return {
+        ...item,
+        agent: {
+          ...item.agent,
+          speechConfig: item.agent.speechConfig
+            ? deserializeAgentSpeechConfig(item.agent.speechConfig)
+            : null,
+        },
+      };
+    }),
+  };
+}
 
 const createChatRoomBodySchema = {
   type: 'object',
@@ -189,7 +246,7 @@ export async function chatRoomGateway(app: FastifyInstance) {
     },
   }, async (request, reply) => {
     const chatRooms = await chatRoomService.findAll();
-    return reply.send({ success: true, data: chatRooms });
+    return reply.send({ success: true, data: chatRooms.map(serializeChatRoomForResponse) });
   });
 
   // Get chatRoom by ID
@@ -226,7 +283,7 @@ export async function chatRoomGateway(app: FastifyInstance) {
       return reply.code(404).send({ success: false, error: '群聊不存在' });
     }
 
-    return reply.send({ success: true, data: chatRoom });
+    return reply.send({ success: true, data: serializeChatRoomForResponse(chatRoom) });
   });
 
   // Create chatRoom
@@ -272,7 +329,7 @@ export async function chatRoomGateway(app: FastifyInstance) {
       io.emit('chatroom:created', { chatRoom });
     }
 
-    return reply.code(201).send({ success: true, data: chatRoom });
+    return reply.code(201).send({ success: true, data: chatRoom ? serializeChatRoomForResponse(chatRoom) : chatRoom });
   });
 
   // Add agent to chatRoom

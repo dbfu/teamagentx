@@ -60,12 +60,16 @@ export interface SocketMessage {
 
 // Socket 附件类型
 export interface SocketAttachment {
+  type?: 'image' | 'audio' | 'file'
   url: string
   filename: string
   mimeType: string
   size: number
   width?: number
   height?: number
+  durationMs?: number
+  transcript?: string
+  waveform?: string
   base64?: string
 }
 

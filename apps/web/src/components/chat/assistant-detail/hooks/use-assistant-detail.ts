@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { agentApi, Agent, QuickChatSession } from '@/lib/agent-api'
 import { skillApi, InstalledSkill } from '@/lib/skill-api'
+import { useChatStore } from '@/stores/chat-store'
 
 interface AssistantDetailState {
   agent: Agent | null
@@ -89,12 +90,19 @@ export function useAssistantDetail(agentId: string) {
   }, [agentId, state.agent?.type])
 
   // 刷新 Agent 数据
-  const refreshAgent = useCallback(async () => {
+  const refreshAgent = useCallback(async (nextAgent?: Agent) => {
     if (!agentId) return
+
+    if (nextAgent) {
+      setState(prev => ({ ...prev, agent: nextAgent }))
+      await useChatStore.getState().loadAllAgents()
+      return
+    }
 
     const res = await agentApi.getById(agentId)
     if (res.success && res.data) {
       setState(prev => ({ ...prev, agent: res.data! }))
+      await useChatStore.getState().loadAllAgents()
     }
   }, [agentId])
 
@@ -113,6 +121,7 @@ export function useAssistantDetail(agentId: string) {
     const res = await agentApi.updateStatus(agentId, isActive)
     if (res.success && res.data) {
       setState(prev => ({ ...prev, agent: res.data! }))
+      await useChatStore.getState().loadAllAgents()
       return true
     }
     return false

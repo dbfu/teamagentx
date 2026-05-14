@@ -589,7 +589,7 @@ function startServer(): Promise<number> {
     const dbPath = path.join(app.getPath('userData'), 'teamagentx.db');
     const databaseUrl = pathToFileURL(dbPath).href;
     // Set UPLOADS_DIR to user data directory (not inside app)
-    const uploadsDir = path.join(app.getPath('userData'), 'uploads', 'images');
+    const uploadsDir = path.join(app.getPath('userData'), 'uploads');
     // 本地工具安装目录
     const toolsDir = path.join(app.getPath('userData'), 'tools');
 
