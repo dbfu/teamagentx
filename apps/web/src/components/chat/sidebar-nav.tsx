@@ -118,6 +118,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
   }
 
   return (
+    <>
     <div
       className="flex h-full w-20 shrink-0 flex-col items-center border-r border-sidebar-border bg-sidebar/95 shadow-[var(--control-shadow)] backdrop-blur"
       style={isElectron ? { WebkitAppRegion: 'drag' } as React.CSSProperties : {}}
@@ -334,35 +335,32 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
           )}
         </button>
       </div>
-
-      {/* Create Group Modal */}
-      <CreateGroupModal
-        isOpen={isCreateGroupOpen}
-        onClose={() => setIsCreateGroupOpen(false)}
-        onSuccess={(chatRoomId) => {
-          onRefreshChatRooms?.()
-          // 导航到新创建的群聊
-          navigate(`/?room=${chatRoomId}`)
-        }}
-        ownerId={currentUser?.id}
-      />
-
-      {/* Create Assistant Modal */}
-      <CreateAssistantModal
-        isOpen={isCreateAssistantOpen}
-        onClose={() => setIsCreateAssistantOpen(false)}
-        onSubmit={handleCreateAssistant}
-      />
-
-      {/* Todo Modal */}
-      <TodoModal
-        isOpen={isTodoModalOpen}
-        onClose={() => setIsTodoModalOpen(false)}
-        onTodoClick={(todo: TodoData) => {
-          // 跳转到对应群聊并定位消息
-          navigate(`/?room=${todo.chatRoomId}&msg=${todo.messageId}`)
-        }}
-      />
     </div>
+
+    {/* Modals rendered outside backdrop-blur container to avoid clipping */}
+    <CreateGroupModal
+      isOpen={isCreateGroupOpen}
+      onClose={() => setIsCreateGroupOpen(false)}
+      onSuccess={(chatRoomId) => {
+        onRefreshChatRooms?.()
+        navigate(`/?room=${chatRoomId}`)
+      }}
+      ownerId={currentUser?.id}
+    />
+
+    <CreateAssistantModal
+      isOpen={isCreateAssistantOpen}
+      onClose={() => setIsCreateAssistantOpen(false)}
+      onSubmit={handleCreateAssistant}
+    />
+
+    <TodoModal
+      isOpen={isTodoModalOpen}
+      onClose={() => setIsTodoModalOpen(false)}
+      onTodoClick={(todo: TodoData) => {
+        navigate(`/?room=${todo.chatRoomId}&msg=${todo.messageId}`)
+      }}
+    />
+    </>
   )
 }

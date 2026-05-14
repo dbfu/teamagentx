@@ -1,7 +1,9 @@
 import type { LlmProvider } from '@prisma/client';
-import { Codex, type Thread, type ThreadEvent, type ThreadItem, type Usage } from '@openai/codex-sdk';
+import type { ThreadEvent, ThreadItem, Usage } from '@openai/codex-sdk';
+import { createInterface } from 'readline';
+import { createRequire } from 'module';
 import { createHash, randomUUID } from 'crypto';
-import { execSync } from 'child_process';
+import { execFileSync, execSync, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -72,6 +74,187 @@ function attachmentExtension(mimeType: string): string {
 }
 
 const TEAMAGENTX_CODEX_PROVIDER_ID = 'teamagentx_openai';
+const INTERNAL_ORIGINATOR_ENV = 'CODEX_INTERNAL_ORIGINATOR_OVERRIDE';
+const TYPESCRIPT_SDK_ORIGINATOR = 'codex_sdk_ts';
+const CODEX_NPM_NAME = '@openai/codex';
+const moduleRequire = createRequire(import.meta.url);
+
+const PLATFORM_PACKAGE_BY_TARGET: Record<string, string> = {
+  'x86_64-unknown-linux-musl': '@openai/codex-linux-x64',
+  'aarch64-unknown-linux-musl': '@openai/codex-linux-arm64',
+  'x86_64-apple-darwin': '@openai/codex-darwin-x64',
+  'aarch64-apple-darwin': '@openai/codex-darwin-arm64',
+  'x86_64-pc-windows-msvc': '@openai/codex-win32-x64',
+  'aarch64-pc-windows-msvc': '@openai/codex-win32-arm64',
+};
+
+type CodexConfigValue = string | number | boolean | CodexConfigValue[] | CodexConfigObject;
+type CodexConfigObject = { [key: string]: CodexConfigValue | undefined };
+
+interface CodexThreadOptions {
+  model?: string;
+  sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access';
+  workingDirectory?: string;
+  skipGitRepoCheck?: boolean;
+  networkAccessEnabled?: boolean;
+  approvalPolicy?: 'untrusted' | 'on-failure' | 'on-request' | 'never';
+}
+
+interface CodexRunOptions extends CodexThreadOptions {
+  input: string;
+  images: string[];
+  threadId: string | null;
+  apiKey?: string;
+  signal?: AbortSignal;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+const TOML_BARE_KEY = /^[A-Za-z0-9_-]+$/;
+
+function formatTomlKey(key: string): string {
+  return TOML_BARE_KEY.test(key) ? key : JSON.stringify(key);
+}
+
+function toTomlValue(value: CodexConfigValue, pathName: string): string {
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      throw new Error(`Codex config override at ${pathName} must be a finite number`);
+    }
+    return `${value}`;
+  }
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (Array.isArray(value)) {
+    return `[${value.map((item, index) => toTomlValue(item, `${pathName}[${index}]`)).join(', ')}]`;
+  }
+  if (isPlainObject(value)) {
+    const parts: string[] = [];
+    for (const [key, child] of Object.entries(value)) {
+      if (!key) throw new Error('Codex config override keys must be non-empty strings');
+      if (child === undefined) continue;
+      parts.push(`${formatTomlKey(key)} = ${toTomlValue(child as CodexConfigValue, `${pathName}.${key}`)}`);
+    }
+    return `{${parts.join(', ')}}`;
+  }
+  throw new Error(`Unsupported Codex config override value at ${pathName}: ${typeof value}`);
+}
+
+function flattenConfigOverrides(value: CodexConfigObject, prefix: string, overrides: string[]): void {
+  const entries = Object.entries(value);
+  if (!prefix && entries.length === 0) return;
+  if (prefix && entries.length === 0) {
+    overrides.push(`${prefix}={}`);
+    return;
+  }
+
+  for (const [key, child] of entries) {
+    if (!key) throw new Error('Codex config override keys must be non-empty strings');
+    if (child === undefined) continue;
+    const pathName = prefix ? `${prefix}.${key}` : key;
+    if (isPlainObject(child) && !Array.isArray(child)) {
+      flattenConfigOverrides(child as CodexConfigObject, pathName, overrides);
+    } else {
+      overrides.push(`${pathName}=${toTomlValue(child as CodexConfigValue, pathName)}`);
+    }
+  }
+}
+
+function serializeConfigOverrides(configOverrides: CodexConfigObject): string[] {
+  const overrides: string[] = [];
+  flattenConfigOverrides(configOverrides, '', overrides);
+  return overrides;
+}
+
+function getCodexTargetTriple(): string {
+  if (process.platform === 'linux' || process.platform === 'android') {
+    if (process.arch === 'x64') return 'x86_64-unknown-linux-musl';
+    if (process.arch === 'arm64') return 'aarch64-unknown-linux-musl';
+  }
+  if (process.platform === 'darwin') {
+    if (process.arch === 'x64') return 'x86_64-apple-darwin';
+    if (process.arch === 'arm64') return 'aarch64-apple-darwin';
+  }
+  if (process.platform === 'win32') {
+    if (process.arch === 'x64') return 'x86_64-pc-windows-msvc';
+    if (process.arch === 'arm64') return 'aarch64-pc-windows-msvc';
+  }
+  throw new Error(`Unsupported platform: ${process.platform} (${process.arch})`);
+}
+
+function findBundledCodexBinary(): string {
+  const targetTriple = getCodexTargetTriple();
+  const platformPackage = PLATFORM_PACKAGE_BY_TARGET[targetTriple];
+  if (!platformPackage) throw new Error(`Unsupported target triple: ${targetTriple}`);
+
+  try {
+    const codexPackageJsonPath = moduleRequire.resolve(`${CODEX_NPM_NAME}/package.json`);
+    const codexRequire = createRequire(codexPackageJsonPath);
+    const platformPackageJsonPath = codexRequire.resolve(`${platformPackage}/package.json`);
+    const vendorRoot = path.join(path.dirname(platformPackageJsonPath), 'vendor');
+    const codexBinaryName = process.platform === 'win32' ? 'codex.exe' : 'codex';
+    return path.join(vendorRoot, targetTriple, 'codex', codexBinaryName);
+  } catch {
+    throw new Error(
+      `Unable to locate Codex CLI binaries. Ensure ${CODEX_NPM_NAME} is installed with optional dependencies.`,
+    );
+  }
+}
+
+function getCodexBinaryFromPlatformPackageJson(platformPackageJsonPath: string): string | undefined {
+  const targetTriple = getCodexTargetTriple();
+  const codexBinaryName = process.platform === 'win32' ? 'codex.exe' : 'codex';
+  const binaryPath = path.join(path.dirname(platformPackageJsonPath), 'vendor', targetTriple, 'codex', codexBinaryName);
+  return fs.existsSync(binaryPath) ? binaryPath : undefined;
+}
+
+function getCodexBinaryFromCodexPackageJson(codexPackageJsonPath: string): string | undefined {
+  const platformPackage = PLATFORM_PACKAGE_BY_TARGET[getCodexTargetTriple()];
+  if (!platformPackage) return undefined;
+
+  try {
+    const codexRequire = createRequire(codexPackageJsonPath);
+    const platformPackageJsonPath = codexRequire.resolve(`${platformPackage}/package.json`);
+    return getCodexBinaryFromPlatformPackageJson(platformPackageJsonPath);
+  } catch {
+    const localVendorPath = getCodexBinaryFromPlatformPackageJson(codexPackageJsonPath);
+    if (localVendorPath) return localVendorPath;
+  }
+
+  return undefined;
+}
+
+function getCodexBinaryFromCodexPackageDir(packageDir: string): string | undefined {
+  const packageJsonPath = path.join(packageDir, 'package.json');
+  if (!fs.existsSync(packageJsonPath)) return undefined;
+  return getCodexBinaryFromCodexPackageJson(packageJsonPath);
+}
+
+function getCodexBinaryFromBinShim(binPath: string): string | undefined {
+  const normalized = path.normalize(binPath);
+  const parts = normalized.split(path.sep);
+  const nodeModulesIndex = parts.lastIndexOf('node_modules');
+  if (nodeModulesIndex >= 0) {
+    const packageDir = path.join(...parts.slice(0, nodeModulesIndex + 1), '@openai', 'codex');
+    const fromPackageDir = getCodexBinaryFromCodexPackageDir(packageDir);
+    if (fromPackageDir) return fromPackageDir;
+  }
+
+  try {
+    const text = fs.readFileSync(binPath, 'utf-8');
+    const match = text.match(/(?:^|["\s])([^"\r\n]+node_modules[\\/]@openai[\\/]codex[\\/]bin[\\/]codex\.js)/i);
+    if (match?.[1]) {
+      const packageDir = path.dirname(path.dirname(match[1]));
+      return getCodexBinaryFromCodexPackageDir(packageDir);
+    }
+  } catch {
+    // Ignore unreadable shims and keep looking.
+  }
+
+  return undefined;
+}
 
 export function buildCodexModelProviderConfig(provider?: LlmProvider | null): Record<string, unknown> {
   if (!provider) return {};
@@ -126,6 +309,63 @@ function findLocalCodexBinary(): string | undefined {
   return undefined;
 }
 
+function findSpawnableCodexBinary(): string | undefined {
+  const isWindows = process.platform === 'win32';
+  const extension = isWindows ? '.exe' : '';
+  const tryPath = (candidate: string | undefined): string | undefined => {
+    if (!candidate || !fs.existsSync(candidate)) return undefined;
+    return candidate;
+  };
+
+  const toolsDir = process.env.TOOLS_DIR;
+  if (toolsDir) {
+    const fromPackage = getCodexBinaryFromCodexPackageDir(
+      path.join(toolsDir, 'node_modules', '@openai', 'codex'),
+    );
+    if (fromPackage) return fromPackage;
+
+    const directRootBinary = tryPath(path.join(toolsDir, 'codex' + extension));
+    if (directRootBinary) return directRootBinary;
+
+    const localBin = tryPath(path.join(toolsDir, 'node_modules', '.bin', 'codex' + extension));
+    if (localBin) return localBin;
+
+    if (isWindows) {
+      const fromCmdShim =
+        getCodexBinaryFromBinShim(path.join(toolsDir, 'node_modules', '.bin', 'codex.cmd')) ||
+        getCodexBinaryFromBinShim(path.join(toolsDir, 'node_modules', '.bin', 'codex.CMD'));
+      if (fromCmdShim) return fromCmdShim;
+    } else {
+      const unixShim = tryPath(path.join(toolsDir, 'node_modules', '.bin', 'codex'));
+      if (unixShim) return unixShim;
+    }
+  }
+
+  try {
+    const which = isWindows ? 'where' : 'which';
+    const result = execFileSync(which, ['codex'], {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 3000,
+      windowsHide: true,
+    }).trim();
+    const candidates = result.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    for (const candidate of candidates) {
+      if (isWindows && /\.cmd$/i.test(candidate)) {
+        const fromShim = getCodexBinaryFromBinShim(candidate);
+        if (fromShim) return fromShim;
+        continue;
+      }
+      const found = tryPath(candidate);
+      if (found) return found;
+    }
+  } catch {
+    // PATH lookup is best-effort; the bundled SDK path may still work in dev.
+  }
+
+  return findLocalCodexBinary();
+}
+
 function getDefaultCodexAuthStatus(): { available: boolean; path: string } {
   const authPath = path.join(os.homedir(), '.codex', 'auth.json');
   try {
@@ -140,6 +380,186 @@ function getDefaultCodexAuthStatus(): { available: boolean; path: string } {
     return { available: Boolean(data.auth_mode && (hasApiKey || hasChatGptTokens)), path: authPath };
   } catch {
     return { available: false, path: authPath };
+  }
+}
+
+type CodexInput = string | Array<{ type: 'text'; text: string } | { type: 'local_image'; path: string }>;
+
+function normalizeCodexInput(input: CodexInput): { prompt: string; images: string[] } {
+  if (typeof input === 'string') return { prompt: input, images: [] };
+
+  const promptParts: string[] = [];
+  const images: string[] = [];
+  for (const item of input) {
+    if (item.type === 'text') {
+      promptParts.push(item.text);
+    } else if (item.type === 'local_image') {
+      images.push(item.path);
+    }
+  }
+  return { prompt: promptParts.join('\n\n'), images };
+}
+
+function isMissingCodexThreadRolloutError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return /thread\/resume/i.test(error.message) && /no rollout found/i.test(error.message);
+}
+
+class TeamAgentXCodexRunner {
+  constructor(
+    private readonly executablePath: string,
+    private readonly envOverride: Record<string, string>,
+    private readonly configOverrides: CodexConfigObject,
+  ) {}
+
+  async *run(args: CodexRunOptions): AsyncGenerator<string> {
+    const commandArgs = ['exec', '--experimental-json'];
+    for (const override of serializeConfigOverrides(this.configOverrides)) {
+      commandArgs.push('--config', override);
+    }
+    if (args.model) commandArgs.push('--model', args.model);
+    if (args.sandboxMode) commandArgs.push('--sandbox', args.sandboxMode);
+    if (args.workingDirectory) commandArgs.push('--cd', args.workingDirectory);
+    if (args.skipGitRepoCheck) commandArgs.push('--skip-git-repo-check');
+    if (args.networkAccessEnabled !== undefined) {
+      commandArgs.push('--config', `sandbox_workspace_write.network_access=${args.networkAccessEnabled}`);
+    }
+    if (args.approvalPolicy) commandArgs.push('--config', `approval_policy="${args.approvalPolicy}"`);
+    if (args.threadId) commandArgs.push('resume', args.threadId);
+    for (const image of args.images) {
+      commandArgs.push('--image', image);
+    }
+
+    const env = { ...this.envOverride };
+    if (!env[INTERNAL_ORIGINATOR_ENV]) {
+      env[INTERNAL_ORIGINATOR_ENV] = TYPESCRIPT_SDK_ORIGINATOR;
+    }
+    if (args.apiKey) {
+      env.CODEX_API_KEY = args.apiKey;
+    }
+
+    const child = spawn(this.executablePath, commandArgs, { env, signal: args.signal });
+    let spawnError: Error | null = null;
+    child.once('error', (error) => {
+      spawnError = error;
+    });
+
+    if (!child.stdin) {
+      child.kill();
+      throw new Error('Child process has no stdin');
+    }
+    child.stdin.write(args.input);
+    child.stdin.end();
+
+    if (!child.stdout) {
+      child.kill();
+      throw new Error('Child process has no stdout');
+    }
+
+    const stderrChunks: Buffer[] = [];
+    child.stderr?.on('data', (data) => {
+      stderrChunks.push(Buffer.isBuffer(data) ? data : Buffer.from(data));
+    });
+
+    const exitPromise = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+      child.once('exit', (code, signal) => resolve({ code, signal }));
+    });
+
+    const rl = createInterface({ input: child.stdout, crlfDelay: Infinity });
+    try {
+      for await (const line of rl) {
+        yield String(line);
+      }
+      if (spawnError) throw spawnError;
+
+      const { code, signal } = await exitPromise;
+      if (code !== 0 || signal) {
+        const detail = signal ? `signal ${signal}` : `code ${code ?? 1}`;
+        throw new Error(`Codex Exec exited with ${detail}: ${Buffer.concat(stderrChunks).toString('utf8')}`);
+      }
+    } finally {
+      rl.close();
+      child.removeAllListeners();
+      try {
+        if (!child.killed) child.kill();
+      } catch {
+        // Ignore cleanup failures after process exit.
+      }
+    }
+  }
+}
+
+class TeamAgentXCodexThread {
+  constructor(
+    private readonly runner: TeamAgentXCodexRunner,
+    private readonly apiKey: string | undefined,
+    private readonly options: CodexThreadOptions,
+    private _id: string | null = null,
+  ) {}
+
+  get id(): string | null {
+    return this._id;
+  }
+
+  async runStreamed(input: CodexInput, turnOptions: { signal?: AbortSignal } = {}): Promise<{ events: AsyncGenerator<ThreadEvent> }> {
+    return { events: this.runStreamedInternal(input, turnOptions) };
+  }
+
+  private async *runStreamedInternal(
+    input: CodexInput,
+    turnOptions: { signal?: AbortSignal },
+  ): AsyncGenerator<ThreadEvent> {
+    const { prompt, images } = normalizeCodexInput(input);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const resumeThreadId = this._id;
+      const generator = this.runner.run({
+        input: prompt,
+        images,
+        threadId: resumeThreadId,
+        apiKey: this.apiKey,
+        signal: turnOptions.signal,
+        model: this.options.model,
+        sandboxMode: this.options.sandboxMode,
+        workingDirectory: this.options.workingDirectory,
+        skipGitRepoCheck: this.options.skipGitRepoCheck,
+        networkAccessEnabled: this.options.networkAccessEnabled,
+        approvalPolicy: this.options.approvalPolicy,
+      });
+
+      try {
+        for await (const line of generator) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          if (!trimmed.startsWith('{')) {
+            debugLog('codexSdkIgnoredStdoutLine', { line: trimmed });
+            continue;
+          }
+
+          let parsed: ThreadEvent;
+          try {
+            parsed = JSON.parse(trimmed) as ThreadEvent;
+          } catch (error) {
+            throw new Error(`Failed to parse item: ${line}`, { cause: error });
+          }
+
+          if (parsed.type === 'thread.started') {
+            this._id = parsed.thread_id;
+          }
+          yield parsed;
+        }
+        return;
+      } catch (error) {
+        if (attempt === 0 && resumeThreadId && isMissingCodexThreadRolloutError(error)) {
+          debugLog('codexSdkResumeThreadMissingRollout', {
+            threadId: resumeThreadId,
+            message: error instanceof Error ? error.message : String(error),
+          });
+          this._id = null;
+          continue;
+        }
+        throw error;
+      }
+    }
   }
 }
 
@@ -162,7 +582,7 @@ export class CodexSdkExecutor implements IAgentExecutor {
   private lastInjectedSkillsSignature?: string;
   private acpProviderInfo?: AcpProviderInfo;
   private currentAbortController: AbortController | null = null;
-  private thread: Thread | null = null;
+  private thread: TeamAgentXCodexThread | null = null;
 
   private content = '';
   private thinking = '';
@@ -727,7 +1147,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     this.toolCalls = [];
   }
 
-  private getCodex(): Codex {
+  private getCodexRunner(): TeamAgentXCodexRunner {
     const env = this.buildEnv();
     const mcpServerPath = this.ensureTeamAgentXMcpServerFile();
     const sendMessageEndpoint = `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/send-message-to-agent`;
@@ -756,18 +1176,17 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       ...(this.llmProvider
         ? buildCodexModelProviderConfig(this.llmProvider)
         : {}),
-    };
+    } as CodexConfigObject;
 
-    return new Codex({
+    return new TeamAgentXCodexRunner(
+      findSpawnableCodexBinary() || findBundledCodexBinary(),
       env,
-      apiKey: this.llmProvider?.apiKey,
       config,
-      codexPathOverride: findLocalCodexBinary(),
-    });
+    );
   }
 
-  private getThread(): Thread {
-    const codex = this.getCodex();
+  private getThread(): TeamAgentXCodexThread {
+    const runner = this.getCodexRunner();
     const options = {
       model: this.llmProvider?.model,
       workingDirectory: this.workDir,
@@ -779,8 +1198,8 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
 
     if (this.thread) return this.thread;
     this.thread = this.threadId
-      ? codex.resumeThread(this.threadId, options)
-      : codex.startThread(options);
+      ? new TeamAgentXCodexThread(runner, this.llmProvider?.apiKey, options, this.threadId)
+      : new TeamAgentXCodexThread(runner, this.llmProvider?.apiKey, options);
     return this.thread;
   }
 
