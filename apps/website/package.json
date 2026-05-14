@@ -5,9 +5,12 @@
   "type": "module",
   "description": "TeamAgentX official website",
   "scripts": {
+    "predev": "node scripts/generate-update-json.mjs",
     "dev": "vite --host --port 5184",
+    "prebuild": "node scripts/generate-update-json.mjs",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview --host --port 4184"
+    "preview": "vite preview --host --port 4184",
+    "generate-update": "node scripts/generate-update-json.mjs"
   },
   "dependencies": {
     "react": "19.2.4",

@@ -1,5 +1,9 @@
 appId: com.teamagentx.app
 productName: TeamAgentX
+compression: maximum
+electronLanguages:
+  - en-US
+  - zh-CN
 directories:
   output: release
 
@@ -29,6 +33,10 @@ extraResources:
       - "!**/README*"
       - "!**/CHANGELOG*"
       - "!**/.DS_Store"
+      # 故意不打入任何 claude/codex native 子包，由 server 端的
+      # resolveClaudeCodeExecutable / findLocalCodexBinary 在运行时优先使用
+      # 用户本地的 claude/codex CLI（TOOLS_DIR 或系统 PATH）。这是为了
+      # 控制安装包体积。如果用户机器上没有，setup wizard 会引导安装。
       - "!**/claude-agent-sdk-darwin-*/**"
       - "!**/claude-agent-sdk-linux-*/**"
       - "!**/claude-agent-sdk-win32-*/**"
@@ -85,6 +93,10 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: TeamAgentX
+  # 安装/升级前先 taskkill 所有 TeamAgentX 进程及其子进程（utilityProcess
+  # 启动的 server 与 claude.exe / codex.exe），否则文件锁会导致覆盖安装失败、
+  # 必须先手动卸载旧版本才能装新版本。
+  include: electron/installer.nsh
 
 linux:
   target:

@@ -1,16 +1,7 @@
 import type { FastifyInstance } from 'fastify';
-import { spawn } from 'child_process';
-import * as fs from 'fs';
-import * as path from 'path';
-import { config } from '../config/index.js';
 import { appSettingService } from '../modules/app-setting/app-setting.service.js';
 import { checkAllAcpTools } from '../core/agent/acp-tools.service.js';
-
-// 工具包名映射
-const TOOL_PACKAGES: Record<string, string> = {
-  claude: '@anthropic-ai/claude-code',
-  codex: '@openai/codex',
-};
+import { spawnAcpToolInstall } from '../core/agent/acp-tool-install.service.js';
 
 /**
  * 首次引导设置 Gateway
@@ -45,6 +36,11 @@ export async function setupGateway(app: FastifyInstance) {
                       description: { type: 'string' },
                       installed: { type: 'boolean' },
                       version: { type: 'string', nullable: true },
+                      cliInstalled: { type: 'boolean' },
+                      cliVersion: { type: 'string', nullable: true },
+                      sdkInstalled: { type: 'boolean' },
+                      sdkVersion: { type: 'string', nullable: true },
+                      preferredRuntime: { type: 'string', enum: ['sdk', 'cli'], nullable: true },
                       localConfigAvailable: { type: 'boolean', nullable: true },
                       localConfigPath: { type: 'string', nullable: true },
                       localConfigLabel: { type: 'string', nullable: true },
@@ -156,15 +152,6 @@ export async function setupGateway(app: FastifyInstance) {
     },
   }, async (request, reply) => {
     const { toolId } = request.body;
-    const packageName = TOOL_PACKAGES[toolId];
-
-    if (!packageName) {
-      return reply.status(400).send({ success: false, error: '不支持的工具' });
-    }
-
-    // 安装到应用本地目录（TOOLS_DIR），而非系统全局
-    const toolsDir = config.toolsDir || path.join(process.cwd(), '.tools');
-    fs.mkdirSync(toolsDir, { recursive: true });
 
     // 流式返回输出
     reply.raw.writeHead(200, {
@@ -173,10 +160,14 @@ export async function setupGateway(app: FastifyInstance) {
       'Cache-Control': 'no-cache',
     });
 
-    const child = spawn('npm', ['install', '--prefix', `"${toolsDir}"`, packageName, '--force'], {
-      env: { ...process.env, FORCE_COLOR: '0' },
-      shell: true,
-    });
+    let child: ReturnType<typeof spawnAcpToolInstall>['child'];
+    try {
+      child = spawnAcpToolInstall(toolId).child;
+    } catch (error: any) {
+      reply.raw.write(`__ERROR__:${error.message || '安装失败'}`);
+      reply.raw.end();
+      return;
+    }
 
     child.stdout?.on('data', (chunk: Buffer) => {
       reply.raw.write(chunk.toString());

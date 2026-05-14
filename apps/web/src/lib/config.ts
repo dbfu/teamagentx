@@ -68,7 +68,15 @@ export function waitForServer(): Promise<void> {
 
     const api = (window as any).electronAPI;
 
-    api.getServerStatus().then((status: { ready: boolean; port: number | null; error: string | null }) => {
+    api.getServerStatus().then((status: {
+      ready: boolean;
+      port: number | null;
+      error: string | null;
+      runtime?: {
+        phase: 'idle' | 'preparing' | 'ready' | 'failed';
+        progress: RuntimePrepareProgress | null;
+      };
+    }) => {
       if (status.ready && status.port) {
         cachedBaseUrl = `http://localhost:${status.port}`;
         resolve();
@@ -88,7 +96,11 @@ export function waitForServer(): Promise<void> {
         resolve();
       });
 
-      const unsubError = api.onServerError((error: string) => {
+      const unsubError = api.onServerError(async (error: string) => {
+        const latest = await api.getServerStatus?.().catch(() => null);
+        if (latest?.runtime?.phase === 'preparing') {
+          return;
+        }
         unsubReady();
         unsubError();
         reject(new Error(error));

@@ -1,10 +1,11 @@
 import { UserAvatar, UserAvatarSelector } from '@/components/chat/user-avatar';
 import { useTheme } from '@/components/theme-provider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { acpToolsApi, type AcpToolInfo } from '@/lib/agent-api';
 import { authApi } from '@/lib/auth-api';
 import { cn } from '@/lib/utils';
 import { useAuthStore, useUIStore } from '@/stores';
-import { Check, ExternalLink, Loader2, LogOut, Monitor, Moon, Palette, RefreshCw, Settings, Smartphone, Sun, Volume2, VolumeX, X } from 'lucide-react';
+import { Check, Download, ExternalLink, Loader2, LogOut, Monitor, Moon, Palette, RefreshCw, Settings, Smartphone, Sun, Terminal, Volume2, VolumeX, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -129,9 +130,14 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
   const [generatedQRData, setGeneratedQRData] = useState<{ serverUrl: string; qrUrl: string } | null>(null)
   const [showQRModal, setShowQRModal] = useState(false)
   const [appVersion, setAppVersion] = useState<string | null>(null)
+  const [checkingUpdate, setCheckingUpdate] = useState(false)
   const [localNetworkIps, setLocalNetworkIps] = useState<string[]>([])
   const [selectedLocalIp, setSelectedLocalIp] = useState<string>('')
   const [refreshingIps, setRefreshingIps] = useState(false)
+  const [acpTools, setAcpTools] = useState<AcpToolInfo[]>([])
+  const [loadingAcpTools, setLoadingAcpTools] = useState(false)
+  const [installingToolId, setInstallingToolId] = useState<string | null>(null)
+  const [installLog, setInstallLog] = useState<Record<string, string>>({})
 
   const handleUpdateProfile = async () => {
     if (!token || !user) return
@@ -262,6 +268,78 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
     setGeneratedQRData(null)
   }
 
+  const handleCheckUpdate = async () => {
+    const api = window.electronAPI
+    if (!api?.isElectron || !api.checkForUpdates) {
+      toast.error('仅桌面客户端支持检查更新')
+      return
+    }
+
+    setCheckingUpdate(true)
+    try {
+      const result = await api.checkForUpdates()
+      if (!result.success) {
+        toast.error(result.error || '检查更新失败')
+        return
+      }
+
+      if (result.data?.hasUpdate && result.data.update) {
+        window.dispatchEvent(new CustomEvent('teamagentx-update-found', {
+          detail: {
+            currentVersion: result.data.currentVersion,
+            update: result.data.update,
+          },
+        }))
+        toast.success(`发现新版本 ${result.data.update.version}，请查看右上角更新提示`)
+        return
+      }
+
+      toast.success('当前已是最新版本')
+    } finally {
+      setCheckingUpdate(false)
+    }
+  }
+
+  const refreshAcpTools = async () => {
+    setLoadingAcpTools(true)
+    try {
+      const response = await acpToolsApi.getAll()
+      if (response.success && response.data) {
+        setAcpTools(response.data)
+      } else {
+        toast.error(response.error || '获取 SDK 状态失败')
+      }
+    } finally {
+      setLoadingAcpTools(false)
+    }
+  }
+
+  useEffect(() => {
+    if (window.electronAPI?.isElectron) {
+      refreshAcpTools()
+    }
+  }, [])
+
+  const handleInstallAcpSdk = async (toolId: string) => {
+    setInstallingToolId(toolId)
+    setInstallLog(prev => ({ ...prev, [toolId]: '' }))
+    try {
+      const exitCode = await acpToolsApi.installTool(toolId, (text) => {
+        setInstallLog(prev => ({ ...prev, [toolId]: (prev[toolId] || '') + text }))
+      })
+      if (exitCode === 0) {
+        toast.success('SDK 安装成功，助手将优先使用 SDK')
+        await refreshAcpTools()
+        return
+      }
+      toast.error('SDK 安装失败，请查看安装日志')
+    } catch (error: any) {
+      toast.error(error.message || 'SDK 安装失败')
+    } finally {
+      setInstallingToolId(null)
+    }
+  }
+
   const themeOptions = [
     { value: 'light', label: '浅色', icon: Sun },
     { value: 'dark', label: '深色', icon: Moon },
@@ -293,6 +371,12 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
       swatches: ['oklch(0.55 0.2 18)', 'oklch(0.7 0.18 18)', 'oklch(0.96 0.015 35)'],
     },
   ] as const
+
+  const getRuntimeLabel = (tool: AcpToolInfo) => {
+    if (tool.preferredRuntime === 'sdk') return '默认使用 SDK'
+    if (tool.preferredRuntime === 'cli') return '默认使用 CLI'
+    return '未可用'
+  }
 
   return (
     <div className="flex flex-1 flex-col bg-background">
@@ -448,6 +532,98 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
           </p>
         </div>
 
+        {/* SDK 管理 */}
+        {window.electronAPI?.isElectron && (
+          <div className="mb-6 rounded-xl border border-border bg-card p-4">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Terminal className="size-4 text-primary" />
+                <h2 className="text-sm font-medium text-muted-foreground">AI 工具运行方式</h2>
+              </div>
+              <button
+                onClick={refreshAcpTools}
+                disabled={loadingAcpTools || installingToolId !== null}
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+              >
+                <RefreshCw className={cn('size-3.5', loadingAcpTools && 'animate-spin')} />
+                重新检测
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {acpTools.map((tool) => {
+                const isInstalling = installingToolId === tool.id
+                const log = installLog[tool.id]
+                return (
+                  <div key={tool.id} className="rounded-lg border border-border bg-background p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-medium text-foreground">{tool.name}</span>
+                          <span className={cn(
+                            'rounded-full px-2 py-0.5 text-xs',
+                            tool.preferredRuntime === 'sdk'
+                              ? 'bg-blue-500/10 text-blue-600'
+                              : tool.preferredRuntime === 'cli'
+                                ? 'bg-emerald-500/10 text-emerald-600'
+                                : 'bg-muted text-muted-foreground'
+                          )}>
+                            {getRuntimeLabel(tool)}
+                          </span>
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                          <span className={cn(tool.cliInstalled && 'text-emerald-600')}>
+                            CLI: {tool.cliInstalled ? (tool.cliVersion || '已检测到') : '未检测到'}
+                          </span>
+                          <span className={cn(tool.sdkInstalled && 'text-blue-600')}>
+                            SDK: {tool.sdkInstalled ? (tool.sdkVersion || '已安装') : '未安装'}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleInstallAcpSdk(tool.id)}
+                        disabled={isInstalling || installingToolId !== null}
+                        className="flex shrink-0 items-center gap-1.5 rounded-lg bg-blue-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {isInstalling ? (
+                          <>
+                            <Loader2 className="size-3.5 animate-spin" />
+                            安装中
+                          </>
+                        ) : tool.sdkInstalled ? (
+                          <>
+                            <Download className="size-3.5" />
+                            重新安装 SDK
+                          </>
+                        ) : (
+                          <>
+                            <Download className="size-3.5" />
+                            安装 SDK
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    {log && (
+                      <pre className="mt-3 max-h-32 overflow-y-auto rounded-md bg-muted/50 p-2 text-xs text-muted-foreground whitespace-pre-wrap">{log}</pre>
+                    )}
+                  </div>
+                )
+              })}
+
+              {!loadingAcpTools && acpTools.length === 0 && (
+                <div className="rounded-lg border border-dashed border-border p-4 text-center text-sm text-muted-foreground">
+                  暂未获取到 AI 工具状态
+                </div>
+              )}
+            </div>
+
+            <p className="mt-3 text-xs leading-5 text-muted-foreground">
+              已安装应用本地 SDK 时，Claude/Codex 助手会优先使用 SDK；未安装 SDK 但宿主机 CLI 可用时，会继续使用宿主机 CLI。
+            </p>
+          </div>
+        )}
+
         {/* 移动端连接 */}
         {canShowMobileConnect && (
           <div className="mb-6 rounded-xl border border-border bg-card p-4">
@@ -576,6 +752,30 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
         )}
 
         {/* 退出登录 */}
+        {window.electronAPI?.isElectron && (
+          <div className="mb-6 rounded-xl border border-border bg-card p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-medium text-muted-foreground">客户端更新</h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  当前版本 {appVersion || '未知'}
+                </p>
+              </div>
+              <Download className="size-4 text-primary" />
+            </div>
+            <button
+              onClick={handleCheckUpdate}
+              disabled={checkingUpdate}
+              className="w-full rounded-lg bg-blue-500 px-4 py-2 text-sm text-white hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <span className="flex items-center justify-center gap-2">
+                {checkingUpdate ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+                {checkingUpdate ? '检查中...' : '检查更新'}
+              </span>
+            </button>
+          </div>
+        )}
+
         <button
           onClick={handleLogout}
           className="w-full rounded-xl border border-border bg-card px-4 py-3 text-sm text-red-500 hover:bg-red-500/10"

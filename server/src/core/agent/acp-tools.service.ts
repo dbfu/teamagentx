@@ -33,12 +33,22 @@ export const ACP_TOOLS = [
 
 const VISIBLE_ACP_TOOL_IDS = new Set(['claude', 'codex']);
 
+const TOOL_PACKAGES: Record<string, string> = {
+  claude: '@anthropic-ai/claude-code',
+  codex: '@openai/codex',
+};
+
 export interface AcpToolInfo {
   id: string;
   name: string;
   description: string;
   installed: boolean;
   version?: string;
+  cliInstalled: boolean;
+  cliVersion?: string;
+  sdkInstalled: boolean;
+  sdkVersion?: string;
+  preferredRuntime?: 'sdk' | 'cli';
   localConfigAvailable?: boolean;
   localConfigPath?: string;
   localConfigLabel?: string;
@@ -109,25 +119,15 @@ function checkLocalConfig(toolId: string): Pick<AcpToolInfo, 'localConfigAvailab
 }
 
 /**
- * 检测单个 CLI 工具是否已安装
+ * 检测宿主机 PATH 中的 CLI 工具是否已安装。
  */
-function checkToolInstalled(checkCommand: string): { installed: boolean; version?: string } {
-  // 构建 PATH：包含 TOOLS_DIR/node_modules/.bin
-  const toolsDir = process.env.TOOLS_DIR;
-  let envPath = process.env.PATH || '';
-  if (toolsDir) {
-    const toolsBin = path.join(toolsDir, 'node_modules', '.bin');
-    if (fs.existsSync(toolsBin)) {
-      envPath = `${toolsBin}${path.delimiter}${envPath}`;
-    }
-  }
-
+function checkHostCliInstalled(checkCommand: string): { installed: boolean; version?: string } {
   try {
     const output = execSync(checkCommand, {
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 5000,
-      env: { ...process.env, PATH: envPath },
+      env: { ...process.env, PATH: process.env.PATH || '' },
     });
 
     // 尝试提取版本号（取第一行）
@@ -136,6 +136,34 @@ function checkToolInstalled(checkCommand: string): { installed: boolean; version
   } catch {
     return { installed: false };
   }
+}
+
+function readPackageVersion(packageDir: string): string | undefined {
+  try {
+    const packageJsonPath = path.join(packageDir, 'package.json');
+    if (!fs.existsSync(packageJsonPath)) return undefined;
+    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
+    return typeof packageJson.version === 'string' ? packageJson.version : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 检测 TeamAgentX 应用本地安装目录中的 SDK/工具包。
+ */
+function checkAppLocalSdkInstalled(toolId: string): { installed: boolean; version?: string } {
+  const toolsDir = process.env.TOOLS_DIR;
+  const packageName = TOOL_PACKAGES[toolId];
+  if (!toolsDir || !packageName) return { installed: false };
+
+  const packageDir = path.join(toolsDir, 'node_modules', ...packageName.split('/'));
+  if (!fs.existsSync(packageDir)) return { installed: false };
+
+  return {
+    installed: true,
+    version: readPackageVersion(packageDir),
+  };
 }
 
 /**
@@ -151,17 +179,27 @@ export function checkAllAcpTools(): AcpToolInfo[] {
         name: tool.name,
         description: tool.description,
         installed: true,
+        cliInstalled: false,
+        sdkInstalled: true,
+        preferredRuntime: 'sdk',
         ...checkLocalConfig(tool.id),
       };
     }
 
-    const result = checkToolInstalled(checkCmd);
+    const sdk = checkAppLocalSdkInstalled(tool.id);
+    const cli = checkHostCliInstalled(checkCmd);
+    const installed = sdk.installed || cli.installed;
     return {
       id: tool.id,
       name: tool.name,
       description: tool.description,
-      installed: result.installed,
-      version: result.version,
+      installed,
+      version: sdk.installed ? sdk.version : cli.version,
+      cliInstalled: cli.installed,
+      cliVersion: cli.version,
+      sdkInstalled: sdk.installed,
+      sdkVersion: sdk.version,
+      preferredRuntime: sdk.installed ? 'sdk' : cli.installed ? 'cli' : undefined,
       ...checkLocalConfig(tool.id),
     };
   });

@@ -15,7 +15,20 @@
       "mcp__plugin_playwright_playwright__browser_navigate",
       "mcp__plugin_playwright_playwright__browser_console_messages",
       "Bash(python -c ' *)",
-      "Bash(git checkout *)"
+      "Bash(git checkout *)",
+      "Bash(git commit *)",
+      "mcp__ide__getDiagnostics",
+      "Bash(git status *)",
+      "Bash(git add *)",
+      "Bash(Get-ChildItem -Path \"G:\\\\spark\\\\teamagentx\\\\apps\\\\website\" -Recurse -File)",
+      "Bash(Select-Object FullName)",
+      "Bash(ConvertTo-Json)",
+      "Bash(pnpm exec *)",
+      "Bash(cd /mnt/g/spark/teamagentx/apps/website && pnpm exec tsc --noEmit 2>&1 | head -40)",
+      "Read(//mnt/**)",
+      "Read(//g//**)",
+      "Bash(cmd.exe /c \"cd G:\\\\spark\\\\teamagentx\\\\apps\\\\website && pnpm exec tsc --noEmit\")",
+      "Bash(cmd.exe /c \"cd /d G:\\\\spark\\\\teamagentx\\\\apps\\\\website && pnpm exec tsc --noEmit 2>&1\")"
     ]
   }
 }

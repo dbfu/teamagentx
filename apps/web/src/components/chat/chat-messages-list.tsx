@@ -384,7 +384,7 @@ export function ChatMessagesList({
           isMobile && 'min-h-0'
         )}
       >
-        {loading ? (
+        {messages.length === 0 && loading ? (
           <div className="flex h-full items-center justify-center text-gray-400">
             加载中...
           </div>

@@ -12,5 +12,5 @@
     "declaration": false
   },
   "include": ["*.ts"],
-  "exclude": ["node_modules", "../dist-electron"]
+  "exclude": ["node_modules", "../dist-electron", "*.test.ts"]
 }

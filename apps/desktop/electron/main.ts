@@ -3,11 +3,15 @@ import { UtilityProcess } from 'electron/main';
 import { execFileSync, execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
+import https from 'node:https';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import os from 'node:os';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+import zlib from 'node:zlib';
+import { isLanzouShareUrl, resolveLanzouDownloadUrl } from './update-download';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -37,12 +41,48 @@ let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let serverProcess: UtilityProcess | null = null;
 let serverPort: number | null = null;
+let lastServerError: string | null = null;
+let lastServerStderr = '';
 let mobileWebServer: http.Server | null = null;
 let mobileWebPort: number | null = null;
 let isQuitting = false;
+let quitRequestedByInstaller = false;
+let shutdownPromise: Promise<void> | null = null;
+let shutdownCompleted = false;
+let downloadedUpdatePath: string | null = null;
+
+// Runtime 准备阶段（首次启动 / 升级时把 server 解压/拷贝到 userData）。
+// 用于让前端区分「正在准备运行环境」和「服务真的失败」。
+type RuntimePhase = 'idle' | 'preparing' | 'ready' | 'failed';
+let runtimePhase: RuntimePhase = 'idle';
+let lastRuntimeProgress: RuntimeProgress | null = null;
+
+type RuntimeProgress = {
+  phase: 'extract' | 'copy';
+  /** 0~100；未知时为 null */
+  percent: number | null;
+  /** 已处理文件数 */
+  files: number;
+  /** 已写入字节数 */
+  bytes: number;
+  /** 期望总字节数；未知时为 null */
+  totalBytes: number | null;
+  /** 阶段性提示，如「正在解压运行环境…」 */
+  message: string;
+};
+
+function emitRuntimeProgress(progress: RuntimeProgress): void {
+  lastRuntimeProgress = progress;
+  mainWindow?.webContents.send('runtime:prepare-progress', progress);
+}
 
 const MOBILE_WEB_PORT = 11054;
 const MOBILE_WEB_HOST = '0.0.0.0';
+// 由 vite.config.ts 的 define 在构建时注入，值来自 apps/desktop/.env 的 VITE_UPDATE_CHECK_URL。
+// 配置方法：在 apps/desktop/.env 中设置 VITE_UPDATE_CHECK_URL=https://yoursite.com/update.json
+declare const __UPDATE_CHECK_URL__: string;
+const UPDATE_CHECK_URL: string = (typeof __UPDATE_CHECK_URL__ !== 'undefined' ? __UPDATE_CHECK_URL__ : '') || '';
+const UPDATE_DOWNLOAD_DIR = 'updates';
 const API_PROXY_PREFIXES = [
   '/auth',
   '/agents',
@@ -101,6 +141,26 @@ function findLocalIp(interfaces: NodeJS.Dict<os.NetworkInterfaceInfo[]>): string
 }
 
 type FolderOpenTarget = 'system' | 'vscode' | 'cursor' | 'trae' | 'trae-cn';
+
+type UpdateInfo = {
+  version: string;
+  /** 兼容旧客户端的通用下载链接（fallback） */
+  url: string;
+  /** macOS 安装包下载链接 */
+  macUrl?: string;
+  /** Windows 安装包下载链接 */
+  winUrl?: string;
+  /** 各平台下载链接（新格式） */
+  downloads?: { mac?: string; win?: string };
+  notes?: string;
+  publishedAt?: string;
+};
+
+type DownloadProgress = {
+  percent: number;
+  transferred: number;
+  total: number | null;
+};
 
 const EDITOR_APP_NAMES: Record<Exclude<FolderOpenTarget, 'system'>, string> = {
   vscode: 'Visual Studio Code',
@@ -199,20 +259,508 @@ function pathExists(targetPath: string): boolean {
   return fs.existsSync(targetPath);
 }
 
+function compareVersions(a: string, b: string): number {
+  const left = a.replace(/^v/i, '').split(/[.-]/).map(part => Number.parseInt(part, 10) || 0);
+  const right = b.replace(/^v/i, '').split(/[.-]/).map(part => Number.parseInt(part, 10) || 0);
+  const length = Math.max(left.length, right.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const diff = (left[index] || 0) - (right[index] || 0);
+    if (diff !== 0) return diff > 0 ? 1 : -1;
+  }
+
+  return 0;
+}
+
+function getStringField(source: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return null;
+}
+
+function normalizeUpdateInfo(payload: unknown): UpdateInfo {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('更新信息格式不正确');
+  }
+
+  const data = payload as Record<string, unknown>;
+  const version = getStringField(data, ['version', 'latestVersion', 'tag_name']);
+
+  // 提取平台专属链接
+  const macUrl = getStringField(data, ['macUrl']) || undefined;
+  const winUrl = getStringField(data, ['winUrl']) || undefined;
+
+  // 提取 downloads 子对象中的链接
+  const downloadsRaw = data['downloads'];
+  let downloadsMac: string | undefined;
+  let downloadsWin: string | undefined;
+  if (downloadsRaw && typeof downloadsRaw === 'object') {
+    const dl = downloadsRaw as Record<string, unknown>;
+    downloadsMac = typeof dl['mac'] === 'string' && dl['mac'] ? dl['mac'] : undefined;
+    downloadsWin = typeof dl['win'] === 'string' && dl['win'] ? dl['win'] : undefined;
+  }
+
+  // 兼容旧格式：通用 url 字段
+  const url = getStringField(data, ['url', 'downloadUrl', 'downloadURL', 'latestDownloadUrl']);
+
+  // 至少要有某个可用的下载链接
+  const hasSomeUrl = url || macUrl || winUrl || downloadsMac || downloadsWin;
+  if (!version || !hasSomeUrl) {
+    throw new Error('更新信息缺少 version 或下载链接');
+  }
+
+  return {
+    version,
+    url: url || macUrl || winUrl || downloadsMac || downloadsWin || '',
+    macUrl: macUrl || downloadsMac,
+    winUrl: winUrl || downloadsWin,
+    downloads: (downloadsMac || downloadsWin) ? { mac: downloadsMac, win: downloadsWin } : undefined,
+    notes: getStringField(data, ['notes', 'releaseNotes', 'body']) || undefined,
+    publishedAt: getStringField(data, ['publishedAt', 'published_at']) || undefined,
+  };
+}
+
+/**
+ * 根据当前运行平台，从 UpdateInfo 中选取对应的下载链接。
+ * 优先级：平台专属链接 > 通用 url 字段。
+ */
+function getPlatformDownloadUrl(update: UpdateInfo): string {
+  if (process.platform === 'darwin') {
+    return update.macUrl || update.downloads?.mac || update.url;
+  }
+  if (process.platform === 'win32') {
+    return update.winUrl || update.downloads?.win || update.url;
+  }
+  // Linux 等其他平台 fallback 到通用链接
+  return update.url;
+}
+
+function requestJson(url: string, redirectCount = 0): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const client = url.startsWith('https:') ? https : http;
+    const request = client.get(url, { headers: { Accept: 'application/json' } }, (response) => {
+      const statusCode = response.statusCode || 0;
+      const location = response.headers.location;
+
+      if (statusCode >= 300 && statusCode < 400 && location) {
+        response.resume();
+        if (redirectCount >= 5) {
+          reject(new Error('更新检查重定向次数过多'));
+          return;
+        }
+        resolve(requestJson(new URL(location, url).toString(), redirectCount + 1));
+        return;
+      }
+
+      if (statusCode < 200 || statusCode >= 300) {
+        response.resume();
+        reject(new Error(`更新检查失败：HTTP ${statusCode}`));
+        return;
+      }
+
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', chunk => {
+        body += chunk;
+      });
+      response.on('end', () => {
+        try {
+          resolve(JSON.parse(body));
+        } catch {
+          reject(new Error('更新信息不是有效 JSON'));
+        }
+      });
+    });
+
+    request.on('error', reject);
+    request.setTimeout(15000, () => {
+      request.destroy(new Error('更新检查超时'));
+    });
+  });
+}
+
+async function checkForUpdate(): Promise<{ hasUpdate: boolean; currentVersion: string; update: UpdateInfo | null; noUrlConfigured?: boolean }> {
+  const currentVersion = app.getVersion();
+
+  if (!UPDATE_CHECK_URL) {
+    writeLog('[Update] 未配置更新检查地址（VITE_UPDATE_CHECK_URL 为空），跳过检查');
+    return { hasUpdate: false, currentVersion, update: null, noUrlConfigured: true };
+  }
+
+  writeLog(`[Update] 开始检查更新，当前版本：${currentVersion}，检查地址：${UPDATE_CHECK_URL}`);
+
+  let payload: unknown;
+  try {
+    payload = await requestJson(UPDATE_CHECK_URL);
+    writeLog(`[Update] 更新接口响应：${JSON.stringify(payload)}`);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    writeLog(`[Update] 更新接口请求失败：${msg}`);
+    throw error;
+  }
+
+  const update = normalizeUpdateInfo(payload);
+  const hasUpdate = compareVersions(update.version, currentVersion) > 0;
+  writeLog(`[Update] 最新版本：${update.version}，hasUpdate：${hasUpdate}`);
+
+  return { hasUpdate, currentVersion, update };
+}
+
+function getDownloadFileName(downloadUrl: string): string {
+  try {
+    const parsed = new URL(downloadUrl);
+    const basename = path.basename(parsed.pathname);
+    if (basename && basename.includes('.')) return basename;
+  } catch {
+    // fall through
+  }
+
+  const ext = process.platform === 'win32' ? '.exe' : process.platform === 'darwin' ? '.dmg' : '.AppImage';
+  return `TeamAgentX-${Date.now()}${ext}`;
+}
+
+function sendUpdateProgress(progress: DownloadProgress): void {
+  mainWindow?.webContents.send('update:download-progress', progress);
+}
+
+function downloadFile(downloadUrl: string, destination: string, redirectCount = 0): Promise<string> {
+  return new Promise((resolve, reject) => {
+    // settled 守卫：防止多个错误路径同时触发导致二次 reject 变成未处理 rejection
+    let settled = false;
+    const safeResolve = (value: string) => { if (!settled) { settled = true; resolve(value); } };
+    const safeReject = (error: Error) => { if (!settled) { settled = true; reject(error); } };
+
+    const client = downloadUrl.startsWith('https:') ? https : http;
+    const request = client.get(downloadUrl, (response) => {
+      const statusCode = response.statusCode || 0;
+      const location = response.headers.location;
+
+      if (statusCode >= 300 && statusCode < 400 && location) {
+        response.resume();
+        if (redirectCount >= 5) {
+          safeReject(new Error('安装包下载重定向次数过多'));
+          return;
+        }
+        resolve(downloadFile(new URL(location, downloadUrl).toString(), destination, redirectCount + 1));
+        return;
+      }
+
+      if (statusCode < 200 || statusCode >= 300) {
+        response.resume();
+        safeReject(new Error(`安装包下载失败：HTTP ${statusCode}`));
+        return;
+      }
+
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      const total = Number.parseInt(String(response.headers['content-length'] || ''), 10);
+      let transferred = 0;
+      const file = fs.createWriteStream(destination);
+
+      // 统一清理：关闭文件流、删除残留文件、触发 reject
+      const cleanup = (error: Error) => {
+        writeLog(`[Update] 下载出错，清理残留文件：${error.message}`);
+        file.destroy();
+        fs.rm(destination, { force: true }, () => safeReject(error));
+      };
+
+      response.on('error', cleanup);
+
+      response.on('data', (chunk: Buffer) => {
+        transferred += chunk.length;
+        sendUpdateProgress({
+          percent: Number.isFinite(total) && total > 0 ? Math.round((transferred / total) * 100) : 0,
+          transferred,
+          total: Number.isFinite(total) && total > 0 ? total : null,
+        });
+      });
+
+      response.pipe(file);
+
+      file.on('finish', () => {
+        file.close(() => safeResolve(destination));
+      });
+      file.on('error', cleanup);
+    });
+
+    request.on('error', (error) => safeReject(error instanceof Error ? error : new Error(String(error))));
+    request.setTimeout(120000, () => {
+      request.destroy(new Error('安装包下载超时'));
+    });
+  });
+}
+
+async function downloadUpdate(update: UpdateInfo): Promise<{ success: true; filePath: string }> {
+  const originalDownloadUrl = getPlatformDownloadUrl(update);
+  const downloadUrl = await resolveLanzouDownloadUrl(originalDownloadUrl);
+  if (downloadUrl !== originalDownloadUrl && isLanzouShareUrl(originalDownloadUrl)) {
+    writeLog(`[Update] 已解析蓝奏分享链接为真实下载地址：${downloadUrl}`);
+  }
+  const filePath = path.join(app.getPath('userData'), UPDATE_DOWNLOAD_DIR, getDownloadFileName(downloadUrl));
+  downloadedUpdatePath = await downloadFile(downloadUrl, filePath);
+  sendUpdateProgress({ percent: 100, transferred: 1, total: 1 });
+  return { success: true, filePath: downloadedUpdatePath };
+}
+
+// 已就绪的 server 运行时目录（userData 下），由 ensureRuntimeServer() 设置。
+// 为 null 时表示尚未准备好或拷贝失败，此时回退到 resources（保持向后兼容）。
+let runtimeServerRoot: string | null = null;
+
+function getResourcesServerRoot(): string {
+  return path.join(process.resourcesPath, 'server');
+}
+
+/**
+ * Server 运行时目录。
+ *
+ * 打包后 server/ 默认在 `resources/server/`，其中的 `.node` / `.dll` 一旦被
+ * utilityProcess 加载，安装目录就会被 Windows 文件锁锁住，更新时 NSIS 会
+ * 报"程序正在运行"。把 server 复制到 userData 后，安装目录里就不再有任何
+ * 会被加载的 native 模块，从根本上消除文件锁。
+ */
 function getServerProjectRoot(): string {
   // Dev: server/ directory at project root (repo root = electron/../../..)
   if (!app.isPackaged) {
     return path.resolve(__dirname, '../../..', 'server');
   }
-  // Production: server/ under resources path (alongside app.asar)
-  return path.join(process.resourcesPath, 'server');
+  // 优先用 runtime（userData 下），未就绪时回退到 resources
+  return runtimeServerRoot ?? getResourcesServerRoot();
 }
 
 function getServerNodeModulesPath(): string {
   if (!app.isPackaged) {
     return path.resolve(__dirname, '../../..', 'server', 'node_modules');
   }
-  return path.join(process.resourcesPath, 'server', 'node_modules');
+  return path.join(getServerProjectRoot(), 'node_modules');
+}
+
+/**
+ * 把 resources/server/ 整个拷贝到 userData/runtime/<version>/server/。
+ *
+ * - 用 `app.getVersion()` 作为子目录名，同版本只拷一次；升级后旧版本目录会被清理。
+ * - 用 `.ready` sentinel 标记拷贝完成；缺失或损坏时自动重拷。
+ * - 拷贝失败时返回 null，调用方回退到 resources（旧路径仍然能跑，只是无法解决文件锁问题）。
+ */
+async function ensureRuntimeServer(): Promise<string | null> {
+  if (!app.isPackaged) {
+    return null; // dev 模式直接用源码目录，无需准备
+  }
+
+  const resourcesRoot = process.resourcesPath;
+  const sourceRoot = getResourcesServerRoot();
+  const tarball = findServerTarball(resourcesRoot);
+
+  if (!tarball && !fs.existsSync(sourceRoot)) {
+    writeLog(`[Runtime] resources 中既无 server tarball 也无 server 目录：${resourcesRoot}`);
+    return null;
+  }
+
+  const version = app.getVersion();
+  const runtimeBase = path.join(app.getPath('userData'), 'runtime');
+  const targetRoot = path.join(runtimeBase, version, 'server');
+  const sentinel = path.join(targetRoot, '.ready');
+
+  if (fs.existsSync(sentinel)) {
+    writeLog(`[Runtime] server runtime 已就绪：${targetRoot}`);
+    runtimePhase = 'ready';
+    void cleanupOldRuntimeVersions(runtimeBase, version);
+    return targetRoot;
+  }
+
+  runtimePhase = 'preparing';
+  lastRuntimeProgress = null;
+  mainWindow?.webContents.send('runtime:prepare-start');
+
+  try {
+    // 残留的不完整目录直接删掉，避免 cp 把新文件混到旧目录中
+    if (fs.existsSync(targetRoot)) {
+      writeLog(`[Runtime] 清理残留的不完整目录：${targetRoot}`);
+      await fs.promises.rm(targetRoot, { recursive: true, force: true });
+    }
+
+    await fs.promises.mkdir(targetRoot, { recursive: true });
+    const start = Date.now();
+
+    if (tarball) {
+      writeLog(`[Runtime] 首次启动或升级，开始解压 server tarball → ${targetRoot}`);
+      await extractServerTarball(tarball, targetRoot);
+    } else {
+      writeLog(`[Runtime] 首次启动或升级，开始拷贝 server → ${targetRoot}`);
+      await copyServerWithProgress(sourceRoot, targetRoot);
+    }
+
+    await fs.promises.writeFile(sentinel, version, 'utf8');
+    writeLog(`[Runtime] server 准备完成，耗时 ${Date.now() - start}ms`);
+
+    runtimePhase = 'ready';
+    void cleanupOldRuntimeVersions(runtimeBase, version);
+    mainWindow?.webContents.send('runtime:prepare-done');
+    return targetRoot;
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    writeLog(`[Runtime] server 准备失败：${msg}`);
+    runtimePhase = 'failed';
+    mainWindow?.webContents.send('runtime:prepare-error', msg);
+    // 清理半成品，下次启动重试
+    try {
+      await fs.promises.rm(targetRoot, { recursive: true, force: true });
+    } catch {
+      // 忽略清理失败
+    }
+    return null;
+  }
+}
+
+/**
+ * 在 resources 目录下寻找 server tarball（方案 B 产物）。
+ * 优先匹配 .tar.zst；若不存在返回 null，调用方回退到目录拷贝。
+ */
+function findServerTarball(resourcesRoot: string): string | null {
+  const candidates = [
+    path.join(resourcesRoot, 'server.tar.zst'),
+    path.join(resourcesRoot, 'server-runtime.tar.zst'),
+    path.join(resourcesRoot, 'server.tar.gz'),
+    path.join(resourcesRoot, 'server-runtime.tar.gz'),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
+ * 流式解压 server tarball 到目标目录，按压缩包字节进度向前端汇报。
+ * 使用动态 import 避免在没有 tar 包时编译报错。
+ */
+async function extractServerTarball(tarballPath: string, targetRoot: string): Promise<void> {
+  const stat = await fs.promises.stat(tarballPath);
+  const totalBytes = stat.size;
+  let processedBytes = 0;
+  let processedFiles = 0;
+  let lastEmit = 0;
+
+  emitRuntimeProgress({
+    phase: 'extract',
+    percent: 0,
+    files: 0,
+    bytes: 0,
+    totalBytes,
+    message: '正在解压运行环境…',
+  });
+
+  // 注：Windows 10+ 自带 tar.exe，但行为在不同版本上不一致；
+  // 使用 npm 'tar' 包（pure-JS）跨平台更稳，会被 Vite bundle 进 main.js。
+  const tar = await import('tar');
+  const stream = fs.createReadStream(tarballPath);
+  stream.on('data', (chunk) => {
+    processedBytes += chunk.length;
+    const now = Date.now();
+    if (now - lastEmit >= 250) {
+      lastEmit = now;
+      emitRuntimeProgress({
+        phase: 'extract',
+        percent: totalBytes > 0 ? Math.min(99, Math.round((processedBytes / totalBytes) * 100)) : null,
+        files: processedFiles,
+        bytes: processedBytes,
+        totalBytes,
+        message: '正在解压运行环境…',
+      });
+    }
+  });
+
+  const extractor = tar.x({ cwd: targetRoot, onentry: () => { processedFiles += 1; } });
+  if (tarballPath.endsWith('.tar.zst')) {
+    await pipeline(stream, zlib.createZstdDecompress(), extractor);
+  } else if (tarballPath.endsWith('.tar.gz') || tarballPath.endsWith('.tgz')) {
+    await pipeline(stream, zlib.createGunzip(), extractor);
+  } else {
+    await pipeline(stream, extractor);
+  }
+
+  emitRuntimeProgress({
+    phase: 'extract',
+    percent: 100,
+    files: processedFiles,
+    bytes: processedBytes,
+    totalBytes,
+    message: '解压完成',
+  });
+}
+
+/**
+ * 兜底：当没有 tarball 时（旧打包产物或 dev 调试），递归拷贝目录并汇报进度。
+ * 自己实现而不用 fs.cp，是为了能在拷贝过程中按文件数发心跳，让用户感知进度。
+ */
+async function copyServerWithProgress(sourceRoot: string, targetRoot: string): Promise<void> {
+  let copiedFiles = 0;
+  let copiedBytes = 0;
+  let lastEmit = 0;
+
+  const emit = (force = false) => {
+    const now = Date.now();
+    if (!force && now - lastEmit < 500) return;
+    lastEmit = now;
+    emitRuntimeProgress({
+      phase: 'copy',
+      percent: null, // 总量未知，前端用 indeterminate 进度条
+      files: copiedFiles,
+      bytes: copiedBytes,
+      totalBytes: null,
+      message: `正在准备运行环境（已复制 ${copiedFiles} 个文件）…`,
+    });
+  };
+
+  emit(true);
+
+  async function walk(src: string, dest: string): Promise<void> {
+    await fs.promises.mkdir(dest, { recursive: true });
+    const entries = await fs.promises.readdir(src, { withFileTypes: true });
+    for (const entry of entries) {
+      const srcPath = path.join(src, entry.name);
+      const destPath = path.join(dest, entry.name);
+      if (entry.isSymbolicLink()) {
+        // electron-builder 已展开 symlink；保留 link 信息（极少情况）
+        try {
+          const linkTarget = await fs.promises.readlink(srcPath);
+          await fs.promises.symlink(linkTarget, destPath);
+        } catch {
+          // 失败就跳过
+        }
+        continue;
+      }
+      if (entry.isDirectory()) {
+        await walk(srcPath, destPath);
+        continue;
+      }
+      await fs.promises.copyFile(srcPath, destPath);
+      const stat = await fs.promises.stat(destPath).catch(() => null);
+      copiedBytes += stat?.size ?? 0;
+      copiedFiles += 1;
+      emit();
+    }
+  }
+
+  await walk(sourceRoot, targetRoot);
+  emit(true);
+}
+
+async function cleanupOldRuntimeVersions(runtimeBase: string, currentVersion: string): Promise<void> {
+  try {
+    if (!fs.existsSync(runtimeBase)) return;
+    const entries = await fs.promises.readdir(runtimeBase);
+    for (const entry of entries) {
+      if (entry === currentVersion) continue;
+      const oldPath = path.join(runtimeBase, entry);
+      writeLog(`[Runtime] 清理旧版 runtime：${oldPath}`);
+      await fs.promises.rm(oldPath, { recursive: true, force: true });
+    }
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    writeLog(`[Runtime] 清理旧版 runtime 失败：${msg}`);
+  }
 }
 
 function getRendererDistPath(): string {
@@ -458,6 +1006,182 @@ function stopMobileWebServer(): void {
   }
 }
 
+function stopMobileWebServerAsync(): Promise<void> {
+  if (!mobileWebServer) {
+    mobileWebPort = null;
+    return Promise.resolve();
+  }
+
+  const server = mobileWebServer;
+  mobileWebServer = null;
+  mobileWebPort = null;
+
+  return new Promise((resolve) => {
+    server.close(() => resolve());
+    setTimeout(resolve, 3000);
+  });
+}
+
+function stopServerProcessAsync(): Promise<void> {
+  if (!serverProcess) {
+    serverPort = null;
+    return Promise.resolve();
+  }
+
+  const processToStop = serverProcess;
+  const pid = processToStop.pid;
+  serverProcess = null;
+  serverPort = null;
+
+  return new Promise((resolve) => {
+    processToStop.once('exit', () => {
+      writeLog(`[Shutdown] server process exited (pid=${pid})`);
+      resolve();
+    });
+
+    if (process.platform === 'win32' && pid) {
+      // Windows: taskkill /F /T 强制终止整个进程树（含 agent 产生的所有子进程），
+      // 单纯 kill() 只发信号，无法保证子进程一并退出，NSIS 会检测到残留进程。
+      writeLog(`[Shutdown] taskkill /F /T /PID ${pid}`);
+      try {
+        execFileSync('taskkill', ['/F', '/T', '/PID', String(pid)], { timeout: 5000 });
+      } catch (e) {
+        writeLog(`[Shutdown] taskkill failed: ${e}, fallback to kill()`);
+        processToStop.kill();
+      }
+    } else {
+      processToStop.kill();
+    }
+
+    setTimeout(resolve, 5000);
+  });
+}
+
+async function shutdownBackend(): Promise<void> {
+  if (shutdownPromise) return shutdownPromise;
+
+  shutdownPromise = (async () => {
+    await stopMobileWebServerAsync();
+    await stopServerProcessAsync();
+    shutdownCompleted = true;
+  })();
+
+  return shutdownPromise;
+}
+
+async function requestAppQuit(): Promise<void> {
+  isQuitting = true;
+  await shutdownBackend();
+  app.quit();
+}
+
+async function installDownloadedUpdate(filePath?: string): Promise<{ success: boolean; error?: string }> {
+  const installerPath = filePath || downloadedUpdatePath;
+  if (!installerPath || !fs.existsSync(installerPath)) {
+    return { success: false, error: '安装包不存在，请重新下载' };
+  }
+
+  try {
+    quitRequestedByInstaller = true;
+    isQuitting = true;
+    await shutdownBackend();
+
+    if (process.platform === 'win32') {
+      // 不能先卸载旧版再装新版——新版安装失败会让用户两头落空。
+      // 正确做法：用 /S（静默模式）直接运行新安装包，旧版文件在安装成功后才被替换。
+      //
+      // NSIS 检测"应用占用"看的是**文件锁**而不是窗口：只要 resources\server\ 下
+      // 的 .node / .dll 还被任何进程的句柄持有，安装就会一直失败，重试多少次都没用。
+      // 而 server 经常派生 node.exe / cmd.exe / npm 子进程（claude/codex/shell/npm install），
+      // 这些孤儿子进程在主进程退出后仍然驻留并持有文件句柄。
+      //
+      // 流程：等主进程退出 → 反复杀掉所有从安装目录启动的进程 → 等文件句柄释放 → /S 静默安装
+      const safeInstallerPath = installerPath.replace(/'/g, "''");
+      const installDir = path.dirname(app.getPath('exe'));
+      const safeInstallDir = installDir.replace(/'/g, "''");
+
+      // 注意：PowerShell 脚本中字符串字面量用单引号包围，
+      // 字符串里的单引号通过两次单引号转义（上面的 .replace 已处理）。
+      const scriptLines = [
+        `$ErrorActionPreference = 'SilentlyContinue'`,
+        `$installDir = '${safeInstallDir}'`,
+        `$installerPath = '${safeInstallerPath}'`,
+        ``,
+        `# 等当前 TeamAgentX 主进程从内存中退出`,
+        `Start-Sleep -Milliseconds 800`,
+        ``,
+        `# 按"可执行文件路径在安装目录下"为准杀进程，能抓到 utilityProcess、`,
+        `# ACP 子进程、npm 子进程等任何 server 派生出来的孤儿进程。`,
+        `function Kill-ProcessesInDir {`,
+        `  param([string]$Dir)`,
+        `  $count = 0`,
+        `  try {`,
+        `    $procs = Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {`,
+        `      $_.ExecutablePath -and $_.ExecutablePath.StartsWith($Dir, [StringComparison]::OrdinalIgnoreCase)`,
+        `    }`,
+        `    foreach ($p in $procs) {`,
+        `      Stop-Process -Id $p.ProcessId -Force`,
+        `      $count++`,
+        `    }`,
+        `  } catch {}`,
+        `  return $count`,
+        `}`,
+        ``,
+        `# 反复杀直到连续两轮 0 个，避免子进程链来不及全部死掉。最多 10 轮（约 3s）。`,
+        `$emptyRounds = 0`,
+        `for ($i = 0; $i -lt 10; $i++) {`,
+        `  $killed = Kill-ProcessesInDir -Dir $installDir`,
+        `  if ($killed -eq 0) {`,
+        `    $emptyRounds++`,
+        `    if ($emptyRounds -ge 2) { break }`,
+        `  } else {`,
+        `    $emptyRounds = 0`,
+        `  }`,
+        `  Start-Sleep -Milliseconds 300`,
+        `}`,
+        ``,
+        `# 兜底：按进程名再杀一次（防止有进程因权限读不到 ExecutablePath 而漏网）`,
+        `Stop-Process -Name 'TeamAgentX' -Force`,
+        ``,
+        `# 进程死掉 ≠ 文件句柄立即释放。Windows 上 .node / .dll 句柄常有 ~1s 的延迟，`,
+        `# 这里多等 1.5s，否则 NSIS 仍可能命中残留句柄报"程序正在运行"。`,
+        `Start-Sleep -Milliseconds 1500`,
+        ``,
+        `Start-Process -FilePath $installerPath -ArgumentList '/S' -Wait`,
+      ];
+
+      const scriptPath = path.join(app.getPath('temp'), 'teamagentx-update.ps1');
+      fs.writeFileSync(scriptPath, scriptLines.join('\r\n'), 'utf8');
+      writeLog(`[Update] 写入静默安装脚本：${scriptPath}，installDir=${installDir}`);
+
+      spawn(
+        'powershell',
+        ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', scriptPath],
+        { detached: true, stdio: 'ignore' },
+      ).unref();
+
+      writeLog('[Update] 主进程立即退出，PowerShell 脚本接管进程清理与静默安装');
+      process.exit(0);
+    }
+
+    // macOS / Linux：直接打开安装包后退出
+    writeLog(`[Update] 打开安装包：${installerPath}`);
+    const errorMessage = await shell.openPath(installerPath);
+    if (errorMessage) {
+      writeLog(`[Update] shell.openPath 失败：${errorMessage}`);
+      quitRequestedByInstaller = false;
+      return { success: false, error: errorMessage };
+    }
+
+    writeLog('[Update] 安装包已启动，退出当前进程');
+    setTimeout(() => process.exit(0), 500);
+    return { success: true };
+  } catch (error) {
+    quitRequestedByInstaller = false;
+    return { success: false, error: String(error) };
+  }
+}
+
 /**
  * 通过启动用户 shell 来获取完整 PATH 环境变量。
  *
@@ -579,12 +1303,53 @@ function buildFallbackPath(): string {
   ].filter(Boolean).join(separator);
 }
 
-function startServer(): Promise<number> {
+async function startServer(): Promise<number> {
   writeLog('startServer called');
-  return new Promise((resolve, reject) => {
-    const projectRoot = getServerProjectRoot();
-    writeLog(`Server project root: ${projectRoot}`);
+  lastServerStderr = '';
 
+  // 在 fork utilityProcess 之前先把 server 目录拷贝到 userData，
+  // 这样所有 .node / .dll 文件锁都落在 userData 而非 resources，
+  // 后续更新时 NSIS 不会再卡在"程序正在运行"。失败时回退到 resources。
+  if (app.isPackaged && !runtimeServerRoot) {
+    const root = await ensureRuntimeServer();
+    if (root) {
+      runtimeServerRoot = root;
+      writeLog(`[Runtime] server 将从 userData 加载：${root}`);
+    } else {
+      writeLog(`[Runtime] server 回退到 resources：${getResourcesServerRoot()}`);
+    }
+  }
+
+  const projectRoot = getServerProjectRoot();
+  const nodeModulesPath = getServerNodeModulesPath();
+  const serverEntry = path.join(projectRoot, 'dist', 'electron-entry.js');
+  writeLog(`Server project root: ${projectRoot}`);
+  writeLog(`Server entry: ${serverEntry}`);
+  writeLog(`Node modules path: ${nodeModulesPath}`);
+
+  // 启动前预检查：缺失关键文件直接抛出明确错误，避免 utilityProcess 静默退出
+  const preflightErrors: string[] = [];
+  if (!fs.existsSync(projectRoot)) {
+    preflightErrors.push(`server 目录不存在：${projectRoot}`);
+  }
+  if (!fs.existsSync(serverEntry)) {
+    preflightErrors.push(`server 入口文件缺失：${serverEntry}（检查打包是否包含 server/dist/electron-entry.js）`);
+  }
+  if (!fs.existsSync(nodeModulesPath)) {
+    preflightErrors.push(`server node_modules 缺失：${nodeModulesPath}`);
+  } else {
+    const prismaClient = path.join(nodeModulesPath, '@prisma', 'client');
+    if (!fs.existsSync(prismaClient)) {
+      preflightErrors.push(`Prisma client 缺失：${prismaClient}`);
+    }
+  }
+  if (preflightErrors.length > 0) {
+    const message = `服务启动预检查失败：\n- ${preflightErrors.join('\n- ')}\n\n详细日志：${getLogPath()}`;
+    writeLog(`[Preflight] ${message}`);
+    throw new Error(message);
+  }
+
+  return new Promise((resolve, reject) => {
     // Set DATABASE_URL to user data directory
     const dbPath = path.join(app.getPath('userData'), 'teamagentx.db');
     const databaseUrl = pathToFileURL(dbPath).href;
@@ -593,39 +1358,39 @@ function startServer(): Promise<number> {
     // 本地工具安装目录
     const toolsDir = path.join(app.getPath('userData'), 'tools');
 
-    // Use Electron's utilityProcess to run the server
-    // This is the correct way to spawn Node.js child processes in Electron
-    const nodeModulesPath = getServerNodeModulesPath();
-    const serverEntry = path.join(projectRoot, 'dist', 'electron-entry.js');
-    writeLog(`Server entry: ${serverEntry}`);
-    writeLog(`Node modules path: ${nodeModulesPath}`);
-    writeLog(`Server entry exists: ${fs.existsSync(serverEntry)}`);
-
     const fullPath = resolveShellPath();
 
-    // Electron 打包时固定端口为 11053
-    const fixedPort = 11053;
+    let settled = false;
+    const settle = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      fn();
+    };
 
-    serverProcess = utilityProcess.fork(serverEntry, [], {
-      cwd: projectRoot,
-      env: {
-        ...process.env,
-        PATH: fullPath,
-        DATABASE_URL: databaseUrl,
-        UPLOADS_DIR: uploadsDir,
-        TOOLS_DIR: toolsDir,
-        NODE_PATH: nodeModulesPath,
-        ELECTRON: 'true',
-        ACPX_FALLBACK: 'true',
-      },
-      stdio: 'pipe',
-    });
-
-    let outputBuffer = '';
+    try {
+      serverProcess = utilityProcess.fork(serverEntry, [], {
+        cwd: projectRoot,
+        env: {
+          ...process.env,
+          PATH: fullPath,
+          DATABASE_URL: databaseUrl,
+          UPLOADS_DIR: uploadsDir,
+          TOOLS_DIR: toolsDir,
+          NODE_PATH: nodeModulesPath,
+          ELECTRON: 'true',
+          ACPX_FALLBACK: 'true',
+        },
+        stdio: 'pipe',
+      });
+    } catch (forkError) {
+      const msg = forkError instanceof Error ? forkError.message : String(forkError);
+      writeLog(`utilityProcess.fork 抛出异常：${msg}`);
+      reject(new Error(`无法启动 server 进程：${msg}\n详细日志：${getLogPath()}`));
+      return;
+    }
 
     serverProcess.stdout?.on('data', (data) => {
       const text = data.toString();
-      outputBuffer += text;
       writeLog(`Server stdout: ${text.trim()}`);
 
       // Parse port from output: __ELECTRON_PORT__:XXXX
@@ -634,7 +1399,7 @@ function startServer(): Promise<number> {
         serverPort = parseInt(match[1], 10);
         writeLog(`Server started on port: ${serverPort}`);
         process.stdout.write(data);
-        resolve(serverPort);
+        settle(() => resolve(serverPort!));
       } else {
         process.stdout.write(data);
       }
@@ -642,30 +1407,32 @@ function startServer(): Promise<number> {
 
     serverProcess.stderr?.on('data', (data) => {
       const text = data.toString();
+      lastServerStderr = `${lastServerStderr}${text}`.slice(-8000);
       writeLog(`Server stderr: ${text.trim()}`);
       process.stderr.write(data);
     });
 
     serverProcess.on('exit', (code) => {
       writeLog(`Server process exited with code: ${code}`);
-      if (serverPort === null) {
-        reject(
-          new Error(
-            `Server process exited with code ${code} before port was assigned`,
-          ),
-        );
-      }
+      const wasReady = serverPort !== null;
       serverProcess = null;
+      if (!wasReady) {
+        const tail = lastServerStderr.trim().split(/\r?\n/).slice(-15).join('\n');
+        const detail = tail ? `\n\n最后的错误输出：\n${tail}` : '';
+        settle(() => reject(new Error(
+          `server 进程退出，退出码 ${code}（端口尚未就绪）${detail}\n\n详细日志：${getLogPath()}`,
+        )));
+      }
     });
 
     // Set a timeout to reject if server doesn't start
     setTimeout(() => {
       if (serverPort === null) {
-        reject(
-          new Error(
-            'Server startup timeout - no port received within 30 seconds',
-          ),
-        );
+        const tail = lastServerStderr.trim().split(/\r?\n/).slice(-15).join('\n');
+        const detail = tail ? `\n\n最后的错误输出：\n${tail}` : '';
+        settle(() => reject(new Error(
+          `server 启动超时（30 秒内未输出端口）${detail}\n\n详细日志：${getLogPath()}`,
+        )));
       }
     }, 30000);
   });
@@ -686,6 +1453,7 @@ function startServerInBackground(): void {
   startServer()
     .then(async (port) => {
       serverPort = port;
+      lastServerError = null;
       writeLog(`Server started on port: ${port}`);
       if (app.isPackaged) {
         await startMobileWebServer(port);
@@ -696,6 +1464,7 @@ function startServerInBackground(): void {
       const msg = error instanceof Error ? error.message : String(error);
       writeLog(`Server startup failed: ${msg}`);
       console.error('Server startup failed:', error);
+      lastServerError = msg;
       mainWindow?.webContents.send('server-error', msg);
     });
 }
@@ -778,8 +1547,7 @@ function createTray() {
       {
         label: '退出',
         click: () => {
-          isQuitting = true;
-          app.quit();
+          void requestAppQuit();
         },
       },
     ]),
@@ -891,6 +1659,33 @@ app.whenReady().then(async () => {
     return app.getVersion();
   });
 
+  ipcMain.handle('update:check', async () => {
+    try {
+      const data = await checkForUpdate();
+      return { success: true, data };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      writeLog(`[Update] checkForUpdate 异常：${msg}`);
+      return { success: false, error: msg };
+    }
+  });
+
+  ipcMain.handle('update:download', async (_event, update: UpdateInfo) => {
+    try {
+      return await downloadUpdate(update);
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('update:install', async (_event, filePath?: string) => {
+    return installDownloadedUpdate(filePath);
+  });
+
+  ipcMain.handle('update:show-in-folder', (_event, filePath: string) => {
+    shell.showItemInFolder(filePath);
+  });
+
   // 窗口控制 IPC handlers (用于 Windows 无边框窗口)
   ipcMain.handle('window:minimize', () => {
     mainWindow?.minimize();
@@ -987,11 +1782,37 @@ app.whenReady().then(async () => {
 
   // 服务状态查询（供渲染器判断后端是否就绪）
   ipcMain.handle('get-server-status', () => {
+    let error: string | null = null;
+    // 只有当不是「正在准备运行环境」、且没有进程在跑、也没有端口时才算失败。
+    // 否则前端会在解压阶段误判为「服务启动失败」。
+    if (serverPort === null && !serverProcess && runtimePhase !== 'preparing') {
+      if (lastServerError) {
+        error = lastServerError;
+      } else if (runtimePhase === 'failed') {
+        error = `运行环境准备失败。详细日志：${getLogPath()}`;
+      }
+      // runtimePhase === 'idle' 时返回 error=null，由前端继续等待事件
+    }
     return {
       ready: serverPort !== null,
       port: serverPort,
-      error: serverPort === null && !serverProcess ? 'Server not running' : null,
+      error,
+      logPath: getLogPath(),
+      runtime: {
+        phase: runtimePhase,
+        progress: lastRuntimeProgress,
+      },
     };
+  });
+
+  // 让用户在错误界面"打开日志文件夹"以协助排查
+  ipcMain.handle('open-log-folder', async () => {
+    try {
+      shell.showItemInFolder(getLogPath());
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
   });
 
   // 先创建窗口和托盘（用户立即看到界面），再后台启动服务
@@ -1022,23 +1843,22 @@ app.on('second-instance', () => {
 app.on('window-all-closed', () => {
   if (!isQuitting) return;
 
-  stopMobileWebServer();
-  if (serverProcess) {
-    serverProcess.kill();
-    serverProcess = null;
+  if (!shutdownCompleted) {
+    void requestAppQuit();
+    return;
   }
-  // Reset serverPort so we know server is not running
-  serverPort = null;
-  app.quit();
+
+  if (process.platform !== 'darwin' || quitRequestedByInstaller) {
+    app.quit();
+  }
 });
 
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
   isQuitting = true;
-  stopMobileWebServer();
-  if (serverProcess) {
-    serverProcess.kill();
-    serverProcess = null;
-    serverPort = null;
+
+  if (!shutdownCompleted) {
+    event.preventDefault();
+    void requestAppQuit();
   }
 });
 

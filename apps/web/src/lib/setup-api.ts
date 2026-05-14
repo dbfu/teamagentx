@@ -7,6 +7,11 @@ export interface AcpToolInfo {
   description: string
   installed: boolean
   version?: string
+  cliInstalled: boolean
+  cliVersion?: string
+  sdkInstalled: boolean
+  sdkVersion?: string
+  preferredRuntime?: 'sdk' | 'cli'
   localConfigAvailable?: boolean
   localConfigPath?: string
   localConfigLabel?: string

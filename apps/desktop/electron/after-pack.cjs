@@ -1,6 +1,9 @@
 const path = require('path');
 const fs = require('fs');
 const { createRequire } = require('module');
+const { pipeline } = require('stream/promises');
+const zlib = require('zlib');
+const tar = require('tar');
 
 /**
  * After pack hook: ensure Prisma client is available in the bundled server/
@@ -105,9 +108,16 @@ exports.default = async function (context) {
       '@prisma+query-plan-executor@',
       '@prisma+studio-core@',
       '@prisma+dev@',
+      '@radix-ui+',
       '@electric-sql+pglite@',
       '@electric-sql+pglite-tools@',
+      '@types+react@',
+      '@types+react-dom@',
+      'prisma@',
+      'react@',
+      'react-dom@',
       'tsx@',
+      'typescript@',
       'esbuild@',
     ]),
     ...prunePlatformPackages(nodeModulesDir, targetPlatform, targetArch),
@@ -148,6 +158,9 @@ exports.default = async function (context) {
     cleanupLogs.push(
       ...pruneNestedPlatformPackageCopies(nodeModulesDir, targetPlatform, targetArch),
       ...hoistPnpmPackageCopies(nodeModulesDir),
+      ...pruneHoistedPnpmDuplicates(nodeModulesDir),
+      ...removeJunkDocFiles(nodeModulesDir),
+      ...removeDevDirectories(nodeModulesDir),
       ...removeFilesByPattern(nodeModulesDir, (fullPath) => (
         fullPath.endsWith('.map')
         || fullPath.endsWith('.d.ts')
@@ -168,6 +181,7 @@ exports.default = async function (context) {
     }
   }
 
+  await createServerRuntimeArchive(serverDir, resourcesDir);
 };
 
 function copyDirSync(src, dest) {
@@ -210,6 +224,45 @@ function removeDanglingSymlinks(rootDir) {
 
   walk(rootDir);
   return removed;
+}
+
+async function createServerRuntimeArchive(serverDir, resourcesDir) {
+  const useZstd = typeof zlib.createZstdCompress === 'function';
+  const archivePath = path.join(resourcesDir, useZstd ? 'server.tar.zst' : 'server.tar.gz');
+  const startedAt = Date.now();
+
+  if (fs.existsSync(archivePath)) {
+    fs.rmSync(archivePath, { force: true });
+  }
+
+  const beforeBytes = getPathSize(serverDir);
+  console.log(`[afterPack] Creating server runtime archive: ${archivePath}`);
+
+  await pipeline(
+    tar.c(
+      {
+        cwd: serverDir,
+        portable: true,
+        noMtime: true,
+      },
+      ['.'],
+    ),
+    useZstd
+      ? zlib.createZstdCompress({
+          params: {
+            [zlib.constants.ZSTD_c_compressionLevel]: 6,
+          },
+        })
+      : zlib.createGzip({ level: 6 }),
+    fs.createWriteStream(archivePath),
+  );
+
+  const archiveBytes = fs.statSync(archivePath).size;
+  fs.rmSync(serverDir, { recursive: true, force: true });
+  console.log(
+    `[afterPack] Archived server runtime ${formatBytes(beforeBytes)} -> ${formatBytes(archiveBytes)} `
+    + `in ${Date.now() - startedAt}ms; removed loose server directory`,
+  );
 }
 
 /**
@@ -733,6 +786,140 @@ function pruneVendorSubdirs(rootDir, keepNames) {
   }
 
   return removed;
+}
+
+/**
+ * 删除 .pnpm/<pkg>@ver/node_modules/ 中已 hoist 到顶层 node_modules 的同版本兄弟副本。
+ * Windows 流程的 convertSymlinksToFiles + hoistPnpmPackageCopies 之后，
+ * 每个依赖在 .pnpm 内每个引用它的包目录里都存在一个完整副本，与顶层 hoist 副本重复。
+ * Node 模块解析会冒泡到顶层 node_modules，所以兄弟副本是冗余的。
+ * 为保持依赖正确性，仅在版本号完全相等时删除。
+ */
+function pruneHoistedPnpmDuplicates(nodeModulesDir) {
+  const pnpmDir = path.join(nodeModulesDir, '.pnpm');
+  if (!fs.existsSync(pnpmDir)) return [];
+
+  let removedCount = 0;
+  let removedBytes = 0;
+
+  const readVersion = (pkgRootDir) => {
+    try {
+      const pkgJsonPath = path.join(pkgRootDir, 'package.json');
+      if (!fs.existsSync(pkgJsonPath)) return null;
+      const parsed = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf-8'));
+      return typeof parsed.version === 'string' ? parsed.version : null;
+    } catch { return null; }
+  };
+
+  const decodeOwnerPackageName = (storeDirName) => {
+    // 形如 "@anthropic-ai+claude-agent-sdk@0.2.138_..." 或 "fastify@5.8.2"
+    const atIdx = storeDirName.indexOf('@', 1);
+    if (atIdx <= 0) return null;
+    const pkgPart = storeDirName.slice(0, atIdx);
+    return pkgPart.replace('+', '/');
+  };
+
+  const tryRemoveDuplicate = (innerPkgPath, packageRelParts) => {
+    const topLevelPath = path.join(nodeModulesDir, ...packageRelParts);
+    if (!fs.existsSync(topLevelPath)) return;
+    const innerVersion = readVersion(innerPkgPath);
+    const topVersion = readVersion(topLevelPath);
+    if (!innerVersion || !topVersion || innerVersion !== topVersion) return;
+
+    const size = getPathSize(innerPkgPath);
+    fs.rmSync(innerPkgPath, { recursive: true, force: true });
+    removedCount += 1;
+    removedBytes += size;
+  };
+
+  for (const storeEntry of fs.readdirSync(pnpmDir, { withFileTypes: true })) {
+    if (!storeEntry.isDirectory()) continue;
+
+    const innerNm = path.join(pnpmDir, storeEntry.name, 'node_modules');
+    if (!fs.existsSync(innerNm)) continue;
+
+    const ownerName = decodeOwnerPackageName(storeEntry.name);
+
+    for (const sibling of fs.readdirSync(innerNm, { withFileTypes: true })) {
+      if (sibling.isSymbolicLink()) continue;
+      if (!sibling.isDirectory()) continue;
+
+      if (sibling.name.startsWith('@')) {
+        const scopeDir = path.join(innerNm, sibling.name);
+        for (const scoped of fs.readdirSync(scopeDir, { withFileTypes: true })) {
+          if (!scoped.isDirectory() || scoped.isSymbolicLink()) continue;
+          const fullName = `${sibling.name}/${scoped.name}`;
+          if (fullName === ownerName) continue;
+          tryRemoveDuplicate(path.join(scopeDir, scoped.name), [sibling.name, scoped.name]);
+        }
+        continue;
+      }
+
+      if (sibling.name === ownerName) continue;
+      tryRemoveDuplicate(path.join(innerNm, sibling.name), [sibling.name]);
+    }
+  }
+
+  if (removedCount === 0) return [];
+  return [`pruned ${removedCount} duplicate package copy(ies) from .pnpm after hoist (${formatBytes(removedBytes)})`];
+}
+
+/**
+ * 删除依赖目录中常见的非运行时文档/法律外文件（保留 LICENSE/LICENCE/NOTICE）。
+ */
+function removeJunkDocFiles(rootDir) {
+  return removeFilesByPattern(rootDir, (fullPath) => {
+    const base = path.basename(fullPath);
+    if (/^(README|CHANGELOG|HISTORY|AUTHORS|CONTRIBUTORS|CONTRIBUTING|UPGRADING|MIGRATING|SECURITY|GOVERNANCE|CODE_OF_CONDUCT)([._-].*)?\.(md|markdown|rst|txt)$/i.test(base)) return true;
+    if (/^(README|CHANGELOG|HISTORY|AUTHORS|CONTRIBUTORS)$/i.test(base)) return true;
+    return false;
+  });
+}
+
+/**
+ * 删除依赖目录中典型的开发/测试目录。LICENSE 等法律文件保持不动。
+ */
+function removeDevDirectories(rootDir) {
+  if (!fs.existsSync(rootDir)) return [];
+
+  const DROP_NAMES = new Set([
+    'test', 'tests', '__tests__', '__test__',
+    'example', 'examples', 'demo', 'demos',
+    'docs', 'doc', 'documentation',
+    'spec', 'specs',
+    'coverage',
+    '.github', '.vscode', '.idea', '.circleci',
+    'man', 'samples',
+  ]);
+
+  let removedCount = 0;
+  let removedBytes = 0;
+
+  function walk(currentPath) {
+    let entries;
+    try { entries = fs.readdirSync(currentPath, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      if (entry.isSymbolicLink()) continue;
+      const full = path.join(currentPath, entry.name);
+      if (!entry.isDirectory()) continue;
+
+      if (DROP_NAMES.has(entry.name)) {
+        const size = getPathSize(full);
+        try {
+          fs.rmSync(full, { recursive: true, force: true });
+          removedCount += 1;
+          removedBytes += size;
+        } catch {}
+        continue;
+      }
+
+      walk(full);
+    }
+  }
+
+  walk(rootDir);
+  if (removedCount === 0) return [];
+  return [`removed ${removedCount} dev directory(ies) (${formatBytes(removedBytes)})`];
 }
 
 function removeFilesByPattern(rootDir, matcher) {

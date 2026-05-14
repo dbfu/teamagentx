@@ -78,20 +78,20 @@ export function TodoModal({ isOpen, onClose, onTodoClick }: TodoModalProps) {
       <div className="fixed inset-0 bg-black/50" onClick={onClose} />
 
       {/* Modal */}
-      <div className="relative z-10 mx-4 w-full max-w-[400px] max-h-[500px] overflow-hidden rounded-xl bg-card shadow-xl">
+      <div className="relative z-10 mx-4 w-full max-w-[560px] max-h-[680px] overflow-hidden rounded-xl bg-card shadow-xl">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <h3 className="text-lg font-semibold text-foreground">待办事项</h3>
           <button
             onClick={onClose}
-            className="flex size-6 items-center justify-center rounded-full hover:bg-accent"
+            className="flex size-8 items-center justify-center rounded-full hover:bg-accent"
           >
             <X className="size-4 text-muted-foreground" />
           </button>
         </div>
 
         {/* Content */}
-        <div className="max-h-[400px] overflow-y-auto">
+        <div className="max-h-[560px] overflow-y-auto">
           {pendingTodos.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
               <Clock className="size-8 mb-2" />
@@ -102,11 +102,11 @@ export function TodoModal({ isOpen, onClose, onTodoClick }: TodoModalProps) {
               {pendingTodos.map((todo) => (
                 <div
                   key={todo.id}
-                  className="flex items-start gap-3 px-4 py-3 hover:bg-accent cursor-pointer"
+                  className="flex items-start gap-3 px-5 py-4 hover:bg-accent cursor-pointer"
                   onClick={() => handleTodoClick(todo)}
                 >
                   {/* 助手头像 */}
-                  <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                  <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10">
                     <span className="text-xs font-medium text-primary">
                       {todo.triggerAgentName?.charAt(0) || 'A'}
                     </span>
@@ -139,7 +139,7 @@ export function TodoModal({ isOpen, onClose, onTodoClick }: TodoModalProps) {
                         e.stopPropagation()
                         handleComplete(todo.id)
                       }}
-                      className="flex size-6 items-center justify-center rounded-full hover:bg-green-500/10"
+                      className="flex size-8 items-center justify-center rounded-full hover:bg-green-500/10"
                       title="完成"
                     >
                       <Check className="size-4 text-green-500" />
@@ -149,7 +149,7 @@ export function TodoModal({ isOpen, onClose, onTodoClick }: TodoModalProps) {
                         e.stopPropagation()
                         handleDismiss(todo.id)
                       }}
-                      className="flex size-6 items-center justify-center rounded-full hover:bg-accent"
+                      className="flex size-8 items-center justify-center rounded-full hover:bg-accent"
                       title="忽略"
                     >
                       <Trash2 className="size-4 text-muted-foreground" />
