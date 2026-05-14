@@ -1,9 +1,10 @@
-import prisma from '../../lib/prisma.js';
 import type { Platform } from './bridge.service.js';
 import { parseStoredBridgeConfig } from './bridge-platform-config.js';
 import { getBridgeInboundTextAdapter } from './platform-inbound-adapters.js';
 import { verifyTelegram, verifyWecom } from './webhook-verify.js';
 import { decryptWecomMessage } from './wecom-crypto.js';
+import prisma from '../../lib/prisma.js';
+import { createHash } from 'crypto';
 
 export interface BridgeWebhookRequest {
   body: unknown;
@@ -61,37 +62,50 @@ type QQWebhookBody = {
   };
 };
 
-async function parseWecomBody(rawBody: WecomWebhookBody): Promise<WecomWebhookBody> {
+async function parseWecomBody(
+  rawBody: WecomWebhookBody,
+  query: Record<string, string>,
+  botId?: string,
+): Promise<WecomWebhookBody> {
   if (!rawBody.Encrypt) return rawBody;
 
-  const platformCfg = await prisma.platformConfig.findUnique({
-    where: { platform: 'wecom' },
-    select: { config: true },
-  });
+  const bridgeBot = botId
+    ? await prisma.bridgeBot.findUnique({
+        where: { id: botId },
+        select: { config: true },
+      })
+    : null;
   try {
-    const platformConfig = parseStoredBridgeConfig(platformCfg ?? {}) as { encodingAESKey?: string } | null;
+    const platformConfig = parseStoredBridgeConfig(bridgeBot ?? {}) as {
+      encodingAESKey?: string;
+      token?: string;
+      corpId?: string;
+    } | null;
     if (platformConfig?.encodingAESKey) {
-      const decryptedXml = decryptWecomMessage(platformConfig.encodingAESKey, rawBody.Encrypt);
+      // Fix #6: verify signature BEFORE decrypting
+      if (platformConfig.token) {
+        const token = platformConfig.token;
+        const { msg_signature, timestamp, nonce } = query;
+        if (!msg_signature || !timestamp || !nonce) {
+          throw new Error('WeCom signature params missing');
+        }
+        const str = [token, timestamp, nonce, rawBody.Encrypt].sort().join('');
+        const expected = createHash('sha1').update(str).digest('hex');
+        if (expected !== msg_signature) {
+          throw new Error('WeCom signature verification failed');
+        }
+      }
+      const decryptedXml = decryptWecomMessage(
+        platformConfig.encodingAESKey,
+        rawBody.Encrypt,
+        platformConfig.corpId,
+      );
       return buildWecomBodyFromXml(decryptedXml);
     }
-  } catch {
-    // fall through to channel-scoped config lookup
-  }
-
-  const wecomChannels = await prisma.externalChannel.findMany({
-    where: { platform: 'wecom', enabled: true },
-  });
-
-  for (const ch of wecomChannels) {
-    try {
-      if (!ch.config) continue;
-      const cfg = parseStoredBridgeConfig(ch) as { encodingAESKey?: string } | null;
-      if (!cfg?.encodingAESKey) continue;
-      const decryptedXml = decryptWecomMessage(cfg.encodingAESKey, rawBody.Encrypt);
-      return buildWecomBodyFromXml(decryptedXml);
-    } catch {
-      // try next configured channel
-    }
+  } catch (err) {
+    // Re-throw signature verification failures; ignore other config errors
+    if (err instanceof Error && err.message.includes('verification failed')) throw err;
+    if (err instanceof Error && err.message.includes('params missing')) throw err;
   }
 
   return rawBody;
@@ -124,16 +138,12 @@ export const BRIDGE_WEBHOOK_ADAPTERS: BridgeWebhookAdapter[] = [
       if (!msg?.chat?.id || !msg.text) return { kind: 'ignore' };
 
       const bindCode = adapter.extractBindCode(msg.text);
-      if (!bindCode && msg.chat.type !== 'group' && msg.chat.type !== 'supergroup') {
-        return { kind: 'ignore' };
-      }
-
       return {
         kind: 'message',
         externalId: String(msg.chat.id),
         groupName: msg.chat.title ?? `Telegram 群 ${String(msg.chat.id)}`,
         senderName: msg.from?.username
-          ? `${msg.from.first_name ?? ''}(@${msg.from.username})`
+          ? `${msg.from.first_name ?? msg.from.username}(@${msg.from.username})`
           : (msg.from?.first_name ?? '未知用户'),
         text: adapter.normalizeText(msg.text),
         bindCode,
@@ -150,7 +160,7 @@ export const BRIDGE_WEBHOOK_ADAPTERS: BridgeWebhookAdapter[] = [
     okResponse: 'ok',
     async parse(request) {
       const adapter = getBridgeInboundTextAdapter('wecom');
-      const body = await parseWecomBody(request.body as WecomWebhookBody);
+      const body = await parseWecomBody(request.body as WecomWebhookBody, request.query, request.query.botId);
       if (!body.ChatId) return { kind: 'ignore' };
       if (body.MsgType && body.MsgType !== 'text') return { kind: 'ignore' };
 
@@ -191,7 +201,22 @@ export const BRIDGE_WEBHOOK_ADAPTERS: BridgeWebhookAdapter[] = [
         dedupeKey: body.id ? `qq:${body.id}` : undefined,
       };
     },
-    async verify() {
+    async verify(request) {
+      // Fix #58: QQ Bot Ed25519 signature verification
+      // TODO: Obtain bot's public key from config (needs `publicKey` field in QQ bot config)
+      const sig = request.headers['x-signature-ed25519'];
+      const ts = request.headers['x-signature-timestamp'];
+      if (!sig || !ts) {
+        // No signature headers present — log warning but allow (backward compat for existing deployments)
+        console.warn('[Bridge][QQ] Missing Ed25519 signature headers — request allowed (no public key configured)');
+        return true;
+      }
+      // If headers are present but we have no public key to verify against, we cannot verify.
+      // TODO: when QQ bot config includes publicKey, use:
+      //   const msgBytes = Buffer.from(ts + rawBody);
+      //   const pubKeyBuf = Buffer.from(publicKey, 'hex');
+      //   return createVerify('ed25519').update(msgBytes).verify(pubKeyBuf, Buffer.from(sig, 'hex'));
+      console.warn('[Bridge][QQ] Ed25519 signature headers present but no public key configured — request allowed');
       return true;
     },
   },

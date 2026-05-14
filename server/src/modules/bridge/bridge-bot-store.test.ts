@@ -1,0 +1,93 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import prisma from '../../lib/prisma.js';
+import {
+  bindBridgeBotToChatRoom,
+  createBridgeBot,
+  listBridgeBots,
+} from './bridge-bot-store.js';
+
+async function createChatRoom(id: string, name: string) {
+  return prisma.chatRoom.create({
+    data: {
+      id,
+      name,
+      updatedAt: new Date(),
+    },
+  });
+}
+
+test.beforeEach(async () => {
+  await prisma.bridgeBot?.deleteMany?.();
+  await prisma.chatRoom.deleteMany({
+    where: {
+      id: {
+        in: ['room-bot-1', 'room-bot-2'],
+      },
+    },
+  });
+});
+
+test('createBridgeBot allows multiple credential instances under the same platform', async () => {
+  await createBridgeBot({
+    platform: 'feishu',
+    name: '飞书机器人 A',
+    config: { appId: 'app-a', appSecret: 'secret-a' },
+  });
+  await createBridgeBot({
+    platform: 'feishu',
+    name: '飞书机器人 B',
+    config: { appId: 'app-b', appSecret: 'secret-b' },
+  });
+
+  const bots = await listBridgeBots('feishu');
+
+  assert.equal(bots.length, 2);
+  assert.equal(bots[0]?.platform, 'feishu');
+  assert.equal(bots[1]?.platform, 'feishu');
+});
+
+test('bindBridgeBotToChatRoom allows multiple bots on the same chat room', async () => {
+  await createChatRoom('room-bot-1', '群聊一');
+
+  const botA = await createBridgeBot({
+    platform: 'telegram',
+    name: 'TG Bot A',
+    botToken: 'token-a',
+  });
+  const botB = await createBridgeBot({
+    platform: 'telegram',
+    name: 'TG Bot B',
+    botToken: 'token-b',
+  });
+
+  const boundA = await bindBridgeBotToChatRoom(botA.id, 'room-bot-1');
+  const boundB = await bindBridgeBotToChatRoom(botB.id, 'room-bot-1');
+
+  const bots = await listBridgeBots('telegram');
+
+  assert.equal(boundA.chatRoomId, 'room-bot-1');
+  assert.equal(boundB.chatRoomId, 'room-bot-1');
+  assert.equal(bots.filter((item) => item.chatRoomId === 'room-bot-1').length, 2);
+});
+
+test('bindBridgeBotToChatRoom supports confirmed rebind and auto-unbinds previous room', async () => {
+  await createChatRoom('room-bot-1', '群聊一');
+  await createChatRoom('room-bot-2', '群聊二');
+
+  const bot = await createBridgeBot({
+    platform: 'telegram',
+    name: 'TG Bot A',
+    botToken: 'token-a',
+  });
+
+  await bindBridgeBotToChatRoom(bot.id, 'room-bot-1');
+  const rebound = await bindBridgeBotToChatRoom(bot.id, 'room-bot-2', { forceRebind: true });
+
+  const bots = await listBridgeBots('telegram');
+  const stored = bots.find((item) => item.id === bot.id);
+
+  assert.equal(rebound.chatRoomId, 'room-bot-2');
+  assert.equal(stored?.chatRoomId, 'room-bot-2');
+});

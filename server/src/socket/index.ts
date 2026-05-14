@@ -19,6 +19,7 @@ import { userService } from '../modules/user/user.service.js';
 import { taskQueueService } from '../modules/task-queue/task-queue.service.js';
 import { todoService } from '../modules/todo/todo.service.js';
 import { bridgeService } from '../modules/bridge/bridge.service.js';
+import { startTypingLoop, stopTypingLoop } from '../modules/bridge/typing-loop.js';
 import { Message, Attachment } from '../types/message.js';
 
 // Track which chatRooms each socket has joined
@@ -83,23 +84,24 @@ export function setupSocket(io: Server) {
   // Emit typing indicator when agent starts working
   const emitTyping = (data: { messageId: string; agentId: string; agentName: string; status?: 'pending' | 'executing' }, chatRoomId: string) => {
     io.to(chatRoomId).emit('agent:typing', data);
+    startTypingLoop(chatRoomId).catch(console.error);
   };
 
   // Emit done indicator when agent finishes working
   const emitDone = (data: { agentId: string; agentName: string; triggerMessageId: string; executionRecordId?: string; messageIds?: string[]; duration?: number | null; totalTokens?: number | null; cacheReadTokens?: number | null }, chatRoomId: string) => {
+    stopTypingLoop(chatRoomId);
     io.to(chatRoomId).emit('agent:done', data);
 
-    // 将 Agent 响应回传到外部平台
+    // 将 Agent 响应回传到外部平台（顺序发送保证消息顺序）
     if (data.messageIds && data.messageIds.length > 0) {
-      Promise.all(data.messageIds.map(id => messageService.findById(id)))
-        .then(msgs => {
-          for (const msg of msgs) {
-            if (msg?.content) {
-              bridgeService.sendAgentResponse(chatRoomId, data.agentName, msg.content).catch(console.error);
-            }
+      (async () => {
+        const msgs = await Promise.all(data.messageIds!.map(id => messageService.findById(id)));
+        for (const msg of msgs) {
+          if (msg?.content) {
+            await bridgeService.sendAgentResponse(chatRoomId, data.agentName, msg.content, msg.id).catch(console.error);
           }
-        })
-        .catch(console.error);
+        }
+      })().catch(console.error);
     }
   };
 
@@ -510,6 +512,7 @@ export function setupSocket(io: Server) {
           };
 
           await emitMessageToChatRoomMembers(msgWithUser, chatRoomId);
+          await bridgeService.syncRoomMessage(chatRoomId, user.username, message.content, message.id);
 
           // Trigger AI handlers
           messageEventEmitter.emit('receivedMessage', {

@@ -9,7 +9,6 @@ import type { ToolCall } from '../executor.interface.js';
 import { parseMentions } from './message-utils.js';
 import { debugLog } from './debug.js';
 import { enqueueAgentTask } from './agent-dispatch.service.js';
-
 // 消息接收事件接口
 interface ReceivedMessageEvent {
   message: Message;

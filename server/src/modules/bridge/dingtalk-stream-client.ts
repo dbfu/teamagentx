@@ -3,18 +3,18 @@
  * 使用 dingtalk-stream SDK，无需公网地址
  */
 import { DWClient, type DWClientDownStream, EventAck, TOPIC_ROBOT } from 'dingtalk-stream';
-import prisma from '../../lib/prisma.js';
 import { bridgeService } from './bridge.service.js';
-import { parseStoredBridgeConfig } from './bridge-platform-config.js';
 import { getBridgeInboundTextAdapter } from './platform-inbound-adapters.js';
 
-let dwClient: DWClient | null = null;
-let currentClientId: string | null = null;
-let isStarting = false;
+const dwClients = new Map<string, DWClient>();
+// Fix #54: 移除 startingBotIds，改用 dwClients.has 判断（supervisor 循环中不需要独立标记）
+const stoppedBotIds = new Set<string>();
+const reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 // 绑定码处理（从 bridge.gateway.ts 注入）
 type BindCodeHandler = (
   platform: string,
+  botId: string,
   externalId: string,
   groupName: string,
   code: string,
@@ -28,68 +28,93 @@ export function setDingtalkBindCodeHandler(handler: BindCodeHandler) {
   bindCodeHandler = handler;
 }
 
-export async function startDingtalkStreamClient(
+const MAX_RETRIES = 20;
+const BASE_DELAY_MS = 2000;
+const MAX_DELAY_MS = 60000;
+
+// Fix #41: supervisor loop with exponential backoff
+async function supervisedConnect(
+  botId: string,
   clientId: string,
   clientSecret: string,
   log: { info: (...a: unknown[]) => void; error: (...a: unknown[]) => void; warn: (...a: unknown[]) => void },
 ): Promise<void> {
-  if (isStarting) {
-    log.warn('[Bridge/Dingtalk-Stream] 正在启动中，忽略重复请求');
-    return;
-  }
+  let attempt = 0;
 
-  if (dwClient && currentClientId === clientId) {
-    log.info('[Bridge/Dingtalk-Stream] 已连接，跳过重复启动');
-    return;
-  }
-
-  isStarting = true;
-  try {
-    if (dwClient) {
-      try { dwClient.disconnect(); } catch {}
-      dwClient = null;
-      currentClientId = null;
+  while (!stoppedBotIds.has(botId)) {
+    if (attempt >= MAX_RETRIES) {
+      log.error({ botId }, '[Bridge/Dingtalk-Stream] 达到最大重试次数，需要手动重启 bot');
+      dwClients.delete(botId);
+      return;
     }
 
-    const adapter = getBridgeInboundTextAdapter('dingtalk');
+    try {
+      const adapter = getBridgeInboundTextAdapter('dingtalk');
+      const client = new DWClient({ clientId, clientSecret, debug: false });
 
-    const client = new DWClient({ clientId, clientSecret, debug: false });
+      client.registerAllEventListener((downstream: DWClientDownStream) => {
+        if (downstream.headers.topic !== TOPIC_ROBOT) {
+          return { status: EventAck.SUCCESS };
+        }
 
-    client.registerAllEventListener((downstream: DWClientDownStream) => {
-      if (downstream.headers.topic !== TOPIC_ROBOT) {
+        // 异步处理，立即 ACK 避免服务端重试
+        handleRobotMessage(botId, downstream, adapter, log).catch(err => {
+          log.error({ err }, '[Bridge/Dingtalk-Stream] 消息处理失败');
+        });
+
         return { status: EventAck.SUCCESS };
-      }
-
-      // 异步处理，立即 ACK 避免服务端重试
-      handleRobotMessage(downstream, clientId, clientSecret, adapter, log).catch(err => {
-        log.error({ err }, '[Bridge/Dingtalk-Stream] 消息处理失败');
       });
 
-      return { status: EventAck.SUCCESS };
-    });
+      dwClients.set(botId, client);
+      log.info({ botId, attempt }, '[Bridge/Dingtalk-Stream] 启动 Stream 长连接...');
 
-    dwClient = client;
-    currentClientId = clientId;
+      await client.connect();
 
-    setTimeout(async () => {
-      try {
-        log.info('[Bridge/Dingtalk-Stream] 启动 Stream 长连接...');
-        await client.connect();
-      } catch (err) {
-        log.error({ err }, '[Bridge/Dingtalk-Stream] Stream 连接失败');
-        dwClient = null;
-        currentClientId = null;
-      }
-    }, 0);
-  } finally {
-    isStarting = false;
+      // connect() resolved normally — reset retry counter
+      attempt = 0;
+    } catch (err) {
+      log.error({ err, botId, attempt }, '[Bridge/Dingtalk-Stream] Stream 连接失败');
+      dwClients.delete(botId);
+
+      if (stoppedBotIds.has(botId)) return;
+
+      attempt++;
+      const delay = Math.min(BASE_DELAY_MS * Math.pow(2, attempt - 1), MAX_DELAY_MS);
+      log.info({ botId, attempt, delayMs: delay }, '[Bridge/Dingtalk-Stream] 将在延迟后重连...');
+
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, delay);
+        reconnectTimers.set(botId, timer);
+      });
+      reconnectTimers.delete(botId);
+    }
   }
 }
 
+export async function startDingtalkStreamClient(
+  botId: string,
+  clientId: string,
+  clientSecret: string,
+  log: { info: (...a: unknown[]) => void; error: (...a: unknown[]) => void; warn: (...a: unknown[]) => void },
+): Promise<void> {
+  if (dwClients.has(botId)) {
+    log.info({ botId }, '[Bridge/Dingtalk-Stream] 已连接，跳过重复启动');
+    return;
+  }
+
+  stoppedBotIds.delete(botId);
+
+  // start supervisor in background
+  setTimeout(() => {
+    supervisedConnect(botId, clientId, clientSecret, log).catch(err => {
+      log.error({ err, botId }, '[Bridge/Dingtalk-Stream] supervisor 异常退出');
+    });
+  }, 0);
+}
+
 async function handleRobotMessage(
+  botId: string,
   downstream: DWClientDownStream,
-  _clientId: string,
-  _clientSecret: string,
   adapter: ReturnType<typeof getBridgeInboundTextAdapter>,
   log: { info: (...a: unknown[]) => void; error: (...a: unknown[]) => void; warn: (...a: unknown[]) => void },
 ) {
@@ -112,8 +137,7 @@ async function handleRobotMessage(
     return;
   }
 
-  // 只处理群消息（conversationType === '2'）
-  if (!body.conversationId || body.conversationType !== '2') return;
+  if (!body.conversationId) return;
 
   const externalId = body.conversationId;
   const rawText = body.text?.content ?? '';
@@ -130,20 +154,19 @@ async function handleRobotMessage(
         await sendViaSessionWebhook(sessionWebhook, replyText, log);
       }
     };
-    await bindCodeHandler('dingtalk', externalId, groupName, bindCode, sendReply, log);
+    await bindCodeHandler('dingtalk', botId, externalId, groupName, bindCode, sendReply, log);
     return;
   }
 
-  const channel = await prisma.externalChannel.findFirst({
-    where: { platform: 'dingtalk', externalId, enabled: true },
-  });
-  if (!channel) return;
-
+  // Fix #42: add dedupeKey to prevent duplicate responses on reconnect
   await bridgeService.receiveBridgeMessage({
+    botId,
     platform: 'dingtalk',
     externalId,
+    replyTarget: body.sessionWebhook ? `sessionWebhook:${body.sessionWebhook}` : externalId,
     senderName: body.senderNick ?? '未知用户',
     content: text,
+    dedupeKey: body.msgId ? `dingtalk:${body.msgId}` : undefined,
   });
 }
 
@@ -176,33 +199,19 @@ async function sendViaSessionWebhook(
   }
 }
 
-export function stopDingtalkStreamClient(): void {
+export function stopDingtalkStreamClient(botId: string): void {
+  stoppedBotIds.add(botId);
+
+  // Cancel any pending reconnect timer
+  const timer = reconnectTimers.get(botId);
+  if (timer) {
+    clearTimeout(timer);
+    reconnectTimers.delete(botId);
+  }
+
+  const dwClient = dwClients.get(botId);
   if (dwClient) {
     try { dwClient.disconnect(); } catch {}
-    dwClient = null;
-    currentClientId = null;
-  }
-}
-
-/**
- * 从数据库读取钉钉凭证并启动 Stream 客户端
- */
-export async function initDingtalkStreamFromDB(
-  log: { info: (...a: unknown[]) => void; error: (...a: unknown[]) => void; warn: (...a: unknown[]) => void },
-): Promise<void> {
-  try {
-    const platformCfg = await prisma.platformConfig.findUnique({ where: { platform: 'dingtalk' } });
-    if (!platformCfg?.config) {
-      log.info('[Bridge/Dingtalk-Stream] 未配置钉钉凭证，跳过');
-      return;
-    }
-    const cfg = parseStoredBridgeConfig(platformCfg) as { appKey?: string; appSecret?: string } | null;
-    if (!cfg?.appKey || !cfg.appSecret) {
-      log.info('[Bridge/Dingtalk-Stream] 钉钉凭证不完整，跳过');
-      return;
-    }
-    await startDingtalkStreamClient(cfg.appKey, cfg.appSecret, log);
-  } catch (err) {
-    log.error({ err }, '[Bridge/Dingtalk-Stream] 初始化失败');
+    dwClients.delete(botId);
   }
 }

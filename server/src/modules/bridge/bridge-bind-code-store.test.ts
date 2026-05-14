@@ -4,18 +4,18 @@ import assert from 'node:assert/strict';
 import {
   clearBridgeBindCodesForTest,
   consumeBridgeBindCode,
-  createBridgeBindCode,
+  createBridgeBotBindCode,
 } from './bridge-bind-code-store.js';
 
-test('createBridgeBindCode creates uppercase code and consumeBridgeBindCode invalidates it', () => {
+test('createBridgeBotBindCode creates uppercase code and consumeBridgeBindCode invalidates it', () => {
   clearBridgeBindCodesForTest();
 
-  const created = createBridgeBindCode('telegram', 'room-1', 60);
+  const created = createBridgeBotBindCode('telegram', 'bot-1', 'room-1', 60);
   assert.match(created.code, /^[A-Z0-9]{8}$/);
   assert.equal(created.expiresIn, 60);
 
   const consumed = consumeBridgeBindCode('telegram', created.code);
-  assert.deepEqual(consumed, { platform: 'telegram', chatRoomId: 'room-1' });
+  assert.deepEqual(consumed, { platform: 'telegram', botId: 'bot-1', chatRoomId: 'room-1' });
 
   const consumedAgain = consumeBridgeBindCode('telegram', created.code);
   assert.equal(consumedAgain, null);
@@ -24,7 +24,7 @@ test('createBridgeBindCode creates uppercase code and consumeBridgeBindCode inva
 test('consumeBridgeBindCode rejects wrong platform and expired code', async () => {
   clearBridgeBindCodesForTest();
 
-  const created = createBridgeBindCode('feishu', 'room-2', 1);
+  const created = createBridgeBotBindCode('feishu', 'bot-2', 'room-2', 1);
   const wrongPlatform = consumeBridgeBindCode('telegram', created.code);
   assert.equal(wrongPlatform, null);
 

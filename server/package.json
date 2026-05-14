@@ -4,7 +4,9 @@
   "description": "Fastify server",
   "type": "module",
   "scripts": {
+    "prestart": "prisma migrate deploy",
     "start": "tsx src/index.ts",
+    "predev": "prisma migrate deploy",
     "dev": "tsx watch src/index.ts",
     "db:migrate": "prisma migrate dev",
     "prebuild:electron": "node scripts/pre-build-check.cjs",

@@ -1,10 +1,10 @@
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ChatRoom, chatRoomApi } from '@/lib/agent-api'
-import { bridgeApi, BridgePlatformDefinition, ExternalChannel, Platform } from '@/lib/bridge-api'
+import { bridgeApi, BridgeBot } from '@/lib/bridge-api'
 import { groupAvatarOptions, GroupAvatarImage, normalizeGroupAvatarIndex } from '@/lib/group-avatars'
 import { cn } from '@/lib/utils'
-import { Eraser, Pencil, Trash2 } from 'lucide-react'
+import { Bot, Eraser, Pencil, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { WorkDirCard, type FolderOpenTarget } from './work-dir-card'
@@ -35,12 +35,8 @@ export function RoomSettingsPanel({
   const [saving, setSaving] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
-  // 外部平台接入
-  const [platforms, setPlatforms] = useState<BridgePlatformDefinition[]>([])
-  const [channels, setChannels] = useState<ExternalChannel[]>([])
-  const [activePlatform, setActivePlatform] = useState<string | null>(null)
-  const [bindCode, setBindCode] = useState<{ code: string; expiresIn: number } | null>(null)
-  const [isGettingCode, setIsGettingCode] = useState(false)
+  // 外部平台机器人绑定
+  const [roomBots, setRoomBots] = useState<BridgeBot[]>([])
 
   // 编辑状态
   const [editingName, setEditingName] = useState(false)
@@ -85,15 +81,9 @@ export function RoomSettingsPanel({
   }, [editingRules])
 
   useEffect(() => {
-    Promise.all([
-      bridgeApi.listPlatforms().catch(() => []),
-      bridgeApi.listChannels().catch(() => []),
-    ]).then(([platformDefs, allChannels]) => {
-      setPlatforms(platformDefs)
-      setChannels(allChannels.filter((ch) => ch.chatRoomId === chatRoom.id))
+    bridgeApi.listBots().then((allBots) => {
+      setRoomBots(allBots.filter((bot) => bot.chatRoomId === chatRoom.id))
     }).catch(() => {})
-    setActivePlatform(null)
-    setBindCode(null)
   }, [chatRoom.id])
 
   const handleSave = async (updates: { name?: string; avatar?: string; description?: string; rules?: string; workDir?: string | null; defaultAgentId?: string | null; agentTriggerMode?: 'auto' | 'manual' }) => {
@@ -146,26 +136,12 @@ export function RoomSettingsPanel({
     handleSave({ agentTriggerMode: value })
   }
 
-  const handleGetBindCode = async () => {
-    if (!activePlatform) return
-    setIsGettingCode(true)
+  const handleDeleteChannel = async (channel: BridgeBot) => {
+    if (!window.confirm(`确定要解绑机器人「${channel.name}」吗？`)) return
     try {
-      const result = await bridgeApi.getBindCode(activePlatform as Platform, chatRoom.id)
-      setBindCode(result)
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : '生成失败')
-    } finally {
-      setIsGettingCode(false)
-    }
-  }
-
-  const handleDeleteChannel = async (channel: ExternalChannel) => {
-    const label = platforms.find((p) => p.key === channel.platform)?.label ?? channel.platform
-    if (!window.confirm(`确定要删除「${label}」的接入（${channel.externalId}）吗？`)) return
-    try {
-      await bridgeApi.deleteChannel(channel.id)
-      setChannels((prev) => prev.filter((ch) => ch.id !== channel.id))
-      toast.success(`已删除 ${label} 接入`)
+      await bridgeApi.unbindBot(channel.id)
+      setRoomBots((prev) => prev.filter((ch) => ch.id !== channel.id))
+      toast.success(`已解绑 ${channel.name}`)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '删除失败')
     }
@@ -451,78 +427,44 @@ export function RoomSettingsPanel({
         {/* 外部平台接入 */}
         {!chatRoom.isQuickChatRoom && (
           <div className="border-t border-border pt-4 mt-4">
-            <label className="mb-2 block text-sm font-medium text-muted-foreground">外部平台映射</label>
-            <div className="flex flex-wrap gap-2">
-              {platforms.filter((p) => p.supportsBindCode).map((p) => {
-                const linked = channels.find((ch) => ch.platform === p.key)
-                const isActive = activePlatform === p.key
-                return (
-                  <button
-                    key={p.key}
-                    type="button"
-                    onClick={() => {
-                      if (linked) {
-                        handleDeleteChannel(linked)
-                      } else {
-                        setActivePlatform(isActive ? null : p.key)
-                        setBindCode(null)
-                      }
-                    }}
-                    className={cn(
-                      'flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs transition-colors',
-                      linked
-                        ? 'border-green-500 text-green-700 hover:bg-green-50'
-                        : isActive
-                        ? 'border-primary text-primary bg-primary/5'
-                        : 'border-border text-muted-foreground hover:bg-accent'
-                    )}
-                  >
-                    <span>{p.emoji}</span>
-                    <span>{p.label}</span>
-                    {linked && <span className="text-green-500">●</span>}
-                  </button>
-                )
-              })}
-            </div>
-
-            {activePlatform && !channels.find((ch) => ch.platform === activePlatform) && (
-              <div className="mt-3 space-y-2">
-                {!bindCode ? (
-                  <button
-                    type="button"
-                    onClick={handleGetBindCode}
-                    disabled={isGettingCode}
-                    className="w-full rounded-lg bg-blue-500 px-3 py-2 text-sm text-white hover:bg-blue-600 disabled:opacity-50"
-                  >
-                    {isGettingCode ? '生成中...' : '获取绑定码'}
-                  </button>
-                ) : (
-                  <div className="space-y-2">
-                      <p className="text-xs text-muted-foreground">
-                        将机器人加入目标 {platforms.find((p) => p.key === activePlatform)?.label} 群后，在群中发送以下命令完成与当前房间的绑定：
-                      </p>
-                    <div className="rounded-lg border border-border bg-muted px-3 py-3 text-center">
-                      <span className="font-mono text-lg font-bold tracking-widest select-all">
-                        /bind {bindCode.code}
-                      </span>
+            <label className="mb-2 block text-sm font-medium text-muted-foreground">外部平台机器人绑定</label>
+            <p className="mb-3 text-xs text-muted-foreground">机器人只负责外部平台通信。当前群聊可以同时连接多个平台机器人，消息会同步到这些已连接机器人。</p>
+            {roomBots.length > 0 ? (
+              <div className="space-y-2">
+                {roomBots.map((bot) => (
+                  <div key={bot.id} className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm">
+                    <div className="flex min-w-0 flex-1 items-center gap-3">
+                      <div className={cn(
+                        'flex size-9 shrink-0 items-center justify-center rounded-lg',
+                        bot.enabled ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-500',
+                      )}>
+                        <Bot className="size-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-medium text-foreground">{bot.name}</div>
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                          <span className="rounded-full bg-blue-50 px-2 py-0.5 font-medium text-blue-700">{bot.platform}</span>
+                          <span className="text-gray-300">•</span>
+                          <span className={cn('inline-flex items-center gap-1', bot.enabled ? 'text-green-600' : 'text-gray-500')}>
+                            <span className={cn('size-1.5 rounded-full', bot.enabled ? 'bg-green-500' : 'bg-gray-400')} />
+                            {bot.enabled ? '启用中' : '已停用'}
+                          </span>
+                        </div>
+                      </div>
                     </div>
-                    <p className="text-xs text-center text-muted-foreground">15 分钟内有效</p>
                     <button
                       type="button"
-                      onClick={() => setBindCode(null)}
-                      className="w-full text-xs text-muted-foreground hover:text-foreground"
+                      onClick={() => handleDeleteChannel(bot)}
+                      className="shrink-0 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
                     >
-                      重新获取
+                      解绑
                     </button>
                   </div>
-                )}
-                <button
-                  type="button"
-                  onClick={() => { setActivePlatform(null); setBindCode(null) }}
-                  className="w-full rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
-                >
-                  取消
-                </button>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
+                当前群聊还没有绑定机器人。你可以在集成页创建机器人实例后直接绑定到这里，或者在群里让“外部平台接入助手”拿到凭证后自动绑定当前群聊。
               </div>
             )}
           </div>
