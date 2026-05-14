@@ -42,6 +42,27 @@ echo "=================================================="
 
 # ── 确定脚本所在目录（支持从任意位置调用） ────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
+# ── 准备临时 Docker 构建上下文 ────────────────────────────────────────────────
+# website 是 workspace 子包，依赖解析需要根目录的 workspace/package/lock 文件。
+BUILD_CONTEXT="$(mktemp -d "${TMPDIR:-/tmp}/teamagentx-website-docker.XXXXXX")"
+cleanup() {
+  rm -rf "${BUILD_CONTEXT}"
+}
+trap cleanup EXIT
+
+rsync -a \
+  --exclude node_modules \
+  --exclude dist \
+  --exclude .env \
+  --exclude .env.local \
+  --exclude '*.log' \
+  "${SCRIPT_DIR}/" "${BUILD_CONTEXT}/"
+
+cp "${ROOT_DIR}/package.json" "${BUILD_CONTEXT}/package.root.json"
+cp "${ROOT_DIR}/pnpm-workspace.yaml" "${BUILD_CONTEXT}/pnpm-workspace.yaml"
+cp "${ROOT_DIR}/pnpm-lock.yaml" "${BUILD_CONTEXT}/pnpm-lock.yaml"
 
 # ── 构建镜像 ──────────────────────────────────────────────────────────────────
 echo ""
@@ -51,10 +72,13 @@ docker build \
   --label "org.opencontainers.image.version=${VERSION}" \
   --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --label "org.opencontainers.image.revision=$(git rev-parse HEAD 2>/dev/null || echo 'unknown')" \
+  --build-arg "VITE_APP_VERSION=${VERSION}" \
+  --build-arg "VITE_DOWNLOAD_URL_MAC=${VITE_DOWNLOAD_URL_MAC:-}" \
+  --build-arg "VITE_DOWNLOAD_URL_WIN=${VITE_DOWNLOAD_URL_WIN:-}" \
   -t "${IMAGE}:${TAG}" \
   -t "${IMAGE}:latest" \
-  -f "${SCRIPT_DIR}/Dockerfile" \
-  "${SCRIPT_DIR}"
+  -f "${BUILD_CONTEXT}/Dockerfile" \
+  "${BUILD_CONTEXT}"
 
 echo ""
 echo "▶ 推送版本标签 ${IMAGE}:${TAG} ..."

@@ -1,11 +1,11 @@
 {
-  "version": "v0.1.11",
-  "url": "http://1.14.159.152:9000/appdownload/TeamAgentX-Setup-0.1.0.exe",
-  "macUrl": "http://1.14.159.152:9000/appdownload/TeamAgentX-Setup-0.1.0.exe",
-  "winUrl": "http://1.14.159.152:9000/appdownload/TeamAgentX-Setup-0.1.0.exe",
+  "version": "v1.2.0",
+  "url": "",
+  "macUrl": "",
+  "winUrl": "",
   "downloads": {
-    "mac": "http://1.14.159.152:9000/appdownload/TeamAgentX-Setup-0.1.0.exe",
-    "win": "http://1.14.159.152:9000/appdownload/TeamAgentX-Setup-0.1.0.exe"
+    "mac": "",
+    "win": ""
   },
-  "notes": "dddd"
+  "notes": ""
 }

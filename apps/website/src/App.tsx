@@ -311,12 +311,7 @@ function HeroDemoWindow() {
 // ══════════════════════════════════════════════════════
 function LogoMark() {
   return (
-    <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
-      <path d="M14 2L25 8.5V19.5L14 26L3 19.5V8.5L14 2Z" fill="#4F7BFF" fillOpacity=".15" stroke="#4F7BFF" strokeWidth="1.4" strokeLinejoin="round" />
-      <path d="M9 12L14 15L19 12" stroke="#4F7BFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M14 15V21" stroke="#4F7BFF" strokeWidth="1.5" strokeLinecap="round" />
-      <circle cx="14" cy="9" r="2" fill="#4F7BFF" />
-    </svg>
+    <img src="/app-logo.png" alt="TeamAgentX" width={28} height={28} />
   )
 }
 
