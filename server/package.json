@@ -15,8 +15,8 @@
     "build": "tsc",
     "electron:entry": "tsc src/electron-entry.ts --outDir dist --moduleResolution node --module NodeNext --target ES2022 --esModuleInterop",
     "verify:electron-deps": "node scripts/verify-electron-deps.cjs",
-    "test": "node --import tsx --test --experimental-test-coverage",
-    "test:watch": "node --import tsx --test --watch"
+    "test": "node --import tsx --test --experimental-test-coverage src/**/*.test.ts",
+    "test:watch": "node --import tsx --test --watch src/**/*.test.ts"
   },
   "keywords": [],
   "author": "",

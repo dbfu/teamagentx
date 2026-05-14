@@ -121,21 +121,37 @@ export function _testInjectDebugInfo(
   debugInfo: Partial<AgentDebugInfo>,
 ): void {
   const cacheKey = getCacheKey(chatRoomId, agentName);
+  const fullDebugInfo: AgentDebugInfo = {
+    name: debugInfo.name ?? agentName,
+    type: debugInfo.type ?? 'langchain',
+    systemPrompt: debugInfo.systemPrompt ?? 'test prompt',
+    lastContext: debugInfo.lastContext ?? null,
+    lastInvokeResult: debugInfo.lastInvokeResult ?? null,
+    lastHistory: debugInfo.lastHistory ?? null,
+    threadId: debugInfo.threadId ?? cacheKey,
+    chatRoomId: debugInfo.chatRoomId ?? chatRoomId,
+    injectGroupHistory: debugInfo.injectGroupHistory ?? true,
+    chatRoomAgents: debugInfo.chatRoomAgents ?? [],
+    workDir: debugInfo.workDir,
+    lastResponse: debugInfo.lastResponse ?? null,
+    acpTool: debugInfo.acpTool,
+    agentId: debugInfo.agentId,
+    llmProvider: debugInfo.llmProvider,
+  };
 
-  // Create a minimal executor with test data (using LangChain executor for testing)
-  const executor = new LangChainAgentExecutor(
-    debugInfo.name ?? agentName,
-    debugInfo.systemPrompt ?? 'test prompt',
-    cacheKey,
-    chatRoomId,
-    debugInfo.injectGroupHistory ?? true,
-    debugInfo.chatRoomAgents ?? [],
-  );
-
-  // Inject the test data
-  (executor as any).lastContext = debugInfo.lastContext ?? null;
-  (executor as any).lastInvokeResult = debugInfo.lastInvokeResult ?? null;
-  (executor as any).lastHistory = debugInfo.lastHistory ?? null;
+  const executor = {
+    name: fullDebugInfo.name,
+    chatRoomId: fullDebugInfo.chatRoomId,
+    injectGroupHistory: fullDebugInfo.injectGroupHistory,
+    workDir: fullDebugInfo.workDir,
+    async exec() {
+      throw new Error('Test executor does not support exec');
+    },
+    getDebugInfo() {
+      return fullDebugInfo;
+    },
+    setLastInjectedMessageId() {},
+  } as unknown as LangChainAgentExecutor;
 
   executorCache.set(cacheKey, executor);
 }

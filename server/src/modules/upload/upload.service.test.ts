@@ -46,7 +46,7 @@ describe('uploadService audio support', () => {
     const file = createMockFile({
       filename: 'recording.webm',
       mimetype: 'audio/webm',
-      content: Buffer.from('fake audio'),
+      content: Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x93, 0x42, 0x82, 0x88, 0x6d, 0x61, 0x74, 0x72]),
     });
 
     const result = await uploadService.processAudio(file);

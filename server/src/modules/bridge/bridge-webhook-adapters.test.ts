@@ -8,7 +8,7 @@ import {
 
 test('bridge webhook adapters expose all supported platforms exactly once', () => {
   const platforms = BRIDGE_WEBHOOK_ADAPTERS.map((adapter) => adapter.platform);
-  assert.deepEqual(platforms, ['telegram', 'feishu', 'dingtalk', 'wecom', 'qq']);
+  assert.deepEqual(platforms, ['telegram', 'wecom', 'qq']);
   assert.equal(new Set(platforms).size, platforms.length);
 });
 
@@ -49,37 +49,24 @@ test('telegram webhook adapter parses group messages and bind commands', async (
   assert.equal(chatResult.senderName, 'Alice(@alice)');
 });
 
-test('feishu webhook adapter handles challenge and event messages', async () => {
-  const adapter = getBridgeWebhookAdapter('feishu');
-
-  const challenge = await adapter.parse({
-    body: { challenge: 'hello' },
-    headers: {},
-    query: {},
-  });
-  assert.equal(challenge.kind, 'challenge');
-  assert.deepEqual(challenge.responseBody, { challenge: 'hello' });
-
+test('wecom webhook adapter parses group messages', async () => {
+  const adapter = getBridgeWebhookAdapter('wecom');
   const message = await adapter.parse({
     body: {
-      header: { event_id: 'evt_1' },
-      event: {
-        sender: { sender_id: { open_id: 'ou_123' } },
-        message: {
-          chat_id: 'oc_123',
-          chat_type: 'group',
-          content: JSON.stringify({ text: '@_user_1 帮我看下' }),
-        },
-      },
+      FromUserName: 'wecom-user-1',
+      ChatId: 'wecom-room-1',
+      Content: '@机器人 帮我看下',
+      MsgType: 'text',
+      MsgId: 'msg_1',
     },
     headers: {},
     query: {},
   });
 
   assert.equal(message.kind, 'message');
-  assert.equal(message.dedupeKey, 'feishu:evt_1');
+  assert.equal(message.dedupeKey, 'wecom:msg_1');
   assert.equal(message.text, '帮我看下');
-  assert.equal(message.senderName, 'ou_123');
+  assert.equal(message.senderName, 'wecom-user-1');
 });
 
 test('qq webhook adapter normalizes mentions and bind commands', async () => {

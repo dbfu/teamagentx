@@ -705,7 +705,18 @@ export async function agentGateway(app: FastifyInstance) {
                   threadId: { type: 'string' },
                   chatRoomId: { type: 'string' },
                   injectGroupHistory: { type: 'boolean' },
-                  chatRoomAgents: { type: 'array', items: { type: 'string' } },
+                  chatRoomAgents: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        name: { type: 'string' },
+                        agentId: { type: 'string' },
+                        workDir: { type: 'string', nullable: true },
+                        customWorkDir: { type: 'string', nullable: true },
+                      },
+                    },
+                  },
                 },
               },
             },
