@@ -38,6 +38,8 @@ let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let serverProcess: UtilityProcess | null = null;
 let serverPort: number | null = null;
+let lastServerError: string | null = null;
+let lastServerStderr = '';
 let mobileWebServer: http.Server | null = null;
 let mobileWebPort: number | null = null;
 let isQuitting = false;
@@ -471,20 +473,122 @@ async function downloadUpdate(update: UpdateInfo): Promise<{ success: true; file
   return { success: true, filePath: downloadedUpdatePath };
 }
 
+// 已就绪的 server 运行时目录（userData 下），由 ensureRuntimeServer() 设置。
+// 为 null 时表示尚未准备好或拷贝失败，此时回退到 resources（保持向后兼容）。
+let runtimeServerRoot: string | null = null;
+
+function getResourcesServerRoot(): string {
+  return path.join(process.resourcesPath, 'server');
+}
+
+/**
+ * Server 运行时目录。
+ *
+ * 打包后 server/ 默认在 `resources/server/`，其中的 `.node` / `.dll` 一旦被
+ * utilityProcess 加载，安装目录就会被 Windows 文件锁锁住，更新时 NSIS 会
+ * 报"程序正在运行"。把 server 复制到 userData 后，安装目录里就不再有任何
+ * 会被加载的 native 模块，从根本上消除文件锁。
+ */
 function getServerProjectRoot(): string {
   // Dev: server/ directory at project root (repo root = electron/../../..)
   if (!app.isPackaged) {
     return path.resolve(__dirname, '../../..', 'server');
   }
-  // Production: server/ under resources path (alongside app.asar)
-  return path.join(process.resourcesPath, 'server');
+  // 优先用 runtime（userData 下），未就绪时回退到 resources
+  return runtimeServerRoot ?? getResourcesServerRoot();
 }
 
 function getServerNodeModulesPath(): string {
   if (!app.isPackaged) {
     return path.resolve(__dirname, '../../..', 'server', 'node_modules');
   }
-  return path.join(process.resourcesPath, 'server', 'node_modules');
+  return path.join(getServerProjectRoot(), 'node_modules');
+}
+
+/**
+ * 把 resources/server/ 整个拷贝到 userData/runtime/<version>/server/。
+ *
+ * - 用 `app.getVersion()` 作为子目录名，同版本只拷一次；升级后旧版本目录会被清理。
+ * - 用 `.ready` sentinel 标记拷贝完成；缺失或损坏时自动重拷。
+ * - 拷贝失败时返回 null，调用方回退到 resources（旧路径仍然能跑，只是无法解决文件锁问题）。
+ */
+async function ensureRuntimeServer(): Promise<string | null> {
+  if (!app.isPackaged) {
+    return null; // dev 模式直接用源码目录，无需准备
+  }
+
+  const sourceRoot = getResourcesServerRoot();
+  if (!fs.existsSync(sourceRoot)) {
+    writeLog(`[Runtime] resources server 不存在：${sourceRoot}`);
+    return null;
+  }
+
+  const version = app.getVersion();
+  const runtimeBase = path.join(app.getPath('userData'), 'runtime');
+  const targetRoot = path.join(runtimeBase, version, 'server');
+  const sentinel = path.join(targetRoot, '.ready');
+
+  if (fs.existsSync(sentinel)) {
+    writeLog(`[Runtime] server runtime 已就绪：${targetRoot}`);
+    void cleanupOldRuntimeVersions(runtimeBase, version);
+    return targetRoot;
+  }
+
+  writeLog(`[Runtime] 首次启动或升级，开始拷贝 server → ${targetRoot}`);
+  mainWindow?.webContents.send('runtime:prepare-start');
+
+  try {
+    // 残留的不完整目录直接删掉，避免 cp 把新文件混到旧目录中
+    if (fs.existsSync(targetRoot)) {
+      writeLog(`[Runtime] 清理残留的不完整目录：${targetRoot}`);
+      await fs.promises.rm(targetRoot, { recursive: true, force: true });
+    }
+
+    await fs.promises.mkdir(targetRoot, { recursive: true });
+    const start = Date.now();
+    await fs.promises.cp(sourceRoot, targetRoot, {
+      recursive: true,
+      force: true,
+      // 跳过符号链接（pnpm 的 .pnpm/ 目录里有大量链接，但 electron-builder
+      // 已经把它们解引用复制成实体文件，这里保险起见用 dereference: false）
+      dereference: false,
+      // 保留原始权限/时间戳
+      preserveTimestamps: true,
+    });
+    await fs.promises.writeFile(sentinel, version, 'utf8');
+    writeLog(`[Runtime] server 拷贝完成，耗时 ${Date.now() - start}ms`);
+
+    void cleanupOldRuntimeVersions(runtimeBase, version);
+    mainWindow?.webContents.send('runtime:prepare-done');
+    return targetRoot;
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    writeLog(`[Runtime] server 拷贝失败：${msg}`);
+    mainWindow?.webContents.send('runtime:prepare-error', msg);
+    // 清理半成品，下次启动重试
+    try {
+      await fs.promises.rm(targetRoot, { recursive: true, force: true });
+    } catch {
+      // 忽略清理失败
+    }
+    return null;
+  }
+}
+
+async function cleanupOldRuntimeVersions(runtimeBase: string, currentVersion: string): Promise<void> {
+  try {
+    if (!fs.existsSync(runtimeBase)) return;
+    const entries = await fs.promises.readdir(runtimeBase);
+    for (const entry of entries) {
+      if (entry === currentVersion) continue;
+      const oldPath = path.join(runtimeBase, entry);
+      writeLog(`[Runtime] 清理旧版 runtime：${oldPath}`);
+      await fs.promises.rm(oldPath, { recursive: true, force: true });
+    }
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    writeLog(`[Runtime] 清理旧版 runtime 失败：${msg}`);
+  }
 }
 
 function getRendererDistPath(): string {
@@ -812,22 +916,71 @@ async function installDownloadedUpdate(filePath?: string): Promise<{ success: bo
 
     if (process.platform === 'win32') {
       // 不能先卸载旧版再装新版——新版安装失败会让用户两头落空。
-      // 正确做法：用 /S（静默模式）直接运行新安装包。
-      // NSIS 静默模式跳过所有 UI 页面（含"关闭应用"检测页），直接覆盖文件，
-      // 旧版文件在安装成功后才被替换，安装失败时旧版依然可用。
+      // 正确做法：用 /S（静默模式）直接运行新安装包，旧版文件在安装成功后才被替换。
       //
-      // 流程：等当前进程退出 → 强杀残留子进程 → /S 静默安装新版
+      // NSIS 检测"应用占用"看的是**文件锁**而不是窗口：只要 resources\server\ 下
+      // 的 .node / .dll 还被任何进程的句柄持有，安装就会一直失败，重试多少次都没用。
+      // 而 server 经常派生 node.exe / cmd.exe / npm 子进程（claude/codex/shell/npm install），
+      // 这些孤儿子进程在主进程退出后仍然驻留并持有文件句柄。
+      //
+      // 流程：等主进程退出 → 反复杀掉所有从安装目录启动的进程 → 等文件句柄释放 → /S 静默安装
       const safeInstallerPath = installerPath.replace(/'/g, "''");
+      const installDir = path.dirname(app.getPath('exe'));
+      const safeInstallDir = installDir.replace(/'/g, "''");
+
+      // 注意：PowerShell 脚本中字符串字面量用单引号包围，
+      // 字符串里的单引号通过两次单引号转义（上面的 .replace 已处理）。
       const scriptLines = [
-        'Start-Sleep -Milliseconds 800',
-        "Stop-Process -Name 'TeamAgentX' -Force -ErrorAction SilentlyContinue",
-        'Start-Sleep -Milliseconds 300',
-        `Start-Process -FilePath '${safeInstallerPath}' -ArgumentList '/S' -Wait`,
+        `$ErrorActionPreference = 'SilentlyContinue'`,
+        `$installDir = '${safeInstallDir}'`,
+        `$installerPath = '${safeInstallerPath}'`,
+        ``,
+        `# 等当前 TeamAgentX 主进程从内存中退出`,
+        `Start-Sleep -Milliseconds 800`,
+        ``,
+        `# 按"可执行文件路径在安装目录下"为准杀进程，能抓到 utilityProcess、`,
+        `# ACP 子进程、npm 子进程等任何 server 派生出来的孤儿进程。`,
+        `function Kill-ProcessesInDir {`,
+        `  param([string]$Dir)`,
+        `  $count = 0`,
+        `  try {`,
+        `    $procs = Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {`,
+        `      $_.ExecutablePath -and $_.ExecutablePath.StartsWith($Dir, [StringComparison]::OrdinalIgnoreCase)`,
+        `    }`,
+        `    foreach ($p in $procs) {`,
+        `      Stop-Process -Id $p.ProcessId -Force`,
+        `      $count++`,
+        `    }`,
+        `  } catch {}`,
+        `  return $count`,
+        `}`,
+        ``,
+        `# 反复杀直到连续两轮 0 个，避免子进程链来不及全部死掉。最多 10 轮（约 3s）。`,
+        `$emptyRounds = 0`,
+        `for ($i = 0; $i -lt 10; $i++) {`,
+        `  $killed = Kill-ProcessesInDir -Dir $installDir`,
+        `  if ($killed -eq 0) {`,
+        `    $emptyRounds++`,
+        `    if ($emptyRounds -ge 2) { break }`,
+        `  } else {`,
+        `    $emptyRounds = 0`,
+        `  }`,
+        `  Start-Sleep -Milliseconds 300`,
+        `}`,
+        ``,
+        `# 兜底：按进程名再杀一次（防止有进程因权限读不到 ExecutablePath 而漏网）`,
+        `Stop-Process -Name 'TeamAgentX' -Force`,
+        ``,
+        `# 进程死掉 ≠ 文件句柄立即释放。Windows 上 .node / .dll 句柄常有 ~1s 的延迟，`,
+        `# 这里多等 1.5s，否则 NSIS 仍可能命中残留句柄报"程序正在运行"。`,
+        `Start-Sleep -Milliseconds 1500`,
+        ``,
+        `Start-Process -FilePath $installerPath -ArgumentList '/S' -Wait`,
       ];
 
       const scriptPath = path.join(app.getPath('temp'), 'teamagentx-update.ps1');
       fs.writeFileSync(scriptPath, scriptLines.join('\r\n'), 'utf8');
-      writeLog(`[Update] 写入静默安装脚本：${scriptPath}`);
+      writeLog(`[Update] 写入静默安装脚本：${scriptPath}，installDir=${installDir}`);
 
       spawn(
         'powershell',
@@ -835,7 +988,7 @@ async function installDownloadedUpdate(filePath?: string): Promise<{ success: bo
         { detached: true, stdio: 'ignore' },
       ).unref();
 
-      writeLog('[Update] 主进程立即退出，PowerShell 脚本接管静默安装');
+      writeLog('[Update] 主进程立即退出，PowerShell 脚本接管进程清理与静默安装');
       process.exit(0);
     }
 
@@ -978,12 +1131,53 @@ function buildFallbackPath(): string {
   ].filter(Boolean).join(separator);
 }
 
-function startServer(): Promise<number> {
+async function startServer(): Promise<number> {
   writeLog('startServer called');
-  return new Promise((resolve, reject) => {
-    const projectRoot = getServerProjectRoot();
-    writeLog(`Server project root: ${projectRoot}`);
+  lastServerStderr = '';
 
+  // 在 fork utilityProcess 之前先把 server 目录拷贝到 userData，
+  // 这样所有 .node / .dll 文件锁都落在 userData 而非 resources，
+  // 后续更新时 NSIS 不会再卡在"程序正在运行"。失败时回退到 resources。
+  if (app.isPackaged && !runtimeServerRoot) {
+    const root = await ensureRuntimeServer();
+    if (root) {
+      runtimeServerRoot = root;
+      writeLog(`[Runtime] server 将从 userData 加载：${root}`);
+    } else {
+      writeLog(`[Runtime] server 回退到 resources：${getResourcesServerRoot()}`);
+    }
+  }
+
+  const projectRoot = getServerProjectRoot();
+  const nodeModulesPath = getServerNodeModulesPath();
+  const serverEntry = path.join(projectRoot, 'dist', 'electron-entry.js');
+  writeLog(`Server project root: ${projectRoot}`);
+  writeLog(`Server entry: ${serverEntry}`);
+  writeLog(`Node modules path: ${nodeModulesPath}`);
+
+  // 启动前预检查：缺失关键文件直接抛出明确错误，避免 utilityProcess 静默退出
+  const preflightErrors: string[] = [];
+  if (!fs.existsSync(projectRoot)) {
+    preflightErrors.push(`server 目录不存在：${projectRoot}`);
+  }
+  if (!fs.existsSync(serverEntry)) {
+    preflightErrors.push(`server 入口文件缺失：${serverEntry}（检查打包是否包含 server/dist/electron-entry.js）`);
+  }
+  if (!fs.existsSync(nodeModulesPath)) {
+    preflightErrors.push(`server node_modules 缺失：${nodeModulesPath}`);
+  } else {
+    const prismaClient = path.join(nodeModulesPath, '@prisma', 'client');
+    if (!fs.existsSync(prismaClient)) {
+      preflightErrors.push(`Prisma client 缺失：${prismaClient}`);
+    }
+  }
+  if (preflightErrors.length > 0) {
+    const message = `服务启动预检查失败：\n- ${preflightErrors.join('\n- ')}\n\n详细日志：${getLogPath()}`;
+    writeLog(`[Preflight] ${message}`);
+    throw new Error(message);
+  }
+
+  return new Promise((resolve, reject) => {
     // Set DATABASE_URL to user data directory
     const dbPath = path.join(app.getPath('userData'), 'teamagentx.db');
     const databaseUrl = pathToFileURL(dbPath).href;
@@ -992,39 +1186,39 @@ function startServer(): Promise<number> {
     // 本地工具安装目录
     const toolsDir = path.join(app.getPath('userData'), 'tools');
 
-    // Use Electron's utilityProcess to run the server
-    // This is the correct way to spawn Node.js child processes in Electron
-    const nodeModulesPath = getServerNodeModulesPath();
-    const serverEntry = path.join(projectRoot, 'dist', 'electron-entry.js');
-    writeLog(`Server entry: ${serverEntry}`);
-    writeLog(`Node modules path: ${nodeModulesPath}`);
-    writeLog(`Server entry exists: ${fs.existsSync(serverEntry)}`);
-
     const fullPath = resolveShellPath();
 
-    // Electron 打包时固定端口为 11053
-    const fixedPort = 11053;
+    let settled = false;
+    const settle = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      fn();
+    };
 
-    serverProcess = utilityProcess.fork(serverEntry, [], {
-      cwd: projectRoot,
-      env: {
-        ...process.env,
-        PATH: fullPath,
-        DATABASE_URL: databaseUrl,
-        UPLOADS_DIR: uploadsDir,
-        TOOLS_DIR: toolsDir,
-        NODE_PATH: nodeModulesPath,
-        ELECTRON: 'true',
-        ACPX_FALLBACK: 'true',
-      },
-      stdio: 'pipe',
-    });
-
-    let outputBuffer = '';
+    try {
+      serverProcess = utilityProcess.fork(serverEntry, [], {
+        cwd: projectRoot,
+        env: {
+          ...process.env,
+          PATH: fullPath,
+          DATABASE_URL: databaseUrl,
+          UPLOADS_DIR: uploadsDir,
+          TOOLS_DIR: toolsDir,
+          NODE_PATH: nodeModulesPath,
+          ELECTRON: 'true',
+          ACPX_FALLBACK: 'true',
+        },
+        stdio: 'pipe',
+      });
+    } catch (forkError) {
+      const msg = forkError instanceof Error ? forkError.message : String(forkError);
+      writeLog(`utilityProcess.fork 抛出异常：${msg}`);
+      reject(new Error(`无法启动 server 进程：${msg}\n详细日志：${getLogPath()}`));
+      return;
+    }
 
     serverProcess.stdout?.on('data', (data) => {
       const text = data.toString();
-      outputBuffer += text;
       writeLog(`Server stdout: ${text.trim()}`);
 
       // Parse port from output: __ELECTRON_PORT__:XXXX
@@ -1033,7 +1227,7 @@ function startServer(): Promise<number> {
         serverPort = parseInt(match[1], 10);
         writeLog(`Server started on port: ${serverPort}`);
         process.stdout.write(data);
-        resolve(serverPort);
+        settle(() => resolve(serverPort!));
       } else {
         process.stdout.write(data);
       }
@@ -1041,30 +1235,32 @@ function startServer(): Promise<number> {
 
     serverProcess.stderr?.on('data', (data) => {
       const text = data.toString();
+      lastServerStderr = `${lastServerStderr}${text}`.slice(-8000);
       writeLog(`Server stderr: ${text.trim()}`);
       process.stderr.write(data);
     });
 
     serverProcess.on('exit', (code) => {
       writeLog(`Server process exited with code: ${code}`);
-      if (serverPort === null) {
-        reject(
-          new Error(
-            `Server process exited with code ${code} before port was assigned`,
-          ),
-        );
-      }
+      const wasReady = serverPort !== null;
       serverProcess = null;
+      if (!wasReady) {
+        const tail = lastServerStderr.trim().split(/\r?\n/).slice(-15).join('\n');
+        const detail = tail ? `\n\n最后的错误输出：\n${tail}` : '';
+        settle(() => reject(new Error(
+          `server 进程退出，退出码 ${code}（端口尚未就绪）${detail}\n\n详细日志：${getLogPath()}`,
+        )));
+      }
     });
 
     // Set a timeout to reject if server doesn't start
     setTimeout(() => {
       if (serverPort === null) {
-        reject(
-          new Error(
-            'Server startup timeout - no port received within 30 seconds',
-          ),
-        );
+        const tail = lastServerStderr.trim().split(/\r?\n/).slice(-15).join('\n');
+        const detail = tail ? `\n\n最后的错误输出：\n${tail}` : '';
+        settle(() => reject(new Error(
+          `server 启动超时（30 秒内未输出端口）${detail}\n\n详细日志：${getLogPath()}`,
+        )));
       }
     }, 30000);
   });
@@ -1085,6 +1281,7 @@ function startServerInBackground(): void {
   startServer()
     .then(async (port) => {
       serverPort = port;
+      lastServerError = null;
       writeLog(`Server started on port: ${port}`);
       if (app.isPackaged) {
         await startMobileWebServer(port);
@@ -1095,6 +1292,7 @@ function startServerInBackground(): void {
       const msg = error instanceof Error ? error.message : String(error);
       writeLog(`Server startup failed: ${msg}`);
       console.error('Server startup failed:', error);
+      lastServerError = msg;
       mainWindow?.webContents.send('server-error', msg);
     });
 }
@@ -1412,11 +1610,26 @@ app.whenReady().then(async () => {
 
   // 服务状态查询（供渲染器判断后端是否就绪）
   ipcMain.handle('get-server-status', () => {
+    let error: string | null = null;
+    if (serverPort === null && !serverProcess) {
+      error = lastServerError ?? `服务尚未启动。详细日志：${getLogPath()}`;
+    }
     return {
       ready: serverPort !== null,
       port: serverPort,
-      error: serverPort === null && !serverProcess ? 'Server not running' : null,
+      error,
+      logPath: getLogPath(),
     };
+  });
+
+  // 让用户在错误界面"打开日志文件夹"以协助排查
+  ipcMain.handle('open-log-folder', async () => {
+    try {
+      shell.showItemInFolder(getLogPath());
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
   });
 
   // 先创建窗口和托盘（用户立即看到界面），再后台启动服务

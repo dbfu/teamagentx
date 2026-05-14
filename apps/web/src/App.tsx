@@ -607,19 +607,42 @@ export default function App() {
 
   // Electron: 服务启动失败
   if (serverState === 'error') {
+    const electronAPI = typeof window !== 'undefined' ? (window as any).electronAPI : null
     return (
       <div className="flex flex-col h-screen w-full bg-background">
         <WindowTitleBar />
-        <div className="flex flex-1 flex-col items-center justify-center">
-          <div className="flex flex-col items-center gap-4 max-w-md text-center">
+        <div className="flex flex-1 flex-col items-center justify-center px-6">
+          <div className="flex flex-col items-center gap-4 max-w-2xl w-full text-center">
             <div className="text-lg font-semibold text-foreground">服务启动失败</div>
-            <div className="text-sm text-muted-foreground">{serverError}</div>
-            <button
-              onClick={() => { setServerError(''); setServerState('waiting') }}
-              className="rounded-lg bg-blue-500 px-4 py-2 text-sm text-white hover:bg-blue-600"
-            >
-              重试
-            </button>
+            <pre className="text-xs text-left whitespace-pre-wrap break-words bg-muted/50 border border-border rounded-lg p-3 max-h-80 overflow-auto w-full">
+              {serverError || '未知错误'}
+            </pre>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => { setServerError(''); setServerState('waiting') }}
+                className="rounded-lg bg-blue-500 px-4 py-2 text-sm text-white hover:bg-blue-600"
+              >
+                重试
+              </button>
+              {electronAPI?.openLogFolder && (
+                <button
+                  onClick={() => electronAPI.openLogFolder()}
+                  className="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50"
+                >
+                  打开日志文件夹
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  if (serverError && navigator.clipboard) {
+                    navigator.clipboard.writeText(serverError).catch(() => {})
+                  }
+                }}
+                className="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50"
+              >
+                复制错误
+              </button>
+            </div>
           </div>
         </div>
       </div>

@@ -234,7 +234,8 @@ function shouldRunBashInBackground(command: string): boolean {
 }
 
 function resolveClaudeCodeExecutable(): string | undefined {
-  const extension = process.platform === 'win32' ? '.exe' : '';
+  const isWindows = process.platform === 'win32';
+  const extension = isWindows ? '.exe' : '';
   const packageNames = process.platform === 'linux'
     ? [
         `@anthropic-ai/claude-agent-sdk-linux-${process.arch}-musl`,
@@ -242,39 +243,147 @@ function resolveClaudeCodeExecutable(): string | undefined {
       ]
     : [`@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`];
 
-  // 1. 查找 SDK 自带的原生二进制
+  const tried: string[] = [];
+
+  // 1. 查找 SDK 自带的原生二进制（打包后通常被 yml filter 排除以减小体积，
+  //    所以这里多半失败，是预期的；下方 step 2/3 会找用户本地安装的 claude）
   for (const packageName of packageNames) {
     try {
-      return requireFromClaudeSdk.resolve(`${packageName}/claude${extension}`);
-    } catch {
-      // Optional native package for another platform/arch is expected to be absent.
+      const resolved = requireFromClaudeSdk.resolve(`${packageName}/claude${extension}`);
+      if (fs.existsSync(resolved)) {
+        console.log(`[ClaudeSDK] resolved claude executable via sdk-native[${packageName}]: ${resolved}`);
+        return resolved;
+      }
+      tried.push(`sdk-native[${packageName}]: ${resolved} (missing — 通常是因为打包阶段排除了 native 子包)`);
+    } catch (error) {
+      tried.push(`sdk-native[${packageName}]: resolve threw ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
-  // 2. 查找应用本地安装目录（TOOLS_DIR/node_modules/.bin/claude）
+  // SDK 直接 spawn 该路径，且非 .js/.mjs/.cjs/.ts/.tsx/.jsx 都被当成 native binary 执行。
+  // 这意味着 Windows 上的 .cmd/.ps1 shim 不能作为 pathToClaudeCodeExecutable —— spawn
+  // 不走 shell，会直接 ENOENT。我们只接受真正的 native binary 或 JS 文件。
+  const isAcceptableExecutable = (candidate: string): boolean => {
+    if (isWindows) {
+      // Windows: 接受 .exe（native binary）或 .cjs/.js/.mjs（用 node 解释执行）
+      return /\.(exe|cjs|js|mjs)$/i.test(candidate);
+    }
+    return true;
+  };
+
+  const tryPathStrict = (label: string, candidate: string | undefined): string | undefined => {
+    if (!candidate) {
+      tried.push(`${label}: <empty>`);
+      return undefined;
+    }
+    if (!fs.existsSync(candidate)) {
+      tried.push(`${label}: ${candidate} (missing)`);
+      return undefined;
+    }
+    if (!isAcceptableExecutable(candidate)) {
+      tried.push(`${label}: ${candidate} (rejected: cannot be spawned directly on Windows)`);
+      return undefined;
+    }
+    console.log(`[ClaudeSDK] resolved claude executable via ${label}: ${candidate}`);
+    return candidate;
+  };
+
+  // 2. 查找应用本地安装目录（TOOLS_DIR）
   const toolsDir = process.env.TOOLS_DIR;
   if (toolsDir) {
-    const localBin = path.join(toolsDir, 'node_modules', '.bin', 'claude' + extension);
-    if (fs.existsSync(localBin)) {
-      return localBin;
+    // 2a. @anthropic-ai/claude-code 包的 bin/claude(.exe) —— postinstall 复制的真 native binary，最优
+    const claudeCodePkgBin = path.join(
+      toolsDir,
+      'node_modules',
+      '@anthropic-ai',
+      'claude-code',
+      'bin',
+      'claude' + extension,
+    );
+    const v2a = tryPathStrict('tools-dir/@anthropic-ai/claude-code/bin', claudeCodePkgBin);
+    if (v2a) return v2a;
+
+    // 2b. .bin shim：非 Windows 走这里（Windows 上 .bin/claude.cmd 不可直接 spawn，跳过）
+    if (!isWindows) {
+      const localBin = path.join(toolsDir, 'node_modules', '.bin', 'claude');
+      const v2b = tryPathStrict('tools-dir/node_modules/.bin', localBin);
+      if (v2b) return v2b;
     }
+
+    // 2c. Windows 上 npm global-style --prefix 直接根目录有 .exe 的情况（少见但兜底）
+    if (isWindows) {
+      const v2c = tryPathStrict('tools-dir/claude.exe', path.join(toolsDir, 'claude.exe'));
+      if (v2c) return v2c;
+    }
+
+    // 2d. cli-wrapper.cjs —— postinstall 失败时的兜底，SDK 会用 node 执行 .cjs
+    const cliWrapper = path.join(
+      toolsDir,
+      'node_modules',
+      '@anthropic-ai',
+      'claude-code',
+      'cli-wrapper.cjs',
+    );
+    const v2d = tryPathStrict('tools-dir/@anthropic-ai/claude-code/cli-wrapper.cjs', cliWrapper);
+    if (v2d) return v2d;
+  } else {
+    tried.push('TOOLS_DIR: <unset>');
   }
 
   // 3. 在 PATH 中查找系统安装的 claude CLI
   try {
-    const whichCmd = process.platform === 'win32' ? 'where claude' : 'which claude';
-    const result = execFileSync('sh', ['-c', whichCmd], {
+    const cmd = isWindows ? 'where' : 'which';
+    const result = execFileSync(cmd, ['claude'], {
       encoding: 'utf-8',
       timeout: 3000,
+      windowsHide: true,
     }).trim();
-    if (result && result.split('\n')[0]) {
-      return result.split('\n')[0];
+    const lines = result.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    // Windows where 通常按 PATHEXT 顺序返回多行：.exe / .cmd / .ps1 / 无扩展名；
+    // 我们只接受 .exe（直接 spawn 可工作）。.cmd 在 Windows 上 spawn 会失败。
+    for (const line of lines) {
+      const found = tryPathStrict(`PATH(${cmd})`, line);
+      if (found) return found;
     }
-  } catch {
-    // claude not found in PATH
+    // 如果 PATH 只能找到 .cmd shim，尝试解析它指向的真实包，再用 cli-wrapper.cjs 兜底
+    if (isWindows) {
+      const cmdShim = lines.find((line) => line.toLowerCase().endsWith('.cmd'));
+      if (cmdShim) {
+        const wrapperFromShim = resolveCliWrapperFromCmdShim(cmdShim);
+        const found = tryPathStrict('PATH(.cmd → cli-wrapper.cjs)', wrapperFromShim);
+        if (found) return found;
+      }
+    }
+  } catch (error) {
+    tried.push(`PATH lookup threw: ${error instanceof Error ? error.message : String(error)}`);
   }
 
+  console.warn('[ClaudeSDK] 找不到可直接 spawn 的 claude 可执行文件，已尝试：\n  - ' + tried.join('\n  - '));
   return undefined;
+}
+
+/**
+ * 从 npm 在 Windows 生成的 claude.cmd shim 解析出对应的 @anthropic-ai/claude-code
+ * 包根目录，再返回其 cli-wrapper.cjs。这是当用户全局/局部安装但 SDK 不能直接
+ * spawn .cmd 时的兜底：用 cli-wrapper.cjs 让 SDK 用 node 执行。
+ */
+function resolveCliWrapperFromCmdShim(cmdShimPath: string): string | undefined {
+  try {
+    const content = fs.readFileSync(cmdShimPath, 'utf-8');
+    // npm shim 形如：node "%~dp0\node_modules\@anthropic-ai\claude-code\bin\claude.exe"
+    // 或：node "%~dp0\..\@anthropic-ai\claude-code\bin\claude.exe"
+    const match = content.match(/[%~dp0\\\/.][^"\r\n]*claude-code[^"\r\n]*/i);
+    if (!match) return undefined;
+    const relative = match[0].replace(/^%~dp0[\\/]/i, '').replace(/\\/g, path.sep);
+    const shimDir = path.dirname(cmdShimPath);
+    const resolved = path.resolve(shimDir, relative);
+    // 从 bin/claude.exe 回退到包根，再到 cli-wrapper.cjs
+    const claudeCodeRoot = resolved.split(/[\\/]@anthropic-ai[\\/]claude-code/)[0];
+    const wrapper = path.join(claudeCodeRoot, '@anthropic-ai', 'claude-code', 'cli-wrapper.cjs');
+    return fs.existsSync(wrapper) ? wrapper : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export class ClaudeAgentSdkExecutor implements IAgentExecutor {
@@ -305,7 +414,11 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
   private lastResponse: string | null = null;
   private lastInvokeResult: string | null = null;
   private lastClaudeStderr = '';
-  private claudeCodeExecutable = resolveClaudeCodeExecutable();
+  // 懒解析：每次访问都查一次（几次 fs.existsSync，开销极小），避免实例化时
+  // 用户尚未装 claude，后续装好仍因为缓存了 undefined 而继续报错。
+  private get claudeCodeExecutable(): string | undefined {
+    return resolveClaudeCodeExecutable();
+  }
 
   private emitStream: StreamEmitCallback | null = null;
   private emitThinking: ThinkingEmitCallback | null = null;
