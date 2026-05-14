@@ -71,6 +71,35 @@ function attachmentExtension(mimeType: string): string {
   return '.jpg';
 }
 
+const TEAMAGENTX_CODEX_PROVIDER_ID = 'teamagentx_openai';
+
+export function buildCodexModelProviderConfig(provider?: LlmProvider | null): Record<string, unknown> {
+  if (!provider) return {};
+
+  const apiUrl = provider.apiUrl?.trim().replace(/\/+$/, '');
+  if (!apiUrl) {
+    return {
+      model: provider.model,
+      model_provider: 'openai',
+    };
+  }
+
+  return {
+    model: provider.model,
+    model_provider: TEAMAGENTX_CODEX_PROVIDER_ID,
+    model_providers: {
+      [TEAMAGENTX_CODEX_PROVIDER_ID]: {
+        name: provider.name || 'TeamAgentX OpenAI',
+        base_url: apiUrl,
+        env_key: 'CODEX_API_KEY',
+        wire_api: 'responses',
+        supports_websockets: false,
+        requires_openai_auth: false,
+      },
+    },
+  };
+}
+
 /**
  * 查找本地安装的 Codex CLI 可执行文件路径（TOOLS_DIR 或系统 PATH）。
  * 当 electron-builder 排除了 @openai/codex 原生二进制包时作为回退。
@@ -725,17 +754,13 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
         },
       },
       ...(this.llmProvider
-        ? {
-            model: this.llmProvider.model,
-            model_provider: 'openai',
-          }
+        ? buildCodexModelProviderConfig(this.llmProvider)
         : {}),
     };
 
     return new Codex({
       env,
       apiKey: this.llmProvider?.apiKey,
-      baseUrl: this.llmProvider?.apiUrl || undefined,
       config,
       codexPathOverride: findLocalCodexBinary(),
     });

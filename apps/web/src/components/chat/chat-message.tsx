@@ -300,7 +300,7 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
     // 如果没有 mentionAgents，直接渲染 markdown（不处理 @mentions）
     if (!mentionAgents || mentionAgents.length === 0) {
       return (
-        <div className="prose prose-sm break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_pre]:whitespace-pre-wrap [&_code]:whitespace-pre-wrap [&_img]:max-w-[120px] [&_img]:max-h-[120px] [&_img]:rounded-lg [&_img]:object-cover [&_img]:cursor-pointer">
+        <div className="prose prose-sm max-w-none break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_pre]:whitespace-pre-wrap [&_code]:whitespace-pre-wrap [&_img]:max-h-[360px] [&_img]:w-auto [&_img]:max-w-[min(560px,80vw)] [&_img]:rounded-lg [&_img]:object-contain [&_img]:cursor-pointer">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
@@ -313,7 +313,7 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
                 <img
                   src={src}
                   alt={alt || '图片'}
-                  className="max-w-[120px] max-h-[120px] rounded-lg object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                  className="max-h-[360px] w-auto max-w-[min(560px,80vw)] rounded-lg object-contain cursor-pointer transition-opacity hover:opacity-90"
                   onClick={() => src && setViewerImage({ url: src, name: alt || '图片' })}
                 />
               ),
@@ -329,7 +329,7 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
     // 使用 rehypeRaw 来处理这些 HTML 节点
     // 在自定义 span 组件中识别我们的标记 class 并渲染为高亮元素
     return (
-      <div className="prose prose-sm break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_pre]:whitespace-pre-wrap [&_code]:whitespace-pre-wrap [&_img]:max-w-[120px] [&_img]:max-h-[120px] [&_img]:rounded-lg [&_img]:object-cover [&_img]:cursor-pointer">
+      <div className="prose prose-sm max-w-none break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_pre]:whitespace-pre-wrap [&_code]:whitespace-pre-wrap [&_img]:max-h-[360px] [&_img]:w-auto [&_img]:max-w-[min(560px,80vw)] [&_img]:rounded-lg [&_img]:object-contain [&_img]:cursor-pointer">
         <ReactMarkdown
           remarkPlugins={[remarkGfm, [remarkMentions, { mentionAgents }]]}
           rehypePlugins={[rehypeRaw]}
@@ -343,7 +343,7 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
               <img
                 src={src}
                 alt={alt || '图片'}
-                className="max-w-[120px] max-h-[120px] rounded-lg object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                className="max-h-[360px] w-auto max-w-[min(560px,80vw)] rounded-lg object-contain cursor-pointer transition-opacity hover:opacity-90"
                 onClick={() => src && setViewerImage({ url: src, name: alt || '图片' })}
               />
             ),
@@ -425,7 +425,7 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
                 <img
                   src={attachment.url}
                   alt={attachment.filename}
-                  className="max-w-[120px] max-h-[120px] rounded-lg cursor-pointer hover:opacity-90 transition-opacity object-cover"
+                  className="max-h-[260px] w-auto max-w-[min(360px,70vw)] rounded-lg cursor-pointer object-contain transition-opacity hover:opacity-90"
                   onClick={() => setViewerImage({ url: attachment.url, name: attachment.filename })}
                   loading="lazy"
                 />

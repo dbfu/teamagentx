@@ -24,6 +24,7 @@ import { Toaster } from './components/ui/sonner'
 import { WindowTitleBar } from './components/ui/window-title-bar'
 import { useIsMobile } from './hooks/use-mobile'
 import { playMessageSound } from './lib/message-sound'
+import { updateManager } from './lib/update-manager'
 import { cn } from './lib/utils'
 import { SetupWizard } from './components/setup/setup-wizard'
 import { UpdateNotification } from './components/update/update-notification'
@@ -408,8 +409,36 @@ function AppContent() {
     if (isConnected) {
       requestUnreadCounts()
       requestTodos()
+      updateManager.checkForUpdates({ silent: true, reason: 'socket-connected' })
     }
   }, [isConnected, requestUnreadCounts, requestTodos])
+
+  // Electron 运行中低频补充检查更新：窗口聚焦、页面可见、网络恢复。
+  useEffect(() => {
+    if (!window.electronAPI?.isElectron) return
+
+    const checkOnFocus = () => {
+      updateManager.checkForUpdates({ silent: true, reason: 'window-focus' })
+    }
+    const checkOnVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        updateManager.checkForUpdates({ silent: true, reason: 'visibility-change' })
+      }
+    }
+    const checkOnOnline = () => {
+      updateManager.checkForUpdates({ silent: true, reason: 'online' })
+    }
+
+    window.addEventListener('focus', checkOnFocus)
+    window.addEventListener('online', checkOnOnline)
+    document.addEventListener('visibilitychange', checkOnVisibilityChange)
+
+    return () => {
+      window.removeEventListener('focus', checkOnFocus)
+      window.removeEventListener('online', checkOnOnline)
+      document.removeEventListener('visibilitychange', checkOnVisibilityChange)
+    }
+  }, [])
 
   // 监听待办事件
   useEffect(() => {

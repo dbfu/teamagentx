@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { LogIn } from 'lucide-react'
+import { Network } from 'lucide-react'
 
 interface LoginModalProps {
   isOpen: boolean
@@ -46,8 +46,11 @@ export function LoginModal({ isOpen, onLogin, onSwitchToRegister }: LoginModalPr
       <div className="w-[400px] shrink-0 rounded-2xl bg-card shadow-xl">
         {/* Header */}
         <div className="flex items-center gap-3 border-b border-border px-6 py-4">
-          <div className="flex size-9 items-center justify-center rounded-xl bg-linear-to-br from-primary to-cyan-500 text-white">
-            <LogIn className="size-5" />
+          <div className="relative flex size-11 items-center justify-center rounded-2xl border border-blue-200/70 bg-blue-50 text-blue-600 shadow-sm shadow-blue-500/10">
+            <div className="absolute inset-1.5 rounded-xl bg-white/80" />
+            <Network className="relative z-10 size-5" strokeWidth={2.2} />
+            <span className="absolute right-2 top-2 z-10 size-1.5 rounded-full bg-cyan-400 ring-2 ring-white" />
+            <span className="absolute bottom-2 left-2 z-10 size-1.5 rounded-full bg-blue-500 ring-2 ring-white" />
           </div>
           <h2 className="text-lg font-semibold text-foreground">登录账号</h2>
         </div>
