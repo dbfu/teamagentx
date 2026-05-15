@@ -345,7 +345,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
 
   const handleCreateAssistant = async (data: {
     name: string
-    avatarIndex: number
+    avatar: string
     description: string
     prompt: string
     type: 'builtin' | 'acp'
@@ -359,7 +359,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
   }): Promise<boolean> => {
     const response = await agentApi.create({
       name: data.name,
-      avatar: String(data.avatarIndex),
+      avatar: data.avatar,
       description: data.description,
       prompt: data.prompt,
       type: data.type,
@@ -385,7 +385,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
 
   const handleUpdateAssistant = async (data: {
     name: string
-    avatarIndex: number
+    avatar: string
     description: string
     prompt: string
     type: 'builtin' | 'acp'
@@ -400,7 +400,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     if (!editingAssistant) return false
     const response = await agentApi.update(editingAssistant.id, {
       name: data.name,
-      avatar: String(data.avatarIndex),
+      avatar: data.avatar,
       description: data.description,
       prompt: data.prompt,
       type: data.type,

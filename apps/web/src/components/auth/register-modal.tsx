@@ -10,7 +10,7 @@ export function RegisterModal({ isOpen, onRegister }: RegisterModalProps) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const [selectedAvatarIndex, setSelectedAvatarIndex] = useState(0)
+  const [selectedAvatar, setSelectedAvatar] = useState('0')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -45,7 +45,7 @@ export function RegisterModal({ isOpen, onRegister }: RegisterModalProps) {
       const result = await onRegister(
         username.trim(),
         password,
-        String(selectedAvatarIndex),
+        selectedAvatar,
       )
 
       if (!result.success) {
@@ -61,7 +61,7 @@ export function RegisterModal({ isOpen, onRegister }: RegisterModalProps) {
       <div className="w-[420px] shrink-0 rounded-2xl bg-card shadow-xl">
         {/* Header */}
         <div className="flex items-center gap-3 border-b border-border px-6 py-4">
-          <UserAvatar avatar={selectedAvatarIndex} size="lg" />
+          <UserAvatar avatar={selectedAvatar} size="lg" />
           <h2 className="text-lg font-semibold text-foreground">创建账号</h2>
         </div>
 
@@ -117,8 +117,8 @@ export function RegisterModal({ isOpen, onRegister }: RegisterModalProps) {
             <div className="mb-4">
               <label className="mb-1.5 block text-sm font-medium text-foreground">头像</label>
               <UserAvatarSelector
-                selectedIndex={selectedAvatarIndex}
-                onSelect={setSelectedAvatarIndex}
+                selectedAvatar={selectedAvatar}
+                onSelect={setSelectedAvatar}
               />
             </div>
 

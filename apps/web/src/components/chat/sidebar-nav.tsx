@@ -86,7 +86,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
 
   const handleCreateAssistant = async (data: {
     name: string
-    avatarIndex: number
+    avatar: string
     description: string
     prompt: string
     type: 'builtin' | 'acp'
@@ -100,7 +100,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
   }): Promise<boolean> => {
     const response = await agentApi.create({
       name: data.name,
-      avatar: String(data.avatarIndex),
+      avatar: data.avatar,
       description: data.description,
       prompt: data.prompt,
       type: data.type,

@@ -121,9 +121,7 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
   const { user, token, logout, setUser } = useAuthStore()
   const { soundEnabled, setSoundEnabled } = useUIStore()
   const [username, setUsername] = useState(user?.username || '')
-  const [selectedAvatarIndex, setSelectedAvatarIndex] = useState(
-    user?.avatar ? ((/^\d+$/.test(user.avatar) ? parseInt(user.avatar, 10) : 0)) : 0
-  )
+  const [selectedAvatar, setSelectedAvatar] = useState(user?.avatar || '0')
   const [isUpdating, setIsUpdating] = useState(false)
   const [mobileWebUrl, setMobileWebUrl] = useState<string | null>(null)
   const [customServerUrl, setCustomServerUrl] = useState<string>('')
@@ -150,7 +148,7 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
     try {
       const response = await authApi.updateProfile(token, {
         username: username.trim(),
-        avatar: String(selectedAvatarIndex),
+        avatar: selectedAvatar,
       })
 
       if (response.success && response.data) {
@@ -416,8 +414,8 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
           <div className="mb-4">
             <label className="mb-1.5 block text-sm font-medium">头像</label>
             <UserAvatarSelector
-              selectedIndex={selectedAvatarIndex}
-              onSelect={setSelectedAvatarIndex}
+              selectedAvatar={selectedAvatar}
+              onSelect={setSelectedAvatar}
             />
           </div>
 
@@ -425,7 +423,7 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
           <div className="mb-4">
             <label className="mb-1.5 block text-sm font-medium">预览</label>
             <div className="flex items-center gap-3">
-              <UserAvatar avatar={selectedAvatarIndex} size="lg" />
+              <UserAvatar avatar={selectedAvatar} size="lg" />
               <span className="text-sm font-medium">{username || '用户名'}</span>
             </div>
           </div>
@@ -433,7 +431,7 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
           {/* 更新按钮 */}
           <button
             onClick={handleUpdateProfile}
-            disabled={isUpdating || username === user?.username && selectedAvatarIndex === (user?.avatar ? parseInt(user.avatar, 10) : 0)}
+            disabled={isUpdating || (username === user?.username && selectedAvatar === (user?.avatar || '0'))}
             className="w-full rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isUpdating ? (

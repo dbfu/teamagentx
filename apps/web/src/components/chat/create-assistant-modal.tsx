@@ -1,12 +1,13 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AcpToolInfo, AgentSpeechConfig, acpToolsApi, AgentCategory, categoryApi } from '@/lib/agent-api';
 import { AgentAvatarImage, agentAvatarOptions } from '@/lib/agent-avatars';
+import { AvatarSelector } from './avatar-selector';
 import { getCodexModelOptions } from '@/lib/codex-models';
 import { llmProviderApi, type LlmProvider } from '@/lib/llm-provider-api';
 import { getProviderProtocolHint, isProviderCompatibleWithAgent } from '@/lib/llm-provider-compat';
 import { promptOptimizeApi } from '@/lib/prompt-optimize-api';
 import { cn } from '@/lib/utils';
-import { Check, Image, Loader2, Maximize2, Sparkles, X } from 'lucide-react';
+import { Image, Loader2, Maximize2, Sparkles, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -15,7 +16,7 @@ interface CreateAssistantModalProps {
   onClose: () => void
   onSubmit: (data: {
     name: string
-    avatarIndex: number
+    avatar: string
     description: string
     prompt: string
     type: 'builtin' | 'acp'
@@ -156,7 +157,7 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [prompt, setPrompt] = useState('')
-  const [selectedAvatarIndex, setSelectedAvatarIndex] = useState(0)
+  const [selectedAvatar, setSelectedAvatar] = useState('0')
   const [assistantType, setAssistantType] = useState<'builtin' | 'acp'>('acp')
   const [acpTool, setAcpTool] = useState('claude')
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -244,7 +245,7 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
     try {
       const success = await onSubmit({
         name: name.trim(),
-        avatarIndex: selectedAvatarIndex,
+        avatar: selectedAvatar,
         description: description.trim(),
         prompt,
         type: assistantType,
@@ -265,7 +266,7 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
         setName('')
         setDescription('')
         setPrompt('')
-        setSelectedAvatarIndex(0)
+        setSelectedAvatar('0')
         setAssistantType('acp')
         setAcpTool('claude')
         setCategoryId('')
@@ -287,7 +288,7 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <div className="flex items-center gap-3">
-            <AgentAvatarImage avatar={selectedAvatarIndex} className="size-9" />
+            <AgentAvatarImage avatar={selectedAvatar} className="size-9" />
             <h2 className="text-lg font-semibold text-foreground">创建助手</h2>
           </div>
           <button
@@ -485,27 +486,15 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
             {/* Avatar selection */}
             <div className="mb-4">
               <label className="mb-1.5 block text-sm font-medium text-foreground">头像</label>
-              <div className="grid max-h-64 grid-cols-6 gap-2 overflow-y-auto rounded-lg border border-input bg-background p-2">
-                {agentAvatarOptions.map((index) => (
-                  <button
-                    key={index}
-                    type="button"
-                    aria-label={`选择头像 ${index + 1}`}
-                    onClick={() => setSelectedAvatarIndex(index)}
-                    className={cn(
-                      'relative flex size-12 items-center justify-center rounded-full transition-all hover:ring-2 hover:ring-primary/30',
-                      selectedAvatarIndex === index && 'ring-2 ring-primary ring-offset-2 ring-offset-background'
-                    )}
-                  >
-                    <AgentAvatarImage avatar={index} className="size-12" />
-                    {selectedAvatarIndex === index && (
-                      <span className="absolute -bottom-0.5 -right-0.5 flex size-5 items-center justify-center rounded-full bg-primary text-white shadow-sm">
-                        <Check className="size-3" />
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </div>
+              <AvatarSelector
+                value={selectedAvatar}
+                onChange={setSelectedAvatar}
+                options={agentAvatarOptions}
+                optionAriaLabel={(index) => `选择头像 ${index + 1}`}
+                renderAvatar={(avatar, className) => (
+                  <AgentAvatarImage avatar={avatar} className={className} />
+                )}
+              />
             </div>
 
             {/* Description */}
