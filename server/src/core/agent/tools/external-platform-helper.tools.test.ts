@@ -6,10 +6,10 @@ import { createExternalPlatformHelperTools } from './external-platform-helper.to
 
 const originalFetch = globalThis.fetch;
 
-function getTool(name: string) {
+function getTool(name: string): { name: string; invoke: (input: Record<string, unknown>) => Promise<unknown> } {
   const tool = createExternalPlatformHelperTools('helper-room').find((item) => item.name === name);
   assert.ok(tool, `missing tool ${name}`);
-  return tool;
+  return tool as { name: string; invoke: (input: Record<string, unknown>) => Promise<unknown> };
 }
 
 test.beforeEach(async () => {

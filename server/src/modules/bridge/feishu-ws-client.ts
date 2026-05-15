@@ -152,8 +152,14 @@ async function supervisedStart(
       // Fix #37: properly catch promise rejection from wsClient.start()
       await wsClient.start({ eventDispatcher: dispatcher });
 
-      // start() resolved normally — reset retry counter
+      // start() resolved normally — reset retry counter but wait before reconnecting
       attempt = 0;
+      if (stoppedBotIds.has(botId)) return;
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, BASE_DELAY_MS);
+        reconnectTimers.set(botId, timer);
+      });
+      reconnectTimers.delete(botId);
     } catch (err) {
       log.error({ err, botId, attempt }, '[Bridge/Feishu-WS] WebSocket 连接失败');
       wsClients.delete(botId);
