@@ -17,8 +17,12 @@ const IMAGE_PROVIDER_BASE_URLS: Record<string, string> = {
   volcengine: 'https://ark.cn-beijing.volces.com/api/v3',
 }
 
+function imageProviderBaseUrl(provider: string | null | undefined): string {
+  return IMAGE_PROVIDER_BASE_URLS[provider || ''] || ''
+}
+
 function imageProviderPlaceholder(provider: string | null | undefined): string {
-  return IMAGE_PROVIDER_BASE_URLS[provider || ''] || 'https://api.openai.com/v1'
+  return imageProviderBaseUrl(provider) || 'https://api.openai.com/v1'
 }
 
 function imageProviderSubmitPath(provider: string | null | undefined, apiType: CreateLlmProviderRequest['imageApiType'] | null | undefined): string {
@@ -29,6 +33,34 @@ function imageProviderSubmitPath(provider: string | null | undefined, apiType: C
       : '/multimodal-generation/generation'
   }
   return '/images/generations'
+}
+
+function shouldReplaceImageApiUrl(currentUrl: string | null | undefined, previousProvider: string | null | undefined): boolean {
+  const normalizedUrl = (currentUrl || '').trim()
+  if (!normalizedUrl) return true
+
+  const previousBaseUrl = imageProviderBaseUrl(previousProvider)
+  return Boolean(previousBaseUrl) && normalizedUrl.replace(/\/+$/, '') === previousBaseUrl.replace(/\/+$/, '')
+}
+
+function applyImageProviderBaseUrl(
+  prev: CreateLlmProviderRequest,
+  nextProvider: string | null | undefined,
+): CreateLlmProviderRequest {
+  const baseUrl = imageProviderBaseUrl(nextProvider)
+  if (!baseUrl) {
+    return { ...prev, imageProvider: nextProvider || prev.imageProvider }
+  }
+
+  if (!shouldReplaceImageApiUrl(prev.apiUrl, prev.imageProvider)) {
+    return { ...prev, imageProvider: nextProvider || prev.imageProvider }
+  }
+
+  return {
+    ...prev,
+    imageProvider: nextProvider || prev.imageProvider,
+    apiUrl: baseUrl,
+  }
 }
 
 export function ModelPage() {
@@ -168,16 +200,18 @@ export function ModelPage() {
 
   // 打开编辑对话框
   const openEditDialog = (provider: LlmProvider) => {
+    const imageProvider = provider.imageProvider || 'openai'
+    const apiUrl = provider.apiUrl || ((provider.modelType || 'text') === 'image' ? imageProviderBaseUrl(imageProvider) : '')
     setEditingProvider(provider)
     setFormData({
       name: provider.name,
       type: 'custom',
       modelType: provider.modelType || 'text',
       apiProtocol: provider.apiProtocol || 'anthropic',
-      apiUrl: provider.apiUrl || '',
+      apiUrl,
       apiKey: provider.apiKey,
       model: provider.model,
-      imageProvider: provider.imageProvider || 'openai',
+      imageProvider,
       imageApiType: provider.imageApiType || 'sync',
       isActive: provider.isActive,
       isDefault: provider.isDefault,
@@ -187,6 +221,8 @@ export function ModelPage() {
 
   // 复制模型配置（创建副本）
   const handleCopy = async (provider: LlmProvider) => {
+    const imageProvider = provider.imageProvider || 'openai'
+    const apiUrl = provider.apiUrl || ((provider.modelType || 'text') === 'image' ? imageProviderBaseUrl(imageProvider) : '')
     // 打开创建对话框，预填充原数据
     setEditingProvider(null)
     setFormData({
@@ -194,10 +230,10 @@ export function ModelPage() {
       type: 'custom',
       modelType: provider.modelType || 'text',
       apiProtocol: provider.apiProtocol || 'anthropic',
-      apiUrl: provider.apiUrl || '',
+      apiUrl,
       apiKey: provider.apiKey,
       model: provider.model,
-      imageProvider: provider.imageProvider || 'openai',
+      imageProvider,
       imageApiType: provider.imageApiType || 'sync',
       isActive: true,
       isDefault: false, // 副本不设为默认
@@ -629,11 +665,19 @@ export function ModelPage() {
                           key={item.value}
                           type="button"
                           onClick={() => setFormData(prev => ({
-                            ...prev,
-                            modelType: item.value as CreateLlmProviderRequest['modelType'],
-                            apiProtocol: item.value === 'text' ? (prev.apiProtocol || 'anthropic') : 'openai',
-                            imageProvider: item.value === 'image' ? (prev.imageProvider || 'openai') : prev.imageProvider,
-                            imageApiType: item.value === 'image' ? (prev.imageApiType || 'sync') : prev.imageApiType,
+                            ...(item.value === 'image'
+                              ? applyImageProviderBaseUrl({
+                                ...prev,
+                                modelType: 'image',
+                                apiProtocol: 'openai',
+                                imageProvider: prev.imageProvider || 'openai',
+                                imageApiType: prev.imageApiType || 'sync',
+                              }, prev.imageProvider || 'openai')
+                              : {
+                                ...prev,
+                                modelType: 'text',
+                                apiProtocol: prev.apiProtocol || 'anthropic',
+                              }),
                           }))}
                           className={cn(
                             'flex h-9 items-center justify-center gap-2 rounded-md border px-3 text-xs font-medium transition-colors',
@@ -658,7 +702,7 @@ export function ModelPage() {
                       </label>
                       <select
                         value={formData.imageProvider || 'openai'}
-                        onChange={e => setFormData(prev => ({ ...prev, imageProvider: e.target.value }))}
+                        onChange={e => setFormData(prev => applyImageProviderBaseUrl(prev, e.target.value))}
                         className="ta-input w-full shadow-none"
                       >
                         <option value="openai">OpenAI</option>
