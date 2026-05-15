@@ -28,7 +28,11 @@
       "Read(//mnt/**)",
       "Read(//g//**)",
       "Bash(cmd.exe /c \"cd G:\\\\spark\\\\teamagentx\\\\apps\\\\website && pnpm exec tsc --noEmit\")",
-      "Bash(cmd.exe /c \"cd /d G:\\\\spark\\\\teamagentx\\\\apps\\\\website && pnpm exec tsc --noEmit 2>&1\")"
+      "Bash(cmd.exe /c \"cd /d G:\\\\spark\\\\teamagentx\\\\apps\\\\website && pnpm exec tsc --noEmit 2>&1\")",
+      "Bash(powershell *)",
+      "mcp__plugin_playwright_playwright__browser_wait_for",
+      "mcp__plugin_playwright_playwright__browser_click",
+      "mcp__plugin_playwright_playwright__browser_snapshot"
     ]
   }
 }
