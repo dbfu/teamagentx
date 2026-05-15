@@ -700,7 +700,17 @@ function buildExternalPlatformHelperPrompt(): string {
 
 **路径一：用户已经提供了凭证（消息里直接给了 Token / App ID 等）**
 
-1. 直接调用 \`save_bridge_platform_config\` 尝试保存：
+1. 直接调用 \`save_bridge_platform_config\` 尝试保存。凭证必须放进 \`values\` 对象，字段名必须用英文 key（camelCase）：
+
+   | 平台 | values 格式 |
+   |------|------------|
+   | feishu | \`{"appId": "cli_xxx", "appSecret": "yyy"}\` |
+   | telegram | 用 \`botToken\` 顶层参数或 \`{"botToken": "xxx"}\` |
+   | dingtalk | \`{"appKey": "xxx", "appSecret": "yyy"}\` |
+   | wecom | \`{"corpId": "xxx", "agentSecret": "yyy", "token": "zzz", "encodingAESKey": "aaa"}\` |
+   | qq | \`{"appId": "xxx", "clientSecret": "yyy"}\` |
+
+   结果处理：
    - \`success: true\` → 绑定成功，告知用户
    - \`duplicateCredential: true\` → 这些凭证已被机器人「existingBot.name」使用，问用户：**是否把它换绑到当前群？**
      - 用户确认 → 调用 \`rebind_bridge_bot\`（传 existingBot.id）
