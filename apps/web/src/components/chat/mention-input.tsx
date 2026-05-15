@@ -679,7 +679,7 @@ export function MentionInput({
         onCompositionStart={handleCompositionStart}
         onCompositionEnd={handleCompositionEnd}
         onPaste={handlePaste}
-        className="min-h-6 max-h-32 overflow-y-auto cursor-text whitespace-pre-wrap break-all text-foreground outline-none empty:before:text-muted-foreground empty:before:content-[attr(data-placeholder)]"
+        className="min-h-6 max-h-32 overflow-y-auto cursor-text whitespace-pre-wrap break-all text-foreground outline-none empty:before:text-[var(--placeholder-foreground)] empty:before:content-[attr(data-placeholder)]"
         data-placeholder={placeholder}
       />
 
