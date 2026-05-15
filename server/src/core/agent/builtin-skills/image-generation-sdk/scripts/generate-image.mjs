@@ -4,7 +4,7 @@ import path from "node:path";
 
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 const DEFAULT_SIZE = "1024x1024";
-const DEFAULT_TIMEOUT_MS = 120000;
+const DEFAULT_TIMEOUT_MS = 240000;
 const DEFAULT_POLL_INTERVAL_MS = 15000;
 
 class CliError extends Error {}
