@@ -634,9 +634,37 @@ export function ModelPage() {
                     type="text"
                     value={formData.apiUrl}
                     onChange={e => setFormData(prev => ({ ...prev, apiUrl: e.target.value }))}
-                    placeholder="https://api.anthropic.com"
+                    placeholder={formData.modelType === 'image'
+                      ? (formData.imageProvider === 'openrouter'
+                          ? 'https://openrouter.ai/api/v1'
+                          : 'https://api.openai.com/v1')
+                      : 'https://api.anthropic.com'}
                     className="ta-input w-full shadow-none"
                   />
+                  {formData.modelType === 'image' && (() => {
+                    const base = (formData.apiUrl || '').replace(/\/+$/, '') || '<base-url>';
+                    const isOpenRouter = formData.imageProvider === 'openrouter';
+                    const submitPath = isOpenRouter ? '/chat/completions' : '/images/generations';
+                    const isAsync = !isOpenRouter && (formData.imageApiType === 'async' || formData.imageApiType === 'auto');
+                    return (
+                      <div className="mt-1.5 space-y-0.5 text-xs text-muted-foreground">
+                        <p>只需填写 base URL，系统会自动追加接口路径：</p>
+                        <p className="font-mono text-foreground">
+                          提交：<span className="text-primary">{base}</span>{submitPath}
+                        </p>
+                        {isAsync && (
+                          <>
+                            <p className="font-mono text-foreground">
+                              轮询：<span className="text-primary">{base}</span>/tasks/{'{task_id}'}
+                            </p>
+                            <p className="font-mono text-foreground">
+                              取消：<span className="text-primary">{base}</span>/tasks/{'{task_id}'}
+                            </p>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* API Key */}
@@ -674,6 +702,13 @@ export function ModelPage() {
                     onChange={e => setFormData(prev => ({ ...prev, model: e.target.value }))}
                     className="ta-input w-full shadow-none"
                   />
+                  {formData.modelType === 'image' && formData.imageProvider === 'openrouter' && (
+                    <div className="mt-1.5 space-y-0.5 text-xs text-muted-foreground">
+                      <p>OpenRouter 这里必须填写支持图片输出的模型 ID，不能填普通文本模型。</p>
+                      <p>可用示例：`google/gemini-3.1-flash-image-preview`、`google/gemini-2.5-flash-image`、`black-forest-labs/flux.2-pro`。</p>
+                      <p>`google/gemini-3-flash-preview` 只支持文本输出，不能用于图片生成。</p>
+                    </div>
+                  )}
                 </div>
 
                 {/* API 协议 */}

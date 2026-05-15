@@ -29,6 +29,15 @@ export interface ImageGenerationDeps {
 
 const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
 const DEFAULT_SIZE = '1024x1024';
+
+// 各供应商在 base URL 上追加的固定路径。前端会同步展示同一份映射给用户。
+const SUBMIT_PATH_OPENROUTER = '/chat/completions';
+const SUBMIT_PATH_DEFAULT = '/images/generations';
+const TASK_PATH_TEMPLATE_DEFAULT = '/tasks/{task_id}';
+
+function submitPathFor(providerType: string): string {
+  return providerType === 'openrouter' ? SUBMIT_PATH_OPENROUTER : SUBMIT_PATH_DEFAULT;
+}
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_POLL_INTERVAL_MS = 5_000;
 
@@ -81,15 +90,18 @@ interface ImageItem {
   mimeType?: string;
 }
 
+type OpenRouterModality = 'image' | 'text';
+
 function buildConfig(provider: LlmProvider, input: GenerateImageInput): ImageConfig {
   const env = buildImageGenerationEnv(provider);
   const mode = (env.IMAGE_GEN_API_TYPE || 'sync') as 'sync' | 'async' | 'auto';
+  const providerType = env.IMAGE_GEN_PROVIDER || 'custom';
   const config: ImageConfig = {
     prompt: input.prompt.trim(),
     apiKey: env.IMAGE_GEN_API_KEY,
     baseUrl: (env.IMAGE_GEN_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, ''),
     model: env.IMAGE_GEN_MODEL,
-    provider: env.IMAGE_GEN_PROVIDER || 'custom',
+    provider: providerType,
     mode,
     outputDir: uploadService.getImageUploadDir(),
     urlPrefix: uploadService.getImageUrlPrefix(),
@@ -98,9 +110,9 @@ function buildConfig(provider: LlmProvider, input: GenerateImageInput): ImageCon
     n: input.n && input.n > 0 ? input.n : 1,
     timeoutMs: DEFAULT_TIMEOUT_MS,
     pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
-    submitPath: '/images/generations',
-    taskPathTemplate: '/tasks/{task_id}',
-    cancelPathTemplate: '/tasks/{task_id}',
+    submitPath: submitPathFor(providerType),
+    taskPathTemplate: TASK_PATH_TEMPLATE_DEFAULT,
+    cancelPathTemplate: TASK_PATH_TEMPLATE_DEFAULT,
     extraJson: input.extraJson || {},
   };
 
@@ -123,6 +135,40 @@ function buildConfig(provider: LlmProvider, input: GenerateImageInput): ImageCon
 function buildUrl(baseUrl: string, suffix: string): string {
   if (/^https?:\/\//i.test(suffix)) return suffix;
   return `${baseUrl}${suffix.startsWith('/') ? suffix : `/${suffix}`}`;
+}
+
+function normalizeModelName(model: string): string {
+  return model.trim().toLowerCase();
+}
+
+function inferOpenRouterModalities(config: ImageConfig): OpenRouterModality[] {
+  const provided = config.extraJson.modalities;
+  if (Array.isArray(provided)) {
+    const valid = provided.filter((value): value is OpenRouterModality => value === 'image' || value === 'text');
+    if (valid.length > 0) return valid;
+  }
+
+  const model = normalizeModelName(config.model);
+  if (
+    model.startsWith('black-forest-labs/')
+    || model.startsWith('sourceful/')
+    || model.startsWith('recraft/')
+  ) {
+    return ['image'];
+  }
+
+  return ['image', 'text'];
+}
+
+function buildOpenRouterCapabilityError(config: ImageConfig, detail: string): Error {
+  const modalities = inferOpenRouterModalities(config).join(', ');
+  const message = [
+    `OpenRouter 模型 "${config.model}" 不支持当前图片输出能力请求（modalities: [${modalities}]）。`,
+    '请改用 output_modalities 包含 image 的模型。',
+    '例如：google/gemini-3.1-flash-image-preview、google/gemini-2.5-flash-image、black-forest-labs/flux.2-pro。',
+    '当前你配置的 google/gemini-3-flash-preview 是文本模型，不是图片生成模型。',
+  ].join(' ');
+  return new Error(`${message} 原始错误: ${detail}`);
 }
 
 async function fetchJson(url: string, init: RequestInit, timeoutMs: number, label: string): Promise<unknown> {
@@ -303,6 +349,40 @@ async function submitSync(config: ImageConfig): Promise<ImageItem[]> {
     body: JSON.stringify(body),
   }, config.timeoutMs, 'submitSync');
   return extractImages(data, 'sync 响应');
+}
+
+/**
+ * OpenRouter 通过 chat completions 接口生成图片：
+ * https://openrouter.ai/docs/guides/overview/multimodal/image-generation
+ *
+ * 请求：POST <baseUrl>/chat/completions
+ *   body: { model, messages:[{role:'user', content: prompt}], modalities:['image','text'], ...extraJson }
+ * 响应：choices[0].message.images[].image_url.url （通常是 data:image/png;base64,...）
+ */
+async function submitOpenRouter(config: ImageConfig): Promise<ImageItem[]> {
+  const modalities = inferOpenRouterModalities(config);
+  const body: Record<string, unknown> = {
+    model: config.model,
+    messages: [{ role: 'user', content: config.prompt }],
+    modalities,
+    ...config.extraJson,
+  };
+  log('submitOpenRouter 开始');
+  let data: unknown;
+  try {
+    data = await fetchJson(buildUrl(config.baseUrl, config.submitPath), {
+      method: 'POST',
+      headers: authHeaders(config),
+      body: JSON.stringify(body),
+    }, config.timeoutMs, 'submitOpenRouter');
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    if (detail.includes('No endpoints found that support the requested output modalities')) {
+      throw buildOpenRouterCapabilityError(config, detail);
+    }
+    throw error;
+  }
+  return extractImages(data, 'openrouter 响应');
 }
 
 async function cancelTask(config: ImageConfig, taskId: string): Promise<void> {
@@ -532,10 +612,13 @@ export async function generateImageWithProvider(
 
   let images: ImageItem[];
   try {
-    images =
-      config.mode === 'async' || config.mode === 'auto'
-        ? await submitAsync(config)
-        : await submitSync(config);
+    if (config.provider === 'openrouter') {
+      images = await submitOpenRouter(config);
+    } else if (config.mode === 'async' || config.mode === 'auto') {
+      images = await submitAsync(config);
+    } else {
+      images = await submitSync(config);
+    }
   } catch (error) {
     logError('generateImage 失败', error instanceof Error ? error.message : String(error));
     throw error;

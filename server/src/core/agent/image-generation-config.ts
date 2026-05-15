@@ -68,5 +68,5 @@ export function getImageGenerationSkillInstructions(provider: ImageGenerationPro
 - 必须通过 TeamAgentX 受控工具生成图片：Claude 工具名为 \`mcp__tax__generate_image\`，Codex/ACP 工具名为 \`tax.generate_image\` 或 \`generate_image\`。
 - 不要自己读取、要求或输出 API Key；模型密钥只保存在 TeamAgentX 服务端。
 - 工具成功后读取 \`urls\` 字段，并在回复中使用 Markdown 图片语法返回给用户，例如：\`![生成图片](/uploads/images/example.png)\`。
-- 如果工具返回错误，根据错误信息简要说明失败原因，并给出可以调整的提示词、尺寸、数量或模型配置。`;
+- **工具调用失败时，禁止自动重试**：不要再次调用 \`generate_image\`/\`mcp__tax__generate_image\`，无论错误是网络、超时、HTTP 4xx/5xx、任务失败还是任何其他原因。把错误信息原样转述给用户，并简要给出可以调整的提示词、尺寸、数量或模型配置建议，由用户决定是否重新发起请求。`;
 }

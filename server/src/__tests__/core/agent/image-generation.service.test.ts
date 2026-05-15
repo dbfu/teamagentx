@@ -128,6 +128,116 @@ describe('Image generation service', () => {
     }
   });
 
+  test('openrouter 模式：通过 chat completions 接口生成图片，并从 message.images 提取 data URL', async () => {
+    let capturedUrl = '';
+    let capturedBody: any = null;
+    const pngBase64 = PNG_BYTES.toString('base64');
+
+    const restore = mockFetch((url, init) => {
+      capturedUrl = url;
+      capturedBody = JSON.parse(init.body as string);
+      return jsonResponse({
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: 'here is your image',
+              images: [
+                { type: 'image_url', image_url: { url: `data:image/png;base64,${pngBase64}` } },
+              ],
+            },
+          },
+        ],
+      });
+    });
+
+    try {
+      const provider = imageProvider({
+        imageProvider: 'openrouter',
+        apiUrl: 'https://openrouter.ai/api/v1',
+        model: 'google/gemini-2.5-flash-image',
+      });
+      const result = await generateImageWithProvider(provider, {
+        prompt: 'a cute corgi',
+        n: 1,
+      });
+
+      assert.strictEqual(capturedUrl, 'https://openrouter.ai/api/v1/chat/completions');
+      assert.strictEqual(capturedBody.model, 'google/gemini-2.5-flash-image');
+      assert.deepStrictEqual(capturedBody.modalities, ['image', 'text']);
+      assert.strictEqual(capturedBody.messages?.[0]?.role, 'user');
+      assert.strictEqual(capturedBody.messages?.[0]?.content, 'a cute corgi');
+      assert.ok(result.files.length > 0, 'expected at least one materialized image file');
+    } finally {
+      restore();
+    }
+  });
+
+  test('openrouter image-only 模型：仅请求 image modality', async () => {
+    let capturedBody: any = null;
+    const pngBase64 = PNG_BYTES.toString('base64');
+
+    const restore = mockFetch((_url, init) => {
+      capturedBody = JSON.parse(init.body as string);
+      return jsonResponse({
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              images: [
+                { type: 'image_url', image_url: { url: `data:image/png;base64,${pngBase64}` } },
+              ],
+            },
+          },
+        ],
+      });
+    });
+
+    try {
+      const provider = imageProvider({
+        imageProvider: 'openrouter',
+        apiUrl: 'https://openrouter.ai/api/v1',
+        model: 'black-forest-labs/flux.2-pro',
+      });
+      const result = await generateImageWithProvider(provider, {
+        prompt: 'a cinematic skyline',
+        n: 1,
+      });
+
+      assert.deepStrictEqual(capturedBody.modalities, ['image']);
+      assert.ok(result.files.length > 0, 'expected at least one materialized image file');
+    } finally {
+      restore();
+    }
+  });
+
+  test('openrouter 模型不支持图片输出时，抛出可操作的错误提示', async () => {
+    const restore = mockFetch(() =>
+      new Response(JSON.stringify({
+        error: {
+          message: 'No endpoints found that support the requested output modalities: image, text',
+          code: 404,
+        },
+      }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+
+    try {
+      await assert.rejects(
+        () => generateImageWithProvider(imageProvider({
+          imageProvider: 'openrouter',
+          apiUrl: 'https://openrouter.ai/api/v1',
+          model: 'google/gemini-3-flash-preview',
+        }), { prompt: 'test' }),
+        /不是图片生成模型/,
+      );
+    } finally {
+      restore();
+    }
+  });
+
   test('图片模型未激活时拒绝调用', async () => {
     await assert.rejects(
       () => generateImageWithProvider(imageProvider({ isActive: false }), { prompt: 'test' }),
