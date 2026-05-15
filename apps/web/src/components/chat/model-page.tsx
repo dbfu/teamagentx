@@ -650,6 +650,45 @@ export function ModelPage() {
                   </div>
                 </div>
 
+                {formData.modelType === 'image' && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="mb-4">
+                      <label className="mb-1.5 block text-sm font-medium text-foreground">
+                        图片供应商 <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={formData.imageProvider || 'openai'}
+                        onChange={e => setFormData(prev => ({ ...prev, imageProvider: e.target.value }))}
+                        className="ta-input w-full shadow-none"
+                      >
+                        <option value="openai">OpenAI</option>
+                        <option value="apimart">APIMart</option>
+                        <option value="openrouter">OpenRouter</option>
+                        <option value="gemini">Gemini</option>
+                        <option value="zhipu">Zhipu</option>
+                        <option value="bailian">Bailian</option>
+                        <option value="xai">xAI</option>
+                        <option value="volcengine">Volcengine Ark</option>
+                        <option value="custom">Custom</option>
+                      </select>
+                    </div>
+                    <div className="mb-4">
+                      <label className="mb-1.5 block text-sm font-medium text-foreground">
+                        调用方式 <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={formData.imageApiType || 'sync'}
+                        onChange={e => setFormData(prev => ({ ...prev, imageApiType: e.target.value as CreateLlmProviderRequest['imageApiType'] }))}
+                        className="ta-input w-full shadow-none"
+                      >
+                        <option value="sync">同步返回图片</option>
+                        <option value="async">返回任务 ID 后轮询</option>
+                        <option value="auto">自动识别</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+
                 {/* API URL */}
                 <div className="mb-4">
                   <label className="mb-1.5 block text-sm font-medium text-foreground">
@@ -786,45 +825,6 @@ export function ModelPage() {
                     Anthropic 协议支持 Claude 特性（thinking、prompt caching），OpenAI 协议兼容更多模型
                   </p>
                 </div>
-                )}
-
-                {formData.modelType === 'image' && (
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="mb-4">
-                      <label className="mb-1.5 block text-sm font-medium text-foreground">
-                        图片供应商 <span className="text-red-500">*</span>
-                      </label>
-                      <select
-                        value={formData.imageProvider || 'openai'}
-                        onChange={e => setFormData(prev => ({ ...prev, imageProvider: e.target.value }))}
-                        className="ta-input w-full shadow-none"
-                      >
-                        <option value="openai">OpenAI</option>
-                        <option value="apimart">APIMart</option>
-                        <option value="openrouter">OpenRouter</option>
-                        <option value="gemini">Gemini</option>
-                        <option value="zhipu">Zhipu</option>
-                        <option value="bailian">Bailian</option>
-                        <option value="xai">xAI</option>
-                        <option value="volcengine">Volcengine Ark</option>
-                        <option value="custom">Custom</option>
-                      </select>
-                    </div>
-                    <div className="mb-4">
-                      <label className="mb-1.5 block text-sm font-medium text-foreground">
-                        调用方式 <span className="text-red-500">*</span>
-                      </label>
-                      <select
-                        value={formData.imageApiType || 'sync'}
-                        onChange={e => setFormData(prev => ({ ...prev, imageApiType: e.target.value as CreateLlmProviderRequest['imageApiType'] }))}
-                        className="ta-input w-full shadow-none"
-                      >
-                        <option value="sync">同步返回图片</option>
-                        <option value="async">返回任务 ID 后轮询</option>
-                        <option value="auto">自动识别</option>
-                      </select>
-                    </div>
-                  </div>
                 )}
 
                 {/* 默认模型 */}
