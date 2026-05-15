@@ -46,4 +46,17 @@ describe('Image generation config', () => {
     assert.deepStrictEqual(buildImageGenerationEnv(null), {});
     assert.match(getImageGenerationSkillInstructions(null), /未开启图片生成能力/);
   });
+
+  test('图片技能说明包含当前供应商文档和参数指导', () => {
+    const instructions = getImageGenerationSkillInstructions(imageProvider({
+      model: 'google/gemini-3.1-flash-image-preview',
+      imageProvider: 'openrouter',
+      apiUrl: 'https://openrouter.ai/api/v1',
+    }));
+
+    assert.match(instructions, /当前供应商参数手册/);
+    assert.match(instructions, /openrouter\.ai\/docs\/guides\/overview\/multimodal\/image-generation/);
+    assert.match(instructions, /extraJson\.image_config/i);
+    assert.match(instructions, /语义化尺寸/);
+  });
 });

@@ -5,6 +5,7 @@ import prisma from '../../lib/prisma.js';
 import { createLlmClient } from '../../lib/llm-client.js';
 import { buildImageGenerationEnv } from './image-generation-config.js';
 import { uploadService } from '../../modules/upload/upload.service.js';
+import { normalizeImageRequestParams } from './image-generation-provider-profiles.js';
 
 export interface GenerateImageInput {
   prompt: string;
@@ -34,8 +35,11 @@ const DEFAULT_SIZE = '1024x1024';
 const SUBMIT_PATH_OPENROUTER = '/chat/completions';
 const SUBMIT_PATH_DEFAULT = '/images/generations';
 const TASK_PATH_TEMPLATE_DEFAULT = '/tasks/{task_id}';
+const SUBMIT_PATH_BAILIAN_SYNC = '/multimodal-generation/generation';
+const SUBMIT_PATH_BAILIAN_ASYNC = '/image-generation/generation';
 
-function submitPathFor(providerType: string): string {
+function submitPathFor(providerType: string, mode: 'sync' | 'async' | 'auto'): string {
+  if (providerType === 'bailian') return mode === 'sync' ? SUBMIT_PATH_BAILIAN_SYNC : SUBMIT_PATH_BAILIAN_ASYNC;
   return providerType === 'openrouter' ? SUBMIT_PATH_OPENROUTER : SUBMIT_PATH_DEFAULT;
 }
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -96,6 +100,7 @@ function buildConfig(provider: LlmProvider, input: GenerateImageInput): ImageCon
   const env = buildImageGenerationEnv(provider);
   const mode = (env.IMAGE_GEN_API_TYPE || 'sync') as 'sync' | 'async' | 'auto';
   const providerType = env.IMAGE_GEN_PROVIDER || 'custom';
+  const normalized = normalizeImageRequestParams(providerType, input.size || DEFAULT_SIZE, input.extraJson || {});
   const config: ImageConfig = {
     prompt: input.prompt.trim(),
     apiKey: env.IMAGE_GEN_API_KEY,
@@ -106,14 +111,14 @@ function buildConfig(provider: LlmProvider, input: GenerateImageInput): ImageCon
     outputDir: uploadService.getImageUploadDir(),
     urlPrefix: uploadService.getImageUrlPrefix(),
     filename: input.filename || '',
-    size: input.size || DEFAULT_SIZE,
+    size: normalized.size || DEFAULT_SIZE,
     n: input.n && input.n > 0 ? input.n : 1,
     timeoutMs: DEFAULT_TIMEOUT_MS,
     pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
-    submitPath: submitPathFor(providerType),
+    submitPath: submitPathFor(providerType, mode),
     taskPathTemplate: TASK_PATH_TEMPLATE_DEFAULT,
     cancelPathTemplate: TASK_PATH_TEMPLATE_DEFAULT,
-    extraJson: input.extraJson || {},
+    extraJson: normalized.extraJson,
   };
 
   log('配置已解析', {
@@ -127,6 +132,7 @@ function buildConfig(provider: LlmProvider, input: GenerateImageInput): ImageCon
     taskPathTemplate: config.taskPathTemplate,
     apiKey: maskKey(config.apiKey),
     outputDir: config.outputDir,
+    extraJson: config.extraJson,
   });
 
   return config;
@@ -139,6 +145,46 @@ function buildUrl(baseUrl: string, suffix: string): string {
 
 function normalizeModelName(model: string): string {
   return model.trim().toLowerCase();
+}
+
+function isOpenAiGptImageModel(model: string): boolean {
+  const normalized = normalizeModelName(model);
+  return normalized.startsWith('gpt-image') || normalized.startsWith('chatgpt-image');
+}
+
+function buildProviderRequestBody(config: ImageConfig): Record<string, unknown> {
+  if (config.provider === 'xai') {
+    return {
+      model: config.model,
+      prompt: config.prompt,
+      n: config.n,
+      ...config.extraJson,
+    };
+  }
+
+  if (config.provider === 'openai') {
+    const body: Record<string, unknown> = {
+      model: config.model,
+      prompt: config.prompt,
+      size: config.size,
+      n: config.n,
+      ...config.extraJson,
+    };
+
+    if (isOpenAiGptImageModel(config.model)) {
+      delete body.response_format;
+    }
+
+    return body;
+  }
+
+  return {
+    model: config.model,
+    prompt: config.prompt,
+    size: config.size,
+    n: config.n,
+    ...config.extraJson,
+  };
 }
 
 function inferOpenRouterModalities(config: ImageConfig): OpenRouterModality[] {
@@ -257,7 +303,7 @@ function extractTaskId(value: unknown): string {
 function findStatus(value: unknown): string {
   const statuses: string[] = [];
   walk(value, (node, key) => {
-    if (key === 'status' && typeof node === 'string') {
+    if ((key === 'status' || key === 'task_status') && typeof node === 'string') {
       statuses.push(node.toLowerCase());
     }
   });
@@ -308,6 +354,8 @@ function extractImages(value: unknown, label = ''): ImageItem[] {
         }
       } else if (key === 'url' && (isHttpUrl(node) || isDataImage(node))) {
         images.push(isDataImage(node) ? dataUrlToImage(node) : { kind: 'url', value: node });
+      } else if (key === 'image' && isHttpUrl(node)) {
+        images.push({ kind: 'url', value: node });
       } else if (isDataImage(node)) {
         images.push(dataUrlToImage(node));
       } else if ((key === 'image_url' || key === 'imageUrl' || key === 'img_url') && isHttpUrl(node)) {
@@ -335,13 +383,7 @@ function extractImages(value: unknown, label = ''): ImageItem[] {
 }
 
 async function submitSync(config: ImageConfig): Promise<ImageItem[]> {
-  const body = {
-    model: config.model,
-    prompt: config.prompt,
-    size: config.size,
-    n: config.n,
-    ...config.extraJson,
-  };
+  const body = buildProviderRequestBody(config);
   log('submitSync 开始');
   const data = await fetchJson(buildUrl(config.baseUrl, config.submitPath), {
     method: 'POST',
@@ -349,6 +391,63 @@ async function submitSync(config: ImageConfig): Promise<ImageItem[]> {
     body: JSON.stringify(body),
   }, config.timeoutMs, 'submitSync');
   return extractImages(data, 'sync 响应');
+}
+
+function buildBailianBody(config: ImageConfig): Record<string, unknown> {
+  const { negative_prompt, prompt_extend, watermark, seed, ...restExtra } = config.extraJson;
+  return {
+    model: config.model,
+    input: {
+      messages: [{
+        role: 'user',
+        content: [{ text: config.prompt }],
+      }],
+    },
+    parameters: {
+      n: config.n,
+      size: config.size,
+      ...(prompt_extend !== undefined ? { prompt_extend } : {}),
+      ...(watermark !== undefined ? { watermark } : {}),
+      ...(negative_prompt !== undefined ? { negative_prompt } : {}),
+      ...(seed !== undefined ? { seed } : {}),
+      ...restExtra,
+    },
+  };
+}
+
+async function submitBailianSync(config: ImageConfig): Promise<ImageItem[]> {
+  const body = buildBailianBody(config);
+  log('submitBailianSync 开始');
+  const data = await fetchJson(buildUrl(config.baseUrl, SUBMIT_PATH_BAILIAN_SYNC), {
+    method: 'POST',
+    headers: authHeaders(config),
+    body: JSON.stringify(body),
+  }, config.timeoutMs, 'submitBailianSync');
+  return extractImages(data, 'bailian sync 响应');
+}
+
+async function submitBailianAsync(config: ImageConfig): Promise<ImageItem[]> {
+  const startedAt = Date.now();
+  const body = buildBailianBody(config);
+  log('submitBailianAsync 开始提交任务');
+  const submitData = await fetchJson(buildUrl(config.baseUrl, SUBMIT_PATH_BAILIAN_ASYNC), {
+    method: 'POST',
+    headers: {
+      ...authHeaders(config),
+      'X-DashScope-Async': 'enable',
+    },
+    body: JSON.stringify(body),
+  }, Math.min(config.timeoutMs, 30_000), 'submitBailianAsync');
+
+  let taskId = extractTaskId(submitData);
+  if (!taskId) {
+    taskId = await llmFallbackExtractTaskId(submitData);
+    if (!taskId) {
+      throw new Error(`submitBailianAsync: 响应中未找到任务 ID。响应内容: ${JSON.stringify(submitData).slice(0, 800)}`);
+    }
+  }
+
+  return pollTask(config, taskId, Math.max(config.timeoutMs - (Date.now() - startedAt), 5_000));
 }
 
 /**
@@ -475,13 +574,7 @@ ${responseJson}`,
 
 async function submitAsync(config: ImageConfig): Promise<ImageItem[]> {
   const startedAt = Date.now();
-  const body = {
-    model: config.model,
-    prompt: config.prompt,
-    size: config.size,
-    n: config.n,
-    ...config.extraJson,
-  };
+  const body = buildProviderRequestBody(config);
 
   log('submitAsync 开始提交任务');
   const submitData = await fetchJson(buildUrl(config.baseUrl, config.submitPath), {
@@ -614,6 +707,10 @@ export async function generateImageWithProvider(
   try {
     if (config.provider === 'openrouter') {
       images = await submitOpenRouter(config);
+    } else if (config.provider === 'bailian') {
+      images = config.mode === 'async' || config.mode === 'auto'
+        ? await submitBailianAsync(config)
+        : await submitBailianSync(config);
     } else if (config.mode === 'async' || config.mode === 'auto') {
       images = await submitAsync(config);
     } else {

@@ -6,6 +6,31 @@ import { Activity, BadgeCheck, Copy, Cpu, Eye, EyeOff, Image, Mic, Pencil, Plus,
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
+const IMAGE_PROVIDER_BASE_URLS: Record<string, string> = {
+  openai: 'https://api.openai.com/v1',
+  apimart: 'https://api.apimart.ai/v1',
+  openrouter: 'https://openrouter.ai/api/v1',
+  gemini: 'https://generativelanguage.googleapis.com',
+  zhipu: 'https://open.bigmodel.cn/api/paas/v4',
+  bailian: 'https://dashscope.aliyuncs.com/api/v1/services/aigc',
+  xai: 'https://api.x.ai/v1',
+  volcengine: 'https://ark.cn-beijing.volces.com/api/v3',
+}
+
+function imageProviderPlaceholder(provider: string | null | undefined): string {
+  return IMAGE_PROVIDER_BASE_URLS[provider || ''] || 'https://api.openai.com/v1'
+}
+
+function imageProviderSubmitPath(provider: string | null | undefined, apiType: CreateLlmProviderRequest['imageApiType'] | null | undefined): string {
+  if (provider === 'openrouter') return '/chat/completions'
+  if (provider === 'bailian') {
+    return apiType === 'async' || apiType === 'auto'
+      ? '/image-generation/generation'
+      : '/multimodal-generation/generation'
+  }
+  return '/images/generations'
+}
+
 export function ModelPage() {
   const [providers, setProviders] = useState<LlmProvider[]>([])
   const [tokenUsage, setTokenUsage] = useState<TokenUsageByProvider[]>([])
@@ -635,17 +660,14 @@ export function ModelPage() {
                     value={formData.apiUrl}
                     onChange={e => setFormData(prev => ({ ...prev, apiUrl: e.target.value }))}
                     placeholder={formData.modelType === 'image'
-                      ? (formData.imageProvider === 'openrouter'
-                          ? 'https://openrouter.ai/api/v1'
-                          : 'https://api.openai.com/v1')
+                      ? imageProviderPlaceholder(formData.imageProvider)
                       : 'https://api.anthropic.com'}
                     className="ta-input w-full shadow-none"
                   />
                   {formData.modelType === 'image' && (() => {
                     const base = (formData.apiUrl || '').replace(/\/+$/, '') || '<base-url>';
-                    const isOpenRouter = formData.imageProvider === 'openrouter';
-                    const submitPath = isOpenRouter ? '/chat/completions' : '/images/generations';
-                    const isAsync = !isOpenRouter && (formData.imageApiType === 'async' || formData.imageApiType === 'auto');
+                    const submitPath = imageProviderSubmitPath(formData.imageProvider, formData.imageApiType);
+                    const isAsync = formData.imageApiType === 'async' || formData.imageApiType === 'auto';
                     return (
                       <div className="mt-1.5 space-y-0.5 text-xs text-muted-foreground">
                         <p>只需填写 base URL，系统会自动追加接口路径：</p>
@@ -706,7 +728,24 @@ export function ModelPage() {
                     <div className="mt-1.5 space-y-0.5 text-xs text-muted-foreground">
                       <p>OpenRouter 这里必须填写支持图片输出的模型 ID，不能填普通文本模型。</p>
                       <p>可用示例：`google/gemini-3.1-flash-image-preview`、`google/gemini-2.5-flash-image`、`black-forest-labs/flux.2-pro`。</p>
-                      <p>`google/gemini-3-flash-preview` 只支持文本输出，不能用于图片生成。</p>
+                    </div>
+                  )}
+                  {formData.modelType === 'image' && formData.imageProvider === 'bailian' && (
+                    <div className="mt-1.5 space-y-0.5 text-xs text-muted-foreground">
+                      <p>百炼/万相推荐优先使用 `wan2.6-t2i` 这类新模型。</p>
+                      <p>同步模式会走 `multimodal-generation/generation`，异步模式会走 `image-generation/generation`。</p>
+                    </div>
+                  )}
+                  {formData.modelType === 'image' && formData.imageProvider === 'zhipu' && (
+                    <div className="mt-1.5 space-y-0.5 text-xs text-muted-foreground">
+                      <p>智谱 GLM-Image 推荐直接填写图片模型 ID，如 `glm-image`。</p>
+                      <p>尺寸建议优先使用推荐像素：`1280x1280`、`1728x960`、`960x1728`。</p>
+                    </div>
+                  )}
+                  {formData.modelType === 'image' && formData.imageProvider === 'xai' && (
+                    <div className="mt-1.5 space-y-0.5 text-xs text-muted-foreground">
+                      <p>xAI 官方当前推荐新请求使用 `grok-imagine-image-quality`。</p>
+                      <p>横竖比例和分辨率建议通过语义化请求生成 `aspect_ratio` / `resolution` 额外参数。</p>
                     </div>
                   )}
                 </div>
@@ -764,6 +803,10 @@ export function ModelPage() {
                         <option value="apimart">APIMart</option>
                         <option value="openrouter">OpenRouter</option>
                         <option value="gemini">Gemini</option>
+                        <option value="zhipu">Zhipu</option>
+                        <option value="bailian">Bailian</option>
+                        <option value="xai">xAI</option>
+                        <option value="volcengine">Volcengine Ark</option>
                         <option value="custom">Custom</option>
                       </select>
                     </div>
