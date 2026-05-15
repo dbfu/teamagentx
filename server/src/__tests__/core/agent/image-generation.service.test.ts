@@ -96,6 +96,42 @@ describe('Image generation service', () => {
     }
   });
 
+  test('openai gpt-image 模式：保留 size，但去掉不支持的 response_format，并处理 b64_json 响应', async () => {
+    let capturedBody: any = null;
+
+    const restore = mockFetch((url, init) => {
+      if (url.includes('/images/generations')) {
+        capturedBody = JSON.parse(init.body as string);
+        return jsonResponse({ data: [{ b64_json: PNG_BYTES.toString('base64') }] });
+      }
+      throw new Error(`unexpected fetch url: ${url}`);
+    });
+
+    try {
+      const provider = imageProvider({
+        imageProvider: 'openai',
+        apiUrl: 'https://api.openai.com/v1',
+        model: 'gpt-image-1',
+      });
+      const result = await generateImageWithProvider(provider, {
+        prompt: 'a hero banner illustration',
+        size: '16:9',
+        n: 1,
+        extraJson: {
+          response_format: 'url',
+          quality: 'high',
+        },
+      });
+
+      assert.strictEqual(capturedBody.size, '1536x1024');
+      assert.strictEqual(capturedBody.quality, 'high');
+      assert.strictEqual('response_format' in capturedBody, false);
+      assert.ok(result.files.length > 0, 'expected at least one materialized image file');
+    } finally {
+      restore();
+    }
+  });
+
   test('async 模式：提交任务后轮询直到完成', async () => {
     let pollCount = 0;
 
@@ -123,6 +159,205 @@ describe('Image generation service', () => {
       assert.ok(pollCount >= 2, 'should have polled at least twice');
       assert.ok(result.files.length > 0);
       assert.strictEqual(result.mode, 'async');
+    } finally {
+      restore();
+    }
+  });
+
+  test('openrouter 模式：通过 chat completions 接口生成图片，并从 message.images 提取 data URL', async () => {
+    let capturedUrl = '';
+    let capturedBody: any = null;
+    const pngBase64 = PNG_BYTES.toString('base64');
+
+    const restore = mockFetch((url, init) => {
+      capturedUrl = url;
+      capturedBody = JSON.parse(init.body as string);
+      return jsonResponse({
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: 'here is your image',
+              images: [
+                { type: 'image_url', image_url: { url: `data:image/png;base64,${pngBase64}` } },
+              ],
+            },
+          },
+        ],
+      });
+    });
+
+    try {
+      const provider = imageProvider({
+        imageProvider: 'openrouter',
+        apiUrl: 'https://openrouter.ai/api/v1',
+        model: 'google/gemini-2.5-flash-image',
+      });
+      const result = await generateImageWithProvider(provider, {
+        prompt: 'a cute corgi',
+        size: '16:9',
+        n: 1,
+      });
+
+      assert.strictEqual(capturedUrl, 'https://openrouter.ai/api/v1/chat/completions');
+      assert.strictEqual(capturedBody.model, 'google/gemini-2.5-flash-image');
+      assert.deepStrictEqual(capturedBody.modalities, ['image', 'text']);
+      assert.deepStrictEqual(capturedBody.image_config, {
+        aspect_ratio: '16:9',
+      });
+      assert.strictEqual(capturedBody.messages?.[0]?.role, 'user');
+      assert.strictEqual(capturedBody.messages?.[0]?.content, 'a cute corgi');
+      assert.ok(result.files.length > 0, 'expected at least one materialized image file');
+    } finally {
+      restore();
+    }
+  });
+
+  test('openrouter image-only 模型：仅请求 image modality', async () => {
+    let capturedBody: any = null;
+    const pngBase64 = PNG_BYTES.toString('base64');
+
+    const restore = mockFetch((_url, init) => {
+      capturedBody = JSON.parse(init.body as string);
+      return jsonResponse({
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              images: [
+                { type: 'image_url', image_url: { url: `data:image/png;base64,${pngBase64}` } },
+              ],
+            },
+          },
+        ],
+      });
+    });
+
+    try {
+      const provider = imageProvider({
+        imageProvider: 'openrouter',
+        apiUrl: 'https://openrouter.ai/api/v1',
+        model: 'black-forest-labs/flux.2-pro',
+      });
+      const result = await generateImageWithProvider(provider, {
+        prompt: 'a cinematic skyline',
+        n: 1,
+      });
+
+      assert.deepStrictEqual(capturedBody.modalities, ['image']);
+      assert.ok(result.files.length > 0, 'expected at least one materialized image file');
+    } finally {
+      restore();
+    }
+  });
+
+  test('openrouter 模型不支持图片输出时，抛出可操作的错误提示', async () => {
+    const restore = mockFetch(() =>
+      new Response(JSON.stringify({
+        error: {
+          message: 'No endpoints found that support the requested output modalities: image, text',
+          code: 404,
+        },
+      }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+
+    try {
+      await assert.rejects(
+        () => generateImageWithProvider(imageProvider({
+          imageProvider: 'openrouter',
+          apiUrl: 'https://openrouter.ai/api/v1',
+          model: 'google/gemini-3-flash-preview',
+        }), { prompt: 'test' }),
+        /不是图片生成模型/,
+      );
+    } finally {
+      restore();
+    }
+  });
+
+  test('bailian sync 模式：使用万相请求体并从 output.choices 提取图片', async () => {
+    let capturedUrl = '';
+    let capturedBody: any = null;
+
+    const restore = mockFetch((url, init) => {
+      if (url.includes('/multimodal-generation/generation')) {
+        capturedUrl = url;
+        capturedBody = JSON.parse(init.body as string);
+        return jsonResponse({
+          output: {
+            choices: [
+              {
+                message: {
+                  role: 'assistant',
+                  content: [
+                    { type: 'image', image: 'https://cdn.example.com/bailian.png' },
+                  ],
+                },
+              },
+            ],
+          },
+        });
+      }
+      return imageUrlResponse();
+    });
+
+    try {
+      const provider = imageProvider({
+        imageProvider: 'bailian',
+        apiUrl: 'https://dashscope.aliyuncs.com/api/v1/services/aigc',
+        model: 'wan2.6-t2i',
+      });
+      const result = await generateImageWithProvider(provider, {
+        prompt: '一个春日咖啡馆海报',
+        size: '16:9',
+        n: 1,
+        extraJson: { watermark: false },
+      });
+
+      assert.strictEqual(capturedUrl, 'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation');
+      assert.strictEqual(capturedBody.model, 'wan2.6-t2i');
+      assert.strictEqual(capturedBody.input.messages[0].content[0].text, '一个春日咖啡馆海报');
+      assert.deepStrictEqual(capturedBody.parameters, {
+        n: 1,
+        size: '1696*960',
+        watermark: false,
+      });
+      assert.ok(result.files.length > 0, 'expected at least one materialized image file');
+    } finally {
+      restore();
+    }
+  });
+
+  test('xai 模式：通过 extraJson 传 aspect_ratio 和 resolution', async () => {
+    let capturedBody: any = null;
+
+    const restore = mockFetch((url, init) => {
+      if (url.includes('/images/generations')) {
+        capturedBody = JSON.parse(init.body as string);
+        return jsonResponse({ data: [{ url: 'https://cdn.example.com/xai.png' }] });
+      }
+      return imageUrlResponse();
+    });
+
+    try {
+      const provider = imageProvider({
+        imageProvider: 'xai',
+        apiUrl: 'https://api.x.ai/v1',
+        model: 'grok-imagine-image-quality',
+      });
+      const result = await generateImageWithProvider(provider, {
+        prompt: '一个未来感城市横版头图',
+        size: '2048x2048',
+        n: 1,
+      });
+
+      assert.strictEqual('size' in capturedBody, false);
+      assert.strictEqual(capturedBody.aspect_ratio, '1:1');
+      assert.strictEqual(capturedBody.resolution, '2k');
+      assert.ok(result.files.length > 0, 'expected at least one materialized image file');
     } finally {
       restore();
     }

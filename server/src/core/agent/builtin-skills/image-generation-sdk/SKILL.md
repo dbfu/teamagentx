@@ -84,6 +84,8 @@ Provider environment variables:
 
 Advanced provider flags are documented in [provider-contracts.md](references/provider-contracts.md). Read it when integrating a non-OpenAI-compatible provider or an async task API.
 
+Provider-specific playbooks are summarized in [provider-playbooks.md](references/provider-playbooks.md). Read it when the caller needs help translating semantic requests like "portrait poster", "16:9 banner", or "4K wallpaper" into provider-specific `size` and `extraJson` fields.
+
 ## Portability Rules
 
 - Do not add project routes, task IDs, user tokens, storage SDKs, or queue semantics to this skill.
