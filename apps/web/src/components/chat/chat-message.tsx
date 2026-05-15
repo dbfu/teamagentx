@@ -19,6 +19,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useChatStore, VOICE_MESSAGE_PLACEHOLDER } from '@/stores/chat-store'
 import { toVoicePanelConfig } from '@/lib/agent-speech'
 import { normalizeSpeechText, speakText, stopSpeechPlayback, supportsSpeechPlayback } from '@/lib/browser-speech'
+import { resolveAssetUrl } from '@/lib/asset-url'
 
 function formatDuration(ms: number): string {
   const totalSeconds = Math.round(ms / 1000)
@@ -309,14 +310,17 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
                   {children}
                 </a>
               ),
-              img: ({ src, alt }) => (
-                <img
-                  src={src}
-                  alt={alt || '图片'}
-                  className="max-h-[360px] w-auto max-w-[min(560px,80vw)] rounded-lg object-contain cursor-pointer transition-opacity hover:opacity-90"
-                  onClick={() => src && setViewerImage({ url: src, name: alt || '图片' })}
-                />
-              ),
+              img: ({ src, alt }) => {
+                const imageUrl = resolveAssetUrl(src)
+                return (
+                  <img
+                    src={imageUrl}
+                    alt={alt || '图片'}
+                    className="max-h-[360px] w-auto max-w-[min(560px,80vw)] rounded-lg object-contain cursor-pointer transition-opacity hover:opacity-90"
+                    onClick={() => imageUrl && setViewerImage({ url: imageUrl, name: alt || '图片' })}
+                  />
+                )
+              },
             }}
           >
             {content}
@@ -339,14 +343,17 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
                 {children}
               </a>
             ),
-            img: ({ src, alt }) => (
-              <img
-                src={src}
-                alt={alt || '图片'}
-                className="max-h-[360px] w-auto max-w-[min(560px,80vw)] rounded-lg object-contain cursor-pointer transition-opacity hover:opacity-90"
-                onClick={() => src && setViewerImage({ url: src, name: alt || '图片' })}
-              />
-            ),
+            img: ({ src, alt }) => {
+              const imageUrl = resolveAssetUrl(src)
+              return (
+                <img
+                  src={imageUrl}
+                  alt={alt || '图片'}
+                  className="max-h-[360px] w-auto max-w-[min(560px,80vw)] rounded-lg object-contain cursor-pointer transition-opacity hover:opacity-90"
+                  onClick={() => imageUrl && setViewerImage({ url: imageUrl, name: alt || '图片' })}
+                />
+              )
+            },
             span: ({ className, children, ...props }) => {
               // 只处理带有我们唯一标记 class 的 span（由我们的 remark 插件插入）
               // 其他 span（包括助手消息中可能包含的其他 HTML span）保持原样
@@ -420,13 +427,14 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
           const attachmentType = getAttachmentType(attachment)
 
           if (attachmentType === 'image') {
+            const imageUrl = resolveAssetUrl(attachment.url)
             return (
               <div key={attachment.id} className="relative">
                 <img
-                  src={attachment.url}
+                  src={imageUrl}
                   alt={attachment.filename}
                   className="max-h-[260px] w-auto max-w-[min(360px,70vw)] rounded-lg cursor-pointer object-contain transition-opacity hover:opacity-90"
-                  onClick={() => setViewerImage({ url: attachment.url, name: attachment.filename })}
+                  onClick={() => imageUrl && setViewerImage({ url: imageUrl, name: attachment.filename })}
                   loading="lazy"
                 />
               </div>
@@ -437,7 +445,7 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
             return (
               <AudioMessagePlayer
                 key={attachment.id}
-                src={attachment.url}
+                src={resolveAssetUrl(attachment.url) ?? attachment.url}
                 mimeType={attachment.mimeType}
                 title={attachment.filename}
                 durationMs={attachment.durationMs}
