@@ -32,8 +32,9 @@ if [ "$MODE" = "electron" ]; then
   # Electron 模式：前端启动 Electron，Electron 会自动启动后端
   echo "Starting in Electron mode..."
 
-  # 检查端口 11053（Electron 内置后端）
+  # 检查端口 11053（Electron 内置后端）和 5173（Vite dev server）
   kill_port 11053
+  kill_port 5173
 
   echo "Building embedded server for Electron..."
   cd "$SCRIPT_DIR/apps/desktop" && pnpm dev:full
