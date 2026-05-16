@@ -48,7 +48,7 @@ export const BRIDGE_PLATFORM_REGISTRY: BridgePlatformDefinition[] = [
     key: 'dingtalk',
     label: '钉钉',
     emoji: '📌',
-    color: '#FF6400',
+    color: '#1675FF',
     groupIdHint: '钉钉群 conversationId',
     supportsBindCode: true,
     supportsManualChannelCreate: true,
