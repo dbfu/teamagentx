@@ -1,4 +1,6 @@
 import { Button } from '@/components/ui/button';
+import { getClaudeModelOptions } from '@/lib/claude-models';
+import { getCodexModelOptions } from '@/lib/codex-models';
 import { llmProviderApi, type CreateLlmProviderRequest, type LlmProvider, type UpdateLlmProviderRequest } from '@/lib/llm-provider-api';
 import { tokenUsageApi, type TokenUsageByProvider } from '@/lib/token-usage-api';
 import { cn } from '@/lib/utils';
@@ -759,8 +761,10 @@ export function ModelPage() {
                   </label>
                   <input
                     type="text"
+                    list={formData.modelType === 'text' ? 'text-model-options' : undefined}
                     value={formData.model}
                     onChange={e => setFormData(prev => ({ ...prev, model: e.target.value }))}
+                    placeholder={formData.modelType === 'text' ? '选择或输入模型 ID' : undefined}
                     className="ta-input w-full shadow-none"
                   />
                   {formData.modelType === 'image' && formData.imageProvider === 'openrouter' && (
@@ -786,6 +790,18 @@ export function ModelPage() {
                       <p>xAI 官方当前推荐新请求使用 `grok-imagine-image-quality`。</p>
                       <p>横竖比例和分辨率建议通过语义化请求生成 `aspect_ratio` / `resolution` 额外参数。</p>
                     </div>
+                  )}
+                  {formData.modelType === 'text' && (
+                    <datalist id="text-model-options">
+                      {(formData.apiProtocol === 'anthropic'
+                        ? getClaudeModelOptions(formData.model)
+                        : getCodexModelOptions(formData.model)
+                      ).map(option => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </datalist>
                   )}
                 </div>
 
