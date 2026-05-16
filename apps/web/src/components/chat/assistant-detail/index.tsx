@@ -313,7 +313,8 @@ export function AssistantDetailPage() {
       imageGeneration: data.imageGeneration,
     })
     if (response.success) {
-      refreshAgent()
+      await refreshAgent()
+      await loadChatRooms()
       setIsEditModalOpen(false)
       return true
     } else {

@@ -10,17 +10,7 @@ const CROP_STAGE_PADDING = 28
 const MIN_ZOOM = 1
 const MAX_ZOOM = 3
 
-type CropRatioOption = {
-  id: string
-  label: string
-  aspect: number
-}
-
-const cropRatioOptions: CropRatioOption[] = [
-  { id: '1:1', label: '1:1', aspect: 1 },
-  { id: '4:3', label: '4:3', aspect: 4 / 3 },
-  { id: '3:4', label: '3:4', aspect: 3 / 4 },
-]
+const AVATAR_CROP_ASPECT = 1
 
 type CropPosition = {
   x: number
@@ -70,7 +60,6 @@ function getCropFrame(aspect: number) {
 }
 
 function AvatarCropModal({ isOpen, imageSrc, onClose, onConfirm }: AvatarCropModalProps) {
-  const [selectedRatioId, setSelectedRatioId] = useState(cropRatioOptions[0].id)
   const [zoom, setZoom] = useState(MIN_ZOOM)
   const [position, setPosition] = useState<CropPosition>({ x: 0, y: 0 })
   const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 })
@@ -81,11 +70,7 @@ function AvatarCropModal({ isOpen, imageSrc, onClose, onConfirm }: AvatarCropMod
     originY: number
   }>(null)
 
-  const selectedRatio = useMemo(
-    () => cropRatioOptions.find((option) => option.id === selectedRatioId) ?? cropRatioOptions[0],
-    [selectedRatioId],
-  )
-  const cropFrame = useMemo(() => getCropFrame(selectedRatio.aspect), [selectedRatio.aspect])
+  const cropFrame = useMemo(() => getCropFrame(AVATAR_CROP_ASPECT), [])
   const coverScale = useMemo(() => {
     if (!naturalSize.width || !naturalSize.height) return 1
     return Math.max(cropFrame.width / naturalSize.width, cropFrame.height / naturalSize.height)
@@ -106,7 +91,6 @@ function AvatarCropModal({ isOpen, imageSrc, onClose, onConfirm }: AvatarCropMod
 
   useEffect(() => {
     if (!isOpen) return
-    setSelectedRatioId(cropRatioOptions[0].id)
     setZoom(MIN_ZOOM)
     setPosition({ x: 0, y: 0 })
     setNaturalSize({ width: 0, height: 0 })
@@ -157,10 +141,8 @@ function AvatarCropModal({ isOpen, imageSrc, onClose, onConfirm }: AvatarCropMod
     const sourceHeight = clamp(cropFrame.height / displayScale, 1, naturalSize.height - sourceY)
 
     const canvas = document.createElement('canvas')
-    const outputWidth = selectedRatio.aspect >= 1 ? 512 : Math.round(512 * selectedRatio.aspect)
-    const outputHeight = selectedRatio.aspect >= 1 ? Math.round(512 / selectedRatio.aspect) : 512
-    canvas.width = outputWidth
-    canvas.height = outputHeight
+    canvas.width = 512
+    canvas.height = 512
 
     const context = canvas.getContext('2d')
     if (!context) return
@@ -175,8 +157,8 @@ function AvatarCropModal({ isOpen, imageSrc, onClose, onConfirm }: AvatarCropMod
         sourceHeight,
         0,
         0,
-        outputWidth,
-        outputHeight,
+        512,
+        512,
       )
       onConfirm(canvas.toDataURL('image/png'))
     }
@@ -189,7 +171,7 @@ function AvatarCropModal({ isOpen, imageSrc, onClose, onConfirm }: AvatarCropMod
         <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
           <div>
             <h3 className="text-base font-semibold text-gray-900">裁剪头像</h3>
-            <p className="text-xs text-gray-500">拖动图片调整位置，使用比例遮罩确认最终范围</p>
+            <p className="text-xs text-gray-500">仅支持 1:1 头像裁剪，拖动图片调整显示范围</p>
           </div>
           <button
             type="button"
@@ -236,7 +218,7 @@ function AvatarCropModal({ isOpen, imageSrc, onClose, onConfirm }: AvatarCropMod
 
               <div className="pointer-events-none absolute inset-0">
                 <div
-                  className="absolute rounded-[28px] border-2 border-white shadow-[0_0_0_9999px_rgba(15,23,42,0.62)]"
+                  className="absolute rounded-full border-2 border-white shadow-[0_0_0_9999px_rgba(15,23,42,0.62)]"
                   style={{
                     left: cropFrame.left,
                     top: cropFrame.top,
@@ -251,22 +233,8 @@ function AvatarCropModal({ isOpen, imageSrc, onClose, onConfirm }: AvatarCropMod
           <div className="space-y-5">
             <div>
               <label className="mb-2 block text-sm font-medium text-gray-700">裁剪比例</label>
-              <div className="flex flex-wrap gap-2">
-                {cropRatioOptions.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    onClick={() => setSelectedRatioId(option.id)}
-                    className={cn(
-                      'rounded-lg border px-3 py-2 text-sm transition-colors',
-                      selectedRatioId === option.id
-                        ? 'border-blue-500 bg-blue-50 text-blue-600'
-                        : 'border-gray-200 text-gray-600 hover:bg-gray-50',
-                    )}
-                  >
-                    {option.label}
-                  </button>
-                ))}
+              <div className="border-primary/20 text-primary bg-primary/10 inline-flex items-center rounded-lg border px-3 py-2 text-sm">
+                1:1
               </div>
             </div>
 
@@ -358,24 +326,24 @@ export function AvatarSelector({
   return (
     <>
       <div className="space-y-3">
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 p-3">
+        <div className="border-primary/10 bg-primary/5 flex flex-wrap items-center gap-2 rounded-lg border p-3">
           <label
             htmlFor={inputId}
-            className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-blue-500 px-3 py-2 text-sm text-white hover:bg-blue-600"
+            className="bg-primary text-primary-foreground inline-flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors hover:bg-primary/90"
           >
             <Upload className="size-4" />
             {hasCustomAvatar ? '更换本地图片' : '上传本地图片'}
           </label>
           {hasCustomAvatar && (
             <>
-              <div className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm text-blue-600">
+              <div className="border-primary/20 text-primary bg-background inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm">
                 <ImagePlus className="size-4" />
                 已选择自定义头像
               </div>
               <button
                 type="button"
                 onClick={() => onChange('0')}
-                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition-colors hover:bg-gray-50"
               >
                 <Trash2 className="size-4" />
                 移除自定义头像
@@ -403,15 +371,15 @@ export function AvatarSelector({
                 aria-label={optionAriaLabel(index)}
                 onClick={() => onChange(optionValue)}
                 className={cn(
-                  'relative flex items-center justify-center rounded-full transition-all hover:ring-2 hover:ring-blue-200',
+                  'relative flex items-center justify-center rounded-full transition-all hover:ring-2 hover:ring-primary/20',
                   itemClassName ?? 'size-12',
-                  isSelected && 'ring-2 ring-blue-500 ring-offset-2 ring-offset-white',
+                  isSelected && 'ring-2 ring-primary ring-offset-2 ring-offset-background',
                   isSelected && selectedItemClassName,
                 )}
               >
                 {renderAvatar(index, itemClassName ?? 'size-12')}
                 {isSelected && (
-                  <span className="absolute -bottom-0.5 -right-0.5 flex size-5 items-center justify-center rounded-full bg-blue-500 text-white shadow-sm">
+                  <span className="bg-primary text-primary-foreground absolute -bottom-0.5 -right-0.5 flex size-5 items-center justify-center rounded-full shadow-sm">
                     <Check className="size-3" />
                   </span>
                 )}

@@ -61,7 +61,7 @@ export function AgentAvatarImage({ avatar, className, alt = '' }: AgentAvatarIma
       src={src}
       alt={alt || ''}
       draggable={false}
-      className={cn('block aspect-square shrink-0 select-none object-cover', className)}
+      className={cn('block aspect-square shrink-0 select-none rounded-full object-cover', className)}
     />
   )
 }
