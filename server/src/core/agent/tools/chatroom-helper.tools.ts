@@ -255,6 +255,45 @@ export const removeAgentFromChatRoomTool = tool(
   },
 );
 
+// 配置群规则工具
+export const updateChatRoomRulesTool = tool(
+  async ({
+    chatRoomId,
+    rules,
+  }: {
+    chatRoomId: string;
+    rules: string;
+  }) => {
+    try {
+      const chatRoom = await chatRoomService.findById(chatRoomId);
+      if (!chatRoom) {
+        return JSON.stringify({ success: false, error: `群聊不存在: ${chatRoomId}` });
+      }
+
+      await chatRoomService.update(chatRoomId, { rules });
+
+      return JSON.stringify({
+        success: true,
+        message: `✅ 已成功更新群聊"${chatRoom.name}"的群规则`,
+        rules,
+      });
+    } catch (error) {
+      return JSON.stringify({
+        success: false,
+        error: error instanceof Error ? error.message : '更新群规则失败',
+      });
+    }
+  },
+  {
+    name: 'update_chatroom_rules',
+    description: '【需要用户确认】配置或更新群聊的群规则。群规则会注入到群内所有助手的上下文中，影响助手的行为和回复风格。',
+    schema: z.object({
+      chatRoomId: z.string().describe('群聊ID'),
+      rules: z.string().describe('群规则内容，支持 Markdown 格式。传空字符串表示清空规则。'),
+    }),
+  },
+);
+
 // 删除群聊工具
 export const deleteChatRoomTool = tool(
   async ({ chatRoomId }: { chatRoomId: string }) => {
@@ -288,5 +327,6 @@ export const chatroomHelperTools = [
   listAgentsTool,
   addAgentToChatRoomTool,
   removeAgentFromChatRoomTool,
+  updateChatRoomRulesTool,
   deleteChatRoomTool,
 ];
