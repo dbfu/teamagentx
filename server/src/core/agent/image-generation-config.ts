@@ -49,8 +49,7 @@ export function buildImageGenerationEnv(
 
 export function getImageGenerationSkillInstructions(provider: ImageGenerationProvider): string {
   if (!provider) {
-    return `## 图片生成能力
-当前助手未开启图片生成能力或未绑定图片模型。用户要求生成图片时，先说明需要在助手配置中开启图片生成能力并选择图片模型。不要猜测 API Key、Base URL 或模型 ID。`;
+    return '';
   }
 
   const providerName = String((provider as any).imageProvider || provider.type || 'custom');
