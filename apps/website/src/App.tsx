@@ -1,41 +1,8 @@
 import { useEffect, useState } from 'react'
+import { DocsPage } from './docs-page'
+import { useSiteConfig } from './site-config'
 
 const GITHUB_URL = 'https://github.com/dbfu/teamagentx'
-
-// 下载配置：运行时从 /update.json 获取（支持容器环境变量动态注入），
-// 构建时环境变量作为初始默认值，避免首屏闪烁。
-interface SiteConfig {
-  version: string
-  macUrl: string
-  winUrl: string
-}
-
-const BUILD_TIME_CONFIG: SiteConfig = {
-  version: import.meta.env.VITE_APP_VERSION || 'v1.2.0',
-  macUrl: import.meta.env.VITE_DOWNLOAD_URL_MAC || '#',
-  winUrl: import.meta.env.VITE_DOWNLOAD_URL_WIN || '#',
-}
-
-function useSiteConfig(): SiteConfig {
-  const [config, setConfig] = useState<SiteConfig>(BUILD_TIME_CONFIG)
-
-  useEffect(() => {
-    fetch('/update.json')
-      .then((res) => res.json())
-      .then((data) => {
-        setConfig({
-          version: data.version || BUILD_TIME_CONFIG.version,
-          macUrl: data.macUrl || data.downloads?.mac || data.url || BUILD_TIME_CONFIG.macUrl,
-          winUrl: data.winUrl || data.downloads?.win || BUILD_TIME_CONFIG.winUrl,
-        })
-      })
-      .catch(() => {
-        // 请求失败时保留构建时默认值，不影响页面显示
-      })
-  }, [])
-
-  return config
-}
 
 // ── 模型滚动条 ──
 const stripItems = [
@@ -392,6 +359,11 @@ const IS_MAC = /Mac|iPhone|iPad/.test(navigator.userAgent)
 function App() {
   const [menuOpen, setMenuOpen] = useState(false)
   const { version: APP_VERSION, macUrl: DOWNLOAD_URL_MAC, winUrl: DOWNLOAD_URL_WIN } = useSiteConfig()
+  const isDocsRoute = typeof window !== 'undefined' && window.location.pathname.startsWith('/docs')
+
+  if (isDocsRoute) {
+    return <DocsPage siteConfig={{ version: APP_VERSION, macUrl: DOWNLOAD_URL_MAC, winUrl: DOWNLOAD_URL_WIN }} />
+  }
 
   // 滚动导航样式
   useEffect(() => {
@@ -457,6 +429,7 @@ function App() {
           <a href="#workflow">工作流程</a>
           <a href="#showcase">协作演示</a>
           <a href="#opensource">开源免费</a>
+          <a href="/docs">使用文档</a>
         </nav>
         <div className="nav-actions">
           <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="btn btn-outline btn-github">
@@ -475,6 +448,7 @@ function App() {
           <a href="#workflow" onClick={() => setMenuOpen(false)}>工作流程</a>
           <a href="#showcase" onClick={() => setMenuOpen(false)}>协作演示</a>
           <a href="#opensource" onClick={() => setMenuOpen(false)}>开源免费</a>
+          <a href="/docs" onClick={() => setMenuOpen(false)}>使用文档</a>
           <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" onClick={() => setMenuOpen(false)}>GitHub 开源</a>
           <a href="#download" onClick={() => setMenuOpen(false)}>下载应用</a>
         </div>
@@ -707,6 +681,7 @@ function App() {
               <a href="#features">功能特性</a>
               <a href="#workflow">工作流程</a>
               <a href="#showcase">协作演示</a>
+              <a href="/docs">使用文档</a>
               <a href="#download">下载应用</a>
             </div>
             <div className="footer-col">
@@ -718,10 +693,10 @@ function App() {
             </div>
             <div className="footer-col">
               <h4>资源</h4>
-              <a href={`${GITHUB_URL}#readme`} target="_blank" rel="noopener noreferrer">快速开始</a>
-              <a href={`${GITHUB_URL}/blob/main/README.md`} target="_blank" rel="noopener noreferrer">文档说明</a>
-              <a href={`${GITHUB_URL}/blob/main/README.md`} target="_blank" rel="noopener noreferrer">部署指南</a>
-              <a href={`${GITHUB_URL}/blob/main/README.md`} target="_blank" rel="noopener noreferrer">技术架构</a>
+              <a href="/docs#quickstart">快速开始</a>
+              <a href="/docs#workspace">消息与工作区</a>
+              <a href="/docs#automation">自动化与集成</a>
+              <a href="/docs#settings">设置与多端连接</a>
             </div>
             <div className="footer-col">
               <h4>关于</h4>

@@ -12,12 +12,13 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { agentApi, AgentSpeechConfig } from '@/lib/agent-api'
+import { openExternalUrl, TEAMAGENTX_DOCS_URL } from '@/lib/site-links'
 import { updateManager } from '@/lib/update-manager'
 import { cn } from '@/lib/utils'
 import { useAuthStore, useSocketStore } from '@/stores'
 import { useChatStore } from '@/stores/chat-store'
 import { TodoData } from '@/stores/socket-store'
-import { Bot, Check, CircleArrowUp, Cpu, Globe, ListTodo, MessageSquare, Monitor, Moon, Package, Palette, Plus, Sun, Users } from 'lucide-react'
+import { BookOpenText, Bot, Check, CircleArrowUp, Cpu, Globe, ListTodo, MessageSquare, Monitor, Moon, Package, Palette, Plus, Sun, Users } from 'lucide-react'
 import { useState, useSyncExternalStore } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -118,6 +119,13 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
     } else {
       toast.error(response.error || '创建失败')
       return false
+    }
+  }
+
+  const handleOpenDocs = async () => {
+    const result = await openExternalUrl(TEAMAGENTX_DOCS_URL)
+    if (!result.success) {
+      toast.error(result.error || '打开使用文档失败')
     }
   }
 
@@ -322,6 +330,15 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
+
+        <button
+          className="flex size-9 cursor-pointer items-center justify-center rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+          title="官网文档"
+          onClick={handleOpenDocs}
+          style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+        >
+          <BookOpenText className="size-4" />
+        </button>
 
         {/* User avatar - 跳转到设置 */}
         <button

@@ -3,9 +3,10 @@ import { useTheme } from '@/components/theme-provider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { acpToolsApi, type AcpToolInfo } from '@/lib/agent-api';
 import { authApi } from '@/lib/auth-api';
+import { openExternalUrl, TEAMAGENTX_DOCS_URL, TEAMAGENTX_WEBSITE_URL } from '@/lib/site-links';
 import { cn } from '@/lib/utils';
 import { useAuthStore, useUIStore } from '@/stores';
-import { Check, Download, ExternalLink, Loader2, LogOut, Monitor, Moon, Palette, RefreshCw, Settings, Smartphone, Sun, Terminal, Volume2, VolumeX, X } from 'lucide-react';
+import { BookOpenText, Check, Download, ExternalLink, Globe2, Loader2, LogOut, Monitor, Moon, Palette, RefreshCw, Settings, Smartphone, Sun, Terminal, Volume2, VolumeX, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -169,6 +170,13 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
     }
     logout()
     navigate('/')
+  }
+
+  const handleOpenExternalLink = async (url: string, fallbackError: string) => {
+    const result = await openExternalUrl(url)
+    if (!result.success) {
+      toast.error(result.error || fallbackError)
+    }
   }
 
   // 获取局域网地址和版本号
@@ -773,6 +781,32 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
             </button>
           </div>
         )}
+
+        <div className="mb-6 rounded-xl border border-border bg-card p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <BookOpenText className="size-4 text-primary" />
+            <h2 className="text-sm font-medium text-muted-foreground">官网与文档</h2>
+          </div>
+          <p className="mb-4 text-xs leading-5 text-muted-foreground">
+            查看官网介绍、下载入口和最新使用文档。文档内容按当前客户端功能整理，适合新成员上手和团队内部流转。
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <button
+              onClick={() => handleOpenExternalLink(TEAMAGENTX_WEBSITE_URL, '打开官网失败')}
+              className="flex items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 py-2 text-sm text-foreground hover:bg-accent"
+            >
+              <Globe2 className="size-4" />
+              官网主页
+            </button>
+            <button
+              onClick={() => handleOpenExternalLink(TEAMAGENTX_DOCS_URL, '打开使用文档失败')}
+              className="flex items-center justify-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-sm text-white hover:bg-blue-600"
+            >
+              <BookOpenText className="size-4" />
+              使用文档
+            </button>
+          </div>
+        </div>
 
         <button
           onClick={handleLogout}
