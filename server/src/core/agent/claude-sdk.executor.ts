@@ -1,8 +1,17 @@
+import type {
+    HookCallbackMatcher,
+    HookEvent,
+    SDKMessage,
+    SDKUserMessage,
+} from '@anthropic-ai/claude-agent-sdk';
+import {
+    createSdkMcpServer,
+    query,
+    tool as sdkTool,
+} from '@anthropic-ai/claude-agent-sdk';
 import type { LlmProvider } from '@prisma/client';
-import type { HookCallbackMatcher, HookEvent, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import { createSdkMcpServer, query, tool as sdkTool } from '@anthropic-ai/claude-agent-sdk';
-import { createHash, randomUUID } from 'crypto';
 import { execFileSync } from 'child_process';
+import { createHash, randomUUID } from 'crypto';
 import * as fs from 'fs';
 import { createRequire } from 'module';
 import * as os from 'os';
@@ -11,44 +20,44 @@ import { z } from 'zod/v4';
 import { agentMemoryService } from '../../modules/agent-memory/agent-memory.service.js';
 import { skillInstallService } from '../../modules/skill/skill-install.service.js';
 import type { AttachmentData } from '../../modules/task-queue/task-queue.service.js';
-import { buildAgentLongTermMemorySection } from './agent-long-term-memory.js';
+import {
+    buildAcpProviderEnv,
+    type AcpProviderInfo,
+} from './acp-provider.adapter.js';
 import { debugLog } from './agent-handler/debug.js';
-import { generateImageForAgent } from './image-generation.service.js';
-import { getDefaultChatRoomWorkDir } from './work-dir.js';
-import { buildAcpProviderEnv, type AcpProviderInfo } from './acp-provider.adapter.js';
-import {
-  resolveAgentWorkDir,
-} from './work-dir.js';
-import {
-  buildInstalledSkillsInstructions,
-  buildInstalledSkillsSignature,
-} from './skill-instructions.js';
-import { getImageGenerationSkillInstructions } from './image-generation-config.js';
-import {
-  AGENT_CREATOR_AGENT_ID,
-  agentCreatorTools,
-  CHATROOM_HELPER_AGENT_ID,
-  chatroomHelperTools,
-  CRON_TASK_HELPER_AGENT_ID,
-  cronTaskHelperTools,
-  SKILL_MANAGER_AGENT_ID,
-  skillManagerTools,
-  EXTERNAL_PLATFORM_HELPER_AGENT_ID,
-  createExternalPlatformHelperTools,
-} from './tools/index.js';
+import { buildAgentLongTermMemorySection } from './agent-long-term-memory.js';
 import type {
-  AgentDebugInfo,
-  AgentExecResult,
-  ChatRoomAgentInfo,
-  HistoryMessage,
-  IAgentExecutor,
-  MessageEmitCallback,
-  StreamEmitCallback,
-  ThinkingEmitCallback,
-  TokenUsage,
-  ToolCall,
-  ToolCallEmitCallback,
+    AgentDebugInfo,
+    AgentExecResult,
+    ChatRoomAgentInfo,
+    HistoryMessage,
+    IAgentExecutor,
+    MessageEmitCallback,
+    StreamEmitCallback,
+    ThinkingEmitCallback,
+    TokenUsage,
+    ToolCall,
+    ToolCallEmitCallback,
 } from './executor.interface.js';
+import { getImageGenerationSkillInstructions } from './image-generation-config.js';
+import { generateImageForAgent } from './image-generation.service.js';
+import {
+    buildInstalledSkillsInstructions,
+    buildInstalledSkillsSignature,
+} from './skill-instructions.js';
+import {
+    AGENT_CREATOR_AGENT_ID,
+    agentCreatorTools,
+    CHATROOM_HELPER_AGENT_ID,
+    chatroomHelperTools,
+    createExternalPlatformHelperTools,
+    CRON_TASK_HELPER_AGENT_ID,
+    cronTaskHelperTools,
+    EXTERNAL_PLATFORM_HELPER_AGENT_ID,
+    SKILL_MANAGER_AGENT_ID,
+    skillManagerTools,
+} from './tools/index.js';
+import { getDefaultChatRoomWorkDir, resolveAgentWorkDir } from './work-dir.js';
 
 function shortHash(input: string): string {
   return createHash('sha256').update(input).digest('hex').slice(0, 16);
@@ -70,7 +79,8 @@ function extractTextFromContent(content: unknown): string {
 
   return content
     .map((block: any) => {
-      if (block?.type === 'text' && typeof block.text === 'string') return block.text;
+      if (block?.type === 'text' && typeof block.text === 'string')
+        return block.text;
       return '';
     })
     .join('');
@@ -81,7 +91,8 @@ function extractThinkingFromContent(content: unknown): string {
 
   return content
     .map((block: any) => {
-      if (block?.type === 'thinking' && typeof block.thinking === 'string') return block.thinking;
+      if (block?.type === 'thinking' && typeof block.thinking === 'string')
+        return block.thinking;
       return '';
     })
     .join('');
@@ -91,17 +102,27 @@ function normalizeUsage(usage: any): TokenUsage | undefined {
   if (!usage || typeof usage !== 'object') return undefined;
   const inputTokens = Number(usage.input_tokens ?? usage.inputTokens ?? 0);
   const outputTokens = Number(usage.output_tokens ?? usage.outputTokens ?? 0);
-  const cacheReadTokens = Number(usage.cache_read_input_tokens ?? usage.cacheReadInputTokens ?? 0);
-  const cacheCreationTokens = Number(usage.cache_creation_input_tokens ?? usage.cacheCreationInputTokens ?? 0);
+  const cacheReadTokens = Number(
+    usage.cache_read_input_tokens ?? usage.cacheReadInputTokens ?? 0,
+  );
+  const cacheCreationTokens = Number(
+    usage.cache_creation_input_tokens ?? usage.cacheCreationInputTokens ?? 0,
+  );
 
-  if (!inputTokens && !outputTokens && !cacheReadTokens && !cacheCreationTokens) {
+  if (
+    !inputTokens &&
+    !outputTokens &&
+    !cacheReadTokens &&
+    !cacheCreationTokens
+  ) {
     return undefined;
   }
 
   return {
     inputTokens,
     outputTokens,
-    totalTokens: inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens,
+    totalTokens:
+      inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens,
     cacheReadTokens,
     cacheCreationTokens,
   };
@@ -120,7 +141,9 @@ function stringifyMcpToolResult(result: unknown): string {
 const requireFromServerBundle = createRequire(import.meta.url);
 const requireFromClaudeSdk = (() => {
   try {
-    return createRequire(requireFromServerBundle.resolve('@anthropic-ai/claude-agent-sdk'));
+    return createRequire(
+      requireFromServerBundle.resolve('@anthropic-ai/claude-agent-sdk'),
+    );
   } catch {
     return requireFromServerBundle;
   }
@@ -132,7 +155,10 @@ function redactValue(value: string | undefined): string | undefined {
   return `${value.slice(0, 6)}...${value.slice(-4)}`;
 }
 
-function logClaudeSdkDebug(message: string, details?: Record<string, unknown>): void {
+function logClaudeSdkDebug(
+  message: string,
+  details?: Record<string, unknown>,
+): void {
   if (details) {
     console.log(`[ClaudeSDK] ${message}`, details);
     return;
@@ -150,35 +176,50 @@ function getClaudeMaxTurns(): number {
   return parsed;
 }
 
-function getClaudeThinkingOptions(provider?: LlmProvider): { type: 'adaptive' } | { type: 'enabled'; budgetTokens?: number } | { type: 'disabled' } | undefined {
+function getClaudeThinkingOptions(
+  provider?: LlmProvider,
+):
+  | {type: 'adaptive'}
+  | {type: 'enabled'; budgetTokens?: number}
+  | {type: 'disabled'}
+  | undefined {
   const mode = (process.env.CLAUDE_AGENT_THINKING || 'enabled').toLowerCase();
 
-  if ((provider as any)?.supportsThinking === false || mode === 'disabled' || mode === 'off' || mode === '0') {
-    return { type: 'disabled' };
+  if (
+    (provider as any)?.supportsThinking === false ||
+    mode === 'disabled' ||
+    mode === 'off' ||
+    mode === '0'
+  ) {
+    return {type: 'disabled'};
   }
 
   if (mode === 'adaptive') {
-    return { type: 'adaptive' };
+    return {type: 'adaptive'};
   }
 
   const rawBudget = process.env.CLAUDE_AGENT_THINKING_BUDGET_TOKENS;
   const budgetTokens = rawBudget ? Number.parseInt(rawBudget, 10) : 16000;
   if (!Number.isFinite(budgetTokens) || budgetTokens < 1) {
-    return { type: 'enabled', budgetTokens: 16000 };
+    return {type: 'enabled', budgetTokens: 16000};
   }
 
-  return { type: 'enabled', budgetTokens };
+  return {type: 'enabled', budgetTokens};
 }
 
 function isSessionAlreadyInUseError(message: string): boolean {
-  return /Session ID .+ is already in use/.test(message)
-    || message.includes('session ID is already in use');
+  return (
+    /Session ID .+ is already in use/.test(message) ||
+    message.includes('session ID is already in use')
+  );
 }
 
 function isRecoverableSessionError(message: string): boolean {
-  return message.includes('Claude Code process exited with code 1')
-    || message.includes('No conversation found with session ID')
-    || isSessionAlreadyInUseError(message);
+  return (
+    message.includes('Claude Code process exited with code 1') ||
+    message.includes('No conversation found with session ID') ||
+    isSessionAlreadyInUseError(message)
+  );
 }
 
 const DEFAULT_LONG_RUNNING_BASH_TIMEOUT_MS = 15 * 1000;
@@ -220,29 +261,33 @@ function getBackgroundIdleFinishMs(): number {
 }
 
 function normalizeBashCommand(command: string): string {
-  return command
-    .replace(/^\s*(?:cd\s+[^;&|]+\s*&&\s*)+/i, '')
-    .trim();
+  return command.replace(/^\s*(?:cd\s+[^;&|]+\s*&&\s*)+/i, '').trim();
 }
 
 function shouldRunBashInBackground(command: string): boolean {
   const normalizedCommand = normalizeBashCommand(command);
-  if (!normalizedCommand || /(?:^|\s)(?:&|nohup|disown)(?:\s|$)/.test(normalizedCommand)) {
+  if (
+    !normalizedCommand ||
+    /(?:^|\s)(?:&|nohup|disown)(?:\s|$)/.test(normalizedCommand)
+  ) {
     return false;
   }
 
-  return LONG_RUNNING_COMMAND_PATTERNS.some((pattern) => pattern.test(normalizedCommand));
+  return LONG_RUNNING_COMMAND_PATTERNS.some((pattern) =>
+    pattern.test(normalizedCommand),
+  );
 }
 
 function resolveClaudeCodeExecutable(): string | undefined {
   const isWindows = process.platform === 'win32';
   const extension = isWindows ? '.exe' : '';
-  const packageNames = process.platform === 'linux'
-    ? [
-        `@anthropic-ai/claude-agent-sdk-linux-${process.arch}-musl`,
-        `@anthropic-ai/claude-agent-sdk-linux-${process.arch}`,
-      ]
-    : [`@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`];
+  const packageNames =
+    process.platform === 'linux'
+      ? [
+          `@anthropic-ai/claude-agent-sdk-linux-${process.arch}-musl`,
+          `@anthropic-ai/claude-agent-sdk-linux-${process.arch}`,
+        ]
+      : [`@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`];
 
   const tried: string[] = [];
 
@@ -250,14 +295,22 @@ function resolveClaudeCodeExecutable(): string | undefined {
   //    所以这里多半失败，是预期的；下方 step 2/3 会找用户本地安装的 claude）
   for (const packageName of packageNames) {
     try {
-      const resolved = requireFromClaudeSdk.resolve(`${packageName}/claude${extension}`);
+      const resolved = requireFromClaudeSdk.resolve(
+        `${packageName}/claude${extension}`,
+      );
       if (fs.existsSync(resolved)) {
-        console.log(`[ClaudeSDK] resolved claude executable via sdk-native[${packageName}]: ${resolved}`);
+        console.log(
+          `[ClaudeSDK] resolved claude executable via sdk-native[${packageName}]: ${resolved}`,
+        );
         return resolved;
       }
-      tried.push(`sdk-native[${packageName}]: ${resolved} (missing — 通常是因为打包阶段排除了 native 子包)`);
+      tried.push(
+        `sdk-native[${packageName}]: ${resolved} (missing — 通常是因为打包阶段排除了 native 子包)`,
+      );
     } catch (error) {
-      tried.push(`sdk-native[${packageName}]: resolve threw ${error instanceof Error ? error.message : String(error)}`);
+      tried.push(
+        `sdk-native[${packageName}]: resolve threw ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 
@@ -272,7 +325,10 @@ function resolveClaudeCodeExecutable(): string | undefined {
     return true;
   };
 
-  const tryPathStrict = (label: string, candidate: string | undefined): string | undefined => {
+  const tryPathStrict = (
+    label: string,
+    candidate: string | undefined,
+  ): string | undefined => {
     if (!candidate) {
       tried.push(`${label}: <empty>`);
       return undefined;
@@ -282,10 +338,14 @@ function resolveClaudeCodeExecutable(): string | undefined {
       return undefined;
     }
     if (!isAcceptableExecutable(candidate)) {
-      tried.push(`${label}: ${candidate} (rejected: cannot be spawned directly on Windows)`);
+      tried.push(
+        `${label}: ${candidate} (rejected: cannot be spawned directly on Windows)`,
+      );
       return undefined;
     }
-    console.log(`[ClaudeSDK] resolved claude executable via ${label}: ${candidate}`);
+    console.log(
+      `[ClaudeSDK] resolved claude executable via ${label}: ${candidate}`,
+    );
     return candidate;
   };
 
@@ -301,7 +361,10 @@ function resolveClaudeCodeExecutable(): string | undefined {
       'bin',
       'claude' + extension,
     );
-    const v2a = tryPathStrict('tools-dir/@anthropic-ai/claude-code/bin', claudeCodePkgBin);
+    const v2a = tryPathStrict(
+      'tools-dir/@anthropic-ai/claude-code/bin',
+      claudeCodePkgBin,
+    );
     if (v2a) return v2a;
 
     // 2b. .bin shim：非 Windows 走这里（Windows 上 .bin/claude.cmd 不可直接 spawn，跳过）
@@ -313,7 +376,10 @@ function resolveClaudeCodeExecutable(): string | undefined {
 
     // 2c. Windows 上 npm global-style --prefix 直接根目录有 .exe 的情况（少见但兜底）
     if (isWindows) {
-      const v2c = tryPathStrict('tools-dir/claude.exe', path.join(toolsDir, 'claude.exe'));
+      const v2c = tryPathStrict(
+        'tools-dir/claude.exe',
+        path.join(toolsDir, 'claude.exe'),
+      );
       if (v2c) return v2c;
     }
 
@@ -325,7 +391,10 @@ function resolveClaudeCodeExecutable(): string | undefined {
       'claude-code',
       'cli-wrapper.cjs',
     );
-    const v2d = tryPathStrict('tools-dir/@anthropic-ai/claude-code/cli-wrapper.cjs', cliWrapper);
+    const v2d = tryPathStrict(
+      'tools-dir/@anthropic-ai/claude-code/cli-wrapper.cjs',
+      cliWrapper,
+    );
     if (v2d) return v2d;
   } else {
     tried.push('TOOLS_DIR: <unset>');
@@ -339,7 +408,10 @@ function resolveClaudeCodeExecutable(): string | undefined {
       timeout: 3000,
       windowsHide: true,
     }).trim();
-    const lines = result.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const lines = result
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
     // Windows where 通常按 PATHEXT 顺序返回多行：.exe / .cmd / .ps1 / 无扩展名；
     // 我们只接受 .exe（直接 spawn 可工作）。.cmd 在 Windows 上 spawn 会失败。
     for (const line of lines) {
@@ -351,15 +423,23 @@ function resolveClaudeCodeExecutable(): string | undefined {
       const cmdShim = lines.find((line) => line.toLowerCase().endsWith('.cmd'));
       if (cmdShim) {
         const wrapperFromShim = resolveCliWrapperFromCmdShim(cmdShim);
-        const found = tryPathStrict('PATH(.cmd → cli-wrapper.cjs)', wrapperFromShim);
+        const found = tryPathStrict(
+          'PATH(.cmd → cli-wrapper.cjs)',
+          wrapperFromShim,
+        );
         if (found) return found;
       }
     }
   } catch (error) {
-    tried.push(`PATH lookup threw: ${error instanceof Error ? error.message : String(error)}`);
+    tried.push(
+      `PATH lookup threw: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 
-  console.warn('[ClaudeSDK] 找不到可直接 spawn 的 claude 可执行文件，已尝试：\n  - ' + tried.join('\n  - '));
+  console.warn(
+    '[ClaudeSDK] 找不到可直接 spawn 的 claude 可执行文件，已尝试：\n  - ' +
+      tried.join('\n  - '),
+  );
   return undefined;
 }
 
@@ -375,12 +455,21 @@ function resolveCliWrapperFromCmdShim(cmdShimPath: string): string | undefined {
     // 或：node "%~dp0\..\@anthropic-ai\claude-code\bin\claude.exe"
     const match = content.match(/[%~dp0\\\/.][^"\r\n]*claude-code[^"\r\n]*/i);
     if (!match) return undefined;
-    const relative = match[0].replace(/^%~dp0[\\/]/i, '').replace(/\\/g, path.sep);
+    const relative = match[0]
+      .replace(/^%~dp0[\\/]/i, '')
+      .replace(/\\/g, path.sep);
     const shimDir = path.dirname(cmdShimPath);
     const resolved = path.resolve(shimDir, relative);
     // 从 bin/claude.exe 回退到包根，再到 cli-wrapper.cjs
-    const claudeCodeRoot = resolved.split(/[\\/]@anthropic-ai[\\/]claude-code/)[0];
-    const wrapper = path.join(claudeCodeRoot, '@anthropic-ai', 'claude-code', 'cli-wrapper.cjs');
+    const claudeCodeRoot = resolved.split(
+      /[\\/]@anthropic-ai[\\/]claude-code/,
+    )[0];
+    const wrapper = path.join(
+      claudeCodeRoot,
+      '@anthropic-ai',
+      'claude-code',
+      'cli-wrapper.cjs',
+    );
     return fs.existsSync(wrapper) ? wrapper : undefined;
   } catch {
     return undefined;
@@ -489,12 +578,17 @@ ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
 
   private ensureWorkDirectory(): void {
     if (!fs.existsSync(this.workDir)) {
-      fs.mkdirSync(this.workDir, { recursive: true });
+      fs.mkdirSync(this.workDir, {recursive: true});
     }
   }
 
   private getClaudeConfigDir(): string {
-    return path.join(os.homedir(), '.teamagentx', 'acp-config', this.agentId || 'default');
+    return path.join(
+      os.homedir(),
+      '.teamagentx',
+      'acp-config',
+      this.agentId || 'default',
+    );
   }
 
   private getSessionStatePath(): string {
@@ -517,15 +611,22 @@ ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
     const conversationPath = this.getClaudeConversationPath(this.sessionId);
     if (fs.existsSync(conversationPath)) return;
 
-    console.warn(`${this.name}: Claude SDK session 文件不存在，创建新 session`, {
-      sessionId: this.sessionId,
-      conversationPath,
-      statePath: this.getSessionStatePath(),
-    });
+    console.warn(
+      `${this.name}: Claude SDK session 文件不存在，创建新 session`,
+      {
+        sessionId: this.sessionId,
+        conversationPath,
+        statePath: this.getSessionStatePath(),
+      },
+    );
     this.resetSession();
   }
 
-  private loadSessionState(): { sessionId: string; hasStartedSession: boolean; skillsSignature?: string } | null {
+  private loadSessionState(): {
+    sessionId: string;
+    hasStartedSession: boolean;
+    skillsSignature?: string;
+  } | null {
     try {
       const statePath = this.getSessionStatePath();
       if (!fs.existsSync(statePath)) {
@@ -548,27 +649,36 @@ ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
       const loaded = {
         sessionId: state.sessionId,
         hasStartedSession: state.hasStartedSession !== false,
-        skillsSignature: typeof state.skillsSignature === 'string' ? state.skillsSignature : undefined,
+        skillsSignature:
+          typeof state.skillsSignature === 'string'
+            ? state.skillsSignature
+            : undefined,
       };
       const conversationPath = this.getClaudeConversationPath(loaded.sessionId);
       if (!loaded.hasStartedSession && fs.existsSync(conversationPath)) {
-        logClaudeSdkDebug('session state ignored: unstarted session already has conversation file', {
-          agentName: this.name,
-          agentId: this.agentId,
-          statePath,
-          sessionId: loaded.sessionId,
-          conversationPath,
-        });
+        logClaudeSdkDebug(
+          'session state ignored: unstarted session already has conversation file',
+          {
+            agentName: this.name,
+            agentId: this.agentId,
+            statePath,
+            sessionId: loaded.sessionId,
+            conversationPath,
+          },
+        );
         return null;
       }
       if (loaded.hasStartedSession && !fs.existsSync(conversationPath)) {
-        logClaudeSdkDebug('session state ignored: conversation file not found', {
-          agentName: this.name,
-          agentId: this.agentId,
-          statePath,
-          sessionId: loaded.sessionId,
-          conversationPath,
-        });
+        logClaudeSdkDebug(
+          'session state ignored: conversation file not found',
+          {
+            agentName: this.name,
+            agentId: this.agentId,
+            statePath,
+            sessionId: loaded.sessionId,
+            conversationPath,
+          },
+        );
         return null;
       }
       logClaudeSdkDebug('session state loaded', {
@@ -592,7 +702,7 @@ ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
   private saveSessionId(): void {
     try {
       const statePath = this.getSessionStatePath();
-      fs.mkdirSync(path.dirname(statePath), { recursive: true });
+      fs.mkdirSync(path.dirname(statePath), {recursive: true});
       fs.writeFileSync(
         statePath,
         JSON.stringify(
@@ -605,7 +715,7 @@ ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
           null,
           2,
         ),
-        { mode: 0o600 },
+        {mode: 0o600},
       );
     } catch (error) {
       console.warn(`${this.name}: 保存 Claude SDK sessionId 失败:`, error);
@@ -615,7 +725,9 @@ ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
   private ensureSkillsSymlink(): void {
     if (!this.agentId) return;
 
-    const globalSkillsDir = skillInstallService.getGlobalAgentSkillsDir(this.agentId);
+    const globalSkillsDir = skillInstallService.getGlobalAgentSkillsDir(
+      this.agentId,
+    );
     if (!fs.existsSync(globalSkillsDir)) return;
 
     const claudeConfigDir = this.getClaudeConfigDir();
@@ -631,22 +743,24 @@ ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
     }
 
     try {
-      fs.rmSync(configSkillsDir, { recursive: true, force: true });
+      fs.rmSync(configSkillsDir, {recursive: true, force: true});
     } catch {
       // 忽略删除失败。
     }
 
-    fs.mkdirSync(claudeConfigDir, { recursive: true });
+    fs.mkdirSync(claudeConfigDir, {recursive: true});
     try {
       fs.symlinkSync(globalSkillsDir, configSkillsDir);
-      console.log(`${this.name}: Skills symlink 已创建 ${configSkillsDir} → ${globalSkillsDir}`);
+      console.log(
+        `${this.name}: Skills symlink 已创建 ${configSkillsDir} → ${globalSkillsDir}`,
+      );
     } catch (error) {
       console.error(`${this.name}: 创建 Skills symlink 失败:`, error);
     }
   }
 
   private buildEnv(): Record<string, string | undefined> {
-    const cleanEnv: Record<string, string | undefined> = { ...process.env };
+    const cleanEnv: Record<string, string | undefined> = {...process.env};
     const keysToClear = [
       'ANTHROPIC_API_KEY',
       'ANTHROPIC_AUTH_TOKEN',
@@ -665,7 +779,7 @@ ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
 
     const providerEnv = this.llmProvider
       ? buildAcpProviderEnv('claude', this.llmProvider, this.agentId)
-      : { CLAUDE_CONFIG_DIR: this.getClaudeConfigDir() };
+      : {CLAUDE_CONFIG_DIR: this.getClaudeConfigDir()};
 
     if (this.llmProvider) {
       this.acpProviderInfo = {
@@ -673,7 +787,9 @@ ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
         name: this.llmProvider.name,
         type: this.llmProvider.type,
         model: this.llmProvider.model,
-        apiProtocol: ((this.llmProvider as any).apiProtocol || 'anthropic').toLowerCase(),
+        apiProtocol: (
+          (this.llmProvider as any).apiProtocol || 'anthropic'
+        ).toLowerCase(),
       };
     }
 
@@ -693,7 +809,9 @@ ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
       cwd: this.workDir,
       cwdExists: fs.existsSync(this.workDir),
       claudeConfigDir: env.CLAUDE_CONFIG_DIR,
-      claudeConfigDirExists: env.CLAUDE_CONFIG_DIR ? fs.existsSync(env.CLAUDE_CONFIG_DIR) : false,
+      claudeConfigDirExists: env.CLAUDE_CONFIG_DIR
+        ? fs.existsSync(env.CLAUDE_CONFIG_DIR)
+        : false,
       sessionStatePath: this.getSessionStatePath(),
       sessionStateExists: fs.existsSync(this.getSessionStatePath()),
       sessionId: this.sessionId,
@@ -708,20 +826,26 @@ ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
             id: this.llmProvider.id,
             name: this.llmProvider.name,
             type: this.llmProvider.type,
-            apiProtocol: ((this.llmProvider as any).apiProtocol || 'anthropic').toLowerCase(),
+            apiProtocol: (
+              (this.llmProvider as any).apiProtocol || 'anthropic'
+            ).toLowerCase(),
             apiUrl: this.llmProvider.apiUrl,
           }
         : undefined,
       sdkImportUrl: import.meta.url,
       sdkPackagePath: (() => {
         try {
-          return requireFromServerBundle.resolve('@anthropic-ai/claude-agent-sdk');
+          return requireFromServerBundle.resolve(
+            '@anthropic-ai/claude-agent-sdk',
+          );
         } catch (error) {
           return error instanceof Error ? error.message : String(error);
         }
       })(),
       claudeCodeExecutable: this.claudeCodeExecutable,
-      claudeCodeExecutableExists: this.claudeCodeExecutable ? fs.existsSync(this.claudeCodeExecutable) : false,
+      claudeCodeExecutableExists: this.claudeCodeExecutable
+        ? fs.existsSync(this.claudeCodeExecutable)
+        : false,
       nodeExecPath: process.execPath,
       processCwd: process.cwd(),
       nodePath: process.env.NODE_PATH,
@@ -742,18 +866,24 @@ ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
         {
           hooks: [
             async (input) => {
-              if (input.hook_event_name !== 'PreToolUse' || input.tool_name !== 'Bash') {
-                return { continue: true };
+              if (
+                input.hook_event_name !== 'PreToolUse' ||
+                input.tool_name !== 'Bash'
+              ) {
+                return {continue: true};
               }
 
               const toolInput = input.tool_input;
               if (!toolInput || typeof toolInput !== 'object') {
-                return { continue: true };
+                return {continue: true};
               }
 
-              const command = (toolInput as { command?: unknown }).command;
-              if (typeof command !== 'string' || !shouldRunBashInBackground(command)) {
-                return { continue: true };
+              const command = (toolInput as {command?: unknown}).command;
+              if (
+                typeof command !== 'string' ||
+                !shouldRunBashInBackground(command)
+              ) {
+                return {continue: true};
               }
 
               this.hasBackgroundedLongRunningCommand = true;
@@ -767,7 +897,8 @@ ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
                     timeout: getLongRunningBashTimeoutMs(),
                     run_in_background: true,
                   },
-                  additionalContext: 'TeamAgentX detected a long-running service command and started it in the background so the conversation can continue.',
+                  additionalContext:
+                    'TeamAgentX detected a long-running service command and started it in the background so the conversation can continue.',
                 },
               };
             },
@@ -777,14 +908,21 @@ ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
     };
   }
 
-  private buildFullMessage(message: string, history?: HistoryMessage[]): string {
+  private buildFullMessage(
+    message: string,
+    history?: HistoryMessage[],
+  ): string {
     let fullMessage = '';
 
     if (this.systemPrompt) {
       fullMessage += `【系统指令】\n${this.systemPrompt}\n\n`;
     }
 
-    const longTermMemorySection = buildAgentLongTermMemorySection(this.chatRoomId, this.agentId, this.name);
+    const longTermMemorySection = buildAgentLongTermMemorySection(
+      this.chatRoomId,
+      this.agentId,
+      this.name,
+    );
     if (longTermMemorySection) {
       fullMessage += `${longTermMemorySection}\n\n`;
     }
@@ -795,8 +933,12 @@ ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
     }
 
     if (this.injectGroupHistory && history && history.length > 0) {
-      const memorySummary = history.find((msg) => msg.kind === 'memory_summary')?.content;
-      const recentHistory = history.filter((msg) => msg.kind !== 'memory_summary');
+      const memorySummary = history.find(
+        (msg) => msg.kind === 'memory_summary',
+      )?.content;
+      const recentHistory = history.filter(
+        (msg) => msg.kind !== 'memory_summary',
+      );
 
       if (memorySummary) {
         fullMessage += `【群聊长期记忆摘要】
@@ -818,13 +960,18 @@ ${historyText}
     }
 
     if (this.chatRoomAgents.length > 0) {
-      const agentsInfo = this.chatRoomAgents.map((agent) => agent.name).join('、');
-      const otherAgents = this.chatRoomAgents.filter((agent) => agent.name !== this.name);
+      const agentsInfo = this.chatRoomAgents
+        .map((agent) => agent.name)
+        .join('、');
+      const otherAgents = this.chatRoomAgents.filter(
+        (agent) => agent.name !== this.name,
+      );
       const otherAgentsList = otherAgents.map((agent) => agent.name).join('、');
       const othersInfo = otherAgents.length > 0 ? otherAgentsList : '无';
-      const mentionTip = otherAgents.length > 0
-        ? '\n【提示】\n需要给其他助手发任意消息时，必须调用 mcp__tax__send_message 工具生成消息草稿，并把工具返回的 @助手消息放入你的最终回复。工具本身不会直接发送消息；最终回复中的 @助手消息会在自动模式下触发目标助手。如果用户只是要求你给某个助手发消息，最终回复只输出这条 @助手消息，不要添加解释、寒暄、总结，也不要擅自扩写成协作邀请。'
-        : '';
+      const mentionTip =
+        otherAgents.length > 0
+          ? '\n【提示】\n需要给其他助手发任意消息时，必须调用 mcp__tax__send_message 工具生成消息草稿，并把工具返回的 @助手消息放入你的最终回复。工具本身不会直接发送消息；最终回复中的 @助手消息会在自动模式下触发目标助手。如果用户只是要求你给某个助手发消息，最终回复只输出这条 @助手消息，不要添加解释、寒暄、总结，也不要擅自扩写成协作邀请。再发消息之前，你需要判断一下是否真的需要发消息给某个助手。'
+          : '';
 
       fullMessage += `【群聊成员信息】
 群聊工作目录：${this.workDir}
@@ -851,7 +998,10 @@ ${historyText}
 ${buildInstalledSkillsInstructions(this.agentId)}`;
   }
 
-  private buildPrompt(fullMessage: string, attachments?: AttachmentData[]): string | AsyncIterable<SDKUserMessage> {
+  private buildPrompt(
+    fullMessage: string,
+    attachments?: AttachmentData[],
+  ): string | AsyncIterable<SDKUserMessage> {
     if (!attachments || attachments.length === 0) {
       return fullMessage;
     }
@@ -862,7 +1012,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       message: {
         role: 'user',
         content: [
-          { type: 'text', text: fullMessage },
+          {type: 'text', text: fullMessage},
           ...attachments.map((attachment) => ({
             type: 'image',
             source: {
@@ -890,11 +1040,15 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
   private resetSession(): void {
     // 删除旧的 conversation 文件，避免垃圾文件累积
     if (this.hasStartedSession && this.sessionId) {
-      const oldConversationPath = this.getClaudeConversationPath(this.sessionId);
+      const oldConversationPath = this.getClaudeConversationPath(
+        this.sessionId,
+      );
       try {
         if (fs.existsSync(oldConversationPath)) {
           fs.unlinkSync(oldConversationPath);
-          console.log(`${this.name}: 已删除旧 conversation 文件 ${oldConversationPath}`);
+          console.log(
+            `${this.name}: 已删除旧 conversation 文件 ${oldConversationPath}`,
+          );
         }
       } catch (error) {
         console.warn(`${this.name}: 删除旧 conversation 文件失败:`, error);
@@ -940,19 +1094,24 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
           try {
             const result = await systemTool.invoke(args ?? {});
             return {
-              content: [{ type: 'text' as const, text: stringifyMcpToolResult(result) }],
+              content: [
+                {type: 'text' as const, text: stringifyMcpToolResult(result)},
+              ],
             };
           } catch (error) {
             return {
-              content: [{
-                type: 'text' as const,
-                text: error instanceof Error ? error.message : '工具执行失败。',
-              }],
+              content: [
+                {
+                  type: 'text' as const,
+                  text:
+                    error instanceof Error ? error.message : '工具执行失败。',
+                },
+              ],
               isError: true,
             };
           }
         },
-        { alwaysLoad: true },
+        {alwaysLoad: true},
       );
     });
   }
@@ -960,7 +1119,9 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
   private getAllowedTaxTools(): string[] {
     const systemToolNames = this.getSystemAssistantTools()
       .map((tool) => tool.name)
-      .filter((name): name is string => typeof name === 'string' && name.length > 0);
+      .filter(
+        (name): name is string => typeof name === 'string' && name.length > 0,
+      );
 
     return [
       'mcp__tax__send_message',
@@ -979,23 +1140,46 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
           'send_message',
           '生成一段要放入最终回复的 TeamAgentX 助手消息草稿。消息内容可以是用户要求转达的任意内容，不一定是协作请求。工具支持一个或多个目标助手；不会直接发送消息，也不会直接触发任务。你必须把返回的 @目标助手 消息内容放入最终回复，最终回复落入群聊后才会在自动模式下触发目标助手。如果用户只是要求你给某个或多个助手发消息，最终回复只输出这条 @助手消息，不要添加解释、寒暄、总结，也不要擅自扩写成协作邀请。',
           {
-            targetAgentId: z.string().optional().describe('目标助手 ID。已知 ID 时优先使用。'),
-            targetAgentName: z.string().optional().describe('目标助手名称。未提供 ID 时使用。'),
-            targetAgentIds: z.array(z.string()).optional().describe('多个目标助手 ID。已知 ID 时优先使用。'),
-            targetAgentNames: z.array(z.string()).optional().describe('多个目标助手名称。未提供 ID 时使用。'),
-            content: z.string().describe('给目标助手的消息内容，不要包含 @目标助手名前缀。多个目标会自动生成 @助手1 @助手2 前缀。'),
+            targetAgentId: z
+              .string()
+              .optional()
+              .describe('目标助手 ID。已知 ID 时优先使用。'),
+            targetAgentName: z
+              .string()
+              .optional()
+              .describe('目标助手名称。未提供 ID 时使用。'),
+            targetAgentIds: z
+              .array(z.string())
+              .optional()
+              .describe('多个目标助手 ID。已知 ID 时优先使用。'),
+            targetAgentNames: z
+              .array(z.string())
+              .optional()
+              .describe('多个目标助手名称。未提供 ID 时使用。'),
+            content: z
+              .string()
+              .describe(
+                '给目标助手的消息内容，不要包含 @目标助手名前缀。多个目标会自动生成 @助手1 @助手2 前缀。',
+              ),
           },
           async (args) => {
             if (!this.agentId) {
               return {
-                content: [{ type: 'text', text: '当前助手缺少 agentId，无法生成消息草稿。' }],
+                content: [
+                  {
+                    type: 'text',
+                    text: '当前助手缺少 agentId，无法生成消息草稿。',
+                  },
+                ],
                 isError: true,
               };
             }
 
             try {
               const content = args.content.trim();
-              const normalizeStringArray = (value: string | string[] | undefined) => {
+              const normalizeStringArray = (
+                value: string | string[] | undefined,
+              ) => {
                 if (Array.isArray(value)) {
                   return value.map((item) => item.trim()).filter(Boolean);
                 }
@@ -1009,44 +1193,62 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
                 ...normalizeStringArray(args.targetAgentNames),
                 ...normalizeStringArray(args.targetAgentName),
               ];
-              const targets: { agentId?: string; agentName: string }[] = [];
+              const targets: {agentId?: string; agentName: string}[] = [];
               const seen = new Set<string>();
 
               for (const targetAgentId of targetAgentIds) {
-                const targetAgent = this.chatRoomAgents.find((agent) => agent.agentId === targetAgentId);
+                const targetAgent = this.chatRoomAgents.find(
+                  (agent) => agent.agentId === targetAgentId,
+                );
                 if (!targetAgent?.name || seen.has(targetAgent.name)) continue;
                 seen.add(targetAgent.name);
-                targets.push({ agentId: targetAgent.agentId, agentName: targetAgent.name });
+                targets.push({
+                  agentId: targetAgent.agentId,
+                  agentName: targetAgent.name,
+                });
               }
 
               for (const targetAgentName of targetAgentNames) {
-                const targetAgent = this.chatRoomAgents.find((agent) => agent.name === targetAgentName);
+                const targetAgent = this.chatRoomAgents.find(
+                  (agent) => agent.name === targetAgentName,
+                );
                 const resolvedName = targetAgent?.name || targetAgentName;
                 if (seen.has(resolvedName)) continue;
                 seen.add(resolvedName);
-                targets.push({ agentId: targetAgent?.agentId, agentName: resolvedName });
+                targets.push({
+                  agentId: targetAgent?.agentId,
+                  agentName: resolvedName,
+                });
               }
 
               if (!content || targets.length === 0) {
                 return {
-                  content: [{
-                    type: 'text',
-                    text: '参数错误：必须提供 content，以及至少一个可解析的 targetAgentId/targetAgentName 或 targetAgentIds/targetAgentNames。',
-                  }],
+                  content: [
+                    {
+                      type: 'text',
+                      text: '参数错误：必须提供 content，以及至少一个可解析的 targetAgentId/targetAgentName 或 targetAgentIds/targetAgentNames。',
+                    },
+                  ],
                   isError: true,
                 };
               }
 
-              const mentionPrefix = targets.map((agent) => `@${agent.agentName}`).join(' ');
+              const mentionPrefix = targets
+                .map((agent) => `@${agent.agentName}`)
+                .join(' ');
               const draftContent = `${mentionPrefix} ${content}`;
 
               return {
-                content: [{
-                  type: 'text',
-                  text: `最终回复请只输出下面这段消息，不要添加其他内容：\n${draftContent}`,
-                }],
+                content: [
+                  {
+                    type: 'text',
+                    text: `最终回复请只输出下面这段消息，不要添加其他内容：\n${draftContent}`,
+                  },
+                ],
                 structuredContent: {
-                  targetAgentIds: targets.map((agent) => agent.agentId).filter(Boolean),
+                  targetAgentIds: targets
+                    .map((agent) => agent.agentId)
+                    .filter(Boolean),
                   targetAgentNames: targets.map((agent) => agent.agentName),
                   targetAgents: targets,
                   content,
@@ -1055,70 +1257,115 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
               };
             } catch (error) {
               return {
-                content: [{
-                  type: 'text',
-                  text: error instanceof Error ? error.message : '生成消息草稿失败。',
-                }],
+                content: [
+                  {
+                    type: 'text',
+                    text:
+                      error instanceof Error
+                        ? error.message
+                        : '生成消息草稿失败。',
+                  },
+                ],
                 isError: true,
               };
             }
           },
-          { alwaysLoad: true },
+          {alwaysLoad: true},
         ),
-        ...(this.imageGenerationProvider ? [
-          sdkTool(
-            'generate_image',
-            '通过 TeamAgentX 服务端受控图片模型生成图片。API Key 只在服务端使用。用户明确要求生成图片、海报、插画、产品图或视觉稿时使用。',
-            {
-              prompt: z.string().describe('详细图片提示词。应包含主体、风格、构图、色彩、用途等。'),
-              size: z.string().optional().describe('图片尺寸或比例，例如 1024x1024、1024x1792、1:1。'),
-              n: z.number().int().min(1).max(4).optional().describe('生成图片数量，默认 1，最多 4。'),
-              filename: z.string().optional().describe('可选文件名，不要包含路径。'),
-              extraJson: z.record(z.string(), z.unknown()).optional().describe('供应商特定额外参数。'),
-            },
-            async (args) => {
-              if (!this.agentId) {
-                return {
-                  content: [{ type: 'text', text: '当前助手缺少 agentId，无法生成图片。' }],
-                  isError: true,
-                };
-              }
+        ...(this.imageGenerationProvider
+          ? [
+              sdkTool(
+                'generate_image',
+                '通过 TeamAgentX 服务端受控图片模型生成图片。API Key 只在服务端使用。用户明确要求生成图片、海报、插画、产品图或视觉稿时使用。',
+                {
+                  prompt: z
+                    .string()
+                    .describe(
+                      '详细图片提示词。应包含主体、风格、构图、色彩、用途等。',
+                    ),
+                  size: z
+                    .string()
+                    .optional()
+                    .describe(
+                      '图片尺寸或比例，例如 1024x1024、1024x1792、1:1。',
+                    ),
+                  n: z
+                    .number()
+                    .int()
+                    .min(1)
+                    .max(4)
+                    .optional()
+                    .describe('生成图片数量，默认 1，最多 4。'),
+                  filename: z
+                    .string()
+                    .optional()
+                    .describe('可选文件名，不要包含路径。'),
+                  extraJson: z
+                    .record(z.string(), z.unknown())
+                    .optional()
+                    .describe('供应商特定额外参数。'),
+                },
+                async (args) => {
+                  if (!this.agentId) {
+                    return {
+                      content: [
+                        {
+                          type: 'text',
+                          text: '当前助手缺少 agentId，无法生成图片。',
+                        },
+                      ],
+                      isError: true,
+                    };
+                  }
 
-              try {
-                const result = await generateImageForAgent(this.agentId, {
-                  prompt: args.prompt,
-                  size: args.size,
-                  n: args.n,
-                  filename: args.filename,
-                  extraJson: args.extraJson,
-                });
-                return {
-                  content: [{
-                    type: 'text',
-                    text: `图片生成成功：${result.urls.join(', ') || result.files.join(', ')}`,
-                  }],
-                  structuredContent: result as unknown as Record<string, unknown>,
-                };
-              } catch (error) {
-                return {
-                  content: [{
-                    type: 'text',
-                    text: error instanceof Error ? error.message : '图片生成失败。',
-                  }],
-                  isError: true,
-                };
-              }
-            },
-            { alwaysLoad: true },
-          ),
-        ] : []),
+                  try {
+                    const result = await generateImageForAgent(this.agentId, {
+                      prompt: args.prompt,
+                      size: args.size,
+                      n: args.n,
+                      filename: args.filename,
+                      extraJson: args.extraJson,
+                    });
+                    return {
+                      content: [
+                        {
+                          type: 'text',
+                          text: `图片生成成功：${result.urls.join(', ') || result.files.join(', ')}`,
+                        },
+                      ],
+                      structuredContent: result as unknown as Record<
+                        string,
+                        unknown
+                      >,
+                    };
+                  } catch (error) {
+                    return {
+                      content: [
+                        {
+                          type: 'text',
+                          text:
+                            error instanceof Error
+                              ? error.message
+                              : '图片生成失败。',
+                        },
+                      ],
+                      isError: true,
+                    };
+                  }
+                },
+                {alwaysLoad: true},
+              ),
+            ]
+          : []),
         ...this.buildSystemAssistantMcpTools(),
       ],
     });
   }
 
   private upsertToolCall(toolCall: ToolCall): void {
-    const existing = this.toolCalls.find((item) => item.toolCallId === toolCall.toolCallId);
+    const existing = this.toolCalls.find(
+      (item) => item.toolCallId === toolCall.toolCallId,
+    );
     if (!existing) {
       this.toolCalls.push(toolCall);
       this.emitToolCall?.(toolCall);
@@ -1139,12 +1386,18 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     const event = message.event;
     if (!event || typeof event !== 'object') return;
 
-    if (event.type === 'content_block_start' && event.content_block?.type === 'thinking') {
+    if (
+      event.type === 'content_block_start' &&
+      event.content_block?.type === 'thinking'
+    ) {
       this.appendThinking(event.content_block.thinking);
       return;
     }
 
-    if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
+    if (
+      event.type === 'content_block_start' &&
+      event.content_block?.type === 'tool_use'
+    ) {
       this.upsertToolCall({
         name: event.content_block.name || 'tool_call',
         input: event.content_block.input || {},
@@ -1156,11 +1409,17 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     }
 
     if (event.type === 'content_block_delta') {
-      if (event.delta?.type === 'text_delta' && typeof event.delta.text === 'string') {
+      if (
+        event.delta?.type === 'text_delta' &&
+        typeof event.delta.text === 'string'
+      ) {
         this.content += event.delta.text;
         this.emitStream?.(event.delta.text);
       }
-      if (event.delta?.type === 'thinking_delta' && typeof event.delta.thinking === 'string') {
+      if (
+        event.delta?.type === 'thinking_delta' &&
+        typeof event.delta.thinking === 'string'
+      ) {
         this.appendThinking(event.delta.thinking);
       }
     }
@@ -1217,7 +1476,9 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
         const toolUseId = block.tool_use_id || message.uuid || randomUUID();
         const output = extractTextFromContent(block.content);
         const status = block.is_error ? 'error' : 'completed';
-        const existing = this.toolCalls.find((item) => item.toolCallId === toolUseId);
+        const existing = this.toolCalls.find(
+          (item) => item.toolCallId === toolUseId,
+        );
 
         if (existing) {
           let changed = false;
@@ -1253,7 +1514,8 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
 
     const sdkSessionId = (message as any).session_id;
     if (typeof sdkSessionId === 'string' && sdkSessionId) {
-      const shouldSaveSession = this.sessionId !== sdkSessionId || !this.hasStartedSession;
+      const shouldSaveSession =
+        this.sessionId !== sdkSessionId || !this.hasStartedSession;
       this.sessionId = sdkSessionId;
       this.hasStartedSession = true;
       if (shouldSaveSession) this.saveSessionId();
@@ -1280,12 +1542,16 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
         return undefined;
       case 'system':
         if ((message as any).subtype === 'status') {
-          const status = (message as any).status?.text || (message as any).status?.message;
+          const status =
+            (message as any).status?.text || (message as any).status?.message;
           if (typeof status === 'string') {
             this.content += status;
           }
         }
-        if ((message as any).subtype === 'task_updated' && (message as any).patch?.is_backgrounded === true) {
+        if (
+          (message as any).subtype === 'task_updated' &&
+          (message as any).patch?.is_backgrounded === true
+        ) {
           this.hasBackgroundedLongRunningCommand = true;
         }
         return undefined;
@@ -1295,7 +1561,11 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
           this.hasStartedSession = true;
           this.saveSessionId();
         }
-        if ((message as any).subtype === 'success' && typeof (message as any).result === 'string' && !this.content) {
+        if (
+          (message as any).subtype === 'success' &&
+          typeof (message as any).result === 'string' &&
+          !this.content
+        ) {
           this.content = (message as any).result;
         }
         return normalizeUsage((message as any).usage);
@@ -1357,7 +1627,9 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
         stderr: (chunk: string) => {
           for (const line of chunk.split(/\r?\n/)) {
             if (line.trim()) {
-              this.lastClaudeStderr = `${this.lastClaudeStderr}\n${line}`.slice(-4000);
+              this.lastClaudeStderr = `${this.lastClaudeStderr}\n${line}`.slice(
+                -4000,
+              );
               console.error(`[ClaudeSDK stderr][${this.name}] ${line}`);
             }
           }
@@ -1375,18 +1647,27 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       }
 
       const nextMessage = iterator.next();
-      const result = this.hasBackgroundedLongRunningCommand && this.content.trim()
-        ? await Promise.race([
-            nextMessage,
-            new Promise<{ done: true; value: undefined; timedOut: true }>((resolve) => {
-              setTimeout(() => resolve({ done: true, value: undefined, timedOut: true }), idleFinishMs);
-            }),
-          ])
-        : await nextMessage;
+      const result =
+        this.hasBackgroundedLongRunningCommand && this.content.trim()
+          ? await Promise.race([
+              nextMessage,
+              new Promise<{done: true; value: undefined; timedOut: true}>(
+                (resolve) => {
+                  setTimeout(
+                    () =>
+                      resolve({done: true, value: undefined, timedOut: true}),
+                    idleFinishMs,
+                  );
+                },
+              ),
+            ])
+          : await nextMessage;
 
       if ('timedOut' in result) {
         nextMessage.catch(() => undefined);
-        console.warn(`${this.name}: Claude SDK 后台任务空闲 ${idleFinishMs}ms，主动结束本轮对话`);
+        console.warn(
+          `${this.name}: Claude SDK 后台任务空闲 ${idleFinishMs}ms，主动结束本轮对话`,
+        );
         abortController.abort('background-idle-finish');
         return tokenUsage;
       }
@@ -1421,13 +1702,16 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     if (messageWithoutMentions.startsWith('/')) {
       const command = messageWithoutMentions.toLowerCase().trim();
       if (command === '/clear' || command === '/new') {
-        const resultMessage = await this.handleClearContext(emit, originalMessageId);
-        return { actions: [{ type: 'message', content: resultMessage }] };
+        const resultMessage = await this.handleClearContext(
+          emit,
+          originalMessageId,
+        );
+        return {actions: [{type: 'message', content: resultMessage}]};
       }
 
       const unsupportedMessage = `暂不支持当前指令: ${command}`;
       await emit(unsupportedMessage, originalMessageId);
-      return { actions: [{ type: 'message', content: unsupportedMessage }] };
+      return {actions: [{type: 'message', content: unsupportedMessage}]};
     }
 
     const fullMessage = this.buildFullMessage(message, history);
@@ -1436,7 +1720,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     const abortController = new AbortController();
     this.currentAbortController = abortController;
     const abort = () => abortController.abort();
-    signal?.addEventListener('abort', abort, { once: true });
+    signal?.addEventListener('abort', abort, {once: true});
 
     let tokenUsage: TokenUsage | undefined;
 
@@ -1448,7 +1732,12 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       this.ensureResumableSessionExists();
       const shouldResume = this.hasStartedSession;
       try {
-        tokenUsage = await this.runQuery(fullMessage, attachments, signal, abortController);
+        tokenUsage = await this.runQuery(
+          fullMessage,
+          attachments,
+          signal,
+          abortController,
+        );
       } catch (error) {
         const message = error instanceof Error ? error.message : '';
         const errorDetails = `${message}\n${this.lastClaudeStderr}`;
@@ -1468,15 +1757,23 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
           throw new DOMException('执行已被用户中断', 'AbortError');
         }
 
-        const canRetryWithFreshSession = isRecoverableSessionError(errorDetails);
+        const canRetryWithFreshSession =
+          isRecoverableSessionError(errorDetails);
         if (!canRetryWithFreshSession) {
           throw error;
         }
 
-        console.warn(`${this.name}: Claude SDK session 失败，清理 session 后重试一次`);
+        console.warn(
+          `${this.name}: Claude SDK session 失败，清理 session 后重试一次`,
+        );
         this.resetSession();
         this.resetCollectors();
-        tokenUsage = await this.runQuery(fullMessage, attachments, signal, abortController);
+        tokenUsage = await this.runQuery(
+          fullMessage,
+          attachments,
+          signal,
+          abortController,
+        );
       }
 
       const finalResponse = this.content || 'claude 执行完成';
@@ -1486,7 +1783,9 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
         {
           toolCalls: this.toolCalls,
           responseLength: finalResponse.length,
-          thinking: this.thinking ? { content: this.thinking, timestamp: Date.now() } : undefined,
+          thinking: this.thinking
+            ? {content: this.thinking, timestamp: Date.now()}
+            : undefined,
           sessionId: this.sessionId,
         },
         null,
@@ -1494,12 +1793,14 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       );
 
       return {
-        actions: [{ type: 'message', content: finalResponse }],
+        actions: [{type: 'message', content: finalResponse}],
         tokenUsage,
       };
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
-        console.warn(`${this.name}: Claude SDK query 已中止，重置 session 供下一轮使用`);
+        console.warn(
+          `${this.name}: Claude SDK query 已中止，重置 session 供下一轮使用`,
+        );
         this.resetSession();
         throw error;
       }
@@ -1533,14 +1834,16 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       lastHistory: null,
       agentId: this.agentId,
       chatRoomAgents: this.chatRoomAgents,
-      llmProvider: this.acpProviderInfo || (this.llmProvider
-        ? {
-            id: this.llmProvider.id,
-            name: this.llmProvider.name,
-            type: this.llmProvider.type,
-            model: this.llmProvider.model,
-          }
-        : undefined),
+      llmProvider:
+        this.acpProviderInfo ||
+        (this.llmProvider
+          ? {
+              id: this.llmProvider.id,
+              name: this.llmProvider.name,
+              type: this.llmProvider.type,
+              model: this.llmProvider.model,
+            }
+          : undefined),
     };
   }
 
@@ -1558,8 +1861,16 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
  * @param agentId 助手 ID
  * @param chatRoomId 群聊 ID
  */
-export function clearClaudeSdkFileSystemContext(agentId: string, chatRoomId: string): void {
-  const claudeConfigDir = path.join(os.homedir(), '.teamagentx', 'acp-config', agentId);
+export function clearClaudeSdkFileSystemContext(
+  agentId: string,
+  chatRoomId: string,
+): void {
+  const claudeConfigDir = path.join(
+    os.homedir(),
+    '.teamagentx',
+    'acp-config',
+    agentId,
+  );
 
   if (!fs.existsSync(claudeConfigDir)) {
     return;
@@ -1584,18 +1895,25 @@ export function clearClaudeSdkFileSystemContext(agentId: string, chatRoomId: str
             claudeConfigDir,
             'projects',
             sanitizeClaudeProjectPath(workDir),
-            `${sessionId}.jsonl`
+            `${sessionId}.jsonl`,
           );
           if (fs.existsSync(conversationPath)) {
             fs.unlinkSync(conversationPath);
-            console.log(`[ClearClaudeContext] 已删除 conversation 文件: ${conversationPath}`);
+            console.log(
+              `[ClearClaudeContext] 已删除 conversation 文件: ${conversationPath}`,
+            );
           }
 
           // 删除 session 状态文件
           fs.unlinkSync(filePath);
-          console.log(`[ClearClaudeContext] 已删除 session 状态文件: ${filePath}`);
+          console.log(
+            `[ClearClaudeContext] 已删除 session 状态文件: ${filePath}`,
+          );
         } catch (error) {
-          console.warn(`[ClearClaudeContext] 清理 session 文件失败: ${filePath}`, error);
+          console.warn(
+            `[ClearClaudeContext] 清理 session 文件失败: ${filePath}`,
+            error,
+          );
         }
       }
     }
@@ -1615,14 +1933,21 @@ export function clearClaudeSdkFileSystemContext(agentId: string, chatRoomId: str
           const filePath = path.join(projectDir, file);
           try {
             fs.unlinkSync(filePath);
-            console.log(`[ClearClaudeContext] 已删除 conversation 文件: ${filePath}`);
+            console.log(
+              `[ClearClaudeContext] 已删除 conversation 文件: ${filePath}`,
+            );
           } catch (error) {
-            console.warn(`[ClearClaudeContext] 删除 conversation 文件失败: ${filePath}`, error);
+            console.warn(
+              `[ClearClaudeContext] 删除 conversation 文件失败: ${filePath}`,
+              error,
+            );
           }
         }
       }
     }
   }
 
-  console.log(`[ClearClaudeContext] 已清理 Claude SDK 上下文: agentId=${agentId}, chatRoomId=${chatRoomId}`);
+  console.log(
+    `[ClearClaudeContext] 已清理 Claude SDK 上下文: agentId=${agentId}, chatRoomId=${chatRoomId}`,
+  );
 }

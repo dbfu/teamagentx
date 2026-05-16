@@ -44,6 +44,19 @@ export async function setupGateway(app: FastifyInstance) {
                       localConfigAvailable: { type: 'boolean', nullable: true },
                       localConfigPath: { type: 'string', nullable: true },
                       localConfigLabel: { type: 'string', nullable: true },
+                      localModels: {
+                        type: 'array',
+                        nullable: true,
+                        items: {
+                          type: 'object',
+                          properties: {
+                            id: { type: 'string' },
+                            name: { type: 'string' },
+                            apiUrl: { type: 'string', nullable: true },
+                            apiKey: { type: 'string', nullable: true },
+                          },
+                        },
+                      },
                     },
                   },
                 },
@@ -73,6 +86,12 @@ export async function setupGateway(app: FastifyInstance) {
       password: string;
       avatar?: string;
       defaultAcpTool: string;
+      modelConfig?: {
+        apiUrl?: string;
+        apiKey: string;
+        model: string;
+        apiProtocol: string;
+      };
     };
   }>('/setup/complete', {
     schema: {
@@ -86,6 +105,16 @@ export async function setupGateway(app: FastifyInstance) {
           password: { type: 'string', minLength: 4 },
           avatar: { type: 'string' },
           defaultAcpTool: { type: 'string', enum: ['claude', 'codex'] },
+          modelConfig: {
+            type: 'object',
+            required: ['apiKey', 'model', 'apiProtocol'],
+            properties: {
+              apiUrl: { type: 'string' },
+              apiKey: { type: 'string' },
+              model: { type: 'string' },
+              apiProtocol: { type: 'string', enum: ['anthropic', 'openai'] },
+            },
+          },
         },
       },
       response: {
@@ -113,7 +142,7 @@ export async function setupGateway(app: FastifyInstance) {
       },
     },
   }, async (request, reply) => {
-    const { username, password, avatar, defaultAcpTool } = request.body;
+    const { username, password, avatar, defaultAcpTool, modelConfig } = request.body;
 
     // 幂等检查：已完成则返回错误
     const alreadyDone = await appSettingService.isSetupCompleted();
@@ -127,6 +156,7 @@ export async function setupGateway(app: FastifyInstance) {
         password,
         avatar,
         defaultAcpTool,
+        modelConfig,
       });
 
       return reply.send({ success: true, data: result });

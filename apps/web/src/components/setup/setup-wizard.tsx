@@ -1,7 +1,10 @@
-import { Check, Download, Loader2, RefreshCw } from 'lucide-react'
+import { Check, ChevronDown, Download, Eye, EyeOff, Loader2, RefreshCw } from 'lucide-react'
 import { useState, useEffect, useCallback } from 'react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { UserAvatarSelector } from '@/components/chat/user-avatar'
+import { getClaudeModelOptions } from '@/lib/claude-models'
 import { setupApi, type AcpToolInfo } from '@/lib/setup-api'
+import { getCodexModelOptions } from '@/lib/codex-models'
 
 interface SetupWizardProps {
   onComplete: (data: { token: string; userId: string; username: string }) => void
@@ -10,8 +13,11 @@ interface SetupWizardProps {
 
 const STEP_WELCOME = 0
 const STEP_TOOLS = 1
-const STEP_ACCOUNT = 2
-const STEP_DONE = 3
+const STEP_MODEL = 2
+const STEP_ACCOUNT = 3
+const STEP_DONE = 4
+
+const STEP_LABELS = ['欢迎', '工具检测', '模型配置', '创建账户', '完成']
 
 export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [step, setStep] = useState(STEP_WELCOME)
@@ -24,9 +30,15 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [loading, setLoading] = useState(false)
   const [detecting, setDetecting] = useState(false)
   const [error, setError] = useState('')
+  const [modelApiUrl, setModelApiUrl] = useState('')
+  const [modelApiKey, setModelApiKey] = useState('')
+  const [modelName, setModelName] = useState('')
+  const [showApiKey, setShowApiKey] = useState(false)
   // 安装状态：{ toolId: 'installing' | 'installed' | 'failed' }
   const [installStates, setInstallStates] = useState<Record<string, string>>({})
   const [installLog, setInstallLog] = useState<Record<string, string>>({})
+  // 模型配置来源：'local' 使用本地 CLI 配置 | 'manual' 手动输入
+  const [modelSource, setModelSource] = useState<'local' | 'manual'>('local')
 
   // 检测已安装工具
   const detectTools = useCallback(async () => {
@@ -36,8 +48,20 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       setTools(status.installedTools)
       // 默认选中第一个已安装的工具
       const installedIds = status.installedTools.filter(t => t.installed).map(t => t.id)
+      const defaultToolId = installedIds.includes('claude') ? 'claude' : installedIds[0] || ''
       if (installedIds.length > 0 && !selectedTool) {
-        setSelectedTool(installedIds.includes('claude') ? 'claude' : installedIds[0])
+        setSelectedTool(defaultToolId)
+      }
+      // 根据本地配置情况设置模型来源
+      const selectedToolInfo = status.installedTools.find(t => t.id === (selectedTool || defaultToolId))
+      const localModels = selectedToolInfo?.localModels ?? []
+      if (selectedToolInfo?.localConfigAvailable) {
+        setModelSource('local')
+        if ((selectedTool || defaultToolId) === 'claude' && localModels[0]?.name) {
+          setModelName(localModels[0].name)
+        }
+      } else {
+        setModelSource('manual')
       }
     } catch {
       setError('检测工具失败，请确认后端服务已启动')
@@ -95,14 +119,23 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     setError('')
     setLoading(true)
     try {
-      console.log('[SetupWizard] calling completeSetup', { username: username.trim(), defaultAcpTool: selectedTool })
+      const apiProtocol = selectedTool === 'codex' ? 'openai' : 'anthropic'
+      // 只有手动配置时才创建 LlmProvider
+      const hasManualConfig = modelSource === 'manual' && modelApiKey.trim() && modelName.trim()
       const result = await setupApi.completeSetup({
         username: username.trim(),
         password,
         avatar: selectedAvatar,
         defaultAcpTool: selectedTool,
+        ...(hasManualConfig ? {
+          modelConfig: {
+            apiUrl: modelApiUrl.trim() || undefined,
+            apiKey: modelApiKey.trim(),
+            model: modelName.trim(),
+            apiProtocol,
+          },
+        } : {}),
       })
-      console.log('[SetupWizard] completeSetup success', result)
       onComplete(result)
     } catch (err: any) {
       console.error('[SetupWizard] completeSetup error', err)
@@ -124,7 +157,20 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const goNext = () => {
     setError('')
     if (step === STEP_TOOLS) {
-      if (!selectedTool) { setError('请选择默认 Agent'); return }
+      if (!selectedTool) { setError('请选择默认引擎'); return }
+      setStep(STEP_MODEL)
+    } else if (step === STEP_MODEL) {
+      if (modelSource === 'manual') {
+        // 手动配置时，apiKey 和模型都必须填。
+        if (!modelApiKey.trim()) {
+          setError('API Key 为必填项')
+          return
+        }
+        if (!modelName.trim()) {
+          setError('模型名称为必填项')
+          return
+        }
+      }
       setStep(STEP_ACCOUNT)
     } else if (step === STEP_ACCOUNT) {
       if (!validateAccount()) return
@@ -134,20 +180,20 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-gray-900 dark:to-gray-800">
-      <div className="w-[520px] shrink-0 rounded-2xl bg-card shadow-2xl">
+      <div className="w-[640px] shrink-0 rounded-2xl bg-card shadow-2xl">
         {/* 步骤指示器 */}
-        <div className="flex items-center justify-center gap-2 border-b border-border px-6 py-4">
-          {['欢迎', '工具检测', '创建账户', '完成'].map((label, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <div className={`flex size-7 items-center justify-center rounded-full text-xs font-medium ${
+        <div className="flex items-center justify-center gap-1.5 border-b border-border px-6 py-4">
+          {STEP_LABELS.map((label, i) => (
+            <div key={i} className="flex items-center gap-1.5">
+              <div className={`flex size-6 items-center justify-center rounded-full text-xs font-medium ${
                 i <= step ? 'bg-blue-500 text-white' : 'bg-muted text-muted-foreground'
               }`}>
-                {i < step ? <Check className="size-4" /> : i + 1}
+                {i < step ? <Check className="size-3.5" /> : i + 1}
               </div>
               <span className={`text-xs ${i <= step ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
                 {label}
               </span>
-              {i < 3 && <div className="h-px w-6 bg-border" />}
+              {i < STEP_LABELS.length - 1 && <div className="h-px w-4 bg-border" />}
             </div>
           ))}
         </div>
@@ -176,7 +222,10 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           {/* Step 1: 工具检测 */}
           {step === STEP_TOOLS && (
             <div>
-              <h2 className="mb-4 text-lg font-semibold text-foreground">检测本地 AI 工具</h2>
+              <h2 className="mb-1 text-lg font-semibold text-foreground">检测本地 AI 工具</h2>
+              <p className="mb-4 text-xs text-muted-foreground">
+                选择一个已安装的 AI 工具作为默认引擎，系统内置助手将使用该引擎处理任务。
+              </p>
 
               {detecting ? (
                 <div className="flex items-center justify-center py-12">
@@ -316,7 +365,224 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             </div>
           )}
 
-          {/* Step 2: 创建账户 */}
+          {/* Step 2: 模型配置 */}
+          {step === STEP_MODEL && (
+            <div>
+              <h2 className="mb-1 text-lg font-semibold text-foreground">配置默认模型</h2>
+              <p className="mb-4 text-xs text-muted-foreground">
+                为所选引擎配置 API 模型，配置后将作为默认模型使用。也可以跳过，稍后在设置中配置。
+              </p>
+
+              {/* 配置方式选择 */}
+              <div className="mb-4">
+                <label className="mb-1.5 block text-sm font-medium text-foreground">
+                  配置方式
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {tools.find(t => t.id === selectedTool)?.localConfigAvailable && (
+                    <button
+                      type="button"
+                      onClick={() => setModelSource('local')}
+                      className={`flex h-9 items-center justify-center rounded-lg border px-3 text-xs font-medium transition-colors ${
+                        modelSource === 'local'
+                          ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950/30 dark:text-blue-300'
+                          : 'border-border text-muted-foreground hover:border-blue-300'
+                      }`}
+                    >
+                      使用本地配置
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setModelSource('manual')}
+                    className={`flex h-9 items-center justify-center rounded-lg border px-3 text-xs font-medium transition-colors ${
+                      modelSource === 'manual'
+                        ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950/30 dark:text-blue-300'
+                        : 'border-border text-muted-foreground hover:border-blue-300'
+                    }`}
+                  >
+                    手动配置
+                  </button>
+                </div>
+              </div>
+
+              {/* 使用本地 CLI 配置 */}
+              {modelSource === 'local' && (() => {
+                const selectedToolInfo = tools.find(t => t.id === selectedTool)
+                const localModels = selectedToolInfo?.localModels || []
+                const localModelNames = new Set(localModels.map(model => model.name))
+                const isCodex = selectedTool === 'codex'
+                return (
+                  <div className="space-y-3">
+                    <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 dark:border-blue-800 dark:bg-blue-950/30">
+                      <div className="flex items-center gap-2">
+                        <Check className="size-4 text-blue-600 dark:text-blue-400" />
+                        <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
+                          已检测到 {selectedToolInfo?.localConfigLabel || '本地 CLI 配置'}
+                        </span>
+                      </div>
+                      <p className="mt-1.5 text-xs text-blue-600/80 dark:text-blue-400/80">
+                        配置文件路径: {selectedToolInfo?.localConfigPath}
+                      </p>
+                    </div>
+                    {/* Codex 模型选择 */}
+                    {isCodex && (
+                      <div>
+                        <label className="mb-1.5 block text-sm font-medium text-foreground">
+                          Codex 模型
+                        </label>
+                        <div className="relative">
+                          <select
+                            value={modelName || '__default__'}
+                            onChange={e => setModelName(e.target.value === '__default__' ? '' : e.target.value)}
+                            className="w-full appearance-none rounded-lg border border-border bg-background px-3 py-2 pr-8 text-sm text-foreground focus:border-blue-500 focus:outline-none"
+                          >
+                            <option value="__default__">使用本地默认模型</option>
+                            {getCodexModelOptions(modelName).map(option => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+                        </div>
+                        <p className="mt-1.5 text-xs text-muted-foreground">
+                          将使用本地 auth.json 中的 API Key
+                        </p>
+                      </div>
+                    )}
+                    {!isCodex && (
+                      <div>
+                        <label className="mb-1.5 block text-sm font-medium text-foreground">
+                          Claude 模型
+                        </label>
+                        <Select
+                          value={modelName || '__default__'}
+                          onValueChange={(value) => setModelName(value === '__default__' ? '' : value)}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="选择 Claude 模型" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__default__">使用本地默认模型</SelectItem>
+                            {localModels.map(model => (
+                              <SelectItem key={model.id} value={model.name}>
+                                {model.name}
+                              </SelectItem>
+                            ))}
+                            {getClaudeModelOptions(modelName)
+                              .filter(option => !localModelNames.has(option.value))
+                              .map(option => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="mt-1.5 text-xs text-muted-foreground">
+                          将使用本地 Claude 配置；模型留空时走本地默认模型
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
+
+              {/* 手动配置 */}
+              {modelSource === 'manual' && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-foreground">
+                      API 协议
+                    </label>
+                    <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
+                      {selectedTool === 'codex' ? 'OpenAI' : 'Anthropic'}
+                      <span className="text-xs">（由所选引擎自动确定）</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-foreground">
+                      API URL
+                    </label>
+                    <input
+                      type="text"
+                      value={modelApiUrl}
+                      onChange={e => setModelApiUrl(e.target.value)}
+                      placeholder={selectedTool === 'codex' ? 'https://api.openai.com' : 'https://api.anthropic.com'}
+                      className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-blue-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-foreground">
+                      API Key <span className="text-red-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showApiKey ? 'text' : 'password'}
+                        value={modelApiKey}
+                        onChange={e => setModelApiKey(e.target.value)}
+                        placeholder="sk-..."
+                        className="w-full rounded-lg border border-border bg-background px-3 py-2 pr-10 text-sm text-foreground placeholder:text-muted-foreground focus:border-blue-500 focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowApiKey(!showApiKey)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      >
+                        {showApiKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-foreground">
+                      模型 <span className="text-red-500">*</span>
+                    </label>
+                    {selectedTool === 'codex' ? (
+                      <input
+                        type="text"
+                        value={modelName}
+                        onChange={e => setModelName(e.target.value)}
+                        placeholder="输入 Codex / OpenAI 模型 ID"
+                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-blue-500 focus:outline-none"
+                      />
+                    ) : (
+                      <input
+                        type="text"
+                        value={modelName}
+                        onChange={e => setModelName(e.target.value)}
+                        placeholder="输入 Claude / 本地模型 ID"
+                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-blue-500 focus:outline-none"
+                      />
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {error && (
+                <div className="mt-3 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div>
+              )}
+
+              <div className="mt-4 flex items-center justify-between">
+                <button onClick={() => { setError(''); setStep(STEP_TOOLS) }} className="text-sm text-muted-foreground hover:text-foreground">
+                  上一步
+                </button>
+                <button
+                  onClick={goNext}
+                  disabled={
+                    (modelSource === 'manual' && (!modelApiKey.trim() || !modelName.trim()))
+                  }
+                  className="rounded-lg bg-blue-500 px-6 py-2 text-sm font-medium text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  下一步
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 3: 创建账户 */}
           {step === STEP_ACCOUNT && (
             <div>
               <h2 className="mb-4 text-lg font-semibold text-foreground">创建管理员账户</h2>
@@ -375,7 +641,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               )}
 
               <div className="mt-4 flex items-center justify-between">
-                <button onClick={() => { setError(''); setStep(STEP_TOOLS) }} className="text-sm text-muted-foreground hover:text-foreground">
+                <button onClick={() => { setError(''); setStep(STEP_MODEL) }} className="text-sm text-muted-foreground hover:text-foreground">
                   上一步
                 </button>
                 <button
@@ -388,7 +654,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             </div>
           )}
 
-          {/* Step 3: 完成 */}
+          {/* Step 4: 完成 */}
           {step === STEP_DONE && (
             <div className="flex flex-col items-center justify-center py-8">
               <div className="mb-4 flex size-16 items-center justify-center rounded-full bg-green-100 text-green-600 dark:bg-green-900/30">
@@ -397,7 +663,20 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               <h2 className="mb-2 text-lg font-semibold text-foreground">配置完成</h2>
               <div className="mb-6 max-w-sm text-center text-sm text-muted-foreground">
                 <p>用户名: <span className="font-medium text-foreground">{username}</span></p>
-                <p>默认 Agent: <span className="font-medium text-foreground">{tools.find(t => t.id === selectedTool)?.name}</span></p>
+                <p>默认引擎: <span className="font-medium text-foreground">{tools.find(t => t.id === selectedTool)?.name}</span></p>
+                {modelSource === 'local' && selectedTool === 'codex' && (
+                  <p>模型配置: <span className="font-medium text-foreground">{modelName || '本地默认模型'}</span></p>
+                )}
+                {modelSource === 'local' && selectedTool !== 'codex' && (() => {
+                  const selectedToolInfo = tools.find(t => t.id === selectedTool)
+                  const fallbackModel = selectedToolInfo?.localModels?.[0]?.name
+                  return (
+                    <p>默认模型: <span className="font-medium text-foreground">{modelName || fallbackModel || '本地默认模型'}</span></p>
+                  )
+                })()}
+                {modelSource === 'manual' && modelName.trim() && (
+                  <p>默认模型: <span className="font-medium text-foreground">{modelName}</span></p>
+                )}
               </div>
               <button
                 onClick={handleComplete}

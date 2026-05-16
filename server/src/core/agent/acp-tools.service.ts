@@ -38,6 +38,13 @@ const TOOL_PACKAGES: Record<string, string> = {
   codex: '@openai/codex',
 };
 
+export interface LocalModelConfig {
+  id: string;
+  name: string;
+  apiUrl?: string;
+  apiKey?: string;
+}
+
 export interface AcpToolInfo {
   id: string;
   name: string;
@@ -52,9 +59,82 @@ export interface AcpToolInfo {
   localConfigAvailable?: boolean;
   localConfigPath?: string;
   localConfigLabel?: string;
+  localModels?: LocalModelConfig[];
 }
 
-function checkClaudeLocalConfig(): { available: boolean; path: string; label: string } {
+function readClaudeConfigModels(configPath: string): LocalModelConfig[] {
+  try {
+    if (!fs.existsSync(configPath)) return [];
+    const data = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    const models: LocalModelConfig[] = [];
+
+    // Claude 配置可能包含 env 对象中的 API key 和模型
+    if (data.env) {
+      if (data.env.ANTHROPIC_API_KEY) {
+        models.push({
+          id: 'claude-default',
+          name: data.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514',
+          apiUrl: data.env.ANTHROPIC_API_URL,
+          apiKey: data.env.ANTHROPIC_API_KEY,
+        });
+      }
+      // 如果有其他模型配置
+      if (data.env.CLAUDE_MODEL) {
+        models.push({
+          id: 'claude-custom',
+          name: data.env.CLAUDE_MODEL,
+          apiUrl: data.env.ANTHROPIC_API_URL,
+          apiKey: data.env.ANTHROPIC_API_KEY,
+        });
+      }
+    }
+
+    // 如果没有从 env 读取到，但有 API key
+    if (models.length === 0 && (data.apiKey || data.ANTHROPIC_API_KEY)) {
+      models.push({
+        id: 'claude-default',
+        name: data.model || 'claude-sonnet-4-20250514',
+        apiKey: data.apiKey || data.ANTHROPIC_API_KEY,
+      });
+    }
+
+    return models;
+  } catch {
+    return [];
+  }
+}
+
+function readCodexConfigModels(configPath: string): LocalModelConfig[] {
+  try {
+    if (!fs.existsSync(configPath)) return [];
+    const data = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    const models: LocalModelConfig[] = [];
+
+    // Codex auth.json 包含 OPENAI_API_KEY
+    if (data.OPENAI_API_KEY) {
+      models.push({
+        id: 'codex-default',
+        name: data.OPENAI_MODEL || 'gpt-4o',
+        apiUrl: data.OPENAI_API_URL,
+        apiKey: data.OPENAI_API_KEY,
+      });
+    }
+
+    // ChatGPT tokens 模式
+    if (data.tokens?.access_token) {
+      models.push({
+        id: 'codex-chatgpt',
+        name: 'ChatGPT (内置)',
+      });
+    }
+
+    return models;
+  } catch {
+    return [];
+  }
+}
+
+function checkClaudeLocalConfig(): { available: boolean; path: string; label: string; models: LocalModelConfig[] } {
   const candidates = [
     {
       path: path.join(os.homedir(), '.claude', 'settings.json'),
@@ -70,20 +150,34 @@ function checkClaudeLocalConfig(): { available: boolean; path: string; label: st
     },
   ];
 
-  const found = candidates.find((candidate) => fs.existsSync(candidate.path));
-  const configPath = found?.path || candidates[0].path;
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate.path)) {
+      const models = readClaudeConfigModels(candidate.path);
+      if (models.length > 0) {
+        return {
+          available: true,
+          path: candidate.path,
+          label: candidate.label,
+          models,
+        };
+      }
+    }
+  }
+
+  const defaultPath = candidates[0].path;
   return {
-    available: fs.existsSync(configPath),
-    path: configPath,
-    label: found?.label || candidates[0].label,
+    available: fs.existsSync(defaultPath),
+    path: defaultPath,
+    label: candidates[0].label,
+    models: [],
   };
 }
 
-function checkCodexLocalConfig(): { available: boolean; path: string; label: string } {
+function checkCodexLocalConfig(): { available: boolean; path: string; label: string; models: LocalModelConfig[] } {
   const authPath = path.join(os.homedir(), '.codex', 'auth.json');
   try {
     if (!fs.existsSync(authPath)) {
-      return { available: false, path: authPath, label: 'Codex auth.json' };
+      return { available: false, path: authPath, label: 'Codex auth.json', models: [] };
     }
     const data = JSON.parse(fs.readFileSync(authPath, 'utf-8'));
     const hasApiKey = typeof data.OPENAI_API_KEY === 'string' && data.OPENAI_API_KEY.length > 0;
@@ -93,17 +187,21 @@ function checkCodexLocalConfig(): { available: boolean; path: string; label: str
       typeof data.tokens.access_token === 'string' &&
       typeof data.tokens.refresh_token === 'string';
 
+    const available = Boolean(data.auth_mode && (hasApiKey || hasChatGptTokens));
+    const models = readCodexConfigModels(authPath);
+
     return {
-      available: Boolean(data.auth_mode && (hasApiKey || hasChatGptTokens)),
+      available,
       path: authPath,
       label: 'Codex auth.json',
+      models,
     };
   } catch {
-    return { available: false, path: authPath, label: 'Codex auth.json' };
+    return { available: false, path: authPath, label: 'Codex auth.json', models: [] };
   }
 }
 
-function checkLocalConfig(toolId: string): Pick<AcpToolInfo, 'localConfigAvailable' | 'localConfigPath' | 'localConfigLabel'> {
+function checkLocalConfig(toolId: string): Pick<AcpToolInfo, 'localConfigAvailable' | 'localConfigPath' | 'localConfigLabel' | 'localModels'> {
   const result = toolId === 'claude'
     ? checkClaudeLocalConfig()
     : toolId === 'codex'
@@ -115,6 +213,7 @@ function checkLocalConfig(toolId: string): Pick<AcpToolInfo, 'localConfigAvailab
     localConfigAvailable: result.available,
     localConfigPath: result.path,
     localConfigLabel: result.label,
+    localModels: result.models,
   };
 }
 

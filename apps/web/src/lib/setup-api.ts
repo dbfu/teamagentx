@@ -1,5 +1,13 @@
 import { getApiBaseUrl } from './config'
 
+// 本地模型配置
+export interface LocalModelConfig {
+  id: string
+  name: string
+  apiUrl?: string
+  apiKey?: string
+}
+
 // ACP 工具信息
 export interface AcpToolInfo {
   id: string
@@ -15,6 +23,7 @@ export interface AcpToolInfo {
   localConfigAvailable?: boolean
   localConfigPath?: string
   localConfigLabel?: string
+  localModels?: LocalModelConfig[]
 }
 
 // 引导状态
@@ -24,12 +33,21 @@ export interface SetupStatus {
   installedTools: AcpToolInfo[]
 }
 
+// 模型配置（引导阶段可选）
+export interface SetupModelConfig {
+  apiUrl?: string
+  apiKey: string
+  model: string
+  apiProtocol: string
+}
+
 // 完成引导请求
 export interface CompleteSetupRequest {
   username: string
   password: string
   avatar?: string
   defaultAcpTool: string
+  modelConfig?: SetupModelConfig
 }
 
 // 完成引导响应

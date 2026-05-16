@@ -68,7 +68,7 @@ async function validateCredentials(
 
     if (platform === 'feishu') {
       const { appId, appSecret } = values;
-      if (!appId || !appSecret) return { valid: false, error: 'App ID 和 App Secret 不能为空' };
+      if (!appId || !appSecret) return { valid: false, error: 'App ID 和 App Secret 不能为空。请确保 values 对象包含 appId 和 appSecret 字段，例如：values: {"appId": "cli_xxx", "appSecret": "yyy"}' };
       const res = await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -81,7 +81,7 @@ async function validateCredentials(
 
     if (platform === 'dingtalk') {
       const { appKey, appSecret } = values;
-      if (!appKey || !appSecret) return { valid: false, error: 'App Key 和 App Secret 不能为空' };
+      if (!appKey || !appSecret) return { valid: false, error: 'App Key 和 App Secret 不能为空。请确保 values 对象包含 appKey 和 appSecret 字段，例如：values: {"appKey": "xxx", "appSecret": "yyy"}' };
       const res = await fetch('https://api.dingtalk.com/v1.0/oauth2/accessToken', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -94,7 +94,7 @@ async function validateCredentials(
 
     if (platform === 'wecom') {
       const { corpId, agentSecret } = values;
-      if (!corpId || !agentSecret) return { valid: false, error: 'Corp ID 和 Agent Secret 不能为空' };
+      if (!corpId || !agentSecret) return { valid: false, error: 'Corp ID 和 Agent Secret 不能为空。请确保 values 对象包含 corpId 和 agentSecret 字段，例如：values: {"corpId": "xxx", "agentSecret": "yyy"}' };
       const res = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=${encodeURIComponent(corpId)}&corpsecret=${encodeURIComponent(agentSecret)}`);
       const data = await res.json() as { errcode: number; errmsg?: string };
       if (data.errcode !== 0) return { valid: false, error: `凭证无效：${data.errmsg ?? '请检查 Corp ID / Agent Secret'}` };
@@ -103,7 +103,7 @@ async function validateCredentials(
 
     if (platform === 'qq') {
       const { appId, clientSecret } = values;
-      if (!appId || !clientSecret) return { valid: false, error: 'App ID 和 Client Secret 不能为空' };
+      if (!appId || !clientSecret) return { valid: false, error: 'App ID 和 Client Secret 不能为空。请确保 values 对象包含 appId 和 clientSecret 字段，例如：values: {"appId": "xxx", "clientSecret": "yyy"}' };
       const res = await fetch('https://bots.qq.com/app/getAppAccessToken', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

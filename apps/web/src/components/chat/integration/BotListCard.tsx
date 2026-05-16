@@ -98,118 +98,99 @@ export function BotListCard({
                 <div
                   key={bot.id}
                   className={cn(
-                    'rounded-xl border bg-background px-4 py-3 transition-colors',
-                    editingBotId === bot.id ? 'border-blue-300 bg-blue-50/40' : 'border-border',
+                    'rounded-xl border bg-background transition-colors',
+                    editingBotId === bot.id ? 'border-blue-300 bg-blue-50/30' : 'border-border hover:border-gray-300',
                     isPending && 'opacity-60',
                   )}
                 >
-                  <div className="grid gap-3 xl:grid-cols-[minmax(240px,1fr)_minmax(180px,220px)_auto] xl:items-center">
-                    <div className="min-w-[240px]">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <div className="flex size-8 items-center justify-center rounded-lg bg-blue-100 text-blue-600">
-                          <Bot className="size-4" />
-                        </div>
-                        <div className="truncate text-sm font-semibold">{bot.name}</div>
-                        <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">
-                          {platformInfo?.label ?? bot.platform}
-                        </span>
-                        <span
-                          className={cn(
-                            'rounded-full px-2 py-0.5 text-[11px]',
-                            bot.enabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600',
+                  <div className="flex items-center gap-0 divide-x divide-border">
+                    {/* Bot info area */}
+                    <div className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3">
+                      <div className={cn(
+                        'flex size-9 shrink-0 items-center justify-center rounded-xl',
+                        editingBotId === bot.id ? 'bg-blue-500 text-white' : 'bg-blue-50 text-blue-600',
+                      )}>
+                        <Bot className="size-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate text-sm font-semibold text-foreground">{bot.name}</span>
+                          {editingBotId === bot.id && (
+                            <span className="shrink-0 rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                              编辑中
+                            </span>
                           )}
-                        >
-                          {bot.enabled ? '启用中' : '已停用'}
-                        </span>
-                        {editingBotId === bot.id && (
-                          <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] text-amber-700">
-                            正在编辑
+                        </div>
+                        <div className="mt-1 flex items-center gap-2">
+                          <span className="flex items-center gap-1 text-[11px]">
+                            <span className={cn(
+                              'size-1.5 rounded-full',
+                              bot.enabled ? 'bg-green-500' : 'bg-gray-300',
+                            )} />
+                            <span className={bot.enabled ? 'text-green-700' : 'text-gray-500'}>
+                              {bot.enabled ? '启用中' : '已停用'}
+                            </span>
                           </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Room binding area */}
+                    <div className="flex w-[220px] shrink-0 items-center px-4 py-3" style={noDragStyle}>
+                      <div className="flex w-full items-center gap-1.5">
+                        <select
+                          value={bot.chatRoomId ?? '__none__'}
+                          disabled={isPending}
+                          onChange={(event) => {
+                            const nextRoomId = event.target.value
+                            if (nextRoomId === '__none__') {
+                              onUnbindBot(bot)
+                              return
+                            }
+                            onSelectRoom(bot, nextRoomId)
+                          }}
+                          className="min-w-0 flex-1 rounded-lg border border-gray-200 bg-background px-2.5 py-1.5 text-xs focus:border-blue-500 focus:outline-none disabled:opacity-50"
+                        >
+                          <option value="__none__">未绑定</option>
+                          {rooms.map((room) => (
+                            <option key={room.id} value={room.id}>
+                              {room.name}
+                            </option>
+                          ))}
+                        </select>
+                        {bot.chatRoomId && (
+                          <button
+                            disabled={isPending}
+                            onClick={() => onUnbindBot(bot)}
+                            title="解绑"
+                            className="shrink-0 rounded-lg border border-gray-200 p-1.5 text-gray-400 hover:border-red-200 hover:bg-red-50 hover:text-red-500 disabled:opacity-50"
+                          >
+                            <Unplug className="size-3.5" />
+                          </button>
                         )}
                       </div>
                     </div>
 
-                    <div className="min-w-0 flex items-center gap-2" style={noDragStyle}>
-                      <select
-                        value={bot.chatRoomId ?? '__none__'}
-                        disabled={isPending}
-                        onChange={(event) => {
-                          const nextRoomId = event.target.value
-                          if (nextRoomId === '__none__') {
-                            onUnbindBot(bot)
-                            return
-                          }
-                          onSelectRoom(bot, nextRoomId)
-                        }}
-                        className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none disabled:opacity-50"
-                      >
-                        <option value="__none__">未绑定群聊</option>
-                        {rooms.map((room) => (
-                          <option key={room.id} value={room.id}>
-                            {room.name}
-                          </option>
-                        ))}
-                      </select>
-                      {bot.chatRoomId && (
-                        <button
-                          disabled={isPending}
-                          onClick={() => onUnbindBot(bot)}
-                          className="shrink-0 rounded-lg border border-gray-200 px-2.5 py-2 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-                        >
-                          <Unplug className="mr-1 inline size-3.5" />
-                          解绑
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="flex shrink-0 flex-nowrap items-center justify-end gap-1.5" style={noDragStyle}>
+                    {/* Action area */}
+                    <div className="flex shrink-0 items-center gap-1.5 px-3 py-3" style={noDragStyle}>
                       <button
                         disabled={isPending}
                         onClick={() => onStartEditBot(bot)}
-                        className="rounded-lg border border-gray-200 px-2 py-2 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                        className="rounded-lg bg-blue-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-600 disabled:opacity-50"
                       >
                         编辑
                       </button>
-
-                      <div className="hidden 2xl:flex 2xl:flex-nowrap 2xl:items-center 2xl:gap-1.5">
-                        <button
-                          disabled={isPending}
-                          onClick={() => onToggleBot(bot)}
-                          className="rounded-lg border border-gray-200 px-2 py-2 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-                        >
-                          {bot.enabled ? '停用' : '启用'}
-                        </button>
-
-                        {webhookUrl && (
-                          <button
-                            onClick={() => onCopyWebhook(bot)}
-                            className="rounded-lg border border-gray-200 px-2 py-2 text-xs text-gray-600 hover:bg-gray-50"
-                          >
-                            <Link2 className="mr-1 inline size-3.5" />
-                            Webhook
-                          </button>
-                        )}
-
-                        <button
-                          disabled={isPending}
-                          onClick={() => onDeleteBot(bot)}
-                          className="rounded-lg border border-red-200 px-2 py-2 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50"
-                        >
-                          删除
-                        </button>
-                      </div>
 
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <button
                             disabled={isPending}
-                            className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-2 py-2 text-xs text-gray-600 hover:bg-gray-50 2xl:hidden disabled:opacity-50"
+                            className="rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:bg-gray-50 disabled:opacity-50"
                           >
-                            <MoreHorizontal className="size-3.5" />
-                            更多
+                            <MoreHorizontal className="size-4" />
                           </button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-40 2xl:hidden">
+                        <DropdownMenuContent align="end" className="w-44">
                           <DropdownMenuItem onClick={() => onToggleBot(bot)}>
                             {bot.enabled ? '停用机器人' : '启用机器人'}
                           </DropdownMenuItem>

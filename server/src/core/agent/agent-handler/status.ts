@@ -34,6 +34,15 @@ export let globalBroadcastTaskQueue:
   | ((chatRoomId: string, agentId: string, tasks: { id: string; messageId: string; messageContent: string; status: string; createdAt: string }[]) => void)
   | null = null;
 
+// 触发 agent 消息处理的回调（避免 message-utils ↔ handler 循环依赖）
+export let globalEmitReceivedMessage:
+  | ((message: any, chatRoomId: string) => void)
+  | null = null;
+
+export function setGlobalEmitReceivedMessage(fn: (message: any, chatRoomId: string) => void) {
+  globalEmitReceivedMessage = fn;
+}
+
 // 广播待办创建的回调
 export let globalEmitTodoCreated:
   | ((todo: {

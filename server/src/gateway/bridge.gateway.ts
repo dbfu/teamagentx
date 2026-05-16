@@ -419,7 +419,7 @@ export async function bridgeGateway(app: FastifyInstance) {
     const user = await requireAuth(req, reply);
     if (!user) return;
     const baseUrl = await getBaseUrl();
-    return reply.send({ success: true, baseUrl });
+    return reply.send({ success: true, data: { baseUrl } });
   });
 
   app.put('/api/bridge/system-config', async (req, reply) => {
@@ -442,7 +442,7 @@ export async function bridgeGateway(app: FastifyInstance) {
       create: { platform: 'system', config: JSON.stringify({ baseUrl: clean }) },
       update: { config: JSON.stringify({ baseUrl: clean }) },
     });
-    return reply.send({ success: true, baseUrl: clean });
+    return reply.send({ success: true, data: { baseUrl: clean } });
   });
 
   app.get('/api/bridge/platforms', async (req, reply) => {

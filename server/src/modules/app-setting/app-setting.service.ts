@@ -1,5 +1,6 @@
 import prisma from '../../lib/prisma.js';
 import { authService } from '../auth/auth.service.js';
+import { llmProviderService } from '../llm-provider/llm-provider.service.js';
 import { updateSystemAgentsAcpTool } from '../../scripts/system-agent-definitions.js';
 
 export const appSettingService = {
@@ -27,12 +28,19 @@ export const appSettingService = {
 
   /**
    * 完成首次引导：注册用户 + 保存设置 + 更新系统助手 ACP 工具
+   * 可选：创建默认 LlmProvider
    */
   async completeSetup(data: {
     username: string;
     password: string;
     avatar?: string;
     defaultAcpTool: string;
+    modelConfig?: {
+      apiUrl?: string;
+      apiKey: string;
+      model: string;
+      apiProtocol: string;
+    };
   }): Promise<{ token: string; userId: string; username: string }> {
     // 1. 注册用户
     const result = await authService.register({
@@ -47,6 +55,18 @@ export const appSettingService = {
 
     // 3. 更新所有系统助手的 acpTool
     await updateSystemAgentsAcpTool(data.defaultAcpTool);
+
+    // 4. 创建默认模型配置
+    if (data.modelConfig) {
+      await llmProviderService.create({
+        name: '默认模型',
+        apiProtocol: data.modelConfig.apiProtocol,
+        apiUrl: data.modelConfig.apiUrl,
+        apiKey: data.modelConfig.apiKey,
+        model: data.modelConfig.model,
+        isDefault: true,
+      });
+    }
 
     return {
       token: result.token,
