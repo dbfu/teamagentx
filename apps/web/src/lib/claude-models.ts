@@ -1,9 +1,8 @@
 export const CLAUDE_MODEL_OPTIONS = [
-  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
-  { value: 'claude-opus-4-7', label: 'Claude Opus 4.7' },
-  { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' },
-  { value: 'qwen3-coder:30b', label: 'Qwen3 Coder 30B (local)' },
-  { value: 'gpt-oss:20b', label: 'gpt-oss 20B (local)' },
+  { value: 'claude-opus-4-7', label: 'Opus 4.7' },
+  { value: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
+  { value: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
+  { value: 'claude-opus-4-6', label: 'Opus 4.6 Legacy' },
 ] as const;
 
 export function getClaudeModelOptions(selectedModel?: string | null): Array<{ value: string; label: string }> {
