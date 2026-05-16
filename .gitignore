@@ -27,10 +27,14 @@ npm-debug.log*
 # Database
 *.db
 *.db-journal
+*.db-shm
+*.db-wal
 
 # Prisma
 server/prisma/*.db
 server/prisma/*.db-journal
+server/prisma/*.db-shm
+server/prisma/*.db-wal
 
 # TypeScript build info
 *.tsbuildinfo
