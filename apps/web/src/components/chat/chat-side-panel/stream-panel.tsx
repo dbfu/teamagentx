@@ -3,6 +3,7 @@ import { cn, truncateToolName } from '@/lib/utils';
 import type { StreamEvent } from '@/stores/socket-store';
 import { Bot, CheckCircle, ChevronDown, ChevronRight, Clock, Loader2, Square } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { CodeEditToolContent, CodeReadToolOutput, isCodeEditTool, isCodeReadTool, renderToolValue } from './tool-call-content';
 
 // 格式化开始时间（显示时分秒）
 function formatStartTime(timestamp: number): string {
@@ -356,19 +357,27 @@ export function StreamPanel({
                       {tool.input && Object.keys(tool.input).length > 0 && (
                         <div>
                           <div className="text-xs text-muted-foreground mb-1">输入:</div>
-                          <div className="font-mono text-muted-foreground bg-muted/50 rounded p-2">
-                            <pre className="whitespace-pre-wrap text-xs" style={{ wordBreak: 'break-word' }}>{JSON.stringify(tool.input, null, 2)}</pre>
-                          </div>
+                          {isCodeEditTool(tool) ? (
+                            <CodeEditToolContent tool={tool} />
+                          ) : (
+                            <div className="font-mono text-muted-foreground bg-muted/50 rounded p-2">
+                              <pre className="whitespace-pre-wrap text-xs" style={{ wordBreak: 'break-word' }}>{JSON.stringify(tool.input, null, 2)}</pre>
+                            </div>
+                          )}
                         </div>
                       )}
                       {tool.output && (
                         <div>
                           <div className="text-xs text-muted-foreground mb-1">输出:</div>
-                          <div className="font-mono text-muted-foreground bg-muted/50 rounded p-2">
-                            <pre className="whitespace-pre-wrap text-xs" style={{ wordBreak: 'break-word' }}>
-                              {typeof tool.output === 'string' ? tool.output : JSON.stringify(tool.output, null, 2)}
-                            </pre>
-                          </div>
+                          {isCodeReadTool(tool) && typeof tool.output === 'string' ? (
+                            <CodeReadToolOutput tool={tool} />
+                          ) : (
+                            <div className="font-mono text-muted-foreground bg-muted/50 rounded p-2">
+                              <pre className="whitespace-pre-wrap text-xs" style={{ wordBreak: 'break-word' }}>
+                                {renderToolValue(tool.output)}
+                              </pre>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
