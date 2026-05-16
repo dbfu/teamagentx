@@ -30,7 +30,7 @@ export function ReplyDetailPanel({ selectedReplyMessage, replies, mentionAgents 
     // 如果没有 mentionAgents，直接渲染 markdown
     if (!mentionAgents || mentionAgents.length === 0) {
       return (
-        <div className="prose prose-sm">
+        <div className="prose prose-sm [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
@@ -52,7 +52,7 @@ export function ReplyDetailPanel({ selectedReplyMessage, replies, mentionAgents 
 
     // 使用 remarkMentions 插件处理 @mentions
     return (
-      <div className="prose prose-sm">
+      <div className="prose prose-sm [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap">
         <ReactMarkdown
           remarkPlugins={[remarkGfm, [remarkMentions, { mentionAgents }]]}
           rehypePlugins={[rehypeRaw]}

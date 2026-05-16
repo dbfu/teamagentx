@@ -1,12 +1,13 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { useRef, useCallback, useEffect, useMemo } from 'react'
+import { createElement, useRef, useCallback, useEffect, useMemo } from 'react'
 import { Agent, Message, messageApi, agentApi, ExecutionRecord, debugApi, AgentDebugInfo, ChatRoom, chatRoomApi, AgentContextInfo, uploadApi } from '@/lib/agent-api'
 import { useSocketStore } from './socket-store'
 import { useChatRoomStore } from './chat-room-store'
 import type { ToolCall, StreamEvent, AgentStatus } from './socket-store'
 import { PendingImage } from '@/components/chat/image-preview-list'
 import { compressImage, fileToBase64, createPreviewUrl, revokePreviewUrl, getImageDimensions, isValidImageType, isValidImageSize } from '@/lib/image-utils'
+import { toast } from 'sonner'
 
 // 兼容 Android WebView 的 UUID 生成函数
 function generateUUID(): string {
@@ -23,6 +24,46 @@ function generateUUID(): string {
 }
 
 export const VOICE_MESSAGE_PLACEHOLDER = '[语音消息]'
+
+const missingRecipientToast = createElement(
+  'span',
+  { className: 'text-sm' },
+  '请 ',
+  createElement('span', { className: 'font-semibold text-yellow-700' }, '@助手'),
+  ' 或在群设置里 ',
+  createElement('span', { className: 'font-semibold text-yellow-700' }, '设置默认接收助手'),
+)
+
+function getMentionedAgentNames(content: string): string[] {
+  const names: string[] = []
+  const regex = /(?:^|\s|[*_>#`\-])@([\u4e00-\u9fa5a-zA-Z0-9_](?:[\u4e00-\u9fa5a-zA-Z0-9_-]*[\u4e00-\u9fa5a-zA-Z0-9_])?)(?=\s|$|[*_>#`!?.,:;！？。，；：]|-(?![\u4e00-\u9fa5a-zA-Z0-9_]))/g
+  let match: RegExpExecArray | null
+  while ((match = regex.exec(content)) !== null) {
+    if (match[1] && !names.includes(match[1])) {
+      names.push(match[1])
+    }
+  }
+  return names
+}
+
+function hasMentionedDispatchableAgent(content: string, chatRoom: ChatRoom, allAgents: Agent[]): boolean {
+  const mentionedNames = getMentionedAgentNames(content)
+  if (mentionedNames.length === 0) return false
+
+  const dispatchableAgentNames = new Set(
+    (chatRoom.chatRoomAgents ?? [])
+      .map((roomAgent) => roomAgent.agent?.name)
+      .filter((name): name is string => Boolean(name))
+  )
+
+  for (const agent of allAgents) {
+    if (agent.agentLevel === 'system' && agent.isActive) {
+      dispatchableAgentNames.add(agent.name)
+    }
+  }
+
+  return mentionedNames.some((name) => dispatchableAgentNames.has(name))
+}
 
 export type SidePanelMode = 'agents' | 'context' | 'history' | 'stream' | 'agent-detail' | 'record-detail' | 'reply-detail' | 'room-settings' | 'execution-detail' | 'cron-tasks' | 'task-queue' | 'task-board' | null
 
@@ -1258,6 +1299,15 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     // 必须有内容或图片才能发送
     if (!trimmedInput && uploadedImages.length === 0) return
 
+    if (
+      !chatRoom.isQuickChatRoom &&
+      !chatRoom.defaultAgentId &&
+      !hasMentionedDispatchableAgent(trimmedInput, chatRoom, allAgents)
+    ) {
+      toast.warning(missingRecipientToast)
+      return
+    }
+
     // 构建附件数据
     const attachments = uploadedImages.map(img => img.uploadedData!).map(data => ({
       url: data.url,
@@ -1304,7 +1354,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     if (document.activeElement instanceof HTMLElement) {
       document.activeElement.blur()
     }
-  }, [chatRoom, sendMessage, setInputValue])
+  }, [allAgents, chatRoom, sendMessage, setInputValue])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     // 中文输入过程中不响应回车（检测 nativeEvent.isComposing）

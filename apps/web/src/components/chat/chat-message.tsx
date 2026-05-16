@@ -301,7 +301,7 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
     // 如果没有 mentionAgents，直接渲染 markdown（不处理 @mentions）
     if (!mentionAgents || mentionAgents.length === 0) {
       return (
-        <div className="prose prose-sm max-w-none break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_pre]:whitespace-pre-wrap [&_code]:whitespace-pre-wrap [&_img]:max-h-[360px] [&_img]:w-auto [&_img]:max-w-[min(560px,80vw)] [&_img]:rounded-lg [&_img]:object-contain [&_img]:cursor-pointer">
+        <div className="prose prose-sm max-w-none break-words [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_pre]:whitespace-pre-wrap [&_code]:whitespace-pre-wrap [&_img]:max-h-[360px] [&_img]:w-auto [&_img]:max-w-[min(560px,80vw)] [&_img]:rounded-lg [&_img]:object-contain [&_img]:cursor-pointer">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
@@ -333,7 +333,7 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
     // 使用 rehypeRaw 来处理这些 HTML 节点
     // 在自定义 span 组件中识别我们的标记 class 并渲染为高亮元素
     return (
-      <div className="prose prose-sm max-w-none break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_pre]:whitespace-pre-wrap [&_code]:whitespace-pre-wrap [&_img]:max-h-[360px] [&_img]:w-auto [&_img]:max-w-[min(560px,80vw)] [&_img]:rounded-lg [&_img]:object-contain [&_img]:cursor-pointer">
+      <div className="prose prose-sm max-w-none break-words [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_pre]:whitespace-pre-wrap [&_code]:whitespace-pre-wrap [&_img]:max-h-[360px] [&_img]:w-auto [&_img]:max-w-[min(560px,80vw)] [&_img]:rounded-lg [&_img]:object-contain [&_img]:cursor-pointer">
         <ReactMarkdown
           remarkPlugins={[remarkGfm, [remarkMentions, { mentionAgents }]]}
           rehypePlugins={[rehypeRaw]}
