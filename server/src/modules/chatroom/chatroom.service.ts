@@ -170,6 +170,32 @@ function addVirtualSystemAgents<T extends { id: string; chatRoomAgents: any[] }>
   };
 }
 
+function syncQuickChatRoomAvatar<T extends {
+  isQuickChatRoom?: boolean | null;
+  quickChatAgentId?: string | null;
+  avatar?: string | null;
+  avatarColor?: string | null;
+  chatRoomAgents: Array<{ agentId?: string | null; agent?: { avatar?: string | null; avatarColor?: string | null } | null }>;
+}>(chatRoom: T): T {
+  if (!chatRoom.isQuickChatRoom || !chatRoom.quickChatAgentId) {
+    return chatRoom;
+  }
+
+  const quickChatAgent = chatRoom.chatRoomAgents.find(
+    (member) => member.agentId === chatRoom.quickChatAgentId && member.agent
+  )?.agent;
+
+  if (!quickChatAgent) {
+    return chatRoom;
+  }
+
+  return {
+    ...chatRoom,
+    avatar: quickChatAgent.avatar ?? chatRoom.avatar ?? null,
+    avatarColor: quickChatAgent.avatarColor ?? chatRoom.avatarColor ?? null,
+  };
+}
+
 export const chatRoomService = {
   async create(data: CreateChatRoomData) {
     const { name, avatar, avatarColor, description, workDir, ownerId, rules } = data;
@@ -322,7 +348,7 @@ export const chatRoomService = {
     if (!chatRoom) return null;
 
     const systemAgents = await getSystemAgents();
-    return addVirtualSystemAgents(chatRoom, systemAgents);
+    return addVirtualSystemAgents(syncQuickChatRoomAvatar(chatRoom), systemAgents);
   },
 
   async findAll() {
@@ -373,7 +399,7 @@ export const chatRoomService = {
       // 将 messages 数组转换为 lastMessage 字段
       const { messages, ...rest } = chatRoom;
       const lastMessage = messages && messages.length > 0 ? messages[0] : null;
-      return addVirtualSystemAgents({ ...rest, lastMessage }, systemAgents);
+      return addVirtualSystemAgents(syncQuickChatRoomAvatar({ ...rest, lastMessage }), systemAgents);
     });
 
     // 排序：置顶在前，然后按最后消息时间倒序（无消息的按创建时间）
@@ -852,7 +878,7 @@ export const chatRoomService = {
     });
 
     const systemAgents = await getSystemAgents();
-    return chatRooms.map((chatRoom) => addVirtualSystemAgents(chatRoom, systemAgents));
+    return chatRooms.map((chatRoom) => addVirtualSystemAgents(syncQuickChatRoomAvatar(chatRoom), systemAgents));
   },
 
   /**

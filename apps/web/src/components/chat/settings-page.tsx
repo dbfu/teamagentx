@@ -3,9 +3,10 @@ import { useTheme } from '@/components/theme-provider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { acpToolsApi, type AcpToolInfo } from '@/lib/agent-api';
 import { authApi } from '@/lib/auth-api';
+import { openExternalUrl, TEAMAGENTX_DOCS_URL, TEAMAGENTX_WEBSITE_URL } from '@/lib/site-links';
 import { cn } from '@/lib/utils';
 import { useAuthStore, useUIStore } from '@/stores';
-import { Check, Download, ExternalLink, Loader2, LogOut, Monitor, Moon, Palette, RefreshCw, Settings, Smartphone, Sun, Terminal, Volume2, VolumeX, X } from 'lucide-react';
+import { BookOpenText, Check, Download, ExternalLink, Globe2, Loader2, LogOut, Monitor, Moon, Palette, RefreshCw, Settings, Smartphone, Sun, Terminal, Volume2, VolumeX, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -121,9 +122,7 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
   const { user, token, logout, setUser } = useAuthStore()
   const { soundEnabled, setSoundEnabled } = useUIStore()
   const [username, setUsername] = useState(user?.username || '')
-  const [selectedAvatarIndex, setSelectedAvatarIndex] = useState(
-    user?.avatar ? ((/^\d+$/.test(user.avatar) ? parseInt(user.avatar, 10) : 0)) : 0
-  )
+  const [selectedAvatar, setSelectedAvatar] = useState(user?.avatar || '0')
   const [isUpdating, setIsUpdating] = useState(false)
   const [mobileWebUrl, setMobileWebUrl] = useState<string | null>(null)
   const [customServerUrl, setCustomServerUrl] = useState<string>('')
@@ -150,7 +149,7 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
     try {
       const response = await authApi.updateProfile(token, {
         username: username.trim(),
-        avatar: String(selectedAvatarIndex),
+        avatar: selectedAvatar,
       })
 
       if (response.success && response.data) {
@@ -171,6 +170,13 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
     }
     logout()
     navigate('/')
+  }
+
+  const handleOpenExternalLink = async (url: string, fallbackError: string) => {
+    const result = await openExternalUrl(url)
+    if (!result.success) {
+      toast.error(result.error || fallbackError)
+    }
   }
 
   // 获取局域网地址和版本号
@@ -416,8 +422,8 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
           <div className="mb-4">
             <label className="mb-1.5 block text-sm font-medium">头像</label>
             <UserAvatarSelector
-              selectedIndex={selectedAvatarIndex}
-              onSelect={setSelectedAvatarIndex}
+              selectedAvatar={selectedAvatar}
+              onSelect={setSelectedAvatar}
             />
           </div>
 
@@ -425,7 +431,7 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
           <div className="mb-4">
             <label className="mb-1.5 block text-sm font-medium">预览</label>
             <div className="flex items-center gap-3">
-              <UserAvatar avatar={selectedAvatarIndex} size="lg" />
+              <UserAvatar avatar={selectedAvatar} size="lg" />
               <span className="text-sm font-medium">{username || '用户名'}</span>
             </div>
           </div>
@@ -433,7 +439,7 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
           {/* 更新按钮 */}
           <button
             onClick={handleUpdateProfile}
-            disabled={isUpdating || username === user?.username && selectedAvatarIndex === (user?.avatar ? parseInt(user.avatar, 10) : 0)}
+            disabled={isUpdating || (username === user?.username && selectedAvatar === (user?.avatar || '0'))}
             className="w-full rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isUpdating ? (
@@ -775,6 +781,32 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
             </button>
           </div>
         )}
+
+        <div className="mb-6 rounded-xl border border-border bg-card p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <BookOpenText className="size-4 text-primary" />
+            <h2 className="text-sm font-medium text-muted-foreground">官网与文档</h2>
+          </div>
+          <p className="mb-4 text-xs leading-5 text-muted-foreground">
+            查看官网介绍、下载入口和最新使用文档。文档内容按当前客户端功能整理，适合新成员上手和团队内部流转。
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <button
+              onClick={() => handleOpenExternalLink(TEAMAGENTX_WEBSITE_URL, '打开官网失败')}
+              className="flex items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 py-2 text-sm text-foreground hover:bg-accent"
+            >
+              <Globe2 className="size-4" />
+              官网主页
+            </button>
+            <button
+              onClick={() => handleOpenExternalLink(TEAMAGENTX_DOCS_URL, '打开使用文档失败')}
+              className="flex items-center justify-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-sm text-white hover:bg-blue-600"
+            >
+              <BookOpenText className="size-4" />
+              使用文档
+            </button>
+          </div>
+        </div>
 
         <button
           onClick={handleLogout}

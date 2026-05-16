@@ -101,7 +101,7 @@ export function UpdateNotification() {
         <button
           onClick={() => updateManager.closeNotification()}
           disabled={status === 'downloading' || status === 'installing'}
-          className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent disabled:opacity-50"
+          className="flex size-8 cursor-pointer items-center justify-center rounded-lg text-muted-foreground hover:bg-accent disabled:opacity-50"
           title="关闭"
         >
           <X className="size-4" />

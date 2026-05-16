@@ -285,7 +285,7 @@ export function AssistantDetailPage() {
   // 更新助手
   const handleUpdateAssistant = async (data: {
     name: string
-    avatarIndex: number
+    avatar: string
     description: string
     prompt: string
     type: 'builtin' | 'acp'
@@ -300,7 +300,7 @@ export function AssistantDetailPage() {
     if (!agent) return false
     const response = await agentApi.update(agent.id, {
       name: data.name,
-      avatar: String(data.avatarIndex),
+      avatar: data.avatar,
       description: data.description,
       prompt: data.prompt,
       type: data.type,
@@ -313,7 +313,8 @@ export function AssistantDetailPage() {
       imageGeneration: data.imageGeneration,
     })
     if (response.success) {
-      refreshAgent()
+      await refreshAgent()
+      await loadChatRooms()
       setIsEditModalOpen(false)
       return true
     } else {

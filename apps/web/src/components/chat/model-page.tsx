@@ -4,8 +4,8 @@ import { getCodexModelOptions } from '@/lib/codex-models';
 import { llmProviderApi, type CreateLlmProviderRequest, type LlmProvider, type UpdateLlmProviderRequest } from '@/lib/llm-provider-api';
 import { tokenUsageApi, type TokenUsageByProvider } from '@/lib/token-usage-api';
 import { cn } from '@/lib/utils';
-import { Activity, BadgeCheck, Copy, Cpu, Eye, EyeOff, Image, Mic, Pencil, Plus, Power, RefreshCw, Search, ServerCog, Sparkles, Star, Trash2, Video, Wifi, WifiOff, X } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { Activity, BadgeCheck, Copy, Cpu, Download, Eye, EyeOff, Image, Mic, Pencil, Plus, Power, RefreshCw, Search, ServerCog, Sparkles, Star, Trash2, Upload, Video, Wifi, WifiOff, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 const IMAGE_PROVIDER_BASE_URLS: Record<string, string> = {
@@ -19,8 +19,12 @@ const IMAGE_PROVIDER_BASE_URLS: Record<string, string> = {
   volcengine: 'https://ark.cn-beijing.volces.com/api/v3',
 }
 
+function imageProviderBaseUrl(provider: string | null | undefined): string {
+  return IMAGE_PROVIDER_BASE_URLS[provider || ''] || ''
+}
+
 function imageProviderPlaceholder(provider: string | null | undefined): string {
-  return IMAGE_PROVIDER_BASE_URLS[provider || ''] || 'https://api.openai.com/v1'
+  return imageProviderBaseUrl(provider) || 'https://api.openai.com/v1'
 }
 
 function imageProviderSubmitPath(provider: string | null | undefined, apiType: CreateLlmProviderRequest['imageApiType'] | null | undefined): string {
@@ -31,6 +35,129 @@ function imageProviderSubmitPath(provider: string | null | undefined, apiType: C
       : '/multimodal-generation/generation'
   }
   return '/images/generations'
+}
+
+function shouldReplaceImageApiUrl(currentUrl: string | null | undefined, previousProvider: string | null | undefined): boolean {
+  const normalizedUrl = (currentUrl || '').trim()
+  if (!normalizedUrl) return true
+
+  const previousBaseUrl = imageProviderBaseUrl(previousProvider)
+  return Boolean(previousBaseUrl) && normalizedUrl.replace(/\/+$/, '') === previousBaseUrl.replace(/\/+$/, '')
+}
+
+function applyImageProviderBaseUrl(
+  prev: CreateLlmProviderRequest,
+  nextProvider: string | null | undefined,
+): CreateLlmProviderRequest {
+  const baseUrl = imageProviderBaseUrl(nextProvider)
+  if (!baseUrl) {
+    return { ...prev, imageProvider: nextProvider || prev.imageProvider }
+  }
+
+  if (!shouldReplaceImageApiUrl(prev.apiUrl, prev.imageProvider)) {
+    return { ...prev, imageProvider: nextProvider || prev.imageProvider }
+  }
+
+  return {
+    ...prev,
+    imageProvider: nextProvider || prev.imageProvider,
+    apiUrl: baseUrl,
+  }
+}
+
+type ExportableProvider = Required<Pick<
+  CreateLlmProviderRequest,
+  'name' | 'apiKey' | 'model'
+>> & Pick<
+  CreateLlmProviderRequest,
+  'type' | 'modelType' | 'apiProtocol' | 'apiUrl' | 'imageProvider' | 'imageApiType' | 'isActive' | 'isDefault'
+>
+
+interface ModelProvidersImportPayload {
+  version: 1
+  exportedAt: string
+  providers: ExportableProvider[]
+}
+
+function toExportableProvider(provider: LlmProvider): ExportableProvider {
+  return {
+    name: provider.name,
+    type: provider.type || 'custom',
+    modelType: provider.modelType || 'text',
+    apiProtocol: provider.apiProtocol || 'anthropic',
+    apiUrl: provider.apiUrl || '',
+    apiKey: provider.apiKey,
+    model: provider.model,
+    imageProvider: provider.imageProvider,
+    imageApiType: provider.imageApiType,
+    isActive: provider.isActive,
+    isDefault: provider.isDefault,
+  }
+}
+
+function normalizeImportedProvider(raw: unknown, index: number): ExportableProvider {
+  if (!raw || typeof raw !== 'object') {
+    throw new Error(`第 ${index + 1} 项不是有效对象`)
+  }
+
+  const item = raw as Record<string, unknown>
+  const name = typeof item.name === 'string' ? item.name.trim() : ''
+  const apiKey = typeof item.apiKey === 'string' ? item.apiKey.trim() : ''
+  const model = typeof item.model === 'string' ? item.model.trim() : ''
+  const modelType = item.modelType === 'image' || item.modelType === 'video' || item.modelType === 'audio'
+    ? item.modelType
+    : 'text'
+  const apiProtocol = item.apiProtocol === 'openai' ? 'openai' : 'anthropic'
+  const apiUrl = typeof item.apiUrl === 'string' ? item.apiUrl.trim() : ''
+  const imageProvider = typeof item.imageProvider === 'string' ? item.imageProvider : null
+  const imageApiType = item.imageApiType === 'async' || item.imageApiType === 'auto' || item.imageApiType === 'sync'
+    ? item.imageApiType
+    : null
+  const isActive = typeof item.isActive === 'boolean' ? item.isActive : true
+  const isDefault = typeof item.isDefault === 'boolean' ? item.isDefault : false
+
+  if (!name || !apiKey || !model || !apiUrl) {
+    throw new Error(`第 ${index + 1} 项缺少必填字段（名称、API URL、API Key、模型）`)
+  }
+
+  if (modelType === 'image' && (!imageProvider || !imageApiType)) {
+    throw new Error(`第 ${index + 1} 项是图片模型，但缺少 imageProvider 或 imageApiType`)
+  }
+
+  return {
+    name,
+    type: 'custom',
+    modelType,
+    apiProtocol,
+    apiUrl,
+    apiKey,
+    model,
+    imageProvider,
+    imageApiType,
+    isActive,
+    isDefault,
+  }
+}
+
+function parseImportPayload(rawText: string): ExportableProvider[] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(rawText)
+  } catch {
+    throw new Error('JSON 解析失败，请检查文件格式')
+  }
+
+  const list = Array.isArray(parsed)
+    ? parsed
+    : (parsed && typeof parsed === 'object' && Array.isArray((parsed as ModelProvidersImportPayload).providers))
+      ? (parsed as ModelProvidersImportPayload).providers
+      : null
+
+  if (!list || list.length === 0) {
+    throw new Error('未找到可导入的模型配置')
+  }
+
+  return list.map((item, index) => normalizeImportedProvider(item, index))
 }
 
 export function ModelPage() {
@@ -61,6 +188,7 @@ export function ModelPage() {
 
   // 密码可见性
   const [showApiKey, setShowApiKey] = useState(false)
+  const importInputRef = useRef<HTMLInputElement | null>(null)
 
   // AI 创建状态
   const [isAiDialogOpen, setIsAiDialogOpen] = useState(false)
@@ -170,16 +298,18 @@ export function ModelPage() {
 
   // 打开编辑对话框
   const openEditDialog = (provider: LlmProvider) => {
+    const imageProvider = provider.imageProvider || 'openai'
+    const apiUrl = provider.apiUrl || ((provider.modelType || 'text') === 'image' ? imageProviderBaseUrl(imageProvider) : '')
     setEditingProvider(provider)
     setFormData({
       name: provider.name,
       type: 'custom',
       modelType: provider.modelType || 'text',
       apiProtocol: provider.apiProtocol || 'anthropic',
-      apiUrl: provider.apiUrl || '',
+      apiUrl,
       apiKey: provider.apiKey,
       model: provider.model,
-      imageProvider: provider.imageProvider || 'openai',
+      imageProvider,
       imageApiType: provider.imageApiType || 'sync',
       isActive: provider.isActive,
       isDefault: provider.isDefault,
@@ -189,6 +319,8 @@ export function ModelPage() {
 
   // 复制模型配置（创建副本）
   const handleCopy = async (provider: LlmProvider) => {
+    const imageProvider = provider.imageProvider || 'openai'
+    const apiUrl = provider.apiUrl || ((provider.modelType || 'text') === 'image' ? imageProviderBaseUrl(imageProvider) : '')
     // 打开创建对话框，预填充原数据
     setEditingProvider(null)
     setFormData({
@@ -196,10 +328,10 @@ export function ModelPage() {
       type: 'custom',
       modelType: provider.modelType || 'text',
       apiProtocol: provider.apiProtocol || 'anthropic',
-      apiUrl: provider.apiUrl || '',
+      apiUrl,
       apiKey: provider.apiKey,
       model: provider.model,
-      imageProvider: provider.imageProvider || 'openai',
+      imageProvider,
       imageApiType: provider.imageApiType || 'sync',
       isActive: true,
       isDefault: false, // 副本不设为默认
@@ -340,6 +472,74 @@ export function ModelPage() {
     setIsAiDialogOpen(true)
   }
 
+  const handleExport = () => {
+    if (providers.length === 0) {
+      toast.error('暂无可导出的模型配置')
+      return
+    }
+
+    const payload: ModelProvidersImportPayload = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      providers: providers.map(toExportableProvider),
+    }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    const date = new Date().toISOString().slice(0, 10)
+    link.href = url
+    link.download = `teamagentx-model-providers-${date}.json`
+    link.click()
+    URL.revokeObjectURL(url)
+    toast.success(`已导出 ${providers.length} 个模型配置`)
+  }
+
+  const triggerImport = () => {
+    importInputRef.current?.click()
+  }
+
+  const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
+    let importedProviders: ExportableProvider[]
+    try {
+      importedProviders = parseImportPayload(await file.text())
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '导入失败')
+      return
+    }
+
+    const defaults = importedProviders.filter((provider) => provider.isDefault)
+    const nonDefaults = importedProviders.filter((provider) => !provider.isDefault)
+    const orderedProviders = [...nonDefaults, ...defaults]
+
+    let successCount = 0
+    const failedItems: string[] = []
+
+    for (const provider of orderedProviders) {
+      const response = await llmProviderApi.create(provider)
+      if (response.success) {
+        successCount += 1
+      } else {
+        failedItems.push(`${provider.name}: ${response.error || '创建失败'}`)
+      }
+    }
+
+    if (successCount > 0) {
+      await loadProviders()
+    }
+
+    if (failedItems.length === 0) {
+      toast.success(`成功导入 ${successCount} 个模型配置`)
+      return
+    }
+
+    toast.error(`导入完成，成功 ${successCount} 个，失败 ${failedItems.length} 个`)
+    failedItems.slice(0, 3).forEach((message) => toast.error(message))
+  }
+
   return (
     <div className="flex flex-1 flex-col overflow-hidden bg-[var(--surface)]">
       {/* 头部 */}
@@ -383,6 +583,14 @@ export function ModelPage() {
             <RefreshCw className={cn('size-3.5', isLoading && 'animate-spin')} />
             刷新
           </Button>
+          <Button variant="outline" size="sm" onClick={handleExport} className="h-8">
+            <Download className="size-3.5" />
+            导出 JSON
+          </Button>
+          <Button variant="outline" size="sm" onClick={triggerImport} className="h-8">
+            <Upload className="size-3.5" />
+            导入 JSON
+          </Button>
           <Button size="sm" className="h-8 bg-primary text-primary-foreground hover:bg-primary/90" onClick={openCreateDialog}>
             <Plus className="size-3.5" />
             新增模型
@@ -394,6 +602,13 @@ export function ModelPage() {
             </Button>
           )}
         </div>
+        <input
+          ref={importInputRef}
+          type="file"
+          accept="application/json,.json"
+          onChange={handleImportFile}
+          className="hidden"
+        />
       </div>
 
       {/* 供应商列表 */}
@@ -631,11 +846,19 @@ export function ModelPage() {
                           key={item.value}
                           type="button"
                           onClick={() => setFormData(prev => ({
-                            ...prev,
-                            modelType: item.value as CreateLlmProviderRequest['modelType'],
-                            apiProtocol: item.value === 'text' ? (prev.apiProtocol || 'anthropic') : 'openai',
-                            imageProvider: item.value === 'image' ? (prev.imageProvider || 'openai') : prev.imageProvider,
-                            imageApiType: item.value === 'image' ? (prev.imageApiType || 'sync') : prev.imageApiType,
+                            ...(item.value === 'image'
+                              ? applyImageProviderBaseUrl({
+                                ...prev,
+                                modelType: 'image',
+                                apiProtocol: 'openai',
+                                imageProvider: prev.imageProvider || 'openai',
+                                imageApiType: prev.imageApiType || 'sync',
+                              }, prev.imageProvider || 'openai')
+                              : {
+                                ...prev,
+                                modelType: 'text',
+                                apiProtocol: prev.apiProtocol || 'anthropic',
+                              }),
                           }))}
                           className={cn(
                             'flex h-9 items-center justify-center gap-2 rounded-md border px-3 text-xs font-medium transition-colors',
@@ -660,7 +883,7 @@ export function ModelPage() {
                       </label>
                       <select
                         value={formData.imageProvider || 'openai'}
-                        onChange={e => setFormData(prev => ({ ...prev, imageProvider: e.target.value }))}
+                        onChange={e => setFormData(prev => applyImageProviderBaseUrl(prev, e.target.value))}
                         className="ta-input w-full shadow-none"
                       >
                         <option value="openai">OpenAI</option>

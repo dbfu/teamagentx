@@ -1,6 +1,7 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AcpToolInfo, Agent, AgentSpeechConfig, agentApi, AgentCategory, acpToolsApi, categoryApi } from '@/lib/agent-api';
-import { AgentAvatarImage, agentAvatarOptions, normalizeAgentAvatarIndex } from '@/lib/agent-avatars';
+import { AgentAvatarImage, agentAvatarOptions } from '@/lib/agent-avatars';
+import { AvatarSelector } from './avatar-selector';
 import { getCodexModelOptions } from '@/lib/codex-models';
 import { normalizeAgentSpeechConfig } from '@/lib/agent-speech';
 import { llmProviderApi, type LlmProvider } from '@/lib/llm-provider-api';
@@ -8,8 +9,7 @@ import { getProviderProtocolHint, getRequiredProviderProtocol, isProviderCompati
 import { promptOptimizeApi } from '@/lib/prompt-optimize-api';
 import { InstalledSkill, skillApi } from '@/lib/skill-api';
 import { Switch } from '@/components/ui/switch';
-import { cn } from '@/lib/utils';
-import { Check, Image, Loader2, Maximize2, Sparkles, X } from 'lucide-react';
+import { Image, Loader2, Maximize2, Sparkles, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -18,7 +18,7 @@ interface EditAssistantModalProps {
   onClose: () => void
   onSubmit: (data: {
     name: string
-    avatarIndex: number
+    avatar: string
     description: string
     prompt: string
     type: 'builtin' | 'acp'
@@ -158,7 +158,7 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [prompt, setPrompt] = useState('')
-  const [selectedAvatarIndex, setSelectedAvatarIndex] = useState(0)
+  const [selectedAvatar, setSelectedAvatar] = useState('0')
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [assistantType, setAssistantType] = useState<'builtin' | 'acp'>('acp')
   const [acpTool, setAcpTool] = useState('claude')
@@ -317,7 +317,7 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
       setName(mode === 'copy' ? `${assistantForForm.name}(副本)` : assistantForForm.name)
       setDescription(assistantForForm.description || '')
       setPrompt(assistantForForm.prompt)
-      setSelectedAvatarIndex(normalizeAgentAvatarIndex(assistantForForm.avatar))
+      setSelectedAvatar(assistantForForm.avatar || '0')
       setAssistantType(assistantForForm.type || 'acp')
       setAcpTool(assistantForForm.acpTool || 'claude')
       setCategoryId(assistantForForm.categoryId || '')
@@ -389,7 +389,7 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
         : (effectiveLlmProviderId || null)
       const success = await onSubmit({
         name: name.trim(),
-        avatarIndex: selectedAvatarIndex,
+        avatar: selectedAvatar,
         description: description.trim(),
         prompt: prompt.trim(),
         type: assistantType,
@@ -421,7 +421,7 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <div className="flex items-center gap-3">
-            <AgentAvatarImage avatar={selectedAvatarIndex} className="size-9" />
+            <AgentAvatarImage avatar={selectedAvatar} className="size-9" />
             <h2 className="text-lg font-semibold text-foreground">{mode === 'copy' ? '复制助手' : '编辑助手'}</h2>
           </div>
           <button
@@ -628,27 +628,15 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
             {/* Avatar selection */}
             <div className="mb-4">
               <label className="mb-1.5 block text-sm font-medium text-foreground">头像</label>
-              <div className="grid max-h-64 grid-cols-6 gap-2 overflow-y-auto rounded-lg border border-border bg-background p-2">
-                {agentAvatarOptions.map((index) => (
-                  <button
-                    key={index}
-                    type="button"
-                    aria-label={`选择头像 ${index + 1}`}
-                    onClick={() => setSelectedAvatarIndex(index)}
-                    className={cn(
-                      'relative flex size-12 items-center justify-center rounded-full transition-all hover:ring-2 hover:ring-primary/30',
-                      selectedAvatarIndex === index && 'ring-2 ring-primary ring-offset-2 ring-offset-background'
-                    )}
-                  >
-                    <AgentAvatarImage avatar={index} className="size-12" />
-                    {selectedAvatarIndex === index && (
-                      <span className="absolute -bottom-0.5 -right-0.5 flex size-5 items-center justify-center rounded-full bg-primary text-white shadow-sm">
-                        <Check className="size-3" />
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </div>
+              <AvatarSelector
+                value={selectedAvatar}
+                onChange={setSelectedAvatar}
+                options={agentAvatarOptions}
+                optionAriaLabel={(index) => `选择头像 ${index + 1}`}
+                renderAvatar={(avatar, className) => (
+                  <AgentAvatarImage avatar={avatar} className={className} />
+                )}
+              />
             </div>
 
             {/* Description */}

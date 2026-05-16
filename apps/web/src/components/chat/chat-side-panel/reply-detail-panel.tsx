@@ -5,6 +5,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw'
 import { remarkMentions, MENTION_MARKER_CLASS } from '@/lib/remark-mentions'
+import { resolveAssetUrl } from '@/lib/asset-url'
 
 interface MentionAgent {
   id: string
@@ -38,6 +39,9 @@ export function ReplyDetailPanel({ selectedReplyMessage, replies, mentionAgents 
                   {children}
                 </a>
               ),
+              img: ({ src, alt }) => (
+                <img src={resolveAssetUrl(src)} alt={alt || '图片'} />
+              ),
             }}
           >
             {content}
@@ -57,6 +61,9 @@ export function ReplyDetailPanel({ selectedReplyMessage, replies, mentionAgents 
               <a href={href} target="_blank" rel="noopener noreferrer">
                 {children}
               </a>
+            ),
+            img: ({ src, alt }) => (
+              <img src={resolveAssetUrl(src)} alt={alt || '图片'} />
             ),
             span: ({ className, children, ...props }) => {
               if (className === MENTION_MARKER_CLASS) {

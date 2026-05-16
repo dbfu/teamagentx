@@ -26,7 +26,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const [selectedAvatarIndex, setSelectedAvatarIndex] = useState(0)
+  const [selectedAvatar, setSelectedAvatar] = useState('0')
   const [loading, setLoading] = useState(false)
   const [detecting, setDetecting] = useState(false)
   const [error, setError] = useState('')
@@ -125,7 +125,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       const result = await setupApi.completeSetup({
         username: username.trim(),
         password,
-        avatar: String(selectedAvatarIndex),
+        avatar: selectedAvatar,
         defaultAcpTool: selectedTool,
         ...(hasManualConfig ? {
           modelConfig: {
@@ -630,8 +630,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 <div>
                   <label className="mb-1.5 block text-sm font-medium text-foreground">头像</label>
                   <UserAvatarSelector
-                    selectedIndex={selectedAvatarIndex}
-                    onSelect={setSelectedAvatarIndex}
+                    selectedAvatar={selectedAvatar}
+                    onSelect={setSelectedAvatar}
                   />
                 </div>
               </div>

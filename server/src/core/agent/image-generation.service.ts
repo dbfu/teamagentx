@@ -42,7 +42,7 @@ function submitPathFor(providerType: string, mode: 'sync' | 'async' | 'auto'): s
   if (providerType === 'bailian') return mode === 'sync' ? SUBMIT_PATH_BAILIAN_SYNC : SUBMIT_PATH_BAILIAN_ASYNC;
   return providerType === 'openrouter' ? SUBMIT_PATH_OPENROUTER : SUBMIT_PATH_DEFAULT;
 }
-const DEFAULT_TIMEOUT_MS = 120_000;
+const DEFAULT_TIMEOUT_MS = 240_000;
 const DEFAULT_POLL_INTERVAL_MS = 5_000;
 
 const LOG_PREFIX = '[ImageGen]';

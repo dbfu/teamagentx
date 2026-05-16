@@ -46,9 +46,11 @@ const PARSE_CONFIG_PROMPT = `你是一个模型配置解析助手。用户会提
 export const llmProviderService = {
   async create(data: CreateLlmProviderInput): Promise<LlmProvider> {
     const modelType = data.modelType || 'text';
+    const existingProviderCount = await prisma.llmProvider.count();
+    const shouldSetDefault = existingProviderCount === 0 || (data.isDefault ?? false);
 
     // 如果设置为默认，需要先清除其他默认
-    if (data.isDefault) {
+    if (shouldSetDefault) {
       await prisma.llmProvider.updateMany({
         where: { isDefault: true, modelType },
         data: { isDefault: false },
@@ -68,7 +70,7 @@ export const llmProviderService = {
         imageProvider: modelType === 'image' ? data.imageProvider : null,
         imageApiType: modelType === 'image' ? (data.imageApiType || 'sync') : null,
         isActive: data.isActive ?? true,
-        isDefault: data.isDefault ?? false,
+        isDefault: shouldSetDefault,
       },
     });
   },

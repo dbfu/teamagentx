@@ -51,6 +51,7 @@ import { QuickChatStartDialog } from './quick-chat-start-dialog'
 import { AgentCard } from './agent-card'
 import { useAuthStore } from '@/stores'
 import { toast } from 'sonner'
+import { useChatRoomStore } from '@/stores/chat-room-store'
 
 // 系统分类 ID
 const SYSTEM_CATEGORY_ID = 'system-category-00000000-0000-0000-0000-000000000001'
@@ -251,6 +252,7 @@ interface AssistantPageProps {
 export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageProps) {
   const navigate = useNavigate()
   const { user: currentUser } = useAuthStore()
+  const loadChatRooms = useChatRoomStore((s) => s.loadChatRooms)
   const [assistants, setAssistants] = useState<Agent[]>([])
   const [groupedData, setGroupedData] = useState<AgentsGrouped | null>(null)
   const [_categories, setCategories] = useState<AgentCategory[]>([])
@@ -345,7 +347,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
 
   const handleCreateAssistant = async (data: {
     name: string
-    avatarIndex: number
+    avatar: string
     description: string
     prompt: string
     type: 'builtin' | 'acp'
@@ -359,7 +361,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
   }): Promise<boolean> => {
     const response = await agentApi.create({
       name: data.name,
-      avatar: String(data.avatarIndex),
+      avatar: data.avatar,
       description: data.description,
       prompt: data.prompt,
       type: data.type,
@@ -385,7 +387,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
 
   const handleUpdateAssistant = async (data: {
     name: string
-    avatarIndex: number
+    avatar: string
     description: string
     prompt: string
     type: 'builtin' | 'acp'
@@ -400,7 +402,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     if (!editingAssistant) return false
     const response = await agentApi.update(editingAssistant.id, {
       name: data.name,
-      avatar: String(data.avatarIndex),
+      avatar: data.avatar,
       description: data.description,
       prompt: data.prompt,
       type: data.type,
@@ -414,6 +416,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     })
     if (response.success) {
       await fetchData()
+      await loadChatRooms()
       setIsEditModalOpen(false)
       setEditingAssistant(null)
       return true

@@ -1,5 +1,6 @@
 import { cn } from '@/lib/utils'
 import { AgentAvatarImage, agentAvatarOptions } from '@/lib/agent-avatars'
+import { AvatarSelector } from './avatar-selector'
 
 interface UserAvatarProps {
   avatar: string | number | null | undefined
@@ -34,32 +35,27 @@ export function UserAvatar({ avatar, size = 'md', className }: UserAvatarProps) 
  * 用于注册和设置页面
  */
 export function UserAvatarSelector({
-  selectedIndex,
+  selectedAvatar,
   onSelect,
 }: {
-  selectedIndex: number
-  onSelect: (index: number) => void
+  selectedAvatar: string | number | null | undefined
+  onSelect: (avatar: string) => void
 }) {
   return (
-    <div className="grid max-h-40 grid-cols-10 gap-1 overflow-y-auto rounded-lg border border-border bg-background p-2">
-      {agentAvatarOptions.map((index) => (
-        <button
-          key={index}
-          type="button"
-          onClick={() => onSelect(index)}
-          className={cn(
-            'flex size-8 items-center justify-center rounded-lg transition-all overflow-hidden',
-            selectedIndex === index
-              ? 'ring-2 ring-primary ring-offset-1 scale-110'
-              : 'hover:scale-105'
-          )}
-        >
-          <AgentAvatarImage
-            avatar={index}
-            className="size-7"
-          />
-        </button>
-      ))}
-    </div>
+    <AvatarSelector
+      value={selectedAvatar}
+      onChange={onSelect}
+      options={agentAvatarOptions}
+      optionAriaLabel={(index) => `选择头像 ${index + 1}`}
+      gridClassName="grid-cols-10"
+      itemClassName="size-8"
+      selectedItemClassName="scale-110"
+      renderAvatar={(avatar, className) => (
+        <AgentAvatarImage
+          avatar={avatar}
+          className={cn('size-7', className === 'size-8' && 'size-7')}
+        />
+      )}
+    />
   )
 }
