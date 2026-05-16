@@ -122,9 +122,6 @@ export function BotListCard({
                           )}
                         </div>
                         <div className="mt-1 flex items-center gap-2">
-                          <span className="rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-600">
-                            {platformInfo?.label ?? bot.platform}
-                          </span>
                           <span className="flex items-center gap-1 text-[11px]">
                             <span className={cn(
                               'size-1.5 rounded-full',
@@ -139,9 +136,8 @@ export function BotListCard({
                     </div>
 
                     {/* Room binding area */}
-                    <div className="flex w-[220px] shrink-0 flex-col gap-1 px-4 py-3" style={noDragStyle}>
-                      <span className="text-[10px] font-medium text-muted-foreground">绑定群聊</span>
-                      <div className="flex items-center gap-1.5">
+                    <div className="flex w-[220px] shrink-0 items-center px-4 py-3" style={noDragStyle}>
+                      <div className="flex w-full items-center gap-1.5">
                         <select
                           value={bot.chatRoomId ?? '__none__'}
                           disabled={isPending}

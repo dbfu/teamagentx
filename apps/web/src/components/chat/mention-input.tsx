@@ -50,6 +50,8 @@ export function MentionInput({
   const [selectedIndex, setSelectedIndex] = useState(0)
   const editorRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+  const selectedItemRef = useRef<HTMLDivElement>(null)
   const isComposingRef = useRef(false)
 
   // 撤销历史栈
@@ -275,10 +277,16 @@ export function MentionInput({
     prevValueRef.current = value
   }, [value, resetHistory])
 
+  // 选中项变化时自动滚动到可见区域
+  useEffect(() => {
+    if (selectedItemRef.current && dropdownRef.current) {
+      selectedItemRef.current.scrollIntoView({ block: 'nearest' })
+    }
+  }, [selectedIndex])
+
   // 过滤助手列表
   const filteredAgents = agents
     .filter(a => !mentionQuery || a.name.toLowerCase().includes(mentionQuery.toLowerCase()))
-    .slice(0, 20)
 
   // 获取纯文本内容（正确处理 contentEditable 中的换行符）
   // contentEditable 中浏览器通常使用 <div> 或 <br> 表示换行
@@ -686,12 +694,14 @@ export function MentionInput({
       {/* Mention suggestions */}
       {showMentions && filteredAgents.length > 0 && (
         <div
-          className="absolute bottom-full z-20 mb-1 w-64 rounded-lg border border-border bg-popover shadow-lg animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-2 duration-200"
+          ref={dropdownRef}
+          className="absolute bottom-full z-20 mb-1 max-h-96 w-64 overflow-y-auto rounded-lg border border-border bg-popover shadow-lg animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-2 duration-200"
           style={{ left: `${mentionLeft}px` }}
         >
           {filteredAgents.map((agent, index) => (
             <div
               key={agent.id}
+              ref={index === selectedIndex ? selectedItemRef : null}
               className={cn(
                 'flex cursor-pointer items-center gap-2 px-3 py-2 first:rounded-t-lg last:rounded-b-lg hover:bg-primary/5',
                 index === selectedIndex && 'bg-primary/5'

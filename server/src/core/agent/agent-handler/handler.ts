@@ -3,7 +3,7 @@ import { chatRoomService } from '../../../modules/chatroom/chatroom.service.js';
 import { agentService } from '../agent.service.js';
 import { recoveryService } from '../../../modules/recovery/recovery.service.js';
 import type { Message } from '../../../types/message.js';
-import { setGlobalCallbacks } from './status.js';
+import { setGlobalCallbacks, setGlobalEmitReceivedMessage } from './status.js';
 import type { AgentStatus } from './status.js';
 import type { ToolCall } from '../executor.interface.js';
 import { parseMentions } from './message-utils.js';
@@ -85,6 +85,11 @@ export function setupAIHandlers(
     emitStatus,
     broadcastTaskQueue,
     emitTodoCreated,
+  });
+
+  // 注入 receivedMessage 触发器，供 broadcastCronTriggerMessage 调用
+  setGlobalEmitReceivedMessage((message, chatRoomId) => {
+    emitter.emit('receivedMessage', { message, chatRoomId });
   });
 
   messageEventEmitter.on(
