@@ -1362,6 +1362,14 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     });
   }
 
+  private stripMcpTaxPrefix(name: string): string {
+    const MCP_TAX_PREFIX = 'mcp__tax__';
+    if (name.startsWith(MCP_TAX_PREFIX)) {
+      return name.slice(MCP_TAX_PREFIX.length);
+    }
+    return name;
+  }
+
   private upsertToolCall(toolCall: ToolCall): void {
     const existing = this.toolCalls.find(
       (item) => item.toolCallId === toolCall.toolCallId,
@@ -1399,7 +1407,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       event.content_block?.type === 'tool_use'
     ) {
       this.upsertToolCall({
-        name: event.content_block.name || 'tool_call',
+        name: this.stripMcpTaxPrefix(event.content_block.name || 'tool_call'),
         input: event.content_block.input || {},
         toolCallId: event.content_block.id || message.uuid || randomUUID(),
         status: 'in_progress',
@@ -1452,7 +1460,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
 
       if (block?.type === 'tool_use') {
         this.upsertToolCall({
-          name: block.name || 'tool_call',
+          name: this.stripMcpTaxPrefix(block.name || 'tool_call'),
           input: block.input || {},
           toolCallId: block.id || randomUUID(),
           status: 'completed',
@@ -1533,7 +1541,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
         return undefined;
       case 'tool_progress':
         this.upsertToolCall({
-          name: (message as any).tool_name || 'tool_call',
+          name: this.stripMcpTaxPrefix((message as any).tool_name || 'tool_call'),
           input: {},
           toolCallId: (message as any).tool_use_id || message.uuid,
           status: 'in_progress',
