@@ -204,6 +204,41 @@ function findBundledCodexBinary(): string {
   }
 }
 
+function findExecutableOnPath(commandName: string): string | undefined {
+  try {
+    const lookupCommand = process.platform === 'win32' ? 'where' : 'which';
+    const result = execFileSync(lookupCommand, [commandName], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    return result.split(/\r?\n/).find(Boolean)?.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function findGitNexusRepoRoot(startDir: string): string | undefined {
+  let current = path.resolve(startDir);
+  while (true) {
+    if (fs.existsSync(path.join(current, '.gitnexus'))) return current;
+    const parent = path.dirname(current);
+    if (parent === current) return undefined;
+    current = parent;
+  }
+}
+
+function buildGitNexusMcpServerConfig(workDir: string): CodexConfigObject | undefined {
+  if (!findGitNexusRepoRoot(workDir)) return undefined;
+
+  const gitnexusCommand = findExecutableOnPath('gitnexus');
+  if (!gitnexusCommand) return undefined;
+
+  return {
+    command: gitnexusCommand,
+    args: ['mcp'],
+  };
+}
+
 function getCodexBinaryFromPlatformPackageJson(platformPackageJsonPath: string): string | undefined {
   const targetTriple = getCodexTargetTriple();
   const codexBinaryName = process.platform === 'win32' ? 'codex.exe' : 'codex';
@@ -1182,6 +1217,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     const env = this.buildEnv();
     const mcpServerPath = this.ensureTeamAgentXMcpServerFile();
     const generateImageEndpoint = `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/generate-image`;
+    const gitNexusMcpServer = buildGitNexusMcpServerConfig(this.workDir);
     const config = {
       hide_agent_reasoning: false,
       show_raw_agent_reasoning: false,
@@ -1190,6 +1226,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
         include_instructions: false,
       },
       mcp_servers: {
+        ...(gitNexusMcpServer ? { gitnexus: gitNexusMcpServer } : {}),
         tax: {
           command: process.execPath,
           args: [mcpServerPath],

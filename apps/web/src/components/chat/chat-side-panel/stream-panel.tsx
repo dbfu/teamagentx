@@ -3,6 +3,9 @@ import { cn, truncateToolName } from '@/lib/utils';
 import type { StreamEvent } from '@/stores/socket-store';
 import { Bot, CheckCircle, ChevronDown, ChevronRight, Clock, Loader2, Square } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { CodeEditToolContent, CodeReadToolOutput, isCodeEditTool, isCodeReadTool, renderToolValue } from './tool-call-content';
 
 // 格式化开始时间（显示时分秒）
 function formatStartTime(timestamp: number): string {
@@ -306,8 +309,10 @@ export function StreamPanel({
                     </div>
                   </CollapsibleTrigger>
                   <CollapsibleContent>
-                    <div className="px-3 pb-3 whitespace-pre-wrap break-all text-sm text-foreground">
-                      {event.content}
+                    <div className="px-3 pb-3 prose prose-sm max-w-none dark:prose-invert [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap [&_pre]:bg-muted/50 [&_pre]:p-2 [&_pre]:rounded [&_code]:text-xs">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {event.content}
+                      </ReactMarkdown>
                     </div>
                   </CollapsibleContent>
                 </Collapsible>
@@ -328,10 +333,10 @@ export function StreamPanel({
                   'bg-purple-50 dark:bg-purple-950/30 border-purple-200 dark:border-purple-800'
                 )}>
                   <CollapsibleTrigger asChild>
-                    <div className="group flex items-center gap-2 p-2 cursor-pointer hover:opacity-80 flex-nowrap">
+                    <div className="group flex items-center gap-2 p-2 cursor-pointer hover:opacity-80 min-w-0">
                       <CollapsibleStateIcon className="shrink-0" />
                       <span
-                        className="inline-flex items-center px-2 py-0.5 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 font-medium truncate max-w-[12rem] shrink-0 sm:max-w-[18rem] lg:max-w-[24rem] xl:max-w-[30rem]"
+                        className="inline-flex items-center px-2 py-0.5 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 font-medium truncate max-w-[12rem] shrink sm:max-w-[18rem] lg:max-w-[24rem] xl:max-w-[30rem]"
                         title={tool.name || '工具调用'}
                       >
                         🔧 {truncateToolName(tool.name)}
@@ -356,19 +361,27 @@ export function StreamPanel({
                       {tool.input && Object.keys(tool.input).length > 0 && (
                         <div>
                           <div className="text-xs text-muted-foreground mb-1">输入:</div>
-                          <div className="font-mono text-muted-foreground bg-muted/50 rounded p-2">
-                            <pre className="whitespace-pre-wrap text-xs" style={{ wordBreak: 'break-word' }}>{JSON.stringify(tool.input, null, 2)}</pre>
-                          </div>
+                          {isCodeEditTool(tool) ? (
+                            <CodeEditToolContent tool={tool} />
+                          ) : (
+                            <div className="font-mono text-muted-foreground bg-muted/50 rounded p-2">
+                              <pre className="whitespace-pre-wrap text-xs" style={{ wordBreak: 'break-word' }}>{JSON.stringify(tool.input, null, 2)}</pre>
+                            </div>
+                          )}
                         </div>
                       )}
                       {tool.output && (
                         <div>
                           <div className="text-xs text-muted-foreground mb-1">输出:</div>
-                          <div className="font-mono text-muted-foreground bg-muted/50 rounded p-2">
-                            <pre className="whitespace-pre-wrap text-xs" style={{ wordBreak: 'break-word' }}>
-                              {typeof tool.output === 'string' ? tool.output : JSON.stringify(tool.output, null, 2)}
-                            </pre>
-                          </div>
+                          {isCodeReadTool(tool) && typeof tool.output === 'string' ? (
+                            <CodeReadToolOutput tool={tool} />
+                          ) : (
+                            <div className="font-mono text-muted-foreground bg-muted/50 rounded p-2">
+                              <pre className="whitespace-pre-wrap text-xs" style={{ wordBreak: 'break-word' }}>
+                                {renderToolValue(tool.output)}
+                              </pre>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -391,8 +404,10 @@ export function StreamPanel({
                     </div>
                   </CollapsibleTrigger>
                   <CollapsibleContent>
-                    <div className="px-3 pb-3 whitespace-pre-wrap break-all text-sm text-foreground">
-                      {event.content}
+                    <div className="px-3 pb-3 prose prose-sm max-w-none dark:prose-invert [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap [&_pre]:bg-muted/50 [&_pre]:p-2 [&_pre]:rounded [&_code]:text-xs">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {event.content}
+                      </ReactMarkdown>
                     </div>
                   </CollapsibleContent>
                 </Collapsible>

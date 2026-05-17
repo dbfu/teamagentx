@@ -3,6 +3,7 @@ import { AcpToolInfo, AgentSpeechConfig, acpToolsApi, AgentCategory, categoryApi
 import { AgentAvatarImage, agentAvatarOptions } from '@/lib/agent-avatars';
 import { AvatarSelector } from './avatar-selector';
 import { getCodexModelOptions } from '@/lib/codex-models';
+import { getClaudeModelOptions } from '@/lib/claude-models';
 import { llmProviderApi, type LlmProvider } from '@/lib/llm-provider-api';
 import { getProviderProtocolHint, isProviderCompatibleWithAgent } from '@/lib/llm-provider-compat';
 import { promptOptimizeApi } from '@/lib/prompt-optimize-api';
@@ -23,6 +24,7 @@ interface CreateAssistantModalProps {
     acpTool: string
     proxyConfig?: string | null
     codexModel?: string | null
+    claudeModel?: string | null
     categoryId: string | null
     llmProviderId: string | null
     imageGeneration?: {
@@ -166,6 +168,7 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
   const [llmProviders, setLlmProviders] = useState<LlmProvider[]>([])
   const [llmProviderId, setLlmProviderId] = useState<string>('')
   const [codexModel, setCodexModel] = useState('')
+  const [claudeModel, setClaudeModel] = useState('')
   const [proxyConfig, setProxyConfig] = useState('')
   const [imageGenerationEnabled, setImageGenerationEnabled] = useState(false)
   const [imageProviderId, setImageProviderId] = useState<string>('')
@@ -179,6 +182,7 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
   )
   const selectedAcpTool = acpTools.find((tool) => tool.id === acpTool)
   const showLocalCodexConfig = assistantType === 'acp' && acpTool === 'codex' && !llmProviderId
+  const showLocalClaudeConfig = assistantType === 'acp' && acpTool === 'claude' && !llmProviderId
 
   // 当 defaultCategoryId 变化时更新 categoryId（组件重新挂载后）
   useEffect(() => {
@@ -252,6 +256,7 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
         acpTool: assistantType === 'acp' ? acpTool : '',
         proxyConfig: showLocalCodexConfig ? proxyConfig.trim() || null : null,
         codexModel: showLocalCodexConfig ? codexModel.trim() || null : null,
+        claudeModel: showLocalClaudeConfig ? claudeModel.trim() || null : null,
         categoryId: categoryId || null,
         llmProviderId: llmProviderId || null,
         imageGeneration: {
@@ -272,6 +277,7 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
         setCategoryId('')
         setLlmProviderId('')
         setCodexModel('')
+        setClaudeModel('')
         setProxyConfig('')
         setImageGenerationEnabled(false)
         setImageProviderId('')
@@ -426,6 +432,30 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
                     className="w-full resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
                   />
                 </div>
+              </div>
+            )}
+
+            {showLocalClaudeConfig && (
+              <div className="mb-4">
+                <label className="mb-1.5 block text-sm font-medium text-foreground">
+                  Claude 模型
+                </label>
+                <Select value={claudeModel || '__default__'} onValueChange={(v) => setClaudeModel(v === '__default__' ? '' : v)}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="选择 Claude 模型" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__default__">使用本地默认模型</SelectItem>
+                    {getClaudeModelOptions(claudeModel).map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  将使用本地 Claude 配置；模型留空时走本地默认模型
+                </p>
               </div>
             )}
 

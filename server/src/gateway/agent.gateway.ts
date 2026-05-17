@@ -71,6 +71,7 @@ const agentResponseSchema = {
     workDir: { type: 'string', nullable: true },
     proxyConfig: { type: 'string', nullable: true },
     codexModel: { type: 'string', nullable: true },
+    claudeModel: { type: 'string', nullable: true },
     speechConfig: {
       type: 'object',
       nullable: true,
@@ -174,6 +175,7 @@ const createAgentBodySchema = {
     workDir: { type: 'string', description: '工作目录（适用于所有类型）' },
     proxyConfig: { type: 'string', nullable: true, description: 'ACP 工具代理配置（支持代理地址或 export 片段）' },
     codexModel: { type: 'string', nullable: true, description: 'Codex 本地配置模式下指定的模型名称' },
+    claudeModel: { type: 'string', nullable: true, description: 'Claude 本地配置模式下指定的模型名称' },
     speechConfig: {
       type: 'object',
       nullable: true,
@@ -236,6 +238,7 @@ const updateAgentBodySchema = {
     workDir: { type: 'string' },
     proxyConfig: { type: 'string', nullable: true },
     codexModel: { type: 'string', nullable: true },
+    claudeModel: { type: 'string', nullable: true },
     speechConfig: {
       type: 'object',
       nullable: true,
@@ -302,6 +305,7 @@ interface CreateAgentBody {
   workDir?: string;
   proxyConfig?: string | null;
   codexModel?: string | null;
+  claudeModel?: string | null;
   speechConfig?: UpdateAgentInput['speechConfig'];
   categoryId?: string;
   llmProviderId?: string;
@@ -319,6 +323,7 @@ interface UpdateAgentBody {
   workDir?: string;
   proxyConfig?: string | null;
   codexModel?: string | null;
+  claudeModel?: string | null;
   speechConfig?: UpdateAgentInput['speechConfig'];
   isActive?: boolean;
   categoryId?: string | null;
@@ -596,7 +601,7 @@ export async function agentGateway(app: FastifyInstance) {
       },
     },
     async (request, reply) => {
-      const {name, avatar, avatarColor, description, prompt, type, acpTool, workDir, proxyConfig, codexModel, speechConfig, categoryId, llmProviderId, imageGeneration} = request.body;
+      const {name, avatar, avatarColor, description, prompt, type, acpTool, workDir, proxyConfig, codexModel, claudeModel, speechConfig, categoryId, llmProviderId, imageGeneration} = request.body;
 
       try {
         const agent = await agentService.create({
@@ -610,6 +615,7 @@ export async function agentGateway(app: FastifyInstance) {
           workDir,
           proxyConfig,
           codexModel,
+          claudeModel,
           speechConfig,
           categoryId,
           llmProviderId,

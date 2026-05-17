@@ -292,6 +292,7 @@ export function AssistantDetailPage() {
     acpTool: string
     proxyConfig?: string | null
     codexModel?: string | null
+    claudeModel?: string | null
     categoryId: string | null
     llmProviderId: string | null
     speechConfig: AgentSpeechConfig | null
@@ -307,6 +308,7 @@ export function AssistantDetailPage() {
       acpTool: data.acpTool || undefined,
       proxyConfig: data.proxyConfig || null,
       codexModel: data.codexModel || null,
+      claudeModel: data.claudeModel || null,
       categoryId: data.categoryId,
       llmProviderId: data.llmProviderId,
       speechConfig: data.speechConfig,

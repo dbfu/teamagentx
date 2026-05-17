@@ -3,6 +3,9 @@ import { ExecutionEvent, ExecutionRecord, ThinkingRecord } from '@/lib/agent-api
 import { tokenUsageApi } from '@/lib/token-usage-api'
 import { cn, formatDateTime, truncateToolName } from '@/lib/utils'
 import { CheckCircle, ChevronDown, ChevronRight, CircleStop, XCircle } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { CodeEditToolContent, CodeReadToolOutput, isCodeEditTool, isCodeReadTool, renderToolValue } from './tool-call-content'
 
 // 格式化耗时显示（1m40s 格式，分钟为0时只显示秒）
 function formatDuration(ms: number): string {
@@ -169,8 +172,10 @@ export function RecordDetailPanel({ selectedRecord }: RecordDetailPanelProps) {
             </div>
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <div className="px-3 pb-3 whitespace-pre-wrap break-all text-sm text-muted-foreground max-h-96 overflow-y-auto">
-              {selectedRecord.context}
+            <div className="px-3 pb-3 prose prose-sm max-w-none dark:prose-invert [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap [&_pre]:bg-muted/50 [&_pre]:p-2 [&_pre]:rounded [&_code]:text-xs max-h-96 overflow-y-auto">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {selectedRecord.context}
+              </ReactMarkdown>
             </div>
           </CollapsibleContent>
         </Collapsible>
@@ -187,8 +192,10 @@ export function RecordDetailPanel({ selectedRecord }: RecordDetailPanelProps) {
           </div>
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <div className="px-3 pb-3 whitespace-pre-wrap break-all text-sm text-foreground max-h-96 overflow-y-auto">
-            {selectedRecord.triggerMessage}
+          <div className="px-3 pb-3 prose prose-sm max-w-none dark:prose-invert [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap [&_pre]:bg-muted/50 [&_pre]:p-2 [&_pre]:rounded [&_code]:text-xs max-h-96 overflow-y-auto">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {selectedRecord.triggerMessage}
+            </ReactMarkdown>
           </div>
         </CollapsibleContent>
       </Collapsible>
@@ -209,8 +216,10 @@ export function RecordDetailPanel({ selectedRecord }: RecordDetailPanelProps) {
                     </div>
                   </CollapsibleTrigger>
                   <CollapsibleContent>
-                    <div className="px-3 pb-3 whitespace-pre-wrap break-all text-sm text-foreground max-h-96 overflow-y-auto">
-                      {event.data.content}
+                    <div className="px-3 pb-3 prose prose-sm max-w-none dark:prose-invert [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap [&_pre]:bg-muted/50 [&_pre]:p-2 [&_pre]:rounded [&_code]:text-xs max-h-96 overflow-y-auto">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {event.data.content}
+                      </ReactMarkdown>
                     </div>
                   </CollapsibleContent>
                 </Collapsible>
@@ -248,19 +257,27 @@ export function RecordDetailPanel({ selectedRecord }: RecordDetailPanelProps) {
                       {event.data.input && Object.keys(event.data.input).length > 0 && (
                         <div>
                           <div className="text-xs text-muted-foreground mb-1">输入:</div>
-                          <div className="font-mono text-foreground bg-muted/50 rounded p-2 max-h-60 overflow-y-auto">
-                            <pre className="whitespace-pre-wrap text-xs" style={{ wordBreak: 'break-word' }}>{JSON.stringify(event.data.input, null, 2)}</pre>
-                          </div>
+                          {isCodeEditTool({ name: event.data.name, input: event.data.input }) ? (
+                            <CodeEditToolContent tool={{ name: event.data.name, input: event.data.input }} />
+                          ) : (
+                            <div className="font-mono text-foreground bg-muted/50 rounded p-2 max-h-60 overflow-y-auto">
+                              <pre className="whitespace-pre-wrap text-xs" style={{ wordBreak: 'break-word' }}>{JSON.stringify(event.data.input, null, 2)}</pre>
+                            </div>
+                          )}
                         </div>
                       )}
                       {event.data.output && (
                         <div>
                           <div className="text-xs text-muted-foreground mb-1">输出:</div>
-                          <div className="font-mono text-foreground bg-muted/50 rounded p-2 max-h-60 overflow-y-auto">
-                            <pre className="whitespace-pre-wrap text-xs" style={{ wordBreak: 'break-word' }}>
-                              {typeof event.data.output === 'string' ? event.data.output : JSON.stringify(event.data.output, null, 2)}
-                            </pre>
-                          </div>
+                          {isCodeReadTool({ name: event.data.name, input: event.data.input, output: event.data.output }) && typeof event.data.output === 'string' ? (
+                            <CodeReadToolOutput tool={{ name: event.data.name, input: event.data.input, output: event.data.output }} />
+                          ) : (
+                            <div className="font-mono text-foreground bg-muted/50 rounded p-2 max-h-60 overflow-y-auto">
+                              <pre className="whitespace-pre-wrap text-xs" style={{ wordBreak: 'break-word' }}>
+                                {renderToolValue(event.data.output)}
+                              </pre>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -284,8 +301,10 @@ export function RecordDetailPanel({ selectedRecord }: RecordDetailPanelProps) {
                     </div>
                   </CollapsibleTrigger>
                   <CollapsibleContent>
-                    <div className="px-3 pb-3 whitespace-pre-wrap break-all text-sm text-foreground">
-                      {event.data.content}
+                    <div className="px-3 pb-3 prose prose-sm max-w-none dark:prose-invert [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap [&_pre]:bg-muted/50 [&_pre]:p-2 [&_pre]:rounded [&_code]:text-xs">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {event.data.content}
+                      </ReactMarkdown>
                     </div>
                   </CollapsibleContent>
                 </Collapsible>

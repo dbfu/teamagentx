@@ -3,6 +3,7 @@ import { AcpToolInfo, Agent, AgentSpeechConfig, agentApi, AgentCategory, acpTool
 import { AgentAvatarImage, agentAvatarOptions } from '@/lib/agent-avatars';
 import { AvatarSelector } from './avatar-selector';
 import { getCodexModelOptions } from '@/lib/codex-models';
+import { getClaudeModelOptions } from '@/lib/claude-models';
 import { normalizeAgentSpeechConfig } from '@/lib/agent-speech';
 import { llmProviderApi, type LlmProvider } from '@/lib/llm-provider-api';
 import { getProviderProtocolHint, getRequiredProviderProtocol, isProviderCompatibleWithAgent } from '@/lib/llm-provider-compat';
@@ -25,6 +26,7 @@ interface EditAssistantModalProps {
     acpTool: string
     proxyConfig?: string | null
     codexModel?: string | null
+    claudeModel?: string | null
     categoryId: string | null
     llmProviderId: string | null
     imageGeneration?: {
@@ -168,6 +170,7 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
   const [llmProviders, setLlmProviders] = useState<LlmProvider[]>([])
   const [llmProviderId, setLlmProviderId] = useState<string>('')
   const [codexModel, setCodexModel] = useState('')
+  const [claudeModel, setClaudeModel] = useState('')
   const [proxyConfig, setProxyConfig] = useState('')
   const [imageGenerationEnabled, setImageGenerationEnabled] = useState(false)
   const [imageProviderId, setImageProviderId] = useState<string>('')
@@ -211,6 +214,7 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
   )
   const canUseLocalAcpConfig = assistantType === 'acp' && selectedAcpTool?.localConfigAvailable
   const showLocalCodexConfig = assistantType === 'acp' && acpTool === 'codex' && !effectiveLlmProviderId
+  const showLocalClaudeConfig = assistantType === 'acp' && acpTool === 'claude' && !effectiveLlmProviderId
   const providerSelectLabel = selectedProviderInfo
     ? `${selectedProviderInfo.name} · ${selectedProviderInfo.model}`
     : assistantType === 'acp'
@@ -244,19 +248,21 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
     if (!isOpen || !assistant?.id) return
 
     let cancelled = false
-    setResolvedAssistant(assistant)
-
+    // 直接从 API 获取最新数据，避免使用传入的旧数据
     agentApi.getById(assistant.id).then((res) => {
       if (cancelled) return
       if (res.success && res.data) {
         setResolvedAssistant(res.data)
+      } else {
+        // API 失败时，使用传入的数据作为 fallback
+        setResolvedAssistant(assistant)
       }
     })
 
     return () => {
       cancelled = true
     }
-  }, [isOpen, assistant?.id, assistant])
+  }, [isOpen, assistant?.id])
 
   // 获取 ACP 工具列表
   const fetchAcpTools = async () => {
@@ -323,6 +329,7 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
       setCategoryId(assistantForForm.categoryId || '')
       setLlmProviderId(assistantForForm.llmProviderId || assistantForForm.llmProvider?.id || '')
       setCodexModel(assistantForForm.codexModel || '')
+      setClaudeModel(assistantForForm.claudeModel || '')
       setProxyConfig(assistantForForm.proxyConfig || '')
       const imageCapability = assistantForForm.capabilities?.find((capability) => capability.capabilityType === 'image')
       setImageGenerationEnabled(Boolean(imageCapability?.enabled))
@@ -396,6 +403,7 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
         acpTool: assistantType === 'acp' ? acpTool : '',
         proxyConfig: showLocalCodexConfig ? proxyConfig.trim() || null : null,
         codexModel: showLocalCodexConfig ? codexModel.trim() || null : null,
+        claudeModel: showLocalClaudeConfig ? claudeModel.trim() || null : null,
         categoryId: categoryId || null,
         llmProviderId: submittedLlmProviderId,
         imageGeneration: {
@@ -580,6 +588,30 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
                     className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
                   />
                 </div>
+              </div>
+            )}
+
+            {showLocalClaudeConfig && (
+              <div className="mb-4">
+                <label className="mb-1.5 block text-sm font-medium text-foreground">
+                  Claude 模型
+                </label>
+                <Select value={claudeModel || '__default__'} onValueChange={(v) => setClaudeModel(v === '__default__' ? '' : v)}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="选择 Claude 模型" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__default__">使用本地默认模型</SelectItem>
+                    {getClaudeModelOptions(claudeModel).map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  将使用本地 Claude 配置；模型留空时走本地默认模型
+                </p>
               </div>
             )}
 

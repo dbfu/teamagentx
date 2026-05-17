@@ -34,6 +34,7 @@ export type CreateAgentInput = {
   workDir?: string;
   proxyConfig?: string | null;
   codexModel?: string | null;
+  claudeModel?: string | null;
   categoryId?: string;
   llmProviderId?: string;
   imageGeneration?: AgentCapabilityInput;
@@ -208,6 +209,7 @@ export const agentService = {
           workDir: data.workDir,
           proxyConfig: normalizeAgentProxyConfig(data.proxyConfig),
           codexModel: normalizeNullableString(data.codexModel),
+          claudeModel: normalizeNullableString(data.claudeModel),
           categoryId,
           llmProviderId,
           speechConfig: serializeAgentSpeechConfig(data.speechConfig),
@@ -295,11 +297,12 @@ export const agentService = {
     }
 
     // 处理外键字段：空字符串转换为 undefined（表示不更新），'null' 字符串转换为 null（表示移除）
-    const { categoryId, llmProviderId, speechConfig, imageGeneration, proxyConfig, codexModel, ...restData } = effectiveData;
+    const { categoryId, llmProviderId, speechConfig, imageGeneration, proxyConfig, codexModel, claudeModel, ...restData } = effectiveData;
     const processedCategoryId = categoryId === '' ? undefined : categoryId === 'null' ? null : categoryId;
     const processedLlmProviderId = llmProviderId === '' ? undefined : llmProviderId === 'null' ? null : llmProviderId;
     const processedProxyConfig = normalizeAgentProxyConfig(proxyConfig);
     const processedCodexModel = normalizeNullableString(codexModel);
+    const processedClaudeModel = normalizeNullableString(claudeModel);
     const currentAgent = await prisma.agent.findUnique({
       where: { id },
       select: { type: true, acpTool: true, llmProviderId: true },
@@ -331,6 +334,7 @@ export const agentService = {
           ...(processedLlmProviderId !== undefined && { llmProviderId: processedLlmProviderId }),
           ...(processedProxyConfig !== undefined && { proxyConfig: processedProxyConfig }),
           ...(processedCodexModel !== undefined && { codexModel: processedCodexModel }),
+          ...(processedClaudeModel !== undefined && { claudeModel: processedClaudeModel }),
           ...(speechConfig !== undefined && { speechConfig: serializeAgentSpeechConfig(speechConfig) }),
           updatedAt: new Date(),
         },

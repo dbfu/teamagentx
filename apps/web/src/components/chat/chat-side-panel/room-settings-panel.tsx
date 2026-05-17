@@ -334,7 +334,7 @@ export function RoomSettingsPanel({
           <div>
             <label className="mb-1.5 block text-sm font-medium text-muted-foreground">默认接收助手</label>
             <div className="text-xs text-muted-foreground mb-2">
-              群主发送未 @ 助手的消息时，会自动触发该助手。
+              成员发送未 @ 助手的消息时，会自动触发该助手。
             </div>
             <Select
               value={defaultAgentId || '__none__'}

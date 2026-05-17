@@ -8,7 +8,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
-import { Bot, Link2, MoreHorizontal, Search, Trash2, Unplug } from 'lucide-react'
+import { Bot, Link2, MoreHorizontal, Plus, Search, Trash2, Unplug } from 'lucide-react'
 import type { CSSProperties } from 'react'
 
 interface BotListCardProps {
@@ -17,12 +17,12 @@ interface BotListCardProps {
   botSearch: string
   rooms: ChatRoom[]
   platforms: BridgePlatformDefinition[]
-  platformInfo: BridgePlatformDefinition | null
   editingBotId: string | null
   pendingBotIds: Set<string>
   baseUrl: string
   noDragStyle: CSSProperties
   onBotSearchChange: (value: string) => void
+  onCreateBot: () => void
   onStartEditBot: (bot: BridgeBot) => void
   onToggleBot: (bot: BridgeBot) => void
   onUnbindBot: (bot: BridgeBot) => void
@@ -50,6 +50,7 @@ export function BotListCard({
   baseUrl,
   noDragStyle,
   onBotSearchChange,
+  onCreateBot,
   onStartEditBot,
   onToggleBot,
   onUnbindBot,
@@ -67,14 +68,23 @@ export function BotListCard({
               当前平台共 {bots.length} 个机器人实例，展示群聊绑定、状态和快捷操作。
             </div>
           </div>
-          <div className="relative w-full lg:w-72" style={noDragStyle}>
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-gray-400" />
-            <input
-              value={botSearch}
-              onChange={(event) => onBotSearchChange(event.target.value)}
-              placeholder="搜索机器人、群聊或平台"
-              className="w-full rounded-lg border border-gray-200 bg-background pl-9 pr-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-            />
+          <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center lg:w-auto" style={noDragStyle}>
+            <button
+              onClick={onCreateBot}
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-500 px-3 py-2 text-sm text-white hover:bg-blue-600"
+            >
+              <Plus className="size-4" />
+              新建机器人实例
+            </button>
+            <div className="relative w-full sm:w-72">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-gray-400" />
+              <input
+                value={botSearch}
+                onChange={(event) => onBotSearchChange(event.target.value)}
+                placeholder="搜索机器人、群聊或平台"
+                className="w-full rounded-lg border border-gray-200 bg-background py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:outline-none"
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -83,7 +93,7 @@ export function BotListCard({
         <div className="space-y-3">
           {bots.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-border bg-muted/20 p-8 text-sm text-muted-foreground">
-              当前平台还没有机器人实例。左侧保存凭证后，这里会立刻显示列表。
+              当前平台还没有机器人实例。新建后这里会立刻显示列表。
             </div>
           ) : filteredBots.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-border bg-muted/20 p-8 text-sm text-muted-foreground">

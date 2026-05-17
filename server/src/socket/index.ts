@@ -160,6 +160,10 @@ export function setupSocket(io: Server) {
     });
   };
 
+  const emitChatRoomCreated = (chatRoom: any) => {
+    io.emit('chatroom:created', { chatRoom });
+  };
+
   // 推送所有正在执行的群聊状态给指定 socket
   async function pushAllExecutingStatuses(socket: AuthenticatedSocket) {
     try {
@@ -187,7 +191,7 @@ export function setupSocket(io: Server) {
     }
   }
 
-  setupAIHandlers(emit, emitTyping, emitDone, emitStream, emitToolCall, emitThinking, emitStatus, broadcastTaskQueue, emitTodoCreated);
+  setupAIHandlers(emit, emitTyping, emitDone, emitStream, emitToolCall, emitThinking, emitStatus, broadcastTaskQueue, emitTodoCreated, emitChatRoomCreated);
 
   // Socket authentication middleware
   io.use(async (socket: AuthenticatedSocket, next) => {

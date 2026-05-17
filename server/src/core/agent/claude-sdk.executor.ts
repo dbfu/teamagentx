@@ -45,6 +45,7 @@ import {
     buildInstalledSkillsInstructions,
     buildInstalledSkillsSignature,
 } from './skill-instructions.js';
+import { syncGlobalClaudeLocalConfig } from './claude-local-config.js';
 import {
     AGENT_CREATOR_AGENT_ID,
     agentCreatorTools,
@@ -777,9 +778,22 @@ ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
     ];
     keysToClear.forEach((key) => delete cleanEnv[key]);
 
+    const claudeConfigDir = this.getClaudeConfigDir();
+    if (!this.llmProvider) {
+      const syncResult = syncGlobalClaudeLocalConfig(claudeConfigDir);
+      if (syncResult.settings.copied || syncResult.state.copied) {
+        logClaudeSdkDebug('synced global Claude settings', {
+          agentName: this.name,
+          agentId: this.agentId,
+          settings: syncResult.settings,
+          state: syncResult.state,
+        });
+      }
+    }
+
     const providerEnv = this.llmProvider
       ? buildAcpProviderEnv('claude', this.llmProvider, this.agentId)
-      : {CLAUDE_CONFIG_DIR: this.getClaudeConfigDir()};
+      : {CLAUDE_CONFIG_DIR: claudeConfigDir};
 
     if (this.llmProvider) {
       this.acpProviderInfo = {
@@ -1362,6 +1376,14 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     });
   }
 
+  private stripMcpTaxPrefix(name: string): string {
+    const MCP_TAX_PREFIX = 'mcp__tax__';
+    if (name.startsWith(MCP_TAX_PREFIX)) {
+      return name.slice(MCP_TAX_PREFIX.length);
+    }
+    return name;
+  }
+
   private upsertToolCall(toolCall: ToolCall): void {
     const existing = this.toolCalls.find(
       (item) => item.toolCallId === toolCall.toolCallId,
@@ -1399,7 +1421,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       event.content_block?.type === 'tool_use'
     ) {
       this.upsertToolCall({
-        name: event.content_block.name || 'tool_call',
+        name: this.stripMcpTaxPrefix(event.content_block.name || 'tool_call'),
         input: event.content_block.input || {},
         toolCallId: event.content_block.id || message.uuid || randomUUID(),
         status: 'in_progress',
@@ -1452,7 +1474,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
 
       if (block?.type === 'tool_use') {
         this.upsertToolCall({
-          name: block.name || 'tool_call',
+          name: this.stripMcpTaxPrefix(block.name || 'tool_call'),
           input: block.input || {},
           toolCallId: block.id || randomUUID(),
           status: 'completed',
@@ -1533,7 +1555,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
         return undefined;
       case 'tool_progress':
         this.upsertToolCall({
-          name: (message as any).tool_name || 'tool_call',
+          name: this.stripMcpTaxPrefix((message as any).tool_name || 'tool_call'),
           input: {},
           toolCallId: (message as any).tool_use_id || message.uuid,
           status: 'in_progress',

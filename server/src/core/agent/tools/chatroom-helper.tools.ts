@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { createSystemTool as tool } from './system-tool.js';
 import { chatRoomService } from '../../../modules/chatroom/chatroom.service.js';
 import { agentService } from '../../../core/agent/agent.service.js';
+import { broadcastChatRoomCreated } from '../agent-handler/status.js';
 import { broadcastAgentJoinedMessage } from '../agent-handler/message-utils.js';
 
 // 群聊管理助手的专用 ID
@@ -18,12 +19,14 @@ export const createChatRoomTool = tool(
     description,
     avatar,
     avatarColor,
+    rules,
     agentIds,
   }: {
     name: string;
     description?: string;
     avatar?: string;
     avatarColor?: string;
+    rules?: string;
     agentIds?: string[];
   }) => {
     try {
@@ -33,6 +36,7 @@ export const createChatRoomTool = tool(
         description,
         avatar,
         avatarColor,
+        rules: rules?.trim() || undefined,
       });
 
       if (!chatRoom) {
@@ -58,15 +62,19 @@ export const createChatRoomTool = tool(
         }
       }
 
+      const latestChatRoom = await chatRoomService.findById(chatRoom.id);
+      broadcastChatRoomCreated(latestChatRoom ?? chatRoom);
+
       return JSON.stringify({
         success: true,
         chatRoom: {
           id: chatRoom.id,
           name: chatRoom.name,
           description: chatRoom.description,
+          rules: latestChatRoom?.rules ?? chatRoom.rules,
         },
         addedAgents,
-        message: `成功创建群聊"${name}"${addedAgents.length > 0 ? `，已添加助手: ${addedAgents.join(', ')}` : ''}`,
+        message: `成功创建群聊"${name}"${rules?.trim() ? '，已设置群规则' : ''}${addedAgents.length > 0 ? `，已添加助手: ${addedAgents.join(', ')}` : ''}`,
       });
     } catch (error) {
       return JSON.stringify({
@@ -77,12 +85,13 @@ export const createChatRoomTool = tool(
   },
   {
     name: 'create_chatroom',
-    description: '【必须用户确认后才能调用】创建一个新的群聊。⚠️ 重要：调用前必须先向用户展示群聊配置（名称、描述、要添加的助手），并询问确认。',
+    description: '【必须用户确认后才能调用】创建一个新的群聊，可同时设置群规则。⚠️ 重要：调用前必须先向用户展示群聊配置（名称、描述、群规则、要添加的助手），并询问确认。',
     schema: z.object({
       name: z.string().describe('群聊名称'),
       description: z.string().optional().describe('群聊描述'),
       avatar: z.string().optional().describe('群聊头像（emoji或图标名称）'),
       avatarColor: z.string().optional().describe('群聊头像颜色'),
+      rules: z.string().optional().describe('创建群聊时同步写入的群规则内容，支持 Markdown 格式。未生成或用户不需要时可省略。'),
       agentIds: z.array(z.string()).optional().describe('要添加到群聊的助手ID列表'),
     }),
   },

@@ -642,7 +642,7 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
 
             <div className="mt-4">
               <p className="text-xs text-muted-foreground mb-3">
-                使用手机 TeamAgentX App 扫描二维码，即可自动登录并连接
+                使用手机 TeamAgentX App 或其他扫码应用扫描二维码，即可自动登录并连接
               </p>
 
               {/* 局域网地址选择 + 刷新 */}
@@ -708,31 +708,38 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
                 生成二维码
               </button>
 
-              {/* 打开网页按钮 - 仅客户端支持 */}
-              {window.electronAPI?.isElectron && localServerUrl && token && user && (
-                <button
-                  onClick={() => {
-                    // 构建带登录参数的 URL
-                    const loginUrl = buildQrLoginUrl(localServerUrl, token, user.username)
-                    window.electronAPI?.openExternal(loginUrl.qrUrl)
-                      .then((result) => {
-                        if (!result?.success) {
-                          toast.error(result?.error || '打开网页失败')
-                        }
-                      })
-                      .catch(() => {
-                        toast.error('打开网页失败')
-                      })
-                  }}
-                  className="mt-2 w-full rounded-lg border border-border bg-background px-4 py-2 text-sm text-foreground hover:bg-accent"
-                >
-                  <span className="flex items-center justify-center gap-2">
-                    <ExternalLink className="size-4" />
-                    打开网页
-                  </span>
-                </button>
-              )}
             </div>
+          </div>
+        )}
+
+        {/* 网页访问 */}
+        {window.electronAPI?.isElectron && localServerUrl && token && user && (
+          <div className="mb-6 rounded-xl border border-border bg-card p-4">
+            <div className="mb-4 flex items-center gap-2">
+              <ExternalLink className="size-4 text-muted-foreground" />
+              <span className="text-sm font-medium">网页访问</span>
+            </div>
+            <button
+              onClick={() => {
+                // 构建带登录参数的 URL
+                const loginUrl = buildQrLoginUrl(localServerUrl, token, user.username)
+                window.electronAPI?.openExternal(loginUrl.qrUrl)
+                  .then((result) => {
+                    if (!result?.success) {
+                      toast.error(result?.error || '打开网页失败')
+                    }
+                  })
+                  .catch(() => {
+                    toast.error('打开网页失败')
+                  })
+              }}
+              className="w-full rounded-lg border border-border bg-background px-4 py-2 text-sm text-foreground hover:bg-accent"
+            >
+              <span className="flex items-center justify-center gap-2">
+                <ExternalLink className="size-4" />
+                打开网页
+              </span>
+            </button>
           </div>
         )}
 
@@ -750,7 +757,7 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
                 </button>
               </div>
               <p className="text-xs text-muted-foreground mb-4">
-                使用手机 TeamAgentX App 扫描下方二维码
+                使用手机 TeamAgentX App 或其他扫码应用扫描下方二维码
               </p>
               <QRCodeDisplay data={generatedQRData} />
             </div>

@@ -39,6 +39,7 @@ export interface Agent {
   workDir: string | null
   proxyConfig: string | null
   codexModel: string | null
+  claudeModel: string | null
   speechConfig: AgentSpeechConfig | null
   isActive: boolean
   categoryId: string | null
@@ -106,6 +107,7 @@ export interface CreateAgentRequest {
   workDir?: string
   proxyConfig?: string | null
   codexModel?: string | null
+  claudeModel?: string | null
   speechConfig?: AgentSpeechConfig | null
   categoryId?: string
   llmProviderId?: string | null
@@ -125,6 +127,7 @@ export interface UpdateAgentRequest {
   workDir?: string
   proxyConfig?: string | null
   codexModel?: string | null
+  claudeModel?: string | null
   speechConfig?: AgentSpeechConfig | null
   categoryId?: string | null
   llmProviderId?: string | null

@@ -10,8 +10,25 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
-import { ArrowDownLeft, ArrowUpRight, Check, Clock3, Globe, Loader2, Pencil, RefreshCw, Trash2 } from 'lucide-react'
+import {
+  ArrowDownLeft,
+  ArrowUpRight,
+  Check,
+  Clock3,
+  Globe,
+  Loader2,
+  Pencil,
+  RefreshCw,
+  Trash2,
+} from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { BotEditorForm } from './integration/BotEditorForm'
@@ -48,6 +65,14 @@ function platformLabel(platforms: BridgePlatformDefinition[], platform: Platform
   return platforms.find((item) => item.key === platform)?.label ?? platform
 }
 
+const PLATFORM_ICON_URLS: Record<Platform, string> = {
+  telegram: 'https://cdn.simpleicons.org/telegram/0088cc',
+  feishu: 'https://cdn.jsdelivr.net/gh/callback-io/allogo@main/public/logos/feishu/icon.svg',
+  dingtalk: 'https://api.iconify.design/ant-design:dingtalk-outlined.svg?color=%231675FF',
+  wecom: 'https://api.iconify.design/tdesign:logo-wecom.svg?color=%2307C160',
+  qq: 'https://cdn.simpleicons.org/qq/12B7F5',
+}
+
 export function IntegrationPage() {
   const [activePlatform, setActivePlatform] = useState<Platform>('telegram')
   const { platforms, bots, rooms, playbook, events, baseUrl: loadedBaseUrl, loading, hasError, loadBots, reload } =
@@ -59,6 +84,7 @@ export function IntegrationPage() {
   const [savingBaseUrl, setSavingBaseUrl] = useState(false)
 
   const [savingBot, setSavingBot] = useState(false)
+  const [botEditorOpen, setBotEditorOpen] = useState(false)
   const [editingBotId, setEditingBotId] = useState<string | null>(null)
   const [botName, setBotName] = useState('')
   const [botFields, setBotFields] = useState<Record<string, string>>({})
@@ -111,6 +137,7 @@ export function IntegrationPage() {
     setBotName('')
     setBotFields({})
     setDraftChatRoomId('__none__')
+    setBotEditorOpen(false)
   }
 
   const startCreateBot = () => {
@@ -121,6 +148,7 @@ export function IntegrationPage() {
     setBotName(platformInfo?.label ? `${platformInfo.label} 机器人` : '')
     setBotFields({})
     setDraftChatRoomId('__none__')
+    setBotEditorOpen(true)
   }
 
   const startEditBot = (bot: BridgeBot) => {
@@ -134,6 +162,16 @@ export function IntegrationPage() {
     }
     setBotFields(nextFields)
     setDraftChatRoomId(bot.chatRoomId ?? '__none__')
+    setBotEditorOpen(true)
+  }
+
+  const handleBotEditorOpenChange = (open: boolean) => {
+    if (open) {
+      setBotEditorOpen(true)
+      return
+    }
+    if (savingBot) return
+    cancelBotEditor()
   }
 
   const handleSaveBot = async () => {
@@ -320,20 +358,12 @@ export function IntegrationPage() {
   return (
     <div className="flex flex-1 flex-col overflow-hidden bg-background">
       <div
-        className="flex h-14 shrink-0 items-center justify-between border-b border-border px-6"
+        className="flex h-14 shrink-0 items-center border-b border-border px-6"
         style={ELECTRON_DRAG_STYLE}
       >
         <div className="flex items-center gap-2">
           <Globe className="size-5 text-primary" />
           <h1 className="text-base font-semibold">外部平台集成</h1>
-        </div>
-        <div className="flex items-center gap-2" style={NO_DRAG_STYLE}>
-          <button
-            onClick={startCreateBot}
-            className="rounded-lg bg-blue-500 px-3 py-1.5 text-sm text-white hover:bg-blue-600"
-          >
-            新建机器人实例
-          </button>
         </div>
       </div>
 
@@ -393,28 +423,179 @@ export function IntegrationPage() {
         className="flex shrink-0 gap-2 border-b border-border px-6 pt-3"
         role="tablist"
       >
-        {platforms.map((platform) => (
-          <button
-            key={platform.key}
-            role="tab"
-            aria-selected={activePlatform === platform.key}
-            onClick={() => setActivePlatform(platform.key)}
-            className={cn(
-              'rounded-t-lg border border-b-0 px-4 py-2 text-sm font-medium',
-              activePlatform === platform.key
-                ? 'border-border bg-background text-foreground'
-                : 'border-transparent text-muted-foreground hover:text-foreground',
-            )}
-            style={NO_DRAG_STYLE}
-          >
-            {platform.emoji} {platform.label}
-          </button>
-        ))}
+        {platforms.map((platform) => {
+          return (
+            <button
+              key={platform.key}
+              role="tab"
+              aria-selected={activePlatform === platform.key}
+              onClick={() => setActivePlatform(platform.key)}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-t-lg border border-b-0 px-4 py-2 text-sm font-medium',
+                activePlatform === platform.key
+                  ? 'border-border bg-background text-foreground'
+                  : 'border-transparent text-muted-foreground hover:text-foreground',
+              )}
+              style={NO_DRAG_STYLE}
+            >
+              <img
+                src={PLATFORM_ICON_URLS[platform.key]}
+                alt=""
+                aria-hidden="true"
+                className="size-4 shrink-0 object-contain"
+              />
+              {platform.label}
+            </button>
+          )
+        })}
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-[360px_1fr] gap-0">
-        {/* Left: editor form */}
-        <div className="border-r border-border overflow-y-auto p-5">
+      <div className="min-h-0 flex-1 overflow-hidden p-5">
+        <div className="grid h-full gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
+          <BotListCard
+            bots={bots}
+            filteredBots={filteredBots}
+            botSearch={botSearch}
+            rooms={rooms}
+            platforms={platforms}
+            editingBotId={editingBotId}
+            pendingBotIds={pendingBotIds}
+            baseUrl={baseUrl}
+            noDragStyle={NO_DRAG_STYLE}
+            onBotSearchChange={setBotSearch}
+            onCreateBot={startCreateBot}
+            onStartEditBot={startEditBot}
+            onToggleBot={handleToggleBot}
+            onUnbindBot={handleUnbindBot}
+            onSelectRoom={handleSelectRoom}
+            onCopyWebhook={handleCopyWebhook}
+            onDeleteBot={(bot) => setPendingDeleteBot(bot)}
+          />
+
+          <div className="space-y-4 self-start">
+            {/* Linked rooms overview */}
+            <div className="rounded-xl border border-border bg-card p-4">
+              <div className="mb-4">
+                <div className="text-sm font-semibold">群聊连接概览</div>
+                <div className="mt-1 text-xs text-muted-foreground">只展示已经接入外部机器人的群聊。</div>
+              </div>
+              <div className="max-h-[220px] space-y-3 overflow-y-auto pr-1">
+                {linkedRooms.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-border px-3 py-4 text-xs text-muted-foreground">
+                    还没有已连接的群聊
+                  </div>
+                ) : (
+                  linkedRooms.map((room) => {
+                    const roomBindings = botsByRoomId.get(room.id) ?? []
+                    return (
+                      <div key={room.id} className="rounded-lg border border-border bg-muted/30 px-3 py-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-medium text-foreground">{room.name}</div>
+                            <div className="mt-1 text-[11px] text-muted-foreground">
+                              已连接 {roomBindings.length} 个机器人
+                            </div>
+                          </div>
+                          <div className="shrink-0 rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-700">
+                            在线桥接
+                          </div>
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {roomBindings.map((item) => (
+                            <span
+                              key={item.id}
+                              className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[11px] text-gray-700"
+                            >
+                              <span className="font-medium">{item.name}</span>
+                              <span className="text-gray-400">·</span>
+                              <span>{platformLabel(platforms, item.platform)}</span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* Recent events */}
+            <div className="rounded-xl border border-border bg-card p-4">
+              <div className="mb-4">
+                <div className="text-sm font-semibold">最近同步事件</div>
+                <div className="mt-1 text-xs text-muted-foreground">展示最近一次流入或流出的消息情况。</div>
+              </div>
+              <div className="max-h-[360px] space-y-2 overflow-y-auto pr-1">
+                {events.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-border px-3 py-4 text-xs text-muted-foreground">
+                    暂无事件
+                  </div>
+                ) : (
+                  events.map((event: BridgeEvent) => (
+                    <div key={event.id} className="rounded-xl border border-border bg-white px-3 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700">
+                              {platformLabel(platforms, event.platform)}
+                            </span>
+                            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-foreground">
+                              {event.direction === 'inbound'
+                                ? <ArrowDownLeft className="size-3.5 text-emerald-600" />
+                                : <ArrowUpRight className="size-3.5 text-blue-600" />}
+                              {event.direction === 'inbound' ? '流入' : '流出'}
+                            </span>
+                          </div>
+                          <div className="mt-2 line-clamp-3 text-[12px] leading-5 text-foreground">
+                            {event.contentPreview || '这次同步还没有拿到可展示的消息内容。'}
+                          </div>
+                          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                            <span className="inline-flex items-center gap-1">
+                              <Clock3 className="size-3" />
+                              {formatEventTime(event.createdAt)}
+                            </span>
+                            {event.agentName && <span>助手：{event.agentName}</span>}
+                            {event.errorMsg ? (
+                              <span className="text-red-500">{event.errorMsg}</span>
+                            ) : (
+                              <span className="truncate max-w-[160px]">会话：{event.externalId}</span>
+                            )}
+                          </div>
+                        </div>
+                        <span className={cn(
+                          'shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium',
+                          event.status === 'success' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500',
+                        )}>
+                          {event.status === 'success' ? (
+                            <span className="inline-flex items-center gap-1">
+                              <Check className="size-3.5" />
+                              成功
+                            </span>
+                          ) : '失败'}
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <Dialog open={botEditorOpen} onOpenChange={handleBotEditorOpenChange}>
+        <DialogContent
+          className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-2xl"
+          style={NO_DRAG_STYLE}
+        >
+          <DialogHeader>
+            <DialogTitle>{editingBotId ? '编辑机器人实例' : '新建机器人实例'}</DialogTitle>
+            <DialogDescription>
+              {editingBotId
+                ? '修改实例配置后保存，密钥字段留空会保持原值。'
+                : `录入${platformInfo?.label ?? '当前平台'}凭证后，可以直接绑定到目标群聊。`}
+            </DialogDescription>
+          </DialogHeader>
           <BotEditorForm
             activePlatform={activePlatform}
             platformInfo={platformInfo}
@@ -433,142 +614,8 @@ export function IntegrationPage() {
             onSave={handleSaveBot}
             onCancel={cancelBotEditor}
           />
-        </div>
-
-        {/* Right: bot list + sidebar */}
-        <div className="min-h-0 overflow-hidden p-5">
-          <div className="grid h-full gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
-            <BotListCard
-              bots={bots}
-              filteredBots={filteredBots}
-              botSearch={botSearch}
-              rooms={rooms}
-              platforms={platforms}
-              platformInfo={platformInfo}
-              editingBotId={editingBotId}
-              pendingBotIds={pendingBotIds}
-              baseUrl={baseUrl}
-              noDragStyle={NO_DRAG_STYLE}
-              onBotSearchChange={setBotSearch}
-              onStartEditBot={startEditBot}
-              onToggleBot={handleToggleBot}
-              onUnbindBot={handleUnbindBot}
-              onSelectRoom={handleSelectRoom}
-              onCopyWebhook={handleCopyWebhook}
-              onDeleteBot={(bot) => setPendingDeleteBot(bot)}
-            />
-
-            <div className="space-y-4 self-start">
-              {/* Linked rooms overview */}
-              <div className="rounded-xl border border-border bg-card p-4">
-                <div className="mb-4">
-                  <div className="text-sm font-semibold">群聊连接概览</div>
-                  <div className="mt-1 text-xs text-muted-foreground">只展示已经接入外部机器人的群聊。</div>
-                </div>
-                <div className="max-h-[220px] space-y-3 overflow-y-auto pr-1">
-                  {linkedRooms.length === 0 ? (
-                    <div className="rounded-lg border border-dashed border-border px-3 py-4 text-xs text-muted-foreground">
-                      还没有已连接的群聊
-                    </div>
-                  ) : (
-                    linkedRooms.map((room) => {
-                      const roomBindings = botsByRoomId.get(room.id) ?? []
-                      return (
-                        <div key={room.id} className="rounded-lg border border-border bg-muted/30 px-3 py-3">
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="truncate text-sm font-medium text-foreground">{room.name}</div>
-                              <div className="mt-1 text-[11px] text-muted-foreground">
-                                已连接 {roomBindings.length} 个机器人
-                              </div>
-                            </div>
-                            <div className="shrink-0 rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-700">
-                              在线桥接
-                            </div>
-                          </div>
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            {roomBindings.map((item) => (
-                              <span
-                                key={item.id}
-                                className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[11px] text-gray-700"
-                              >
-                                <span className="font-medium">{item.name}</span>
-                                <span className="text-gray-400">·</span>
-                                <span>{platformLabel(platforms, item.platform)}</span>
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )
-                    })
-                  )}
-                </div>
-              </div>
-
-              {/* Recent events */}
-              <div className="rounded-xl border border-border bg-card p-4">
-                <div className="mb-4">
-                  <div className="text-sm font-semibold">最近同步事件</div>
-                  <div className="mt-1 text-xs text-muted-foreground">展示最近一次流入或流出的消息情况。</div>
-                </div>
-                <div className="max-h-[360px] space-y-2 overflow-y-auto pr-1">
-                  {events.length === 0 ? (
-                    <div className="rounded-lg border border-dashed border-border px-3 py-4 text-xs text-muted-foreground">
-                      暂无事件
-                    </div>
-                  ) : (
-                    events.map((event: BridgeEvent) => (
-                      <div key={event.id} className="rounded-xl border border-border bg-white px-3 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700">
-                                {platformLabel(platforms, event.platform)}
-                              </span>
-                              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-foreground">
-                                {event.direction === 'inbound'
-                                  ? <ArrowDownLeft className="size-3.5 text-emerald-600" />
-                                  : <ArrowUpRight className="size-3.5 text-blue-600" />}
-                                {event.direction === 'inbound' ? '流入' : '流出'}
-                              </span>
-                            </div>
-                            <div className="mt-2 line-clamp-3 text-[12px] leading-5 text-foreground">
-                              {event.contentPreview || '这次同步还没有拿到可展示的消息内容。'}
-                            </div>
-                            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-                              <span className="inline-flex items-center gap-1">
-                                <Clock3 className="size-3" />
-                                {formatEventTime(event.createdAt)}
-                              </span>
-                              {event.agentName && <span>助手：{event.agentName}</span>}
-                              {event.errorMsg ? (
-                                <span className="text-red-500">{event.errorMsg}</span>
-                              ) : (
-                                <span className="truncate max-w-[160px]">会话：{event.externalId}</span>
-                              )}
-                            </div>
-                          </div>
-                          <span className={cn(
-                            'shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium',
-                            event.status === 'success' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500',
-                          )}>
-                            {event.status === 'success' ? (
-                              <span className="inline-flex items-center gap-1">
-                                <Check className="size-3.5" />
-                                成功
-                              </span>
-                            ) : '失败'}
-                          </span>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Rebind confirmation dialog (Fix #66: safe null check) */}
       <AlertDialog open={!!pendingRebind} onOpenChange={(open) => !open && setPendingRebind(null)}>
