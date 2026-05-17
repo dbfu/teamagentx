@@ -248,19 +248,21 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
     if (!isOpen || !assistant?.id) return
 
     let cancelled = false
-    setResolvedAssistant(assistant)
-
+    // 直接从 API 获取最新数据，避免使用传入的旧数据
     agentApi.getById(assistant.id).then((res) => {
       if (cancelled) return
       if (res.success && res.data) {
         setResolvedAssistant(res.data)
+      } else {
+        // API 失败时，使用传入的数据作为 fallback
+        setResolvedAssistant(assistant)
       }
     })
 
     return () => {
       cancelled = true
     }
-  }, [isOpen, assistant?.id, assistant])
+  }, [isOpen, assistant?.id])
 
   // 获取 ACP 工具列表
   const fetchAcpTools = async () => {

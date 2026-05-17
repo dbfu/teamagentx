@@ -99,12 +99,17 @@ export function TodoModal({ isOpen, onClose, onTodoClick }: TodoModalProps) {
             </div>
           ) : (
             <div className="divide-y divide-border">
-              {pendingTodos.map((todo) => (
+              {pendingTodos.map((todo, index) => (
                 <div
                   key={todo.id}
                   className="flex items-start gap-3 px-5 py-4 hover:bg-accent cursor-pointer"
                   onClick={() => handleTodoClick(todo)}
                 >
+                  {/* 序号 */}
+                  <div className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground">
+                    {index + 1}
+                  </div>
+
                   {/* 助手头像 */}
                   <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10">
                     <span className="text-xs font-medium text-primary">

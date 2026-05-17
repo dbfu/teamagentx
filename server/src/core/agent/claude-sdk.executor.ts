@@ -45,6 +45,7 @@ import {
     buildInstalledSkillsInstructions,
     buildInstalledSkillsSignature,
 } from './skill-instructions.js';
+import { syncGlobalClaudeLocalConfig } from './claude-local-config.js';
 import {
     AGENT_CREATOR_AGENT_ID,
     agentCreatorTools,
@@ -777,9 +778,22 @@ ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
     ];
     keysToClear.forEach((key) => delete cleanEnv[key]);
 
+    const claudeConfigDir = this.getClaudeConfigDir();
+    if (!this.llmProvider) {
+      const syncResult = syncGlobalClaudeLocalConfig(claudeConfigDir);
+      if (syncResult.settings.copied || syncResult.state.copied) {
+        logClaudeSdkDebug('synced global Claude settings', {
+          agentName: this.name,
+          agentId: this.agentId,
+          settings: syncResult.settings,
+          state: syncResult.state,
+        });
+      }
+    }
+
     const providerEnv = this.llmProvider
       ? buildAcpProviderEnv('claude', this.llmProvider, this.agentId)
-      : {CLAUDE_CONFIG_DIR: this.getClaudeConfigDir()};
+      : {CLAUDE_CONFIG_DIR: claudeConfigDir};
 
     if (this.llmProvider) {
       this.acpProviderInfo = {
