@@ -76,4 +76,5 @@ apps/mobile/.flutter-plugins
 apps/mobile/.flutter-plugins-dependencies
 apps/mobile/.idea/
 apps/mobile/*.iml
+apps/mobile/release/
 .gitnexus
