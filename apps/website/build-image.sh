@@ -41,6 +41,8 @@ echo "  完整版本  : ${VERSION}"
 echo "  mac-arm64 : ${VITE_DOWNLOAD_URL_MAC_ARM64:-（未设置）}"
 echo "  mac-x64   : ${VITE_DOWNLOAD_URL_MAC_X64:-（未设置）}"
 echo "  win       : ${VITE_DOWNLOAD_URL_WIN:-（未设置）}"
+echo "  ios       : ${VITE_DOWNLOAD_URL_IOS:-（未设置）}"
+echo "  android   : ${VITE_DOWNLOAD_URL_ANDROID:-（未设置）}"
 echo "=================================================="
 
 # ── 确定脚本所在目录（支持从任意位置调用） ────────────────────────────────────
@@ -57,7 +59,7 @@ if [ -f "$ENV_FILE" ]; then
     val="${line#*=}"
     # 只补充尚未在 shell 中设置的变量
     case "$key" in
-      VITE_DOWNLOAD_URL_MAC_ARM64|VITE_DOWNLOAD_URL_MAC_X64|VITE_DOWNLOAD_URL_WIN|VITE_APP_VERSION_NOTE)
+      VITE_DOWNLOAD_URL_MAC_ARM64|VITE_DOWNLOAD_URL_MAC_X64|VITE_DOWNLOAD_URL_WIN|VITE_DOWNLOAD_URL_IOS|VITE_DOWNLOAD_URL_ANDROID|VITE_APP_VERSION_NOTE)
         eval "[ -z \"\${${key}+x}\" ] && export ${key}=\"${val}\""
         ;;
     esac
@@ -96,6 +98,8 @@ docker build \
   --build-arg "VITE_DOWNLOAD_URL_MAC_ARM64=${VITE_DOWNLOAD_URL_MAC_ARM64:-}" \
   --build-arg "VITE_DOWNLOAD_URL_MAC_X64=${VITE_DOWNLOAD_URL_MAC_X64:-}" \
   --build-arg "VITE_DOWNLOAD_URL_WIN=${VITE_DOWNLOAD_URL_WIN:-}" \
+  --build-arg "VITE_DOWNLOAD_URL_IOS=${VITE_DOWNLOAD_URL_IOS:-}" \
+  --build-arg "VITE_DOWNLOAD_URL_ANDROID=${VITE_DOWNLOAD_URL_ANDROID:-}" \
   -t "${IMAGE}:${TAG}" \
   -t "${IMAGE}:latest" \
   -f "${BUILD_CONTEXT}/Dockerfile" \

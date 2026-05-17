@@ -481,6 +481,16 @@ export function DocsPage({ siteConfig }: DocsPageProps) {
               <a href={siteConfig.winUrl} target="_blank" rel="noopener noreferrer" className="btn btn-outline">
                 下载 Windows 客户端
               </a>
+              {siteConfig.iosUrl && (
+                <a href={siteConfig.iosUrl} target="_blank" rel="noopener noreferrer" className="btn btn-outline">
+                  下载 iOS App
+                </a>
+              )}
+              {siteConfig.androidUrl && (
+                <a href={siteConfig.androidUrl} target="_blank" rel="noopener noreferrer" className="btn btn-outline">
+                  下载 Android App
+                </a>
+              )}
               <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="btn btn-outline">
                 查看 GitHub
               </a>

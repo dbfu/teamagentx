@@ -488,6 +488,21 @@ body.nav-scrolled .top-nav{background:rgba(8,11,18,.85);backdrop-filter:blur(16p
 .cta-sub{font-size:17px;color:var(--t2);margin-bottom:36px;position:relative;line-height:1.7}
 .cta-actions{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;position:relative}
 .download-note{font-size:12px;color:var(--t3);margin-top:16px;position:relative}
+.mobile-download-row{
+  display:flex;align-items:center;justify-content:center;gap:10px;
+  margin-top:20px;position:relative;
+}
+.mobile-download-label{
+  font-size:12px;font-weight:600;color:var(--t3);letter-spacing:.6px;
+  text-transform:uppercase;padding-right:4px;
+}
+.mobile-store-btn{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:7px 16px;border-radius:var(--r);font-size:13px;font-weight:500;
+  color:var(--t2);border:1px solid var(--border2);
+  transition:color .15s,border-color .15s,background .15s;
+}
+.mobile-store-btn:hover{color:var(--t1);border-color:var(--accent);background:rgba(79,123,255,.06)}
 
 /* ════════════════════ Footer ════════════════════ */
 footer{padding:60px var(--shell-gutter);background:var(--bg);border-top:1px solid var(--border)}

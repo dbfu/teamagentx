@@ -354,7 +354,10 @@ function toneToHue(tone: string) {
 // ══════════════════════════════════════════════════════
 //  主应用
 // ══════════════════════════════════════════════════════
-const IS_MAC = /Mac|iPhone|iPad/.test(navigator.userAgent)
+const IS_IOS = /iPhone|iPad/.test(navigator.userAgent)
+const IS_ANDROID = /Android/.test(navigator.userAgent)
+const IS_MOBILE = IS_IOS || IS_ANDROID
+const IS_MAC = /Macintosh/.test(navigator.userAgent)
 
 function App() {
   const [menuOpen, setMenuOpen] = useState(false)
@@ -366,6 +369,8 @@ function App() {
     macUrlArm64: DOWNLOAD_URL_MAC_ARM64,
     macUrlX64: DOWNLOAD_URL_MAC_X64,
     winUrl: DOWNLOAD_URL_WIN,
+    iosUrl: DOWNLOAD_URL_IOS,
+    androidUrl: DOWNLOAD_URL_ANDROID,
   } = useSiteConfig()
   const isDocsRoute = typeof window !== 'undefined' && window.location.pathname.startsWith('/docs')
 
@@ -377,6 +382,8 @@ function App() {
           macUrlArm64: DOWNLOAD_URL_MAC_ARM64,
           macUrlX64: DOWNLOAD_URL_MAC_X64,
           winUrl: DOWNLOAD_URL_WIN,
+          iosUrl: DOWNLOAD_URL_IOS,
+          androidUrl: DOWNLOAD_URL_ANDROID,
         }}
       />
     )
@@ -496,21 +503,20 @@ function App() {
               多个 Agent 并行推进、相互协作，竞品分析、内容创作、数据报告、软件开发——<strong>任何大模型能做的事，都能自动化完成。</strong>
             </p>
             <div className="hero-actions">
-              {IS_MAC ? (
-                <button
-                  type="button"
-                  className="btn btn-primary btn-hero"
-                  onClick={() => setShowMacModal(true)}
-                >
+              {IS_IOS && DOWNLOAD_URL_IOS ? (
+                <a href={DOWNLOAD_URL_IOS} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-hero">
+                  {downloadIcon(15)} 下载 iOS App
+                </a>
+              ) : IS_ANDROID && DOWNLOAD_URL_ANDROID ? (
+                <a href={DOWNLOAD_URL_ANDROID} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-hero">
+                  {downloadIcon(15)} 下载 Android App
+                </a>
+              ) : IS_MAC ? (
+                <button type="button" className="btn btn-primary btn-hero" onClick={() => setShowMacModal(true)}>
                   {downloadIcon(15)} 下载 macOS 客户端
                 </button>
               ) : (
-                <a
-                  href={DOWNLOAD_URL_WIN}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="btn btn-primary btn-hero"
-                >
+                <a href={DOWNLOAD_URL_WIN} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-hero">
                   {downloadIcon(15)} 下载 Windows 客户端
                 </a>
               )}
@@ -688,7 +694,16 @@ function App() {
           完全免费 · 开源无限制 · 数据本地存储
         </p>
         <div className="cta-actions reveal">
-          {IS_MAC ? (
+          {IS_MOBILE ? (
+            <>
+              {DOWNLOAD_URL_IOS && (
+                <a href={DOWNLOAD_URL_IOS} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-lg">{downloadIcon(16)}下载 iOS App</a>
+              )}
+              {DOWNLOAD_URL_ANDROID && (
+                <a href={DOWNLOAD_URL_ANDROID} target="_blank" rel="noopener noreferrer" className={`btn btn-lg ${DOWNLOAD_URL_IOS ? 'btn-outline' : 'btn-primary'}`}>{downloadIcon(16)}下载 Android App</a>
+              )}
+            </>
+          ) : IS_MAC ? (
             <>
               <button type="button" className="btn btn-primary btn-lg" onClick={() => setShowMacModal(true)}>{downloadIcon(16)}下载 macOS 客户端</button>
               <a href={DOWNLOAD_URL_WIN} target="_blank" rel="noopener noreferrer" className="btn btn-outline btn-lg">下载 Windows 客户端</a>
@@ -703,7 +718,24 @@ function App() {
             <GitHubIcon size={16} />GitHub 开源
           </a>
         </div>
-        <p className="download-note reveal">当前版本 {APP_VERSION} · 支持 macOS 12+ / Windows 10+ · MIT 开源协议</p>
+        {(DOWNLOAD_URL_IOS || DOWNLOAD_URL_ANDROID) && !IS_MOBILE && (
+          <div className="mobile-download-row reveal">
+            <span className="mobile-download-label">移动端</span>
+            {DOWNLOAD_URL_IOS && (
+              <a href={DOWNLOAD_URL_IOS} target="_blank" rel="noopener noreferrer" className="mobile-store-btn">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98l-.09.06c-.22.14-2.2 1.28-2.18 3.82.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.76M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+                App Store
+              </a>
+            )}
+            {DOWNLOAD_URL_ANDROID && (
+              <a href={DOWNLOAD_URL_ANDROID} target="_blank" rel="noopener noreferrer" className="mobile-store-btn">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M17.523 15.341 5.477 8.659a.5.5 0 0 0-.727.444v13.794a.5.5 0 0 0 .727.444l12.046-6.682a.5.5 0 0 0 0-.888v-.43zM3.25 7.084V20.75A2.25 2.25 0 0 0 5.5 23h.051L5.5 23l12.047-6.682a2.25 2.25 0 0 0 0-3.912L5.5 5.724A2.25 2.25 0 0 0 3.25 7.084zM14.5 2a.75.75 0 0 1 .75.75v2.5a.75.75 0 0 1-1.5 0v-2.5A.75.75 0 0 1 14.5 2zm-5 0a.75.75 0 0 1 .75.75v2.5a.75.75 0 0 1-1.5 0v-2.5A.75.75 0 0 1 9.5 2z"/></svg>
+                Android APK
+              </a>
+            )}
+          </div>
+        )}
+        <p className="download-note reveal">当前版本 {APP_VERSION} · 支持 macOS 12+ / Windows 10+ / iOS / Android · MIT 开源协议</p>
       </section>
 
       {/* ── macOS 芯片选择弹窗 ── */}
