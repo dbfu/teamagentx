@@ -32,7 +32,13 @@
       "Bash(powershell *)",
       "mcp__plugin_playwright_playwright__browser_wait_for",
       "mcp__plugin_playwright_playwright__browser_click",
-      "mcp__plugin_playwright_playwright__browser_snapshot"
+      "mcp__plugin_playwright_playwright__browser_snapshot",
+      "Bash(pnpm typecheck *)",
+      "Bash(bash -n /Users/zhangyang/spark_ai_project/teamagentx/apps/website/build-image.sh)",
+      "Bash(git -C /Users/zhangyang/spark_ai_project/teamagentx status)",
+      "Bash(git -C /Users/zhangyang/spark_ai_project/teamagentx diff --stat)",
+      "Bash(git -C /Users/zhangyang/spark_ai_project/teamagentx log --oneline -5)",
+      "Bash(git -C /Users/zhangyang/spark_ai_project/teamagentx add apps/desktop/electron-builder.yml apps/desktop/electron/main.ts apps/web/src/types/electron.d.ts apps/website/.env.example apps/website/Dockerfile apps/website/build-image.sh apps/website/docker-entrypoint.sh apps/website/public/update.json apps/website/src/App.tsx apps/website/src/docs-page.tsx apps/website/src/env.d.ts apps/website/src/site-config.ts apps/website/src/styles.css)"
     ]
   }
 }

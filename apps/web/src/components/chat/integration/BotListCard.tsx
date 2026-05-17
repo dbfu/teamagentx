@@ -45,7 +45,6 @@ export function BotListCard({
   botSearch,
   rooms,
   platforms,
-  platformInfo,
   editingBotId,
   pendingBotIds,
   baseUrl,
