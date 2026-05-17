@@ -1,6 +1,12 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert';
-import { buildCodexModelProviderConfig } from '../../../core/agent/codex-sdk.executor.js';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import {
+  buildBuiltinCodexMcpServerConfigs,
+  buildCodexModelProviderConfig,
+} from '../../../core/agent/codex-sdk.executor.js';
 
 function provider(overrides: Record<string, unknown> = {}) {
   return {
@@ -42,5 +48,77 @@ describe('Codex SDK Executor provider config', () => {
       model: 'gpt-5.4',
       model_provider: 'openai',
     });
+  });
+});
+
+describe('Codex SDK Executor builtin MCP servers', () => {
+  test('注入 tax，并在 GitNexus 可用时注入 gitnexus', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-codex-mcp-'));
+    const repoDir = path.join(tmpDir, 'repo');
+    const binDir = path.join(tmpDir, 'bin');
+    const gitnexusPath = path.join(binDir, 'gitnexus');
+    fs.mkdirSync(path.join(repoDir, '.gitnexus'), { recursive: true });
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.writeFileSync(gitnexusPath, '#!/usr/bin/env sh\nexit 0\n', { mode: 0o755 });
+
+    const originalPath = process.env.PATH;
+    process.env.PATH = `${binDir}${path.delimiter}${originalPath || ''}`;
+    try {
+      const mcpServers = buildBuiltinCodexMcpServerConfigs({
+        workDir: repoDir,
+        teamAgentXMcpServerPath: '/tmp/teamagentx-agent-tools-mcp.mjs',
+        chatRoomId: 'room-1',
+        agentId: 'agent-1',
+        agentName: 'Codex',
+        chatRoomAgents: [
+          { agentId: 'agent-2', name: 'Claude' },
+        ],
+        generateImageEndpoint: 'http://127.0.0.1:3001/internal/agent-tools/generate-image',
+      }) as Record<string, any>;
+
+      assert.strictEqual(mcpServers.gitnexus.command, gitnexusPath);
+      assert.deepStrictEqual(mcpServers.gitnexus.args, ['mcp']);
+      assert.strictEqual(mcpServers.tax.command, process.execPath);
+      assert.deepStrictEqual(mcpServers.tax.args, ['/tmp/teamagentx-agent-tools-mcp.mjs']);
+      assert.strictEqual(mcpServers.tax.env.TEAMAGENTX_CHAT_ROOM_ID, 'room-1');
+      assert.strictEqual(mcpServers.tax.env.TEAMAGENTX_SOURCE_AGENT_ID, 'agent-1');
+      assert.strictEqual(mcpServers.tax.env.TEAMAGENTX_SOURCE_AGENT_NAME, 'Codex');
+      assert.strictEqual(
+        mcpServers.tax.env.TEAMAGENTX_CHAT_ROOM_AGENTS,
+        JSON.stringify([{ agentId: 'agent-2', name: 'Claude' }]),
+      );
+      assert.strictEqual(
+        mcpServers.tax.env.TEAMAGENTX_GENERATE_IMAGE_ENDPOINT,
+        'http://127.0.0.1:3001/internal/agent-tools/generate-image',
+      );
+      assert.ok(mcpServers.tax.env.TEAMAGENTX_INTERNAL_TOOL_TOKEN);
+    } finally {
+      if (originalPath === undefined) {
+        delete process.env.PATH;
+      } else {
+        process.env.PATH = originalPath;
+      }
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test('GitNexus 不可用时仍然注入 tax', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-codex-mcp-'));
+    try {
+      const mcpServers = buildBuiltinCodexMcpServerConfigs({
+        workDir: tmpDir,
+        teamAgentXMcpServerPath: '/tmp/teamagentx-agent-tools-mcp.mjs',
+        chatRoomId: 'room-1',
+        agentName: 'Codex',
+        chatRoomAgents: [],
+      }) as Record<string, any>;
+
+      assert.strictEqual(mcpServers.gitnexus, undefined);
+      assert.strictEqual(mcpServers.tax.command, process.execPath);
+      assert.strictEqual(mcpServers.tax.env.TEAMAGENTX_SOURCE_AGENT_ID, '');
+      assert.strictEqual(mcpServers.tax.env.TEAMAGENTX_GENERATE_IMAGE_ENDPOINT, undefined);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });
