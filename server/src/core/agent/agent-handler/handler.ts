@@ -173,19 +173,16 @@ export function setupAIHandlers(
         return;
       }
 
-      // 普通群聊：无 @ 发言时，触发默认接收助手
-      // 若群有群主，仅群主消息触发；未设置群主则任意成员均可触发
-      // 注意：`!chatRoom.ownerId` 分支是有意保留的设计——当前系统内置/无主群聊
-      // （例如系统创建的群组）允许任意成员触发默认助手。
-      // TODO: 若未来支持用户创建无主房间，需评估此处是否需要增加触发权限校验
+      // 普通群聊：无 @ 发言时，触发默认接收助手。
+      // Socket 入口已校验发送者是群聊成员；这里不再限制必须由群主触发，
+      // 避免多人群聊或历史 ownerId 漂移时默认助手静默失效。
       if (!hasMentions) {
         if (
           message.isHuman &&
           chatRoom &&
           !chatRoom.isQuickChatRoom &&
           chatRoom.defaultAgentId &&
-          message.userId &&
-          (!chatRoom.ownerId || message.userId === chatRoom.ownerId)
+          message.userId
         ) {
           const agent = await agentService.findById(chatRoom.defaultAgentId);
 
