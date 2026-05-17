@@ -591,4 +591,49 @@ footer{padding:60px var(--shell-gutter);background:var(--bg);border-top:1px soli
   .footer-bottom{flex-direction:column;align-items:flex-start;gap:8px}
   .wchat-msgs{padding:8px 8px 4px;gap:7px}
   .wchat-input{padding:6px 10px}
+  .mac-modal{width:calc(100% - 32px);padding:28px 20px 24px;border-radius:12px}
+  .mac-modal-options{gap:10px}
+  .mac-modal-option{padding:12px 14px}
 }
+
+/* ── macOS 芯片选择弹窗 ── */
+.mac-modal-overlay{
+  position:fixed;inset:0;z-index:1000;
+  background:rgba(0,0,0,.65);backdrop-filter:blur(6px);
+  display:flex;align-items:center;justify-content:center;
+}
+.mac-modal{
+  position:relative;background:#0D1020;
+  border:1px solid rgba(255,255,255,.12);border-radius:16px;
+  padding:36px 32px 28px;width:440px;max-width:92vw;
+  box-shadow:0 24px 64px rgba(0,0,0,.5);
+}
+.mac-modal-close{
+  position:absolute;top:14px;right:16px;
+  background:none;border:none;cursor:pointer;
+  font-size:22px;line-height:1;color:var(--t2);
+  padding:4px 8px;border-radius:6px;
+  transition:background .15s,color .15s;
+}
+.mac-modal-close:hover{background:rgba(255,255,255,.08);color:var(--t1)}
+.mac-modal-header{margin-bottom:20px}
+.mac-modal-header h3{font-size:18px;font-weight:700;color:var(--t1);margin:0 0 6px}
+.mac-modal-header p{font-size:14px;color:var(--t2);margin:0}
+.mac-modal-options{display:flex;flex-direction:column;gap:12px;margin-bottom:20px}
+.mac-modal-option{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 16px;border-radius:10px;
+  border:2px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);
+  cursor:pointer;text-align:left;transition:border-color .15s,background .15s;
+}
+.mac-modal-option:hover{border-color:var(--accent);background:rgba(79,123,255,.08)}
+.mac-modal-option.selected{border-color:var(--accent);background:rgba(79,123,255,.1)}
+.mac-modal-option-body{flex:1;min-width:0}
+.mac-modal-option-title{font-size:15px;font-weight:600;color:var(--t1);margin-bottom:2px}
+.mac-modal-option-desc{font-size:13px;color:var(--t2)}
+.mac-modal-badge{
+  font-size:11px;font-weight:600;color:var(--accent);
+  background:rgba(79,123,255,.15);padding:3px 8px;
+  border-radius:20px;white-space:nowrap;flex-shrink:0;margin-left:10px;
+}
+.mac-modal-download-btn{display:flex;width:100%;justify-content:center;align-items:center;gap:8px}

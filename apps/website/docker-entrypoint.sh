@@ -7,20 +7,20 @@ HTML_DIR=/usr/share/nginx/html
 UPDATE_JSON="${HTML_DIR}/update.json"
 
 VERSION="${VITE_APP_VERSION:-v1.2.0}"
-RELEASE_VERSION=$(echo "$VERSION" | sed 's/^[vV]//')
-
-MAC_URL="${VITE_DOWNLOAD_URL_MAC:-https://releases.teamagentx.com/${RELEASE_VERSION}/TeamAgentX-${RELEASE_VERSION}-mac.dmg}"
-WIN_URL="${VITE_DOWNLOAD_URL_WIN:-https://releases.teamagentx.com/${RELEASE_VERSION}/TeamAgentX-${RELEASE_VERSION}-win.exe}"
-NOTES="${VITE_APP_VERSION_NOTE:-${VITE_UPDATE_NOTES:-}}"
+MAC_URL_ARM64="${VITE_DOWNLOAD_URL_MAC_ARM64:-}"
+MAC_URL_X64="${VITE_DOWNLOAD_URL_MAC_X64:-}"
+WIN_URL="${VITE_DOWNLOAD_URL_WIN:-}"
+NOTES="${VITE_APP_VERSION_NOTE:-}"
 
 cat > "$UPDATE_JSON" <<EOF
 {
   "version": "${VERSION}",
-  "url": "${MAC_URL}",
-  "macUrl": "${MAC_URL}",
+  "macUrlArm64": "${MAC_URL_ARM64}",
+  "macUrlX64": "${MAC_URL_X64}",
   "winUrl": "${WIN_URL}",
   "downloads": {
-    "mac": "${MAC_URL}",
+    "macArm64": "${MAC_URL_ARM64}",
+    "macX64": "${MAC_URL_X64}",
     "win": "${WIN_URL}"
   },
   "notes": "${NOTES}"

@@ -1,11 +1,12 @@
 {
   "version": "v1.2.0",
-  "url": "",
-  "macUrl": "",
-  "winUrl": "",
+  "macUrlArm64": "https://releases.teamagentx.com/1.2.0/TeamAgentX-1.2.0-mac-arm64.dmg",
+  "macUrlX64": "https://releases.teamagentx.com/1.2.0/TeamAgentX-1.2.0-mac-x64.dmg",
+  "winUrl": "https://releases.teamagentx.com/1.2.0/TeamAgentX-1.2.0-win.exe",
   "downloads": {
-    "mac": "",
-    "win": ""
+    "macArm64": "https://releases.teamagentx.com/1.2.0/TeamAgentX-1.2.0-mac-arm64.dmg",
+    "macX64": "https://releases.teamagentx.com/1.2.0/TeamAgentX-1.2.0-mac-x64.dmg",
+    "win": "https://releases.teamagentx.com/1.2.0/TeamAgentX-1.2.0-win.exe"
   },
-  "notes": ""
+  "notes": "dddd"
 }

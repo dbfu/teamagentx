@@ -358,12 +358,43 @@ const IS_MAC = /Mac|iPhone|iPad/.test(navigator.userAgent)
 
 function App() {
   const [menuOpen, setMenuOpen] = useState(false)
-  const { version: APP_VERSION, macUrl: DOWNLOAD_URL_MAC, winUrl: DOWNLOAD_URL_WIN } = useSiteConfig()
+  const [showMacModal, setShowMacModal] = useState(false)
+  const [selectedArch, setSelectedArch] = useState<'arm64' | 'x64'>('arm64')
+  const [detectedArch, setDetectedArch] = useState<'arm64' | 'x64' | null>(null)
+  const {
+    version: APP_VERSION,
+    macUrlArm64: DOWNLOAD_URL_MAC_ARM64,
+    macUrlX64: DOWNLOAD_URL_MAC_X64,
+    winUrl: DOWNLOAD_URL_WIN,
+  } = useSiteConfig()
   const isDocsRoute = typeof window !== 'undefined' && window.location.pathname.startsWith('/docs')
 
   if (isDocsRoute) {
-    return <DocsPage siteConfig={{ version: APP_VERSION, macUrl: DOWNLOAD_URL_MAC, winUrl: DOWNLOAD_URL_WIN }} />
+    return (
+      <DocsPage
+        siteConfig={{
+          version: APP_VERSION,
+          macUrlArm64: DOWNLOAD_URL_MAC_ARM64,
+          macUrlX64: DOWNLOAD_URL_MAC_X64,
+          winUrl: DOWNLOAD_URL_WIN,
+        }}
+      />
+    )
   }
+
+  // Apple Silicon vs Intel 架构检测
+  useEffect(() => {
+    if (!IS_MAC) return
+    const uad = (navigator as { userAgentData?: { getHighEntropyValues: (hints: string[]) => Promise<{ architecture?: string }> } }).userAgentData
+    const resolve = (arch: 'arm64' | 'x64') => { setDetectedArch(arch); setSelectedArch(arch) }
+    if (uad?.getHighEntropyValues) {
+      uad.getHighEntropyValues(['architecture'])
+        .then((hints) => resolve(hints.architecture === 'arm' ? 'arm64' : 'x64'))
+        .catch(() => resolve('arm64'))
+    } else {
+      resolve('arm64')
+    }
+  }, [])
 
   // 滚动导航样式
   useEffect(() => {
@@ -465,14 +496,24 @@ function App() {
               多个 Agent 并行推进、相互协作，竞品分析、内容创作、数据报告、软件开发——<strong>任何大模型能做的事，都能自动化完成。</strong>
             </p>
             <div className="hero-actions">
-              <a
-                href={IS_MAC ? DOWNLOAD_URL_MAC : DOWNLOAD_URL_WIN}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn btn-primary btn-hero"
-              >
-                {downloadIcon(15)} 下载 {IS_MAC ? 'macOS' : 'Windows'} 客户端
-              </a>
+              {IS_MAC ? (
+                <button
+                  type="button"
+                  className="btn btn-primary btn-hero"
+                  onClick={() => setShowMacModal(true)}
+                >
+                  {downloadIcon(15)} 下载 macOS 客户端
+                </button>
+              ) : (
+                <a
+                  href={DOWNLOAD_URL_WIN}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn btn-primary btn-hero"
+                >
+                  {downloadIcon(15)} 下载 Windows 客户端
+                </a>
+              )}
               <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="btn btn-outline btn-hero">
                 <GitHubIcon size={16} /> 开源 · 免费使用
               </a>
@@ -649,13 +690,13 @@ function App() {
         <div className="cta-actions reveal">
           {IS_MAC ? (
             <>
-              <a href={DOWNLOAD_URL_MAC} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-lg">{downloadIcon(16)}下载 macOS 客户端</a>
+              <button type="button" className="btn btn-primary btn-lg" onClick={() => setShowMacModal(true)}>{downloadIcon(16)}下载 macOS 客户端</button>
               <a href={DOWNLOAD_URL_WIN} target="_blank" rel="noopener noreferrer" className="btn btn-outline btn-lg">下载 Windows 客户端</a>
             </>
           ) : (
             <>
               <a href={DOWNLOAD_URL_WIN} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-lg">{downloadIcon(16)}下载 Windows 客户端</a>
-              <a href={DOWNLOAD_URL_MAC} target="_blank" rel="noopener noreferrer" className="btn btn-outline btn-lg">下载 macOS 客户端</a>
+              <button type="button" className="btn btn-outline btn-lg" onClick={() => setShowMacModal(true)}>下载 macOS 客户端</button>
             </>
           )}
           <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="btn btn-outline btn-lg">
@@ -664,6 +705,52 @@ function App() {
         </div>
         <p className="download-note reveal">当前版本 {APP_VERSION} · 支持 macOS 12+ / Windows 10+ · MIT 开源协议</p>
       </section>
+
+      {/* ── macOS 芯片选择弹窗 ── */}
+      {showMacModal && (
+        <div className="mac-modal-overlay" onClick={() => setShowMacModal(false)}>
+          <div className="mac-modal" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="mac-modal-close" onClick={() => setShowMacModal(false)}>×</button>
+            <div className="mac-modal-header">
+              <h3>选择 macOS 安装包</h3>
+              <p>请根据你的 Mac 芯片类型选择对应版本</p>
+            </div>
+            <div className="mac-modal-options">
+              <button
+                type="button"
+                className={`mac-modal-option${selectedArch === 'arm64' ? ' selected' : ''}`}
+                onClick={() => setSelectedArch('arm64')}
+              >
+                <div className="mac-modal-option-body">
+                  <div className="mac-modal-option-title">Apple Silicon</div>
+                  <div className="mac-modal-option-desc">M1 · M2 · M3 · M4 及更新芯片</div>
+                </div>
+                {detectedArch === 'arm64' && <span className="mac-modal-badge">当前设备</span>}
+              </button>
+              <button
+                type="button"
+                className={`mac-modal-option${selectedArch === 'x64' ? ' selected' : ''}`}
+                onClick={() => setSelectedArch('x64')}
+              >
+                <div className="mac-modal-option-body">
+                  <div className="mac-modal-option-title">Intel</div>
+                  <div className="mac-modal-option-desc">Intel Core 系列处理器</div>
+                </div>
+                {detectedArch === 'x64' && <span className="mac-modal-badge">当前设备</span>}
+              </button>
+            </div>
+            <a
+              href={selectedArch === 'arm64' ? DOWNLOAD_URL_MAC_ARM64 : DOWNLOAD_URL_MAC_X64}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-primary mac-modal-download-btn"
+              onClick={() => setShowMacModal(false)}
+            >
+              {downloadIcon(15)} 下载 {selectedArch === 'arm64' ? 'Apple Silicon' : 'Intel'} 版本
+            </a>
+          </div>
+        </div>
+      )}
 
       {/* ── Footer ── */}
       <footer id="footer">

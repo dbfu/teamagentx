@@ -58,9 +58,10 @@ declare global {
   interface UpdateInfo {
     version: string;
     url: string;
-    macUrl?: string;
+    macUrlArm64?: string;
+    macUrlX64?: string;
     winUrl?: string;
-    downloads?: { mac?: string; win?: string };
+    downloads?: { macArm64?: string; macX64?: string; win?: string };
     notes?: string;
     publishedAt?: string;
   }

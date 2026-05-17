@@ -146,12 +146,14 @@ type UpdateInfo = {
   version: string;
   /** 兼容旧客户端的通用下载链接（fallback） */
   url: string;
-  /** macOS 安装包下载链接 */
-  macUrl?: string;
+  /** macOS Apple Silicon (arm64) 安装包下载链接 */
+  macUrlArm64?: string;
+  /** macOS Intel (x64) 安装包下载链接 */
+  macUrlX64?: string;
   /** Windows 安装包下载链接 */
   winUrl?: string;
   /** 各平台下载链接（新格式） */
-  downloads?: { mac?: string; win?: string };
+  downloads?: { macArm64?: string; macX64?: string; win?: string };
   notes?: string;
   publishedAt?: string;
 };
@@ -291,51 +293,63 @@ function normalizeUpdateInfo(payload: unknown): UpdateInfo {
   const version = getStringField(data, ['version', 'latestVersion', 'tag_name']);
 
   // 提取平台专属链接
-  const macUrl = getStringField(data, ['macUrl']) || undefined;
+  const macUrlArm64 = getStringField(data, ['macUrlArm64']) || undefined;
+  const macUrlX64 = getStringField(data, ['macUrlX64']) || undefined;
   const winUrl = getStringField(data, ['winUrl']) || undefined;
 
   // 提取 downloads 子对象中的链接
   const downloadsRaw = data['downloads'];
-  let downloadsMac: string | undefined;
+  let downloadsMacArm64: string | undefined;
+  let downloadsMacX64: string | undefined;
   let downloadsWin: string | undefined;
   if (downloadsRaw && typeof downloadsRaw === 'object') {
     const dl = downloadsRaw as Record<string, unknown>;
-    downloadsMac = typeof dl['mac'] === 'string' && dl['mac'] ? dl['mac'] : undefined;
+    downloadsMacArm64 = typeof dl['macArm64'] === 'string' && dl['macArm64'] ? dl['macArm64'] : undefined;
+    downloadsMacX64 = typeof dl['macX64'] === 'string' && dl['macX64'] ? dl['macX64'] : undefined;
     downloadsWin = typeof dl['win'] === 'string' && dl['win'] ? dl['win'] : undefined;
   }
 
-  // 兼容旧格式：通用 url 字段
+  // 兼容旧格式：通用 url 字段（fallback，不主动使用）
   const url = getStringField(data, ['url', 'downloadUrl', 'downloadURL', 'latestDownloadUrl']);
 
+  const resolvedMacArm64 = macUrlArm64 || downloadsMacArm64;
+  const resolvedMacX64 = macUrlX64 || downloadsMacX64;
+  const resolvedWin = winUrl || downloadsWin;
+
   // 至少要有某个可用的下载链接
-  const hasSomeUrl = url || macUrl || winUrl || downloadsMac || downloadsWin;
+  const hasSomeUrl = resolvedMacArm64 || resolvedMacX64 || resolvedWin || url;
   if (!version || !hasSomeUrl) {
     throw new Error('更新信息缺少 version 或下载链接');
   }
 
   return {
     version,
-    url: url || macUrl || winUrl || downloadsMac || downloadsWin || '',
-    macUrl: macUrl || downloadsMac,
-    winUrl: winUrl || downloadsWin,
-    downloads: (downloadsMac || downloadsWin) ? { mac: downloadsMac, win: downloadsWin } : undefined,
+    url: url || resolvedMacArm64 || resolvedMacX64 || resolvedWin || '',
+    macUrlArm64: resolvedMacArm64,
+    macUrlX64: resolvedMacX64,
+    winUrl: resolvedWin,
+    downloads: (downloadsMacArm64 || downloadsMacX64 || downloadsWin)
+      ? { macArm64: downloadsMacArm64, macX64: downloadsMacX64, win: downloadsWin }
+      : undefined,
     notes: getStringField(data, ['notes', 'releaseNotes', 'body']) || undefined,
     publishedAt: getStringField(data, ['publishedAt', 'published_at']) || undefined,
   };
 }
 
 /**
- * 根据当前运行平台，从 UpdateInfo 中选取对应的下载链接。
- * 优先级：平台专属链接 > 通用 url 字段。
+ * 根据当前运行平台和 CPU 架构，从 UpdateInfo 中选取对应的下载链接。
  */
 function getPlatformDownloadUrl(update: UpdateInfo): string {
   if (process.platform === 'darwin') {
-    return update.macUrl || update.downloads?.mac || update.url;
+    const arch = process.arch; // 'arm64' for Apple Silicon, 'x64' for Intel
+    if (arch === 'arm64') {
+      return update.macUrlArm64 || update.downloads?.macArm64 || update.url;
+    }
+    return update.macUrlX64 || update.downloads?.macX64 || update.url;
   }
   if (process.platform === 'win32') {
     return update.winUrl || update.downloads?.win || update.url;
   }
-  // Linux 等其他平台 fallback 到通用链接
   return update.url;
 }
 

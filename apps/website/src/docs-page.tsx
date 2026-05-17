@@ -1,5 +1,15 @@
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { SiteConfig } from './site-config'
+
+const IS_MAC = /Mac|iPhone|iPad/.test(navigator.userAgent)
+
+function downloadIcon(size: number) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+  )
+}
 
 const GITHUB_URL = 'https://github.com/dbfu/teamagentx'
 
@@ -60,6 +70,23 @@ function DocCard({
 }
 
 export function DocsPage({ siteConfig }: DocsPageProps) {
+  const [showMacModal, setShowMacModal] = useState(false)
+  const [selectedArch, setSelectedArch] = useState<'arm64' | 'x64'>('arm64')
+  const [detectedArch, setDetectedArch] = useState<'arm64' | 'x64' | null>(null)
+
+  useEffect(() => {
+    if (!IS_MAC) return
+    const uad = (navigator as { userAgentData?: { getHighEntropyValues: (hints: string[]) => Promise<{ architecture?: string }> } }).userAgentData
+    const resolve = (arch: 'arm64' | 'x64') => { setDetectedArch(arch); setSelectedArch(arch) }
+    if (uad?.getHighEntropyValues) {
+      uad.getHighEntropyValues(['architecture'])
+        .then((hints) => resolve(hints.architecture === 'arm' ? 'arm64' : 'x64'))
+        .catch(() => resolve('arm64'))
+    } else {
+      resolve('arm64')
+    }
+  }, [])
+
   return (
     <div className="page-shell docs-shell">
       <div className="grid-bg" />
@@ -448,9 +475,9 @@ export function DocsPage({ siteConfig }: DocsPageProps) {
               <p>建议先下载客户端，完成初始化后创建一个“调研 + 撰写 + 审核”的三助手群聊，这是验证 TeamAgentX 价值最快的方式。</p>
             </div>
             <div className="docs-download-actions">
-              <a href={siteConfig.macUrl} target="_blank" rel="noopener noreferrer" className="btn btn-primary">
-                下载 macOS 客户端
-              </a>
+              <button type="button" className="btn btn-primary" onClick={() => setShowMacModal(true)}>
+                {downloadIcon(14)} 下载 macOS 客户端
+              </button>
               <a href={siteConfig.winUrl} target="_blank" rel="noopener noreferrer" className="btn btn-outline">
                 下载 Windows 客户端
               </a>
@@ -462,6 +489,52 @@ export function DocsPage({ siteConfig }: DocsPageProps) {
           </section>
         </div>
       </main>
+
+      {/* ── macOS 芯片选择弹窗 ── */}
+      {showMacModal && (
+        <div className="mac-modal-overlay" onClick={() => setShowMacModal(false)}>
+          <div className="mac-modal" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="mac-modal-close" onClick={() => setShowMacModal(false)}>×</button>
+            <div className="mac-modal-header">
+              <h3>选择 macOS 安装包</h3>
+              <p>请根据你的 Mac 芯片类型选择对应版本</p>
+            </div>
+            <div className="mac-modal-options">
+              <button
+                type="button"
+                className={`mac-modal-option${selectedArch === 'arm64' ? ' selected' : ''}`}
+                onClick={() => setSelectedArch('arm64')}
+              >
+                <div className="mac-modal-option-body">
+                  <div className="mac-modal-option-title">Apple Silicon</div>
+                  <div className="mac-modal-option-desc">M1 · M2 · M3 · M4 及更新芯片</div>
+                </div>
+                {detectedArch === 'arm64' && <span className="mac-modal-badge">当前设备</span>}
+              </button>
+              <button
+                type="button"
+                className={`mac-modal-option${selectedArch === 'x64' ? ' selected' : ''}`}
+                onClick={() => setSelectedArch('x64')}
+              >
+                <div className="mac-modal-option-body">
+                  <div className="mac-modal-option-title">Intel</div>
+                  <div className="mac-modal-option-desc">Intel Core 系列处理器</div>
+                </div>
+                {detectedArch === 'x64' && <span className="mac-modal-badge">当前设备</span>}
+              </button>
+            </div>
+            <a
+              href={selectedArch === 'arm64' ? siteConfig.macUrlArm64 : siteConfig.macUrlX64}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-primary mac-modal-download-btn"
+              onClick={() => setShowMacModal(false)}
+            >
+              {downloadIcon(15)} 下载 {selectedArch === 'arm64' ? 'Apple Silicon' : 'Intel'} 版本
+            </a>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
