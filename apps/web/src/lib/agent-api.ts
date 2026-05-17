@@ -674,6 +674,14 @@ export const messageApi = {
     })
   },
 
+  // 批量删除消息
+  async deleteBatch(ids: string[]): Promise<ApiResponse<{ count: number }>> {
+    return request<{ count: number }>('/messages/batch-delete', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    })
+  },
+
   // 清空群组消息
   async clearByChatRoomId(chatRoomId: string): Promise<ApiResponse<void>> {
     return request<void>(`/messages/chatroom/${chatRoomId}`, {

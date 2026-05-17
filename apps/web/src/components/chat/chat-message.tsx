@@ -2,7 +2,7 @@ import { Message } from '@/lib/agent-api'
 import { tokenUsageApi } from '@/lib/token-usage-api'
 import { cn, formatDateTime } from '@/lib/utils'
 import { copyToClipboard } from '@/lib/copy-utils'
-import { Bot, MessageSquareMore, Info, Copy, XCircle, Trash2, Volume2 } from 'lucide-react'
+import { Bot, CheckSquare, MessageSquareMore, Info, Copy, XCircle, Trash2, Volume2, ChevronDown, ChevronUp } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw'
@@ -57,6 +57,14 @@ type CurrentUser = {
   avatar?: string | null
 } | null
 
+const LARGE_MESSAGE_CHAR_THRESHOLD = 1200
+const LARGE_MESSAGE_LINE_THRESHOLD = 18
+
+function isLargeMessageContent(content: string): boolean {
+  if (content.length > LARGE_MESSAGE_CHAR_THRESHOLD) return true
+  return content.split(/\r\n|\r|\n/).length > LARGE_MESSAGE_LINE_THRESHOLD
+}
+
 interface ChatMessageProps {
   message: Message
   isRight?: boolean
@@ -76,9 +84,14 @@ interface ChatMessageProps {
   onExecutionDetailClick?: (messageId: string, executionRecordId: string) => void
   onMentionAgent?: (agentId: string, agentName: string) => void
   onDeleteMessage?: (messageId: string) => Promise<void> | void
+  onStartMultiSelect?: (messageId: string) => void
+  onToggleSelection?: (messageId: string) => void
+  selectionMode?: boolean
+  isSelected?: boolean
+  disableContentCollapse?: boolean
 }
 
-export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechButton = true, typingAgents, mentionAgents, currentUser, hasBeenPlayed, onMarkPlayed, onAgentAvatarClick, onTypingAgentClick, onMentionClick, onReplyClick, onExecutionDetailClick, onMentionAgent, onDeleteMessage }: ChatMessageProps) {
+export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechButton = true, typingAgents, mentionAgents, currentUser, hasBeenPlayed, onMarkPlayed, onAgentAvatarClick, onTypingAgentClick, onMentionClick, onReplyClick, onExecutionDetailClick, onMentionAgent, onDeleteMessage, onStartMultiSelect, onToggleSelection, selectionMode, isSelected, disableContentCollapse = false }: ChatMessageProps) {
   const isMobile = useIsMobile()
   const allAgents = useChatStore((s) => s.allAgents)
   const playingVoiceMessageId = useChatStore((s) => s.playingVoiceMessageId)
@@ -106,6 +119,7 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
   const [longPressTimer, setLongPressTimer] = useState<ReturnType<typeof setTimeout> | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [isContentExpanded, setIsContentExpanded] = useState(false)
 
   // 助手名称 hover 状态
   const [isNameHovered, setIsNameHovered] = useState(false)
@@ -180,6 +194,21 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
     setShowContextMenu(false)
     setDeleteDialogOpen(true)
   }, [])
+
+  const handleStartMultiSelect = useCallback(() => {
+    setShowContextMenu(false)
+    onStartMultiSelect?.(message.id)
+  }, [message.id, onStartMultiSelect])
+
+  const handleSelectionClickCapture = useCallback((e: React.MouseEvent) => {
+    if (!selectionMode) return
+    const target = e.target as HTMLElement
+    if (target.closest('button,a,input,textarea')) return
+
+    e.preventDefault()
+    e.stopPropagation()
+    onToggleSelection?.(message.id)
+  }, [message.id, onToggleSelection, selectionMode])
 
   // 点击其他地方关闭菜单
   const handleClickOutside = useCallback(() => {
@@ -617,6 +646,70 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
             删除消息
           </button>
         )}
+        {onStartMultiSelect && (
+          <button
+            onClick={handleStartMultiSelect}
+            className="flex w-full items-center gap-2 px-3 py-2 text-sm text-popover-foreground hover:bg-accent"
+          >
+            <CheckSquare className="size-4" />
+            多选
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  const renderCollapsibleContent = () => {
+    if (shouldHideContent) return null
+
+    const shouldCollapse = !disableContentCollapse && isLargeMessageContent(message.content)
+    const isCollapsed = shouldCollapse && !isContentExpanded
+
+    return (
+      <div
+        className={cn(
+          "relative",
+          isCollapsed && (isMobile ? "max-h-[300px] overflow-hidden" : "max-h-[420px] overflow-hidden")
+        )}
+      >
+        {renderContent(message.content)}
+        {shouldCollapse && (
+          <div
+            className={cn(
+              "flex justify-center",
+              isCollapsed
+                ? "absolute inset-x-0 bottom-0"
+                : "mt-2 border-t border-border/60 pt-2"
+            )}
+          >
+            <button
+              type="button"
+              className={cn(
+                "inline-flex items-center gap-1.5 text-xs text-blue-500 transition-colors hover:text-blue-600",
+                isCollapsed
+                  ? "h-24 w-full justify-center rounded-b-lg border-0 bg-gradient-to-t from-background via-background/95 to-transparent pt-12 pb-2 shadow-none hover:from-blue-50 hover:via-blue-50/95 dark:hover:from-blue-950/90 dark:hover:via-blue-950/60"
+                  : "rounded-full border border-gray-200 bg-background px-3 py-1.5 shadow-sm hover:bg-blue-50 dark:border-border dark:hover:bg-blue-950/30"
+              )}
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                setIsContentExpanded((expanded) => !expanded)
+              }}
+            >
+              {isCollapsed ? (
+                <>
+                  <ChevronDown className="size-3.5" />
+                  <span>展开完整内容</span>
+                </>
+              ) : (
+                <>
+                  <ChevronUp className="size-3.5" />
+                  <span>收起内容</span>
+                </>
+              )}
+            </button>
+          </div>
+        )}
       </div>
     )
   }
@@ -628,7 +721,10 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
           <div className="fixed inset-0 z-40" onClick={handleClickOutside} />
         )}
         {renderContextMenu()}
-        <div className={cn("flex justify-end py-2", isMobile ? "px-2" : "px-6")}>
+        <div
+          className={cn("flex justify-end py-2", isMobile ? "px-2" : "px-6")}
+          onClickCapture={handleSelectionClickCapture}
+        >
           <div className="flex flex-row-reverse items-start gap-3 w-0 min-w-0 flex-1 max-w-full">
             <UserAvatar avatar={currentUser?.avatar} size="md" />
             <div className="min-w-0 flex flex-col items-end gap-1">
@@ -643,14 +739,16 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
                   isAudioOnly
                     ? ""
                     : "rounded-lg bg-primary/15 px-4 py-2 border border-primary/20 dark:bg-primary/20 dark:border-primary/30",
-                  isMobile ? "select-none" : "select-text"
+                  isMobile ? "select-none" : "select-text",
+                  selectionMode && "cursor-pointer select-none",
+                  isSelected && "ring-2 ring-blue-500 ring-offset-2 ring-offset-background"
                 )}
                 onContextMenu={handleContextMenu}
                 onTouchStart={handleTouchStart}
                 onTouchEnd={handleTouchEnd}
               >
                 {renderAttachments()}
-                {!shouldHideContent && renderContent(message.content)}
+                {renderCollapsibleContent()}
               </div>
               <div className="flex items-center gap-2">
                 {renderTypingAgents()}
@@ -689,7 +787,10 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
         <div className="fixed inset-0 z-40" onClick={handleClickOutside} />
       )}
       {renderContextMenu()}
-      <div className={cn("py-2", isMobile ? "px-2" : "px-6")}>
+      <div
+        className={cn("py-2", isMobile ? "px-2" : "px-6")}
+        onClickCapture={handleSelectionClickCapture}
+      >
         <div className="flex items-start gap-3">
           {message.isHuman ? (
             <UserAvatar avatar={message.user?.avatar ?? currentUser?.avatar} size="md" />
@@ -736,14 +837,16 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
                 isAudioOnly
                   ? ""
                   : "rounded-lg bg-muted/50 px-4 py-3 border border-border/50 dark:bg-muted/40 dark:border-border",
-                isMobile ? "select-none" : "select-text"
+                isMobile ? "select-none" : "select-text",
+                selectionMode && "cursor-pointer select-none",
+                isSelected && "ring-2 ring-blue-500 ring-offset-2 ring-offset-background"
               )}
               onContextMenu={handleContextMenu}
               onTouchStart={handleTouchStart}
               onTouchEnd={handleTouchEnd}
             >
               {renderAttachments()}
-              {!shouldHideContent && renderContent(message.content)}
+              {renderCollapsibleContent()}
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               {renderTypingAgents()}

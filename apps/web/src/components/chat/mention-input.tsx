@@ -35,6 +35,10 @@ interface HistoryEntry {
   cursorOffset: number
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\\/]/g, '\\$&')
+}
+
 export function MentionInput({
   value,
   onChange,
@@ -65,7 +69,11 @@ export function MentionInput({
   // 解析文本中的 @mentions
   const parseMentions = useCallback((text: string): MentionData[] => {
     const mentions: MentionData[] = []
-    const agentNames = agents.map(a => a.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    const agentNames = agents
+      .map(a => a.name)
+      .filter(Boolean)
+      .sort((a, b) => b.length - a.length)
+      .map(escapeRegExp)
     if (agentNames.length === 0) return mentions
 
     // 支持 @ 前面是：空格、字符串开头、或 markdown 特殊字符（*、_、>、-、#、`）

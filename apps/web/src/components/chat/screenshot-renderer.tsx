@@ -139,6 +139,7 @@ export function ScreenshotRenderer({
             onReplyClick={() => {}}
             onExecutionDetailClick={() => {}}
             onMentionAgent={() => {}}
+            disableContentCollapse
           />
         ))}
       </div>

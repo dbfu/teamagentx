@@ -1,4 +1,4 @@
-import { FastifyInstance } from 'fastify';
+import { FastifyInstance, FastifyReply } from 'fastify';
 import { messageService } from '../modules/message/message.service.js';
 import { executionRecordService } from '../modules/execution-record/execution-record.service.js';
 import { checkpointService } from '../modules/checkpoint/checkpoint.service.js';
@@ -123,6 +123,114 @@ export async function messageGateway(app: FastifyInstance) {
 
     return reply.send({ success: true, data: message });
   });
+
+  const deleteMessagesBatchHandler = async (
+    request: { body?: { ids?: string[] } },
+    reply: FastifyReply,
+  ) => {
+    const ids = Array.isArray(request.body?.ids) ? request.body.ids : [];
+    const uniqueIds = Array.from(new Set(ids.map((id) => id.trim()).filter(Boolean)));
+    if (uniqueIds.length === 0) {
+      return reply.code(400).send({ success: false, error: '消息 ID 不能为空' });
+    }
+
+    const result = await messageService.deleteByIds(uniqueIds);
+
+    try {
+      for (const chatRoomId of result.chatRoomIds) {
+        const chatRoomAgents = await prisma.chatRoomAgent.findMany({
+          where: { chatRoomId },
+          include: {
+            agent: { select: { id: true, name: true, type: true, acpTool: true } },
+          },
+        });
+
+        for (const chatRoomAgent of chatRoomAgents) {
+          if (!chatRoomAgent.agent) continue;
+
+          await agentMemoryService.clear(chatRoomId, chatRoomAgent.agent.id);
+          await chatRoomService.updateLastInjectedMessageId(chatRoomId, chatRoomAgent.agent.id, null);
+
+          if (chatRoomAgent.agent.type === 'builtin') {
+            await checkpointService.clearChatRoomAgentContext(chatRoomId, chatRoomAgent.agent.name);
+          } else if (chatRoomAgent.agent.type === 'acp') {
+            for (const [cacheKey, executor] of executorCache.entries()) {
+              if (cacheKey.startsWith(`${chatRoomId}_`) && cacheKey.includes(`_${chatRoomAgent.agent.name}`)) {
+                try {
+                  await executor.cleanup?.();
+                } catch (cleanupError) {
+                  console.warn(`[MessageGateway] 清理 ACP executor 失败: ${cacheKey}`, cleanupError);
+                }
+              }
+            }
+            const acpTool = (chatRoomAgent.agent as any).acpTool;
+            if (acpTool === 'codex') {
+              clearCodexSdkFileSystemContext(chatRoomAgent.agent.id, chatRoomId);
+            } else {
+              clearClaudeSdkFileSystemContext(chatRoomAgent.agent.id, chatRoomId);
+            }
+          }
+
+          clearExecutorCache(chatRoomAgent.agent.name, chatRoomId);
+        }
+      }
+    } catch (error) {
+      console.error('[MessageGateway] 批量删除消息后清理上下文失败:', error);
+    }
+
+    return reply.send({ success: true, data: { count: result.count } });
+  };
+
+  const deleteMessagesBatchSchema = {
+    description: '批量删除消息，并重置相关房间的上下文注入缓存',
+    tags: ['Messages'],
+    body: {
+      type: 'object',
+      required: ['ids'],
+      properties: {
+        ids: {
+          type: 'array',
+          items: { type: 'string' },
+          minItems: 1,
+        },
+      },
+    },
+    response: {
+      200: {
+        type: 'object',
+        properties: {
+          success: { type: 'boolean' },
+          data: {
+            type: 'object',
+            properties: {
+              count: { type: 'integer' },
+            },
+          },
+        },
+      },
+      400: {
+        type: 'object',
+        properties: {
+          success: { type: 'boolean' },
+          error: { type: 'string' },
+        },
+      },
+    },
+  };
+
+  // Delete multiple messages by IDs. Prefer POST because some clients/proxies drop DELETE bodies.
+  app.post<{ Body: { ids?: string[] } }>('/messages/batch-delete', {
+    schema: deleteMessagesBatchSchema,
+  }, deleteMessagesBatchHandler);
+
+  // Backward-compatible route for clients that already use DELETE with a JSON body.
+  app.delete<{ Body: { ids?: string[] } }>('/messages/batch', {
+    schema: {
+      ...deleteMessagesBatchSchema,
+      deprecated: true,
+      description: '批量删除消息（兼容旧接口；推荐使用 POST /messages/batch-delete）',
+    },
+  }, deleteMessagesBatchHandler);
 
   // Delete single message by ID
   app.delete<{ Params: { id: string } }>('/messages/:id', {
