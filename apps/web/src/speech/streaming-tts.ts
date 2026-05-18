@@ -1,5 +1,15 @@
 const MIN_CHUNK_CHARS = 50
 
+function findSentenceBoundary(text: string, start: number): number {
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i]
+    if ('。！？!?'.includes(ch)) return i + 1
+    if (ch === '.' && (i + 1 >= text.length || !/\d/.test(text[i + 1]))) return i + 1
+    if (ch === '\n' && i + 1 < text.length && text[i + 1] === '\n') return i + 2
+  }
+  return -1
+}
+
 export function extractNewChunks(
   text: string,
   fromPosition: number,
@@ -8,14 +18,9 @@ export function extractNewChunks(
   let pos = fromPosition
 
   while (pos + MIN_CHUNK_CHARS < text.length) {
-    // 从 pos+MIN_CHUNK_CHARS 开始找句子边界，确保每块至少 MIN_CHUNK_CHARS 字
-    let boundaryEnd = -1
-    for (let i = pos + MIN_CHUNK_CHARS; i < text.length; i++) {
-      const ch = text[i]
-      if ('。！？!?'.includes(ch)) { boundaryEnd = i + 1; break }
-      if (ch === '.' && (i + 1 >= text.length || !/\d/.test(text[i + 1]))) { boundaryEnd = i + 1; break }
-      if (ch === '\n' && i + 1 < text.length && text[i + 1] === '\n') { boundaryEnd = i + 2; break }
-    }
+    // 流式阶段只在自然句边界切块，避免把半句话突然播出来。
+    const minBoundaryStart = pos + MIN_CHUNK_CHARS
+    const boundaryEnd = findSentenceBoundary(text, minBoundaryStart)
     if (boundaryEnd === -1) break
 
     const chunk = text.slice(pos, boundaryEnd).trim()
@@ -124,6 +129,15 @@ export class StreamingTtsSession {
   private isProcessing = false
   stopped = false
   private abortCurrent: (() => void) | null = null
+  private finished = false
+
+  constructor(private readonly onFinish?: () => void) {}
+
+  private notifyFinished(): void {
+    if (this.finished) return
+    this.finished = true
+    this.onFinish?.()
+  }
 
   // text 立刻触发网络请求（并行预取），playback 在 process() 中串行消费
   add(text: string, fetchStream: FetchStreamFn): void {
@@ -137,6 +151,9 @@ export class StreamingTtsSession {
     this.queue = []
     this.abortCurrent?.()
     this.abortCurrent = null
+    if (!this.isProcessing) {
+      this.notifyFinished()
+    }
   }
 
   private async process(): Promise<void> {
@@ -151,6 +168,9 @@ export class StreamingTtsSession {
       } catch { /* skip failed chunk */ }
     }
     this.isProcessing = false
+    if (this.stopped || this.queue.length === 0) {
+      this.notifyFinished()
+    }
   }
 }
 
@@ -161,10 +181,13 @@ class StreamingTtsManager {
     return this.sessions.get(sessionKey)
   }
 
-  getOrCreate(sessionKey: string): StreamingTtsSession {
+  getOrCreate(sessionKey: string, onFinish?: () => void): StreamingTtsSession {
     const existing = this.sessions.get(sessionKey)
     if (existing && !existing.stopped) return existing
-    const session = new StreamingTtsSession()
+    const session = new StreamingTtsSession(() => {
+      this.sessions.delete(sessionKey)
+      onFinish?.()
+    })
     this.sessions.set(sessionKey, session)
     return session
   }

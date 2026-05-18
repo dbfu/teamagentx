@@ -77,9 +77,10 @@ interface ChatMessageProps {
   onMentionAgent?: (agentId: string, agentName: string) => void
   onDeleteMessage?: (messageId: string) => Promise<void> | void
   onManualSpeak?: (messageId: string) => void
+  onStopSpeak?: (messageId: string) => void
 }
 
-export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechButton = true, typingAgents, mentionAgents, currentUser, hasBeenPlayed, onMarkPlayed, onAgentAvatarClick, onTypingAgentClick, onMentionClick, onReplyClick, onExecutionDetailClick, onMentionAgent, onDeleteMessage, onManualSpeak }: ChatMessageProps) {
+export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechButton = true, typingAgents, mentionAgents, currentUser, hasBeenPlayed, onMarkPlayed, onAgentAvatarClick, onTypingAgentClick, onMentionClick, onReplyClick, onExecutionDetailClick, onMentionAgent, onDeleteMessage, onManualSpeak, onStopSpeak }: ChatMessageProps) {
   const isMobile = useIsMobile()
   const allAgents = useChatStore((s) => s.allAgents)
   const playingVoiceMessageId = useChatStore((s) => s.playingVoiceMessageId)
@@ -205,6 +206,10 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
     if (!voiceConfig?.enabled || !message.content.trim()) return
 
     if (isCurrentlyPlaying) {
+      if (onStopSpeak) {
+        onStopSpeak(message.id)
+        return
+      }
       stopSpeechPlayback()
       setPlayingVoiceMessageId(null)
       return
@@ -248,7 +253,7 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
         setPlayingVoiceMessageId(null)
       }
     }
-  }, [isCurrentlyPlaying, message.content, message.id, message.agentId, normalizedContent, onManualSpeak, onMarkPlayed, setPlayingVoiceMessageId, voiceConfig])
+  }, [isCurrentlyPlaying, message.content, message.id, message.agentId, normalizedContent, onManualSpeak, onMarkPlayed, onStopSpeak, setPlayingVoiceMessageId, voiceConfig])
 
   const renderContent = (content: string) => {
     // 用户消息：普通文本展示，但 @助手 需要高亮
