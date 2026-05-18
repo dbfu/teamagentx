@@ -150,7 +150,7 @@ export function ChatAreaHeader({
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
-                    className="group rounded-lg p-2 text-muted-foreground transition-all duration-200 hover:bg-primary/10 hover:text-primary active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2"
+                    className="group rounded-lg p-2 text-muted-foreground transition-all duration-200 hover:bg-primary/10 hover:text-primary active:scale-[0.95] outline-none"
                     onClick={() => onShowAddAgent(true)}
                   >
                     <UserPlus className="size-5 transition-transform duration-200 group-hover:scale-110" />
