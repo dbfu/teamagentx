@@ -1,4 +1,4 @@
-const MIN_CHUNK_CHARS = 15
+const MIN_CHUNK_CHARS = 50
 
 export function extractNewChunks(
   text: string,
@@ -8,22 +8,13 @@ export function extractNewChunks(
   let pos = fromPosition
 
   while (pos + MIN_CHUNK_CHARS < text.length) {
-    // Search for sentence boundary starting at least MIN_CHUNK_CHARS from current pos
+    // 从 pos+MIN_CHUNK_CHARS 开始找句子边界，确保每块至少 MIN_CHUNK_CHARS 字
     let boundaryEnd = -1
     for (let i = pos + MIN_CHUNK_CHARS; i < text.length; i++) {
       const ch = text[i]
-      if ('。！？!?'.includes(ch)) {
-        boundaryEnd = i + 1
-        break
-      }
-      if (ch === '.' && (i + 1 >= text.length || !/\d/.test(text[i + 1]))) {
-        boundaryEnd = i + 1
-        break
-      }
-      if (ch === '\n' && i + 1 < text.length && text[i + 1] === '\n') {
-        boundaryEnd = i + 2
-        break
-      }
+      if ('。！？!?'.includes(ch)) { boundaryEnd = i + 1; break }
+      if (ch === '.' && (i + 1 >= text.length || !/\d/.test(text[i + 1]))) { boundaryEnd = i + 1; break }
+      if (ch === '\n' && i + 1 < text.length && text[i + 1] === '\n') { boundaryEnd = i + 2; break }
     }
     if (boundaryEnd === -1) break
 
@@ -35,68 +26,131 @@ export function extractNewChunks(
   return { chunks, newPosition: pos }
 }
 
-export type FetchAudioFn = (text: string) => Promise<{ blob: Blob; mimeType: string }>
+// fetchFn 返回流式 Response（对应 /speech/tts/stream 端点）
+export type FetchStreamFn = (text: string) => Promise<Response>
+
+// 用 MediaSource 播放一个流式 TTS Response
+function playStreamResponse(
+  response: Response,
+  onAbort: (abortFn: () => void) => void,
+): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const mediaSource = new MediaSource()
+    const audio = new Audio()
+    const blobUrl = URL.createObjectURL(mediaSource)
+    audio.src = blobUrl
+    let aborted = false
+
+    const cleanup = () => {
+      try { audio.pause(); audio.src = ''; audio.load() } catch { /* ignore */ }
+      URL.revokeObjectURL(blobUrl)
+    }
+
+    onAbort(() => {
+      aborted = true
+      cleanup()
+      resolve()
+    })
+
+    // MediaSource 不支持时降级：等全量 arrayBuffer 再播
+    const fallbackBlob = async () => {
+      try {
+        const ab = await response.arrayBuffer()
+        if (aborted) { cleanup(); resolve(); return }
+        const blob = new Blob([ab], { type: 'audio/mpeg' })
+        const url = URL.createObjectURL(blob)
+        URL.revokeObjectURL(blobUrl)
+        const a2 = new Audio(url)
+        onAbort(() => { aborted = true; a2.pause(); a2.src = ''; URL.revokeObjectURL(url); resolve() })
+        a2.onended = () => { URL.revokeObjectURL(url); resolve() }
+        a2.onerror = () => { URL.revokeObjectURL(url); resolve() }
+        void a2.play().catch(() => {})
+      } catch { cleanup(); resolve() }
+    }
+
+    if (!('MediaSource' in window) || !MediaSource.isTypeSupported('audio/mpeg') || !response.body) {
+      void fallbackBlob()
+      return
+    }
+
+    mediaSource.addEventListener('sourceopen', async () => {
+      let sourceBuffer: SourceBuffer
+      try {
+        sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg')
+      } catch {
+        void fallbackBlob()
+        return
+      }
+
+      const waitUpdate = () => new Promise<void>((r) => {
+        if (!sourceBuffer.updating) { r(); return }
+        sourceBuffer.addEventListener('updateend', () => r(), { once: true })
+      })
+
+      try {
+        const reader = response.body!.getReader()
+        let firstChunk = true
+        while (!aborted) {
+          const { done, value } = await reader.read()
+          if (done || aborted) break
+          await waitUpdate()
+          if (aborted) break
+          sourceBuffer.appendBuffer(value)
+          if (firstChunk) {
+            firstChunk = false
+            void audio.play().catch(() => {})
+          }
+        }
+
+        if (!aborted) {
+          await waitUpdate()
+          if (mediaSource.readyState === 'open') mediaSource.endOfStream()
+          audio.addEventListener('ended', () => { cleanup(); resolve() }, { once: true })
+          audio.addEventListener('error', () => { cleanup(); resolve() }, { once: true })
+        } else {
+          cleanup()
+          resolve()
+        }
+      } catch {
+        cleanup()
+        resolve()
+      }
+    }, { once: true })
+  })
+}
 
 export class StreamingTtsSession {
-  private queue: Array<{ promise: Promise<{ blob: Blob; mimeType: string }> }> = []
+  private queue: Array<Promise<Response>> = []
   private isProcessing = false
   stopped = false
-  private currentAudio: HTMLAudioElement | null = null
+  private abortCurrent: (() => void) | null = null
 
-  add(text: string, fetchAudio: FetchAudioFn): void {
+  // text 立刻触发网络请求（并行预取），playback 在 process() 中串行消费
+  add(text: string, fetchStream: FetchStreamFn): void {
     if (this.stopped) return
-    this.queue.push({ promise: fetchAudio(text) })
+    this.queue.push(fetchStream(text))
     if (!this.isProcessing) void this.process()
   }
 
   stop(): void {
     this.stopped = true
     this.queue = []
-    if (this.currentAudio) {
-      try {
-        this.currentAudio.pause()
-        this.currentAudio.src = ''
-        this.currentAudio.load()
-      } catch { /* ignore */ }
-      this.currentAudio = null
-    }
+    this.abortCurrent?.()
+    this.abortCurrent = null
   }
 
   private async process(): Promise<void> {
     this.isProcessing = true
     while (this.queue.length > 0 && !this.stopped) {
-      const item = this.queue.shift()!
+      const responsePromise = this.queue.shift()!
       try {
-        const { blob, mimeType } = await item.promise
+        const response = await responsePromise
         if (this.stopped) break
-        await this.playBlob(blob, mimeType)
+        await playStreamResponse(response, (fn) => { this.abortCurrent = fn })
+        this.abortCurrent = null
       } catch { /* skip failed chunk */ }
     }
     this.isProcessing = false
-  }
-
-  private playBlob(blob: Blob, _mimeType: string): Promise<void> {
-    const url = URL.createObjectURL(blob)
-    return new Promise<void>((resolve) => {
-      const audio = new Audio(url)
-      this.currentAudio = audio
-      let done = false
-      const finish = () => {
-        if (done) return
-        done = true
-        this.currentAudio = null
-        try {
-          audio.pause()
-          audio.src = ''
-          audio.load()
-        } catch { /* ignore */ }
-        URL.revokeObjectURL(url)
-        resolve()
-      }
-      audio.onended = finish
-      audio.onerror = finish
-      audio.play().catch(finish)
-    })
   }
 }
 
@@ -116,17 +170,12 @@ class StreamingTtsManager {
   }
 
   stop(sessionKey: string): void {
-    const session = this.sessions.get(sessionKey)
-    if (session) {
-      session.stop()
-      this.sessions.delete(sessionKey)
-    }
+    this.sessions.get(sessionKey)?.stop()
+    this.sessions.delete(sessionKey)
   }
 
   stopAll(): void {
-    for (const session of this.sessions.values()) {
-      session.stop()
-    }
+    for (const s of this.sessions.values()) s.stop()
     this.sessions.clear()
   }
 }

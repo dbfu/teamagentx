@@ -8,7 +8,9 @@ import { cn } from '@/lib/utils'
 import { toVoicePanelConfig, type AgentVoicePanelConfig } from '@/lib/agent-speech'
 import { deleteTtsCache, loadRoomTtsCache, normalizeSpeechText, prewarmTts, speakText, stopSpeechPlayback, supportsSpeechPlayback } from '@/lib/browser-speech'
 import { buildTtsCacheKey, PREWARM_MAX_TEXT_LENGTH } from '@/speech/tts-prefetch-cache'
-import { streamingTtsManager } from '@/speech/streaming-tts'
+import { extractNewChunks, streamingTtsManager, type FetchStreamFn } from '@/speech/streaming-tts'
+import { stopRemoteTtsPlayback } from '@/speech/providers/remote-tts-provider'
+import { getApiBaseUrl } from '@/lib/config'
 
 interface MentionAgent {
   id: string
@@ -117,6 +119,9 @@ export function ChatMessagesList({
   const initialMessageIdsRef = useRef<Set<string>>(new Set())
   const initialCapturedRef = useRef(false)
   const recentlyStreamedAgentIdsRef = useRef<Map<string, number>>(new Map())
+  const streamingPositionsRef = useRef<Map<string, number>>(new Map())
+  const lastStreamContentRef = useRef<Map<string, string>>(new Map())
+  const prevStreamKeysRef = useRef<Set<string>>(new Set())
 
   // 检查是否在底部附近
   const checkIsNearBottom = useCallback(() => {
@@ -207,6 +212,9 @@ export function ChatMessagesList({
       initialMessageIdsRef.current = new Set()
       initialCapturedRef.current = false
       recentlyStreamedAgentIdsRef.current.clear()
+      streamingPositionsRef.current.clear()
+      lastStreamContentRef.current.clear()
+      prevStreamKeysRef.current.clear()
       // 重置底部状态
       setIsNearBottom(true)
       setShowNewMessageHint(false)
@@ -286,6 +294,127 @@ export function ChatMessagesList({
     stopSpeechPlayback()
     setPlayingVoiceMessageId(null)
   }, [chatRoomId, setPlayingVoiceMessageId])
+
+  // 流式 TTS：监听 streamEvents，边生成文字边用 MediaSource 播放
+  useEffect(() => {
+    const currentKeys = new Set(streamEvents.keys())
+
+    // 检测已完成的流（key 消失 = agent:done）
+    for (const prevKey of prevStreamKeysRef.current) {
+      if (currentKeys.has(prevKey)) continue
+      const agentId = prevKey.slice(prevKey.indexOf('_') + 1)
+      const agent = allAgentsRef.current.find((a) => a.id === agentId)
+      const vc = agent?.speechConfig ? toVoicePanelConfig(agent.speechConfig) : null
+      if (vc?.enabled && vc.provider === 'openai-compatible-tts') {
+        const lastContent = lastStreamContentRef.current.get(prevKey) ?? ''
+        const pos = streamingPositionsRef.current.get(prevKey) ?? 0
+        const remaining = normalizeSpeechText(lastContent.slice(pos)).trim()
+        if (remaining) {
+          const session = streamingTtsManager.get(prevKey)
+          if (session && !session.stopped) {
+            const fetchFn: FetchStreamFn = async (text) => {
+              const baseUrl = await getApiBaseUrl()
+              const token = localStorage.getItem('auth_token')
+              const resp = await fetch(`${baseUrl}/speech/tts/stream`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                },
+                body: JSON.stringify({
+                  type: 'tts',
+                  input: { text },
+                  profile: {
+                    provider: vc.provider,
+                    model: vc.model ?? null,
+                    voice: vc.voiceId ?? null,
+                    speed: vc.speed ?? 1.3,
+                    format: vc.format ?? null,
+                  },
+                  context: { agentId, chatRoomId },
+                }),
+              })
+              if (!resp.ok) throw new Error(`TTS stream ${resp.status}`)
+              return resp
+            }
+            session.add(remaining, fetchFn)
+          }
+        }
+      }
+      recentlyStreamedAgentIdsRef.current.set(agentId, Date.now())
+      streamingPositionsRef.current.delete(prevKey)
+      lastStreamContentRef.current.delete(prevKey)
+    }
+
+    prevStreamKeysRef.current = currentKeys
+
+    // 处理活跃流：提取新句子片段并加入流式播放队列
+    for (const [key, events] of streamEvents) {
+      const outputEvents = events.filter((e) => e.type === 'output')
+      const outputEvent = outputEvents[outputEvents.length - 1]
+      if (!outputEvent?.content) continue
+
+      const agentId = key.slice(key.indexOf('_') + 1)
+      const agent = allAgentsRef.current.find((a) => a.id === agentId)
+      const vc = agent?.speechConfig ? toVoicePanelConfig(agent.speechConfig) : null
+      if (!vc?.enabled || vc.provider !== 'openai-compatible-tts') continue
+      if (vc.outputMode !== 'auto_final_only') continue
+
+      const content = outputEvent.content
+      lastStreamContentRef.current.set(key, content)
+
+      const pos = streamingPositionsRef.current.get(key) ?? 0
+      const { chunks, newPosition } = extractNewChunks(content, pos)
+      if (chunks.length === 0) continue
+      streamingPositionsRef.current.set(key, newPosition)
+
+      const isFirstSession = !streamingTtsManager.get(key)
+      const session = streamingTtsManager.getOrCreate(key)
+
+      if (isFirstSession) {
+        speechRunIdRef.current += 1
+        isSpeakingRef.current = false
+        speechQueueRef.current = []
+        queuedVoiceMessageIdsRef.current.clear()
+        stopRemoteTtsPlayback()
+      }
+
+      const agentIdCapture = agentId
+      const vcCapture = vc
+      const roomIdCapture = chatRoomId
+      const fetchFn: FetchStreamFn = async (text) => {
+        const baseUrl = await getApiBaseUrl()
+        const token = localStorage.getItem('auth_token')
+        const resp = await fetch(`${baseUrl}/speech/tts/stream`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({
+            type: 'tts',
+            input: { text },
+            profile: {
+              provider: vcCapture.provider,
+              model: vcCapture.model ?? null,
+              voice: vcCapture.voiceId ?? null,
+              speed: vcCapture.speed ?? 1.3,
+              format: vcCapture.format ?? null,
+            },
+            context: { agentId: agentIdCapture, chatRoomId: roomIdCapture },
+          }),
+        })
+        if (!resp.ok) throw new Error(`TTS stream ${resp.status}`)
+        return resp
+      }
+
+      for (const chunk of chunks) {
+        const normalizedChunk = normalizeSpeechText(chunk)
+        if (!normalizedChunk) continue
+        session.add(normalizedChunk, fetchFn)
+      }
+    }
+  }, [streamEvents, chatRoomId])
 
 
   // 串行消费队列：上一条播完再播下一条。读取 ref 中的最新状态，避免 effect 重跑触发循环。
