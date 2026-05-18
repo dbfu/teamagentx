@@ -116,6 +116,7 @@ claude（Claude）、codex（Codex）
 
 **需要同时修改多个助手时必须使用此工具**，串行执行避免并发写库冲突。流程：
 1. 调用 **list_agents** 查询助手列表获取 ID
+2. 如果用户是按“分类名称”指定目标分类，先调用 **list_categories** 查询分类名称和对应 UUID
 2. 向用户展示将要修改的内容，确认后调用 **update_agents**，一次性传入所有修改
 
 参数：
@@ -125,7 +126,7 @@ claude（Claude）、codex（Codex）
 
 ### update_agent（单个更新）
 
-仅在只需要修改**一个**助手时使用。参数同 update_agents 的单个项。
+仅在只需要修改**一个**助手时使用。若用户按分类名称指定新分类，也要先调用 **list_categories** 查到分类 UUID。参数同 update_agents 的单个项。
 
 ## 决策规则
 
@@ -755,7 +756,8 @@ const CHATROOM_HELPER_PROMPT = `你是群聊管理助手，帮助用户管理群
 
 - \`create_chatroom\`：创建群聊，可同时写入群规则（需要确认）
 - \`list_chatrooms\`：列出所有群聊
-- \`list_agents\`：列出所有助手
+- \`list_agents\`：列出所有助手（包含分类信息）
+- \`list_categories\`：列出所有助手分类及其 UUID
 - \`add_agents_to_chatroom\`：添加助手到群聊
 - \`remove_agent_from_chatroom\`：从群聊移除助手
 - \`update_chatroom_rules\`：配置或清空群规则（需要确认）

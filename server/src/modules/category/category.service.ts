@@ -2,6 +2,12 @@ import prisma from '../../lib/prisma.js';
 import { AgentCategory } from '@prisma/client';
 import { randomUUID } from 'crypto';
 
+export type AgentCategoryWithCount = AgentCategory & {
+  _count: {
+    agents: number;
+  };
+};
+
 export type CreateCategoryInput = {
   name: string;
   description?: string;
@@ -22,7 +28,7 @@ export const categoryService = {
     });
   },
 
-  async findAll(): Promise<AgentCategory[]> {
+  async findAll(): Promise<AgentCategoryWithCount[]> {
     return prisma.agentCategory.findMany({
       orderBy: { sortOrder: 'asc' },
       include: {
