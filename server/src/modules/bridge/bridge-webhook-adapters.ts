@@ -4,12 +4,14 @@ import { getBridgeInboundTextAdapter } from './platform-inbound-adapters.js';
 import { verifyTelegram, verifyWecom } from './webhook-verify.js';
 import { decryptWecomMessage } from './wecom-crypto.js';
 import prisma from '../../lib/prisma.js';
-import { createHash } from 'crypto';
+import { createHash, createVerify } from 'crypto';
 
 export interface BridgeWebhookRequest {
   body: unknown;
   headers: Record<string, string | string[] | undefined>;
   query: Record<string, string>;
+  /** 原始请求体字符串，用于需要原始字节的签名验证（如 QQ Ed25519） */
+  rawBody?: string;
 }
 
 export type BridgeWebhookParseResult =
@@ -106,6 +108,7 @@ async function parseWecomBody(
     // Re-throw signature verification failures; ignore other config errors
     if (err instanceof Error && err.message.includes('verification failed')) throw err;
     if (err instanceof Error && err.message.includes('params missing')) throw err;
+    console.warn('[Bridge][WeCom] 消息解密失败，降级为原始 body:', err instanceof Error ? err.message : err);
   }
 
   return rawBody;
@@ -202,21 +205,42 @@ export const BRIDGE_WEBHOOK_ADAPTERS: BridgeWebhookAdapter[] = [
       };
     },
     async verify(request) {
-      // Fix #58: QQ Bot Ed25519 signature verification
-      // TODO: Obtain bot's public key from config (needs `publicKey` field in QQ bot config)
       const sig = request.headers['x-signature-ed25519'];
       const ts = request.headers['x-signature-timestamp'];
+
       if (!sig || !ts) {
-        // No signature headers present — log warning but allow (backward compat for existing deployments)
-        console.warn('[Bridge][QQ] Missing Ed25519 signature headers — request allowed (no public key configured)');
+        console.warn('[Bridge][QQ] 缺少 Ed25519 签名头，已放行（未配置公钥）');
         return true;
       }
-      // If headers are present but we have no public key to verify against, we cannot verify.
-      // TODO: when QQ bot config includes publicKey, use:
-      //   const msgBytes = Buffer.from(ts + rawBody);
-      //   const pubKeyBuf = Buffer.from(publicKey, 'hex');
-      //   return createVerify('ed25519').update(msgBytes).verify(pubKeyBuf, Buffer.from(sig, 'hex'));
-      console.warn('[Bridge][QQ] Ed25519 signature headers present but no public key configured — request allowed');
+
+      // 从请求 query 中取 botId，查询 publicKey 配置
+      const botId = request.query.botId;
+      if (botId) {
+        const bridgeBot = await prisma.bridgeBot.findUnique({
+          where: { id: botId },
+          select: { config: true },
+        });
+        const cfg = parseStoredBridgeConfig(bridgeBot ?? {}) as { publicKey?: string } | null;
+        if (cfg?.publicKey) {
+          try {
+            const rawBody = request.rawBody ?? JSON.stringify(request.body);
+            const msgBuf = Buffer.from((Array.isArray(ts) ? ts[0] : ts) + rawBody);
+            const sigHex = Array.isArray(sig) ? sig[0] : sig;
+            const sigBuf = Buffer.from(sigHex, 'hex');
+            const pubKeyBuf = Buffer.from(cfg.publicKey, 'hex');
+            const verified = createVerify('ed25519').update(msgBuf).verify(pubKeyBuf, sigBuf);
+            if (!verified) {
+              console.warn('[Bridge][QQ] Ed25519 签名验证失败');
+            }
+            return verified;
+          } catch (err) {
+            console.error('[Bridge][QQ] Ed25519 签名验证异常:', err instanceof Error ? err.message : err);
+            return false;
+          }
+        }
+      }
+
+      console.warn('[Bridge][QQ] 签名头存在但未配置公钥，已放行');
       return true;
     },
   },

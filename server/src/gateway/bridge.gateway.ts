@@ -306,17 +306,23 @@ async function handleWebhookByAdapter(
 
   if (parsed.bindCode) {
     const noop = async (_text: string) => {};
-    const sendReply = adapter.platform === 'telegram'
-      ? async (text: string) => {
-          const botToken = bridgeBot ? resolveStoredBridgeBotToken(bridgeBot) : undefined;
-          if (!botToken) return;
-          await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chat_id: parsed.externalId, text }),
-          });
-        }
-      : noop;
+    let sendReply: (text: string) => Promise<void> = noop;
+
+    if (adapter.platform === 'telegram') {
+      sendReply = async (text: string) => {
+        const botToken = bridgeBot ? resolveStoredBridgeBotToken(bridgeBot) : undefined;
+        if (!botToken) return;
+        await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: parsed.externalId, text }),
+        });
+      };
+    } else if ((adapter.platform === 'wecom' || adapter.platform === 'qq') && botId) {
+      sendReply = async (text: string) => {
+        await bridgeService.sendDirectMessage(adapter.platform, botId, parsed.externalId, text);
+      };
+    }
 
     await handleBindCode(
       adapter.platform,
@@ -677,6 +683,7 @@ export async function bridgeGateway(app: FastifyInstance) {
           body: req.body,
           headers: req.headers as Record<string, string | string[] | undefined>,
           query: { ...(req.query as Record<string, string>), ...(botId ? { botId } : {}) },
+          rawBody: typeof req.body === 'string' ? req.body : JSON.stringify(req.body),
         }, botId);
         return reply.status(result.statusCode).send(result.body);
       } catch (err) {

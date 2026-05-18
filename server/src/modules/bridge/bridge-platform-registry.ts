@@ -4,6 +4,7 @@ export interface BridgePlatformConfigFieldDefinition {
   key: string;
   label: string;
   secret?: boolean;
+  optional?: boolean;
 }
 
 export interface BridgePlatformDefinition {
@@ -85,6 +86,7 @@ export const BRIDGE_PLATFORM_REGISTRY: BridgePlatformDefinition[] = [
     configFields: [
       { key: 'appId', label: 'App ID' },
       { key: 'clientSecret', label: 'Client Secret', secret: true },
+      { key: 'publicKey', label: 'Bot Public Key（可选，用于 Webhook 签名验证）', optional: true },
     ],
   },
 ];

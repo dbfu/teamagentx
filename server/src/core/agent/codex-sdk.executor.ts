@@ -109,6 +109,21 @@ interface CodexRunOptions extends CodexThreadOptions {
   signal?: AbortSignal;
 }
 
+interface CodexBuiltinMcpServerContext {
+  workDir: string;
+  teamAgentXMcpServerPath: string;
+  chatRoomId: string;
+  agentId?: string;
+  agentName: string;
+  chatRoomAgents: ChatRoomAgentInfo[];
+  generateImageEndpoint?: string;
+}
+
+interface CodexBuiltinMcpServerDefinition {
+  name: string;
+  build: (context: CodexBuiltinMcpServerContext) => CodexConfigObject | undefined;
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -227,16 +242,61 @@ function findGitNexusRepoRoot(startDir: string): string | undefined {
   }
 }
 
-function buildGitNexusMcpServerConfig(workDir: string): CodexConfigObject | undefined {
-  if (!findGitNexusRepoRoot(workDir)) return undefined;
+const BUILTIN_CODEX_MCP_SERVERS: CodexBuiltinMcpServerDefinition[] = [
+  {
+    name: 'gitnexus',
+    build: ({ workDir }) => {
+      if (!findGitNexusRepoRoot(workDir)) return undefined;
 
-  const gitnexusCommand = findExecutableOnPath('gitnexus');
-  if (!gitnexusCommand) return undefined;
+      const gitnexusCommand = findExecutableOnPath('gitnexus');
+      if (!gitnexusCommand) return undefined;
 
-  return {
-    command: gitnexusCommand,
-    args: ['mcp'],
-  };
+      return {
+        command: gitnexusCommand,
+        args: ['mcp'],
+      };
+    },
+  },
+  {
+    name: 'tax',
+    build: ({
+      teamAgentXMcpServerPath,
+      chatRoomId,
+      agentId,
+      agentName,
+      chatRoomAgents,
+      generateImageEndpoint,
+    }) => ({
+      command: process.execPath,
+      args: [teamAgentXMcpServerPath],
+      env: {
+        TEAMAGENTX_CHAT_ROOM_ID: chatRoomId,
+        TEAMAGENTX_SOURCE_AGENT_ID: agentId || '',
+        TEAMAGENTX_SOURCE_AGENT_NAME: agentName,
+        TEAMAGENTX_CHAT_ROOM_AGENTS: JSON.stringify(chatRoomAgents.map((agent) => ({
+          agentId: agent.agentId,
+          name: agent.name,
+        }))),
+        ...(generateImageEndpoint ? {
+          TEAMAGENTX_GENERATE_IMAGE_ENDPOINT: generateImageEndpoint,
+          TEAMAGENTX_INTERNAL_TOOL_TOKEN: getInternalAgentToolToken(),
+        } : {}),
+      },
+    }),
+  },
+];
+
+export function buildBuiltinCodexMcpServerConfigs(
+  context: CodexBuiltinMcpServerContext,
+): CodexConfigObject {
+  const mcpServers: CodexConfigObject = {};
+  for (const definition of BUILTIN_CODEX_MCP_SERVERS) {
+    const config = definition.build(context);
+    if (config) {
+      mcpServers[definition.name] = config;
+    }
+  }
+  return mcpServers;
 }
 
 function getCodexBinaryFromPlatformPackageJson(platformPackageJsonPath: string): string | undefined {
@@ -1216,8 +1276,18 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
   private getCodexRunner(): TeamAgentXCodexRunner {
     const env = this.buildEnv();
     const mcpServerPath = this.ensureTeamAgentXMcpServerFile();
-    const generateImageEndpoint = `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/generate-image`;
-    const gitNexusMcpServer = buildGitNexusMcpServerConfig(this.workDir);
+    const generateImageEndpoint = this.imageGenerationProvider
+      ? `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/generate-image`
+      : undefined;
+    const builtinMcpServers = buildBuiltinCodexMcpServerConfigs({
+      workDir: this.workDir,
+      teamAgentXMcpServerPath: mcpServerPath,
+      chatRoomId: this.chatRoomId,
+      agentId: this.agentId || undefined,
+      agentName: this.name,
+      chatRoomAgents: this.chatRoomAgents,
+      generateImageEndpoint,
+    });
     const config = {
       hide_agent_reasoning: false,
       show_raw_agent_reasoning: false,
@@ -1225,26 +1295,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       skills: {
         include_instructions: false,
       },
-      mcp_servers: {
-        ...(gitNexusMcpServer ? { gitnexus: gitNexusMcpServer } : {}),
-        tax: {
-          command: process.execPath,
-          args: [mcpServerPath],
-          env: {
-            TEAMAGENTX_CHAT_ROOM_ID: this.chatRoomId,
-            TEAMAGENTX_SOURCE_AGENT_ID: this.agentId || '',
-            TEAMAGENTX_SOURCE_AGENT_NAME: this.name,
-            TEAMAGENTX_CHAT_ROOM_AGENTS: JSON.stringify(this.chatRoomAgents.map((agent) => ({
-              agentId: agent.agentId,
-              name: agent.name,
-            }))),
-            ...(this.imageGenerationProvider ? {
-              TEAMAGENTX_GENERATE_IMAGE_ENDPOINT: generateImageEndpoint,
-              TEAMAGENTX_INTERNAL_TOOL_TOKEN: getInternalAgentToolToken(),
-            } : {}),
-          },
-        },
-      },
+      mcp_servers: builtinMcpServers,
       ...(this.llmProvider
         ? buildCodexModelProviderConfig(this.llmProvider)
         : {}),

@@ -64,6 +64,11 @@ export async function syncBridgeBotRuntime(botId: string, log: BridgeLogger): Pr
     }
     return;
   }
+
+  // wecom 和 qq 是纯 webhook 平台，无长连接客户端需要管理
+  if (bot.platform === 'wecom' || bot.platform === 'qq') {
+    return;
+  }
 }
 
 export async function syncAllBridgeBotsRuntime(log: BridgeLogger): Promise<void> {

@@ -139,6 +139,7 @@ async function validateBridgeCredentials(platform: Platform, body: { botToken?: 
       throw new Error('飞书机器人不存在或凭证无效');
     }
   }
+
 }
 
 async function getActiveBridgeTargets(chatRoomId: string) {
@@ -199,6 +200,7 @@ export const bridgeService = {
     const definition = getBridgePlatformDefinition(data.platform);
     const missingFields = definition.configFields
       .filter((field) => {
+        if (field.optional) return false;
         if (field.key === 'botToken') {
           return !data.botToken?.trim();
         }
@@ -384,6 +386,14 @@ export const bridgeService = {
 
   registerSender(platform: Platform, sender: (botId: string, externalId: string, text: string, agentName: string) => Promise<void>) {
     platformSenders.set(platform, sender);
+  },
+
+  async sendDirectMessage(platform: Platform, botId: string, externalId: string, text: string): Promise<void> {
+    const sender = platformSenders.get(platform);
+    if (!sender) return;
+    await sender(botId, externalId, text, 'Bot').catch((err) => {
+      console.error(`[Bridge] sendDirectMessage 失败 platform=${platform}:`, err instanceof Error ? err.message : err);
+    });
   },
 
   registerTypingSender(platform: Platform, sender: (botId: string, externalId: string) => Promise<void>) {
