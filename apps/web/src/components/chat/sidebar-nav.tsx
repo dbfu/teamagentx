@@ -94,6 +94,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
     acpTool: string
     proxyConfig?: string | null
     codexModel?: string | null
+    claudeModel?: string | null
     categoryId: string | null
     llmProviderId: string | null
     speechConfig: AgentSpeechConfig | null
@@ -108,6 +109,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
       acpTool: data.acpTool || undefined,
       proxyConfig: data.proxyConfig || null,
       codexModel: data.codexModel || null,
+      claudeModel: data.claudeModel || null,
       categoryId: data.categoryId || undefined,
       llmProviderId: data.llmProviderId || undefined,
       speechConfig: data.speechConfig,
