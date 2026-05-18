@@ -3,6 +3,7 @@ import type {
     HookEvent,
     SDKMessage,
     SDKUserMessage,
+    SettingSource,
 } from '@anthropic-ai/claude-agent-sdk';
 import {
     createSdkMcpServer,
@@ -1625,6 +1626,9 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     const thinking = getClaudeThinkingOptions(this.llmProvider);
     this.lastClaudeStderr = '';
     this.logQueryStart(env);
+    const settingSources: SettingSource[] = this.llmProvider
+      ? []
+      : ['user', 'project', 'local'];
     const q = query({
       prompt: this.buildPrompt(fullMessage, attachments),
       options: {
@@ -1640,7 +1644,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
           tax: this.buildTeamAgentXMcpServer(),
         },
         allowedTools: this.getAllowedTaxTools(),
-        settingSources: ['user', 'project', 'local'],
+        settingSources,
         hooks: this.buildHooks(),
         sessionId: this.hasStartedSession ? undefined : this.sessionId,
         resume: this.hasStartedSession ? this.sessionId : undefined,

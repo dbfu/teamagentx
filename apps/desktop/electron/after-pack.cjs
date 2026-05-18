@@ -587,12 +587,13 @@ function normalizeElectronBuilderArch(targetArch) {
     return targetArch;
   }
 
-  // electron-builder Arch enum: x64 = 0, ia32 = 1, armv7l = 2, arm64 = 3.
+  // electron-builder Arch enum: ia32 = 0, x64 = 1, armv7l = 2, arm64 = 3, universal = 4.
   const archMap = {
-    0: 'x64',
-    1: 'ia32',
+    0: 'ia32',
+    1: 'x64',
     2: 'armv7l',
     3: 'arm64',
+    4: 'universal',
   };
 
   return archMap[targetArch] || String(targetArch);

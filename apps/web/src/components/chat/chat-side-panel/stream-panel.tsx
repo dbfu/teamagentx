@@ -3,8 +3,7 @@ import { cn, truncateToolName } from '@/lib/utils';
 import type { StreamEvent } from '@/stores/socket-store';
 import { Bot, CheckCircle, ChevronDown, ChevronRight, Clock, Loader2, Square } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { MarkdownContent } from '../markdown-content';
 import { CodeEditToolContent, CodeReadToolOutput, isCodeEditTool, isCodeReadTool, renderToolValue } from './tool-call-content';
 
 // 格式化开始时间（显示时分秒）
@@ -309,11 +308,10 @@ export function StreamPanel({
                     </div>
                   </CollapsibleTrigger>
                   <CollapsibleContent>
-                    <div className="px-3 pb-3 prose prose-sm max-w-none dark:prose-invert [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap [&_pre]:bg-muted/50 [&_pre]:p-2 [&_pre]:rounded [&_code]:text-xs">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {event.content}
-                      </ReactMarkdown>
-                    </div>
+                    <MarkdownContent
+                      content={event.content ?? ''}
+                      className="px-3 pb-3 dark:prose-invert [&_pre]:bg-muted/50 [&_pre]:p-2 [&_pre]:rounded [&_code]:text-xs"
+                    />
                   </CollapsibleContent>
                 </Collapsible>
               )
@@ -404,11 +402,10 @@ export function StreamPanel({
                     </div>
                   </CollapsibleTrigger>
                   <CollapsibleContent>
-                    <div className="px-3 pb-3 prose prose-sm max-w-none dark:prose-invert [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap [&_pre]:bg-muted/50 [&_pre]:p-2 [&_pre]:rounded [&_code]:text-xs">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {event.content}
-                      </ReactMarkdown>
-                    </div>
+                    <MarkdownContent
+                      content={event.content ?? ''}
+                      className="px-3 pb-3 dark:prose-invert [&_pre]:bg-muted/50 [&_pre]:p-2 [&_pre]:rounded [&_code]:text-xs"
+                    />
                   </CollapsibleContent>
                 </Collapsible>
               )

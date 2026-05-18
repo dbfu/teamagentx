@@ -3,10 +3,6 @@ import { tokenUsageApi } from '@/lib/token-usage-api'
 import { cn, formatDateTime } from '@/lib/utils'
 import { copyToClipboard } from '@/lib/copy-utils'
 import { Bot, MessageSquareMore, Info, Copy, XCircle, Trash2, Volume2 } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import rehypeRaw from 'rehype-raw'
-import { remarkMentions, MENTION_MARKER_CLASS } from '@/lib/remark-mentions'
 import { useState, useCallback, useMemo } from 'react'
 import { toast } from 'sonner'
 import { ImageViewerModal } from './image-viewer-modal'
@@ -20,6 +16,7 @@ import { useChatStore, VOICE_MESSAGE_PLACEHOLDER } from '@/stores/chat-store'
 import { toVoicePanelConfig } from '@/lib/agent-speech'
 import { normalizeSpeechText, speakText, stopSpeechPlayback, supportsSpeechPlayback } from '@/lib/browser-speech'
 import { resolveAssetUrl } from '@/lib/asset-url'
+import { MarkdownContent } from './markdown-content'
 
 function formatDuration(ms: number): string {
   const totalSeconds = Math.round(ms / 1000)
@@ -298,91 +295,13 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
     }
 
     // 助手消息：使用 markdown 渲染
-    // 如果没有 mentionAgents，直接渲染 markdown（不处理 @mentions）
-    if (!mentionAgents || mentionAgents.length === 0) {
-      return (
-        <div className="prose prose-sm max-w-none break-words [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_pre]:whitespace-pre-wrap [&_code]:whitespace-pre-wrap [&_img]:max-h-[360px] [&_img]:w-auto [&_img]:max-w-[min(560px,80vw)] [&_img]:rounded-lg [&_img]:object-contain [&_img]:cursor-pointer">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={{
-              a: ({ href, children }) => (
-                <a href={href} target="_blank" rel="noopener noreferrer">
-                  {children}
-                </a>
-              ),
-              img: ({ src, alt }) => {
-                const imageUrl = resolveAssetUrl(src)
-                return (
-                  <img
-                    src={imageUrl}
-                    alt={alt || '图片'}
-                    className="max-h-[360px] w-auto max-w-[min(560px,80vw)] rounded-lg object-contain cursor-pointer transition-opacity hover:opacity-90"
-                    onClick={() => imageUrl && setViewerImage({ url: imageUrl, name: alt || '图片' })}
-                  />
-                )
-              },
-            }}
-          >
-            {content}
-          </ReactMarkdown>
-        </div>
-      )
-    }
-
-    // 使用 remarkMentions 插件处理 @mentions，将有效的 @助手名 转换为 HTML span
-    // 使用 rehypeRaw 来处理这些 HTML 节点
-    // 在自定义 span 组件中识别我们的标记 class 并渲染为高亮元素
     return (
-      <div className="prose prose-sm max-w-none break-words [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_pre]:whitespace-pre-wrap [&_code]:whitespace-pre-wrap [&_img]:max-h-[360px] [&_img]:w-auto [&_img]:max-w-[min(560px,80vw)] [&_img]:rounded-lg [&_img]:object-contain [&_img]:cursor-pointer">
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm, [remarkMentions, { mentionAgents }]]}
-          rehypePlugins={[rehypeRaw]}
-          components={{
-            a: ({ href, children }) => (
-              <a href={href} target="_blank" rel="noopener noreferrer">
-                {children}
-              </a>
-            ),
-            img: ({ src, alt }) => {
-              const imageUrl = resolveAssetUrl(src)
-              return (
-                <img
-                  src={imageUrl}
-                  alt={alt || '图片'}
-                  className="max-h-[360px] w-auto max-w-[min(560px,80vw)] rounded-lg object-contain cursor-pointer transition-opacity hover:opacity-90"
-                  onClick={() => imageUrl && setViewerImage({ url: imageUrl, name: alt || '图片' })}
-                />
-              )
-            },
-            span: ({ className, children, ...props }) => {
-              // 只处理带有我们唯一标记 class 的 span（由我们的 remark 插件插入）
-              // 其他 span（包括助手消息中可能包含的其他 HTML span）保持原样
-              if (className === MENTION_MARKER_CLASS) {
-                // 从 props 中获取 agent 信息
-                // rehype-raw 将 data-* 属性转换为 camelCase
-                const agentId = (props as any).agentId || (props as any)['data-agent-id']
-                const agentName = (props as any).agentName || (props as any)['data-agent-name']
-
-                if (agentId && agentName) {
-                  return (
-                    <span
-                      className="text-primary cursor-pointer hover:text-primary/80 whitespace-nowrap"
-                      onClick={() => onMentionClick?.(agentId, agentName)}
-                      title={`点击查看 ${agentName} 详情`}
-                    >
-                      {children}
-                    </span>
-                  )
-                }
-              }
-              // 其他 span 保持原样渲染（显示为纯文本）
-              return <span className={className} {...props}>{children}</span>
-            },
-          }}
-        >
-          {content}
-        </ReactMarkdown>
-      </div>
+      <MarkdownContent
+        content={content}
+        mentionAgents={mentionAgents}
+        onMentionClick={onMentionClick}
+        onImageClick={setViewerImage}
+      />
     )
   }
 
