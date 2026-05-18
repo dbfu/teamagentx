@@ -12,6 +12,7 @@ import { agentService } from '../agent.service.js';
 import {
   processingMap,
   abortControllers,
+  discardExecutionResultKeys,
   streamEventsCache,
 } from './cache.js';
 import {
@@ -425,6 +426,11 @@ export async function processQueue(chatRoomId: string, agentId: string) {
           // 清除流式事件缓存（任务已完成，按 messageId_agentId 存储）
           const streamCacheKey = `${chatRoomId}_${task.messageId}_${task.agentId}`;
           streamEventsCache.delete(streamCacheKey);
+
+          if (discardExecutionResultKeys.delete(key)) {
+            console.log(`[processor] 已丢弃清理期间结束的执行结果: ${key}`);
+            continue;
+          }
 
           // 获取执行器的调试信息
           const debugInfo = executor.getDebugInfo();

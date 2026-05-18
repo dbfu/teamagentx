@@ -336,6 +336,14 @@ export const chatRoomApi = {
     })
   },
 
+  // 复制群组配置（不复制消息）
+  async duplicate(id: string, data?: { name?: string }): Promise<ApiResponse<ChatRoom>> {
+    return request<ChatRoom>(`/chatrooms/${id}/duplicate`, {
+      method: 'POST',
+      body: JSON.stringify(data ?? {}),
+    })
+  },
+
   // 删除群组
   async delete(id: string): Promise<ApiResponse<void>> {
     return request<void>(`/chatrooms/${id}`, {

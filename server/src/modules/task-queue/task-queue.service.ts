@@ -180,6 +180,12 @@ export const taskQueueService = {
     });
   },
 
+  async deleteByChatRoomAndAgent(chatRoomId: string, agentId: string): Promise<{ count: number }> {
+    return prisma.taskQueue.deleteMany({
+      where: { chatRoomId, agentId },
+    });
+  },
+
   async clearAll(): Promise<void> {
     await prisma.taskQueue.deleteMany();
   },
