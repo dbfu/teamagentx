@@ -381,38 +381,6 @@ export function ChatMessagesList({
     setPlayingVoiceMessageId(null)
   }, [setPlayingVoiceMessageId])
 
-  const handleManualSpeak = useCallback((startMessageId: string) => {
-    const lastStoppedAt = recentlyStoppedVoiceMessageIdsRef.current.get(startMessageId)
-    if (lastStoppedAt !== undefined && Date.now() - lastStoppedAt < 800) {
-      return
-    }
-    speechRunIdRef.current += 1
-    isSpeakingRef.current = false
-    speechQueueRef.current = []
-    queuedVoiceMessageIdsRef.current.clear()
-    stopSpeechPlayback()
-    setPlayingVoiceMessageId(null)
-
-    const startIdx = messages.findIndex((m) => m.id === startMessageId)
-    if (startIdx === -1) return
-
-    for (const message of messages.slice(startIdx)) {
-      if (message.isHuman || !message.agentId || !message.content.trim()) continue
-      const agent = allAgentsRef.current.find((a) => a.id === message.agentId)
-      const vc = agent?.speechConfig ? toVoicePanelConfig(agent.speechConfig) : null
-      if (!vc?.enabled || !supportsSpeechPlayback(vc)) continue
-      queuedVoiceMessageIdsRef.current.add(message.id)
-      speechQueueRef.current.push({
-        messageId: message.id,
-        agentId: message.agentId!,
-        text: normalizeSpeechText(message.content),
-        voiceConfig: vc,
-      })
-    }
-
-    void processQueue()
-  }, [messages, processQueue, setPlayingVoiceMessageId])
-
   useEffect(() => {
     if (loading) return
     if (document.hidden) return
@@ -548,7 +516,6 @@ export function ChatMessagesList({
                 currentUser={currentUser}
                 hasBeenPlayed={playedIds.has(message.id)}
                 onMarkPlayed={() => markVoiceMessagesPlayed(chatRoomId, [message.id])}
-                onManualSpeak={handleManualSpeak}
                 onStopSpeak={stopCurrentPlaybackSession}
                 onAgentAvatarClick={onAgentAvatarClick}
                 onTypingAgentClick={onTypingAgentClick}

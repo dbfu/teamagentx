@@ -2,6 +2,7 @@ import type { Agent, LlmProvider } from '@prisma/client';
 import prisma from '../../../lib/prisma.js';
 import type { SpeechProvider } from '../domain/provider.js';
 import type { SpeechArtifact, SpeechTask } from '../domain/types.js';
+import { deserializeAgentSpeechConfig } from '../speech-config.js';
 import { SpeechConfigError } from '../speech.service.js';
 
 type RemoteTtsDependencies = {
@@ -134,7 +135,7 @@ function normalizeVoiceValue(apiUrl: string | null | undefined, model: string, v
 
 async function resolveLlmProviderFromTask(task: SpeechTask<{ text: string }>): Promise<LlmProvider> {
   // #6: 不信任客户端传入的 llmProviderId（@internal 协议，仅内部使用）
-  // 优先从 agentId 对应的 agent 配置中读取，再从客户端提供的 vendorOptions 读取
+  // 优先从 agentId 对应的语音配置读取，再从客户端提供的 vendorOptions 读取
   if (task.context?.agentId) {
     const agent = await prisma.agent.findUnique({
       where: { id: task.context.agentId },
@@ -143,7 +144,24 @@ async function resolveLlmProviderFromTask(task: SpeechTask<{ text: string }>): P
       },
     }) as (Agent & { llmProvider: LlmProvider | null }) | null;
 
-    if (agent?.llmProvider?.isActive && agent.llmProvider.apiProtocol === 'openai') {
+    const speechConfig = deserializeAgentSpeechConfig(agent?.speechConfig);
+    const speechProviderId = typeof speechConfig?.profile?.vendorOptions?.llmProviderId === 'string'
+      ? speechConfig.profile.vendorOptions.llmProviderId
+      : null;
+
+    if (speechProviderId) {
+      const provider = await prisma.llmProvider.findUnique({ where: { id: speechProviderId } });
+      if (provider?.isActive) {
+        return provider;
+      }
+    }
+
+    if (
+      agent?.llmProvider?.isActive
+      && agent.llmProvider.apiProtocol === 'openai'
+      && agent.llmProvider.modelType === 'audio'
+      && (agent.llmProvider.audioUsage === 'tts' || agent.llmProvider.audioUsage === 'both')
+    ) {
       return agent.llmProvider;
     }
   }

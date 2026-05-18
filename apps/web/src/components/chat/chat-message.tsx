@@ -76,11 +76,10 @@ interface ChatMessageProps {
   onExecutionDetailClick?: (messageId: string, executionRecordId: string) => void
   onMentionAgent?: (agentId: string, agentName: string) => void
   onDeleteMessage?: (messageId: string) => Promise<void> | void
-  onManualSpeak?: (messageId: string) => void
   onStopSpeak?: (messageId: string) => void
 }
 
-export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechButton = true, typingAgents, mentionAgents, currentUser, hasBeenPlayed, onMarkPlayed, onAgentAvatarClick, onTypingAgentClick, onMentionClick, onReplyClick, onExecutionDetailClick, onMentionAgent, onDeleteMessage, onManualSpeak, onStopSpeak }: ChatMessageProps) {
+export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechButton = true, typingAgents, mentionAgents, currentUser, hasBeenPlayed, onMarkPlayed, onAgentAvatarClick, onTypingAgentClick, onMentionClick, onReplyClick, onExecutionDetailClick, onMentionAgent, onDeleteMessage, onStopSpeak }: ChatMessageProps) {
   const isMobile = useIsMobile()
   const allAgents = useChatStore((s) => s.allAgents)
   const playingVoiceMessageId = useChatStore((s) => s.playingVoiceMessageId)
@@ -215,11 +214,6 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
       return
     }
 
-    if (onManualSpeak) {
-      onManualSpeak(message.id)
-      return
-    }
-
     const speechText = normalizedContent
     if (!speechText) return
 
@@ -230,6 +224,7 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
         provider: voiceConfig.provider,
         model: voiceConfig.model,
         voiceId: voiceConfig.voiceId,
+        fallbackProvider: voiceConfig.fallbackProvider,
         rate: voiceConfig.speed,
         volume: voiceConfig.volume,
         pitch: voiceConfig.pitch ?? undefined,
@@ -253,7 +248,21 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
         setPlayingVoiceMessageId(null)
       }
     }
-  }, [isCurrentlyPlaying, message.content, message.id, message.agentId, normalizedContent, onManualSpeak, onMarkPlayed, onStopSpeak, setPlayingVoiceMessageId, voiceConfig])
+  }, [isCurrentlyPlaying, message.content, message.id, message.agentId, normalizedContent, onMarkPlayed, onStopSpeak, setPlayingVoiceMessageId, voiceConfig])
+
+  const handlePrewarm = useCallback(() => {
+    if (isCurrentlyPlaying || voiceConfig?.provider !== 'openai-compatible-tts') return
+    prewarmTts({
+      text: message.content,
+      provider: voiceConfig.provider,
+      model: voiceConfig.model,
+      voiceId: voiceConfig.voiceId,
+      rate: voiceConfig.speed,
+      format: voiceConfig.format ?? undefined,
+      agentId: message.agentId ?? undefined,
+      chatRoomId: message.chatRoomId,
+    })
+  }, [isCurrentlyPlaying, message.agentId, message.chatRoomId, message.content, voiceConfig])
 
   const renderContent = (content: string) => {
     // 用户消息：普通文本展示，但 @助手 需要高亮
@@ -523,20 +532,8 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
       <span className="relative inline-flex">
         <button
           onClick={handleSpeakMessage}
-          onMouseEnter={() => {
-            if (!isCurrentlyPlaying && voiceConfig?.provider === 'openai-compatible-tts') {
-              prewarmTts({
-                text: message.content,
-                provider: voiceConfig.provider,
-                model: voiceConfig.model,
-                voiceId: voiceConfig.voiceId,
-                rate: voiceConfig.speed,
-                format: voiceConfig.format ?? undefined,
-                agentId: message.agentId ?? undefined,
-                chatRoomId: message.chatRoomId,
-              })
-            }
-          }}
+          onMouseEnter={handlePrewarm}
+          onPointerDown={handlePrewarm}
           className={cn(
             "group inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs transition-colors",
             isCurrentlyPlaying
