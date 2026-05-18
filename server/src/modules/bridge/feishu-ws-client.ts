@@ -32,6 +32,17 @@ export function setFeishuBindCodeHandler(handler: BindCodeHandler) {
 }
 
 const NAME_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+const FEISHU_STALE_MESSAGE_GRACE_MS = 60 * 1000;
+
+export function parseFeishuMessageTimestamp(value: unknown): number | null {
+  const numeric = typeof value === 'number'
+    ? value
+    : typeof value === 'string'
+      ? Number(value)
+      : NaN;
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+  return numeric < 10_000_000_000 ? numeric * 1000 : numeric;
+}
 
 // Fix #55: resolve open_id to display name, with cache
 async function resolveFeishuSenderName(
@@ -81,6 +92,7 @@ async function supervisedStart(
 ): Promise<void> {
   try {
     const adapter = getBridgeInboundTextAdapter('feishu');
+    const clientStartedAt = Date.now();
 
     const dispatcher = new EventDispatcher({}).register({
       'im.message.receive_v1': async (data) => {
@@ -101,6 +113,15 @@ async function supervisedStart(
             log.info(
               { botId, messageId: msg.message_id },
               '[Bridge/Feishu-WS] 忽略飞书卡片消息，避免机器人自发消息回环',
+            );
+            return;
+          }
+
+          const messageCreatedAt = parseFeishuMessageTimestamp(msg.create_time);
+          if (messageCreatedAt && messageCreatedAt < clientStartedAt - FEISHU_STALE_MESSAGE_GRACE_MS) {
+            log.info(
+              { botId, messageId: msg.message_id, createTime: msg.create_time },
+              '[Bridge/Feishu-WS] 忽略启动前的历史消息，避免重连后重复触发',
             );
             return;
           }

@@ -234,6 +234,7 @@ async function createBridgeEvent(data: {
   direction: string;
   status: string;
   messageId?: string | null;
+  dedupeKey?: string | null;
   contentPreview?: string | null;
   agentName?: string | null;
   errorMsg?: string | null;
@@ -250,6 +251,7 @@ async function createBridgeEvent(data: {
       ...data,
       contentPreview: data.contentPreview ?? null,
       messageId: data.messageId ?? null,
+      dedupeKey: data.dedupeKey ?? null,
       agentName: data.agentName ?? null,
       errorMsg: data.errorMsg ?? null,
     },
@@ -367,6 +369,19 @@ export const bridgeService = {
         console.info(`[Bridge] 重复消息已过滤: ${params.dedupeKey}`);
         return null;
       }
+      const persistedDuplicate = await prisma.bridgeEvent.findFirst({
+        where: {
+          dedupeKey: params.dedupeKey,
+          direction: 'inbound',
+          status: 'success',
+        },
+        select: { id: true },
+      });
+      if (persistedDuplicate) {
+        console.info(`[Bridge] 持久化重复消息已过滤: ${params.dedupeKey}`);
+        addDedupeKey(params.dedupeKey);
+        return null;
+      }
       addDedupeKey(params.dedupeKey);
     }
 
@@ -427,6 +442,7 @@ export const bridgeService = {
       direction: 'inbound',
       status: 'success',
       messageId: msgId,
+      dedupeKey: params.dedupeKey ?? null,
       contentPreview: finalContent.slice(0, 280),
     }).catch((error) => console.error('[Bridge] 写入 inbound success 事件失败:', error));
 

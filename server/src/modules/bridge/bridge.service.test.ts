@@ -512,6 +512,57 @@ test('receiveBridgeMessage does not fall back to the only active room agent', as
   assert.equal(savedMessage.content, '你好');
 });
 
+test('receiveBridgeMessage filters persisted duplicate platform events after restart', async () => {
+  await prisma.chatRoom.create({
+    data: {
+      id: 'bridge-service-room',
+      name: 'Bridge Service Room',
+      updatedAt: new Date(),
+    },
+  });
+
+  const bot = await bridgeService.createBot({
+    platform: 'feishu',
+    name: 'Feishu Bridge Bot',
+    config: { appId: 'feishu-app-id', appSecret: 'feishu-secret' },
+  });
+  await bridgeService.bindBot(bot.id, 'bridge-service-room');
+
+  await prisma.bridgeEvent.create({
+    data: {
+      platform: 'feishu',
+      externalId: 'oc_feishu_chat',
+      direction: 'inbound',
+      status: 'success',
+      dedupeKey: 'feishu:om_replayed_message',
+      contentPreview: '你好啊',
+    },
+  });
+
+  const broadcasts: string[] = [];
+  setBridgeInboundMessageBroadcaster((message) => {
+    broadcasts.push(message.content);
+  });
+
+  const result = await bridgeService.receiveBridgeMessage({
+    botId: bot.id,
+    platform: 'feishu',
+    externalId: 'oc_feishu_chat',
+    senderName: 'external-user',
+    content: '你好啊',
+    dedupeKey: 'feishu:om_replayed_message',
+    sourceMessageId: 'om_replayed_message',
+  });
+
+  const messages = await prisma.message.findMany({
+    where: { chatRoomId: 'bridge-service-room' },
+  });
+
+  assert.equal(result, null);
+  assert.equal(messages.length, 0);
+  assert.deepEqual(broadcasts, []);
+});
+
 test('receiveBridgeMessage preserves explicit agent mentions from external platforms without appending default agent', async () => {
   const agent = await prisma.agent.create({
     data: {
