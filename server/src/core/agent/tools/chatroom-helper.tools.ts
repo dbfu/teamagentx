@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { createSystemTool as tool } from './system-tool.js';
 import { chatRoomService } from '../../../modules/chatroom/chatroom.service.js';
 import { agentService } from '../../../core/agent/agent.service.js';
-import { broadcastChatRoomCreated } from '../agent-handler/status.js';
+import { broadcastChatRoomCreated, broadcastAgentsUpdated } from '../agent-handler/status.js';
 import { broadcastAgentJoinedMessage } from '../agent-handler/message-utils.js';
 
 // 群聊管理助手的专用 ID
@@ -201,6 +201,8 @@ export const addAgentToChatRoomTool = tool(
       let message = `群聊"${chatRoom.name}"操作结果：`;
       if (addedAgents.length > 0) {
         message += `\n✅ 已添加: ${addedAgents.map(a => a.name).join(', ')}`;
+        // 广播群聊助手列表更新事件，通知前端刷新
+        broadcastAgentsUpdated(chatRoomId);
       }
       if (failedAgents.length > 0) {
         message += `\n❌ 失败: ${failedAgents.join(', ')}`;
@@ -248,6 +250,9 @@ export const removeAgentFromChatRoomTool = tool(
       }
 
       await chatRoomService.removeAgent(chatRoomAgent.id);
+
+      // 广播群聊助手列表更新事件，通知前端刷新
+      broadcastAgentsUpdated(chatRoomId);
 
       return `✅ 已将助手"${agent.name}"从群聊"${chatRoom.name}"移除`;
     } catch (error) {

@@ -21,6 +21,7 @@ export {
   broadcastAgentStatus,
   broadcastAgentTaskQueue,
   broadcastChatRoomCreated,
+  broadcastAgentsUpdated,
 } from './status.js';
 
 // 从 executor-manager 导出
