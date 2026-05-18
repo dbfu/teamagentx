@@ -76,7 +76,7 @@ interface ChatMessageProps {
   onStopSpeak?: (messageId: string) => void
 }
 
-export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechButton = true, typingAgents, mentionAgents, currentUser, hasBeenPlayed, onMarkPlayed, onAgentAvatarClick, onTypingAgentClick, onMentionClick, onReplyClick, onExecutionDetailClick, onMentionAgent, onDeleteMessage, onStopSpeak }: ChatMessageProps) {
+export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechButton = true, typingAgents, mentionAgents, currentUser, hasBeenPlayed: _hasBeenPlayed, onMarkPlayed, onAgentAvatarClick, onTypingAgentClick, onMentionClick, onReplyClick, onExecutionDetailClick, onMentionAgent, onDeleteMessage, onStopSpeak }: ChatMessageProps) {
   const isMobile = useIsMobile()
   const allAgents = useChatStore((s) => s.allAgents)
   const playingVoiceMessageId = useChatStore((s) => s.playingVoiceMessageId)
@@ -237,7 +237,9 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
       })
       onMarkPlayed?.()
     } catch (error) {
+      // 用户主动停止不显示错误提示
       if (error instanceof Error && (error as Error & { cancelled?: boolean }).cancelled) return
+      if (error instanceof Error && error.message === 'speech_interrupted') return
       console.error('语音播报失败:', error)
       toast.error(error instanceof Error ? error.message : '语音播报失败')
     } finally {
