@@ -1,6 +1,10 @@
 import { getApiBaseUrl } from '@/lib/config'
 import type { SpeechArtifact } from '@/speech/domain/types'
 import type { SpeechProvider } from '@/speech/providers/provider'
+import { buildTtsCacheKey, PREWARM_MAX_TEXT_LENGTH, roomTtsPrefetchCache } from '@/speech/tts-prefetch-cache'
+import { writeIdbEntry } from '@/speech/tts-idb-cache'
+
+const DEFAULT_REMOTE_TTS_TIMEOUT_MS = 8_000
 
 type RemoteTtsProviderDependencies = {
   getBaseUrl?: () => Promise<string>
@@ -128,28 +132,95 @@ export function createRemoteTtsSpeechProvider(
       taskTypes: ['tts'],
     },
     async synthesize(task) {
+      const text = String((task.input as { text?: string }).text || '').trim()
+
+      // 缓存命中：跳过远程请求直接播放
+      const chatRoomId = (task.context as { chatRoomId?: string } | undefined)?.chatRoomId
+      if (text && text.length <= PREWARM_MAX_TEXT_LENGTH && chatRoomId) {
+        const cacheKey = buildTtsCacheKey({
+          provider: providerId,
+          model: task.profile?.model ?? null,
+          voice: task.profile?.voice ?? null,
+          speed: task.profile?.speed ?? 1.3,
+          format: task.profile?.format ?? null,
+          text,
+        })
+        const cached = roomTtsPrefetchCache.forRoom(chatRoomId).get(cacheKey)
+        if (cached) {
+          try {
+            const { blob, mimeType } = await cached
+            const audioUrl = URL.createObjectURL(blob)
+            await playAudioUrl(audioUrl)
+            return {
+              kind: 'audio',
+              provider: providerId,
+              mimeType,
+              text,
+              metadata: { runtime: 'client', transport: providerId, fromCache: true },
+            } satisfies SpeechArtifact
+          } catch {
+            // 缓存条目失效，降级到正常 fetch
+          }
+        }
+      }
+
       const token = localStorage.getItem('auth_token')
-      const response = await fetch(`${await getBaseUrl()}/speech/tts`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify(task),
-      })
+      const rawTimeout = task.profile?.vendorOptions?.timeoutMs
+      const defaultTimeout = task.preferences?.allowFallback
+        ? DEFAULT_REMOTE_TTS_TIMEOUT_MS
+        : 30_000
+      const timeoutMs = typeof rawTimeout === 'number'
+        ? Math.min(30_000, Math.max(1_000, rawTimeout))
+        : defaultTimeout
+
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+      let response: Response
+      try {
+        response = await fetch(`${await getBaseUrl()}/speech/tts`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify(task),
+          signal: controller.signal,
+        })
+      } catch (err) {
+        clearTimeout(timeoutId)
+        if (err instanceof Error && err.name === 'AbortError') {
+          throw new Error('语音服务响应超时，请重试')
+        }
+        throw err
+      }
+      clearTimeout(timeoutId)
 
       if (!response.ok) {
         const errorText = await response.text().catch(() => '')
         throw new Error(errorText || `远程语音播报失败(${response.status})`)
       }
 
-      const mimeType = response.headers.get('content-type') || 'audio/mpeg'
+      const mimeType = (response.headers.get('content-type') || 'audio/mpeg').split(';')[0].trim()
       const provider = response.headers.get('x-speech-provider') || providerId
       const model = response.headers.get('x-speech-model')
       const voice = response.headers.get('x-speech-voice')
       const blob = new Blob([await response.arrayBuffer()], { type: mimeType })
-      const audioUrl = URL.createObjectURL(blob)
 
+      if (chatRoomId && text.length <= PREWARM_MAX_TEXT_LENGTH) {
+        const cacheKey = buildTtsCacheKey({
+          provider: providerId,
+          model: task.profile?.model ?? null,
+          voice: task.profile?.voice ?? null,
+          speed: task.profile?.speed ?? 1.3,
+          format: task.profile?.format ?? null,
+          text,
+        })
+        roomTtsPrefetchCache.forRoom(chatRoomId).set(cacheKey, Promise.resolve({ blob, mimeType }))
+        void writeIdbEntry(chatRoomId, cacheKey, { blob, mimeType })
+      }
+
+      const audioUrl = URL.createObjectURL(blob)
       await playAudioUrl(audioUrl)
 
       // #11: audioUrl 在 playAudioUrl 内播放完成后已 revoke，不在 artifact 中暴露已失效的 URL

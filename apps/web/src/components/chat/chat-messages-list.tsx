@@ -6,7 +6,10 @@ import { useChatStore } from '@/stores/chat-store'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { cn } from '@/lib/utils'
 import { toVoicePanelConfig, type AgentVoicePanelConfig } from '@/lib/agent-speech'
-import { normalizeSpeechText, speakText, stopSpeechPlayback, supportsSpeechPlayback } from '@/lib/browser-speech'
+import { deleteTtsCache, fetchTtsAudio, loadRoomTtsCache, normalizeSpeechText, prewarmTts, speakText, stopSpeechPlayback, supportsSpeechPlayback } from '@/lib/browser-speech'
+import { buildTtsCacheKey, PREWARM_MAX_TEXT_LENGTH } from '@/speech/tts-prefetch-cache'
+import { extractNewChunks, streamingTtsManager } from '@/speech/streaming-tts'
+import { stopRemoteTtsPlayback } from '@/speech/providers/remote-tts-provider'
 
 interface MentionAgent {
   id: string
@@ -109,6 +112,16 @@ export function ChatMessagesList({
   const prevChatRoomIdRef = useRef(chatRoomId)
   // 是否已完成初始滚动位置恢复（切换群聊时重置）
   const hasRestoredPositionRef = useRef(false)
+  // 已完成进入群聊批量预热的 room ID 集合
+  const prewarmDoneRoomsRef = useRef<Set<string>>(new Set())
+  // 进入房间时已存在的消息 ID（不自动播放）
+  const initialMessageIdsRef = useRef<Set<string>>(new Set())
+  const initialCapturedRef = useRef(false)
+  // 流式 TTS 相关：按 streamKey 跟踪已处理的文本位置
+  const streamingPositionsRef = useRef<Map<string, number>>(new Map())
+  const lastStreamContentRef = useRef<Map<string, string>>(new Map())
+  const recentlyStreamedAgentIdsRef = useRef<Map<string, number>>(new Map())
+  const prevStreamKeysRef = useRef<Set<string>>(new Set())
 
   // 检查是否在底部附近
   const checkIsNearBottom = useCallback(() => {
@@ -196,6 +209,12 @@ export function ChatMessagesList({
     if (prevChatRoomIdRef.current !== chatRoomId) {
       prevChatRoomIdRef.current = chatRoomId
       hasRestoredPositionRef.current = false
+      initialMessageIdsRef.current = new Set()
+      initialCapturedRef.current = false
+      streamingPositionsRef.current.clear()
+      lastStreamContentRef.current.clear()
+      prevStreamKeysRef.current.clear()
+      recentlyStreamedAgentIdsRef.current.clear()
       // 重置底部状态
       setIsNearBottom(true)
       setShowNewMessageHint(false)
@@ -230,6 +249,42 @@ export function ChatMessagesList({
     }
   }, [loading, chatRoomId, getScrollPosition, scrollToBottom])
 
+  // 捕获进入房间时的初始消息 ID，这些消息不走自动播放
+  useEffect(() => {
+    if (!loading && !initialCapturedRef.current && messages.length > 0) {
+      initialCapturedRef.current = true
+      for (const m of messages) initialMessageIdsRef.current.add(m.id)
+    }
+  }, [loading, chatRoomId, messages])
+
+  // 进入群聊时先从 IDB 加载缓存，再批量预热未缓存的旧消息（每个 room 只触发一次）
+  useEffect(() => {
+    if (loading || messages.length === 0 || allAgents.length === 0) return
+    if (prewarmDoneRoomsRef.current.has(chatRoomId)) return
+    prewarmDoneRoomsRef.current.add(chatRoomId)
+    const agents = allAgents
+    const roomId = chatRoomId
+    void (async () => {
+      await loadRoomTtsCache(roomId)
+      for (const message of [...messages].reverse().slice(0, 10)) {
+        if (message.isHuman || !message.agentId || !message.content.trim()) continue
+        const agent = agents.find((a) => a.id === message.agentId)
+        const vc = agent?.speechConfig ? toVoicePanelConfig(agent.speechConfig) : null
+        if (!vc?.enabled || vc.provider !== 'openai-compatible-tts') continue
+        prewarmTts({
+          text: message.content,
+          provider: vc.provider,
+          model: vc.model,
+          voiceId: vc.voiceId,
+          rate: vc.speed,
+          format: vc.format ?? undefined,
+          agentId: message.agentId,
+          chatRoomId: roomId,
+        })
+      }
+    })()
+  }, [chatRoomId, loading, messages, allAgents])
+
   // 切换房间时取消正在播报的语音（已播 ID 保留，不清空）
   useEffect(() => {
     speechRunIdRef.current += 1
@@ -239,6 +294,102 @@ export function ChatMessagesList({
     stopSpeechPlayback()
     setPlayingVoiceMessageId(null)
   }, [chatRoomId, setPlayingVoiceMessageId])
+
+  // 流式 TTS：监听 streamEvents 实时合成并播放句子片段
+  useEffect(() => {
+    const currentKeys = new Set(streamEvents.keys())
+
+    // 检测已完成的流（key 消失 = agent:done）
+    for (const prevKey of prevStreamKeysRef.current) {
+      if (currentKeys.has(prevKey)) continue
+      // 流结束，冲刷剩余文本
+      const agentId = prevKey.slice(prevKey.indexOf('_') + 1)
+      const agent = allAgentsRef.current.find((a) => a.id === agentId)
+      const vc = agent?.speechConfig ? toVoicePanelConfig(agent.speechConfig) : null
+      if (vc?.enabled && vc.provider === 'openai-compatible-tts') {
+        const lastContent = lastStreamContentRef.current.get(prevKey) ?? ''
+        const pos = streamingPositionsRef.current.get(prevKey) ?? 0
+        const remaining = normalizeSpeechText(lastContent.slice(pos)).trim()
+        if (remaining) {
+          const session = streamingTtsManager.get(prevKey)
+          if (session && !session.stopped) {
+            const agentIdCapture = agentId
+            const vcCapture = vc
+            session.add(remaining, (text) =>
+              fetchTtsAudio({
+                text,
+                provider: vcCapture.provider,
+                model: vcCapture.model ?? undefined,
+                voiceId: vcCapture.voiceId ?? undefined,
+                rate: vcCapture.speed,
+                format: vcCapture.format ?? undefined,
+                agentId: agentIdCapture,
+                chatRoomId,
+              }),
+            )
+          }
+        }
+      }
+      recentlyStreamedAgentIdsRef.current.set(agentId, Date.now())
+      streamingPositionsRef.current.delete(prevKey)
+      lastStreamContentRef.current.delete(prevKey)
+    }
+
+    prevStreamKeysRef.current = currentKeys
+
+    // 处理活跃流：提取新句子片段并加入播放队列
+    for (const [key, events] of streamEvents) {
+      const outputEvents = events.filter((e) => e.type === 'output')
+      const outputEvent = outputEvents[outputEvents.length - 1]
+      if (!outputEvent?.content) continue
+
+      const agentId = key.slice(key.indexOf('_') + 1)
+      const agent = allAgentsRef.current.find((a) => a.id === agentId)
+      const vc = agent?.speechConfig ? toVoicePanelConfig(agent.speechConfig) : null
+      if (!vc?.enabled || vc.provider !== 'openai-compatible-tts') continue
+      if (vc.outputMode !== 'auto_final_only') continue
+
+      const content = outputEvent.content
+      lastStreamContentRef.current.set(key, content)
+
+      const pos = streamingPositionsRef.current.get(key) ?? 0
+      const { chunks, newPosition } = extractNewChunks(content, pos)
+      if (chunks.length === 0) continue
+
+      streamingPositionsRef.current.set(key, newPosition)
+
+      const isFirstSession = !streamingTtsManager.get(key)
+      const session = streamingTtsManager.getOrCreate(key)
+
+      if (isFirstSession) {
+        // 流式 TTS 开始：停止普通自动播放
+        speechRunIdRef.current += 1
+        isSpeakingRef.current = false
+        speechQueueRef.current = []
+        queuedVoiceMessageIdsRef.current.clear()
+        stopRemoteTtsPlayback()
+      }
+
+      const agentIdCapture = agentId
+      const vcCapture = vc
+      for (const chunk of chunks) {
+        const normalizedChunk = normalizeSpeechText(chunk)
+        if (!normalizedChunk) continue
+        session.add(normalizedChunk, (text) =>
+          fetchTtsAudio({
+            text,
+            provider: vcCapture.provider,
+            model: vcCapture.model ?? undefined,
+            voiceId: vcCapture.voiceId ?? undefined,
+            rate: vcCapture.speed,
+            format: vcCapture.format ?? undefined,
+            agentId: agentIdCapture,
+            chatRoomId,
+          }),
+        )
+      }
+    }
+  }, [streamEvents, chatRoomId])
 
   // 串行消费队列：上一条播完再播下一条。读取 ref 中的最新状态，避免 effect 重跑触发循环。
   const processQueue = useCallback(async () => {
@@ -252,9 +403,23 @@ export function ChatMessagesList({
       }
       const item = speechQueueRef.current.shift()!
       setPlayingVoiceMessageId(item.messageId)
+      // 预热队列中接下来两条，避免播完等待
+      for (const next of speechQueueRef.current.slice(0, 3)) {
+        prewarmTts({
+          text: next.text,
+          provider: next.voiceConfig.provider,
+          model: next.voiceConfig.model,
+          voiceId: next.voiceConfig.voiceId,
+          rate: next.voiceConfig.speed,
+          format: next.voiceConfig.format ?? undefined,
+          agentId: next.agentId,
+          chatRoomId,
+        })
+      }
       let playedSuccessfully = false
       let interrupted = false
       try {
+        streamingTtsManager.stopAll()
         await speakText({
           text: item.text,
           provider: item.voiceConfig.provider,
@@ -279,6 +444,8 @@ export function ChatMessagesList({
       } catch (e) {
         if (e instanceof Error && e.message === 'speech_interrupted') {
           interrupted = true
+        } else if (e instanceof Error && (e as Error & { cancelled?: boolean }).cancelled) {
+          interrupted = true
         }
       }
       queuedVoiceMessageIdsRef.current.delete(item.messageId)
@@ -296,8 +463,38 @@ export function ChatMessagesList({
       }
       setPlayingVoiceMessageId(null)
     }
-    isSpeakingRef.current = false
+    if (speechRunIdRef.current === runId) {
+      isSpeakingRef.current = false
+    }
   }, [chatRoomId, markVoiceMessagesHandled, markVoiceMessagesPlayed, setPlayingVoiceMessageId])
+
+  const handleManualSpeak = useCallback((startMessageId: string) => {
+    speechRunIdRef.current += 1
+    isSpeakingRef.current = false
+    speechQueueRef.current = []
+    queuedVoiceMessageIdsRef.current.clear()
+    stopSpeechPlayback()
+    setPlayingVoiceMessageId(null)
+
+    const startIdx = messages.findIndex((m) => m.id === startMessageId)
+    if (startIdx === -1) return
+
+    for (const message of messages.slice(startIdx)) {
+      if (message.isHuman || !message.agentId || !message.content.trim()) continue
+      const agent = allAgentsRef.current.find((a) => a.id === message.agentId)
+      const vc = agent?.speechConfig ? toVoicePanelConfig(agent.speechConfig) : null
+      if (!vc?.enabled || !supportsSpeechPlayback(vc)) continue
+      queuedVoiceMessageIdsRef.current.add(message.id)
+      speechQueueRef.current.push({
+        messageId: message.id,
+        agentId: message.agentId!,
+        text: normalizeSpeechText(message.content),
+        voiceConfig: vc,
+      })
+    }
+
+    void processQueue()
+  }, [messages, processQueue, setPlayingVoiceMessageId])
 
   useEffect(() => {
     if (loading) return
@@ -328,10 +525,14 @@ export function ChatMessagesList({
         return false
       }
       const voiceConfig = agent.speechConfig ? toVoicePanelConfig(agent.speechConfig) : null
+      const recentStreamTime = recentlyStreamedAgentIdsRef.current.get(message.agentId ?? '')
+      const wasRecentlyStreamed = recentStreamTime !== undefined && Date.now() - recentStreamTime < 10_000
       const shouldAutoPlay = voiceConfig?.enabled
         && voiceConfig.outputMode === 'auto_final_only'
         && supportsSpeechPlayback(voiceConfig)
         && !playedSet.has(message.id)
+        && !initialMessageIdsRef.current.has(message.id)
+        && !wasRecentlyStreamed
 
       if (playedSet.has(message.id)) {
         permanentlySkippedMessageIds.push(message.id)
@@ -343,6 +544,23 @@ export function ChatMessagesList({
 
     if (permanentlySkippedMessageIds.length > 0) {
       markVoiceMessagesHandled(chatRoomId, permanentlySkippedMessageIds)
+    }
+
+    for (const message of newMessages) {
+      if (message.isHuman || !message.agentId || !message.content.trim()) continue
+      const agent = agentsList.find((item) => item.id === message.agentId)
+      const vc = agent?.speechConfig ? toVoicePanelConfig(agent.speechConfig) : null
+      if (!vc?.enabled || vc.provider !== 'openai-compatible-tts') continue
+      prewarmTts({
+        text: message.content,
+        provider: vc.provider,
+        model: vc.model,
+        voiceId: vc.voiceId,
+        rate: vc.speed,
+        format: vc.format ?? undefined,
+        agentId: message.agentId,
+        chatRoomId,
+      })
     }
 
     if (toSpeak.length === 0) return
@@ -416,13 +634,31 @@ export function ChatMessagesList({
                 currentUser={currentUser}
                 hasBeenPlayed={playedIds.has(message.id)}
                 onMarkPlayed={() => markVoiceMessagesPlayed(chatRoomId, [message.id])}
+                onManualSpeak={handleManualSpeak}
                 onAgentAvatarClick={onAgentAvatarClick}
                 onTypingAgentClick={onTypingAgentClick}
                 onMentionClick={onMentionClick}
                 onReplyClick={onReplyClick}
                 onExecutionDetailClick={onExecutionDetailClick}
                 onMentionAgent={onMentionAgent}
-                onDeleteMessage={onDeleteMessage}
+                onDeleteMessage={async (messageId) => {
+                  await onDeleteMessage?.(messageId)
+                  const msg = messages.find((m) => m.id === messageId)
+                  if (!msg || msg.isHuman || !msg.agentId) return
+                  const agent = allAgentsRef.current.find((a) => a.id === msg.agentId)
+                  const vc = agent?.speechConfig ? toVoicePanelConfig(agent.speechConfig) : null
+                  if (!vc?.enabled || vc.provider !== 'openai-compatible-tts') return
+                  const text = normalizeSpeechText(msg.content)
+                  if (!text || text.length > PREWARM_MAX_TEXT_LENGTH) return
+                  deleteTtsCache(chatRoomId, buildTtsCacheKey({
+                    provider: vc.provider,
+                    model: vc.model ?? null,
+                    voice: vc.voiceId ?? null,
+                    speed: vc.speed ?? 1.3,
+                    format: vc.format ?? null,
+                    text,
+                  }))
+                }}
               />
             </div>
           ))
