@@ -10,6 +10,10 @@ import {
 } from '@/speech/providers/browser-local-provider'
 import type { SpeechTask } from '@/speech'
 import { stopRemoteTtsPlayback } from '@/speech/providers/remote-tts-provider'
+import { buildTtsCacheKey, PREWARM_MAX_TEXT_LENGTH, roomTtsPrefetchCache } from '@/speech/tts-prefetch-cache'
+import { deleteExpiredIdbEntries, deleteIdbEntry, loadRoomIdbEntries, writeIdbEntry } from '@/speech/tts-idb-cache'
+import { streamingTtsManager } from '@/speech/streaming-tts'
+import { getApiBaseUrl } from '@/lib/config'
 
 export type SpeechOutputMode = 'off' | 'manual' | 'auto_final_only'
 
@@ -65,6 +69,10 @@ export function startBrowserSpeechRecognition(language = 'zh-CN'): BrowserSpeech
     if (!session || typeof session !== 'object') {
       throw new Error('语音识别会话启动失败')
     }
+    // #35: 校验 session 具有必要方法，避免不安全的类型断言
+    if (typeof (session as { stop?: unknown }).stop !== 'function') {
+      throw new Error('语音识别会话接口不完整')
+    }
     return session as BrowserSpeechRecognitionSession
   }
 
@@ -116,7 +124,9 @@ export function supportsSpeechPlayback(profile?: Pick<SpeechProfile, 'provider'>
 export function stopSpeechPlayback(): void {
   stopBrowserLocalSpeechSynthesis()
   stopRemoteTtsPlayback()
+  streamingTtsManager.stopAll()
 }
+
 
 export async function speakText(options: SpeakTextOptions): Promise<void> {
   const trimmedText = normalizeSpeechText(options.text)
@@ -158,6 +168,86 @@ export async function speakText(options: SpeakTextOptions): Promise<void> {
       allowFallback: Boolean(options.fallbackProvider),
     },
   })
+}
+
+export function deleteTtsCache(chatRoomId: string, cacheKey: string): void {
+  roomTtsPrefetchCache.forRoom(chatRoomId).delete(cacheKey)
+  void deleteIdbEntry(chatRoomId, cacheKey)
+}
+
+export function prewarmTts(options: SpeakTextOptions): void {
+  const text = normalizeSpeechText(options.text)
+  if (!text || text.length > PREWARM_MAX_TEXT_LENGTH) return
+  const provider = options.provider ?? 'browser-local'
+  if (provider !== 'openai-compatible-tts') return
+  if (!options.chatRoomId) return
+
+  const roomCache = roomTtsPrefetchCache.forRoom(options.chatRoomId)
+  const cacheKey = buildTtsCacheKey({
+    provider,
+    model: options.model ?? null,
+    voice: options.voiceId ?? null,
+    speed: options.rate ?? 1.3,
+    format: options.format ?? null,
+    vendorOptions: options.vendorOptions ?? null,
+    text,
+  })
+  if (roomCache.has(cacheKey)) return
+
+  const promise = (async () => {
+    const baseUrl = await getApiBaseUrl()
+    const token = localStorage.getItem('auth_token')
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 30_000)
+    try {
+      const response = await fetch(`${baseUrl}/speech/tts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          type: 'tts',
+          input: { text },
+          profile: {
+            provider,
+            model: options.model ?? null,
+            voice: options.voiceId ?? null,
+            speed: options.rate ?? 1.3,
+            format: options.format ?? null,
+            vendorOptions: options.vendorOptions ?? null,
+          },
+          context: {
+            agentId: options.agentId,
+            chatRoomId: options.chatRoomId,
+          },
+        }),
+        signal: controller.signal,
+      })
+      if (!response.ok) throw new Error(`prewarm failed: ${response.status}`)
+      const contentType = response.headers.get('content-type') || 'audio/mpeg'
+      const mimeType = contentType.split(';')[0].trim()
+      const blob = new Blob([await response.arrayBuffer()], { type: mimeType })
+      return { blob, mimeType }
+    } finally {
+      clearTimeout(timeoutId)
+    }
+  })()
+
+  roomCache.set(cacheKey, promise)
+  const chatRoomId = options.chatRoomId
+  promise.then((audio) => writeIdbEntry(chatRoomId, cacheKey, audio)).catch(() => {})
+}
+
+export async function loadRoomTtsCache(chatRoomId: string): Promise<void> {
+  void deleteExpiredIdbEntries()
+  const entries = await loadRoomIdbEntries(chatRoomId)
+  const roomCache = roomTtsPrefetchCache.forRoom(chatRoomId)
+  for (const entry of entries) {
+    if (!roomCache.has(entry.cacheKey)) {
+      roomCache.set(entry.cacheKey, Promise.resolve({ blob: entry.blob, mimeType: entry.mimeType }))
+    }
+  }
 }
 
 export async function speakTextWithBrowserSpeech(options: SpeakTextOptions): Promise<void> {

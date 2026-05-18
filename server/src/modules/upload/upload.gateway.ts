@@ -13,14 +13,6 @@ export async function uploadGateway(app: FastifyInstance) {
     durationMs: { type: 'integer' },
   };
 
-  // 注册 multipart 插件
-  await app.register(import('@fastify/multipart'), {
-    limits: {
-      fileSize: 10 * 1024 * 1024, // 10MB
-      files: 5, // 最多 5 个文件
-    },
-  });
-
   // 单图上传接口
   app.post('/upload/image', {
     schema: {

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { createSystemTool as tool } from './system-tool.js';
 import { agentService } from '../../../core/agent/agent.service.js';
+import { categoryService } from '../../../modules/category/category.service.js';
 import { llmProviderService } from '../../../modules/llm-provider/llm-provider.service.js';
 import { installDefaultSkillsForNewAgent } from '../../../modules/skill/preinstalled-skills.js';
 import { installSkillFromSourceTool } from './skills-helper.tools.js';
@@ -397,13 +398,30 @@ export const listAgentsTool = tool(
       .map((a) => {
         const parsedSpeechConfig = deserializeAgentSpeechConfig(a.speechConfig);
         const inferredPresetId = inferSpeechPresetId(parsedSpeechConfig);
-        return `ID: ${a.id}\n名称: ${a.name}\n级别: ${a.agentLevel === 'system' ? '系统助手' : '自定义助手'}\n描述: ${a.description || '无'}\n语音预设: ${inferredPresetId || '自定义/未匹配'}\n语音: ${a.speechConfig ? String(a.speechConfig) : '未配置'}`;
+        return `ID: ${a.id}\n名称: ${a.name}\n级别: ${a.agentLevel === 'system' ? '系统助手' : '自定义助手'}\n描述: ${a.description || '无'}\n分类ID: ${a.categoryId || '未分类'}\n分类名称: ${a.category?.name || '未分类'}\n语音预设: ${inferredPresetId || '自定义/未匹配'}\n语音: ${a.speechConfig ? String(a.speechConfig) : '未配置'}`;
       })
       .join('\n\n');
   },
   {
     name: 'list_agents',
-    description: '列出所有助手及其当前配置（含系统助手与语音配置），用于查找需要更新的助手 ID。',
+    description: '列出所有助手及其当前配置（含系统助手、分类信息与语音配置），用于查找需要更新的助手 ID。',
+    schema: z.object({}),
+  },
+);
+
+export const listCategoriesTool = tool(
+  async () => {
+    const categories = await categoryService.findAll();
+    if (categories.length === 0) return '暂无助手分类。';
+    return categories
+      .map((category) => (
+        `ID: ${category.id}\n名称: ${category.name}\n描述: ${category.description || '无'}\n助手数量: ${category._count?.agents ?? 0}`
+      ))
+      .join('\n\n');
+  },
+  {
+    name: 'list_categories',
+    description: '列出所有助手分类及其 ID，用于按分类名称查找对应 UUID，并给助手设置 categoryId。',
     schema: z.object({}),
   },
 );
@@ -600,6 +618,7 @@ export const agentCreatorTools = [
   createAgentTool,
   createAgentsTool,
   listAgentsTool,
+  listCategoriesTool,
   listVoicePresetsTool,
   updateAgentTool,
   updateAgentsTool,

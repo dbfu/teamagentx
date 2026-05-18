@@ -13,7 +13,7 @@ afterEach(() => {
 })
 
 describe('remote-tts speech provider', () => {
-  test('应从服务端获取音频并返回可播放的 blob url', async () => {
+  test('应从服务端获取音频并返回 SpeechArtifact', async () => {
     let createdBlob: Blob | null = null
     let revokedUrl: string | null = null
 
@@ -30,9 +30,6 @@ describe('remote-tts speech provider', () => {
         status: 200,
         headers: {
           'content-type': 'audio/mpeg',
-          'x-speech-provider': 'openai-compatible-tts',
-          'x-speech-model': 'gpt-4o-mini-tts',
-          'x-speech-voice': 'alloy',
         },
       })
     }
@@ -54,7 +51,6 @@ describe('remote-tts speech provider', () => {
       constructor(public readonly src: string) {}
 
       async play() {
-        assert.strictEqual(this.src, 'blob:remote-tts-preview')
         this.onended?.()
       }
     }
@@ -77,12 +73,9 @@ describe('remote-tts speech provider', () => {
     })
 
     assert.ok(result)
-    assert.strictEqual(result?.kind, 'audio')
-    assert.strictEqual(result?.audioUrl, 'blob:remote-tts-preview')
-    assert.strictEqual(result?.provider, 'openai-compatible-tts')
-    assert.strictEqual(result?.model, 'gpt-4o-mini-tts')
-    assert.strictEqual(result?.voice, 'alloy')
-    assert.strictEqual(result?.mimeType, 'audio/mpeg')
+    assert.strictEqual(result.kind, 'audio')
+    assert.strictEqual(result.provider, 'openai-compatible-tts')
+    assert.strictEqual(result.mimeType, 'audio/mpeg')
     assert.ok(createdBlob)
     assert.strictEqual(createdBlob?.type, 'audio/mpeg')
     assert.strictEqual(revokedUrl, 'blob:remote-tts-preview')
@@ -147,5 +140,93 @@ describe('remote-tts speech provider', () => {
     assert.strictEqual(result.kind, 'audio')
     assert.strictEqual(paused, true)
     assert.strictEqual(revokedUrl, 'blob:remote-tts-stop')
+  })
+
+  test('服务端返回非 2xx 时应抛错', async () => {
+    globalThis.fetch = async () => {
+      return new Response(null, { status: 502 })
+    }
+
+    globalThis.URL = {
+      createObjectURL() { return 'blob:err' },
+      revokeObjectURL() {},
+    } as typeof URL
+
+    class FakeAudio {
+      onended: (() => void) | null = null
+      onerror: (() => void) | null = null
+      constructor(public readonly src: string) {}
+      async play() { this.onended?.() }
+      pause() {}
+    }
+    globalThis.Audio = FakeAudio as unknown as typeof Audio
+
+    const provider = createRemoteTtsSpeechProvider({
+      getBaseUrl: async () => 'http://127.0.0.1:3001',
+    })
+
+    await assert.rejects(
+      provider.synthesize?.({
+        type: 'tts',
+        profile: { provider: 'openai-compatible-tts' },
+        input: { text: '错误测试' },
+      }),
+      /TTS failed: 502/,
+    )
+  })
+
+  test('连续两次 synthesize 时应停掉前一个 controller', async () => {
+    let playCount = 0
+    let pausedCount = 0
+
+    globalThis.fetch = async () => {
+      return new Response(new Uint8Array([1, 2]), {
+        status: 200,
+        headers: { 'content-type': 'audio/mpeg' },
+      })
+    }
+
+    globalThis.URL = {
+      createObjectURL() { return `blob:play-${++playCount}` },
+      revokeObjectURL() {},
+    } as typeof URL
+
+    class FakeAudio {
+      onended: (() => void) | null = null
+      onerror: (() => void) | null = null
+      currentTime = 0
+      constructor(public readonly src: string) {}
+      async play() {
+        // 延迟结束，让第二次 synthesize 有时间中断
+        await new Promise((r) => setTimeout(r, 30))
+        this.onended?.()
+      }
+      pause() { pausedCount++ }
+    }
+    globalThis.Audio = FakeAudio as unknown as typeof Audio
+
+    const provider = createRemoteTtsSpeechProvider({
+      getBaseUrl: async () => 'http://127.0.0.1:3001',
+    })
+
+    const first = provider.synthesize?.({
+      type: 'tts',
+      profile: { provider: 'openai-compatible-tts' },
+      input: { text: '第一条' },
+    })
+
+    await new Promise((r) => setTimeout(r, 5))
+
+    const second = provider.synthesize?.({
+      type: 'tts',
+      profile: { provider: 'openai-compatible-tts' },
+      input: { text: '第二条' },
+    })
+
+    // 第一次应该被 stop 导致 cancelled reject
+    await assert.rejects(first, /播放已取消/)
+    const result = await second
+    assert.strictEqual(result.kind, 'audio')
+    assert.ok(pausedCount >= 1, '前一个 audio 应被 pause')
   })
 })

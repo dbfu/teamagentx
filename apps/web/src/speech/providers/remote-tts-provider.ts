@@ -1,6 +1,7 @@
 import { getApiBaseUrl } from '@/lib/config'
 import type { SpeechArtifact } from '@/speech/domain/types'
 import type { SpeechProvider } from '@/speech/providers/provider'
+import { buildTtsCacheKey, PREWARM_MAX_TEXT_LENGTH, roomTtsPrefetchCache } from '@/speech/tts-prefetch-cache'
 
 type RemoteTtsProviderDependencies = {
   getBaseUrl?: () => Promise<string>
@@ -99,7 +100,10 @@ async function playAudioUrl(audioUrl: string): Promise<void> {
         } catch {
           // ignore stop errors from browser media APIs
         }
-        finish()
+        // #17: stop 走 reject（标记为 cancelled），让调用方知道播放被中断
+        finished = true
+        cleanup()
+        reject(Object.assign(new Error('播放已取消'), { cancelled: true }))
       },
     }
 
@@ -125,40 +129,64 @@ export function createRemoteTtsSpeechProvider(
       taskTypes: ['tts'],
     },
     async synthesize(task) {
-      const response = await fetch(`${await getBaseUrl()}/speech/tts`, {
+      const text = String((task.input as { text?: string }).text || '').trim()
+
+      // 缓存命中：跳过远程请求直接播放
+      const chatRoomId = (task.context as { chatRoomId?: string } | undefined)?.chatRoomId
+      if (text && text.length <= PREWARM_MAX_TEXT_LENGTH && chatRoomId) {
+        const cacheKey = buildTtsCacheKey({
+          provider: providerId,
+          model: task.profile?.model ?? null,
+          voice: task.profile?.voice ?? null,
+          speed: task.profile?.speed ?? 1.3,
+          format: task.profile?.format ?? null,
+          vendorOptions: task.profile?.vendorOptions ?? null,
+          text,
+        })
+        const cached = roomTtsPrefetchCache.forRoom(chatRoomId).get(cacheKey)
+        if (cached) {
+          try {
+            const { blob, mimeType } = await cached
+            const audioUrl = URL.createObjectURL(blob)
+            await playAudioUrl(audioUrl)
+            return {
+              kind: 'audio',
+              provider: providerId,
+              mimeType,
+              text,
+              metadata: { runtime: 'client', transport: providerId, fromCache: true },
+            } satisfies SpeechArtifact
+          } catch (err) {
+            // cancelled 错误不降级到 fetch，直接向上传播
+            if (err instanceof Error && (err as Error & { cancelled?: boolean }).cancelled) throw err
+            // 缓存条目失效，降级到正常 fetch
+          }
+        }
+      }
+
+      // 缓存未命中：先获取完整音频再播放，先回到普通模式以保证稳定性。
+      const streamToken = localStorage.getItem('auth_token')
+      const baseUrl = await getBaseUrl()
+      const response = await fetch(`${baseUrl}/speech/tts`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(streamToken ? { Authorization: `Bearer ${streamToken}` } : {}),
         },
         body: JSON.stringify(task),
+        signal: AbortSignal.timeout(60_000),
       })
-
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => '')
-        throw new Error(errorText || `远程语音播报失败(${response.status})`)
-      }
-
-      const mimeType = response.headers.get('content-type') || 'audio/mpeg'
-      const provider = response.headers.get('x-speech-provider') || providerId
-      const model = response.headers.get('x-speech-model')
-      const voice = response.headers.get('x-speech-voice')
+      if (!response.ok) throw new Error(`TTS failed: ${response.status}`)
+      const contentType = response.headers.get('content-type') || 'audio/mpeg'
+      const mimeType = contentType.split(';')[0].trim()
       const blob = new Blob([await response.arrayBuffer()], { type: mimeType })
       const audioUrl = URL.createObjectURL(blob)
-
       await playAudioUrl(audioUrl)
-
       return {
         kind: 'audio',
-        provider,
-        model,
-        voice,
-        mimeType,
-        audioUrl,
+        provider: providerId,
         text: String((task.input as { text?: string }).text || ''),
-        metadata: {
-          runtime: 'client',
-          transport: providerId,
-        },
+        metadata: { runtime: 'client', transport: providerId, mode: 'non-streaming-fallback' },
       } satisfies SpeechArtifact
     },
   }

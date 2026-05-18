@@ -8,10 +8,7 @@ export type SpeechPresetId =
   | 'system-default'
   | 'gentle-guide'
   | 'steady-pro'
-  | 'bright-host'
-  | 'edge-xiaoxiao'
-  | 'edge-xiaoyi'
-  | 'edge-yunxi';
+  | 'bright-host';
 
 export type SpeechPresetDefinition = {
   id: SpeechPresetId;
@@ -107,75 +104,6 @@ export const SPEECH_PRESETS: SpeechPresetDefinition[] = [
         emotion: 'cheerful',
         style: 'energetic',
         prompt: '语气轻快、有节奏感，像在做自然播报。',
-      },
-    }),
-  },
-  {
-    id: 'edge-xiaoxiao',
-    name: 'Edge 晓晓',
-    description: '女声自然顺滑，适合通用讲解和日常对话。',
-    recommendedFor: ['通用', '讲解', '客服'],
-    speechConfig: normalizeAgentSpeechConfig({
-      behavior: {
-        enabled: true,
-        outputMode: 'manual',
-        autoPlay: false,
-      },
-      profile: {
-        provider: 'edge-tts',
-        voice: 'zh-CN-XiaoxiaoNeural',
-        speed: 1,
-        volume: 1,
-        pitch: null,
-        emotion: null,
-        style: null,
-        prompt: null,
-      },
-    }),
-  },
-  {
-    id: 'edge-xiaoyi',
-    name: 'Edge 晓伊',
-    description: '女声更柔和，适合陪伴和轻声引导。',
-    recommendedFor: ['陪伴', '引导', '温和回复'],
-    speechConfig: normalizeAgentSpeechConfig({
-      behavior: {
-        enabled: true,
-        outputMode: 'manual',
-        autoPlay: false,
-      },
-      profile: {
-        provider: 'edge-tts',
-        voice: 'zh-CN-XiaoyiNeural',
-        speed: 1,
-        volume: 1,
-        pitch: null,
-        emotion: null,
-        style: null,
-        prompt: null,
-      },
-    }),
-  },
-  {
-    id: 'edge-yunxi',
-    name: 'Edge 云希',
-    description: '男声更稳，适合播报、分析和专业回答。',
-    recommendedFor: ['播报', '分析', '专业场景'],
-    speechConfig: normalizeAgentSpeechConfig({
-      behavior: {
-        enabled: true,
-        outputMode: 'manual',
-        autoPlay: false,
-      },
-      profile: {
-        provider: 'edge-tts',
-        voice: 'zh-CN-YunxiNeural',
-        speed: 1,
-        volume: 1,
-        pitch: null,
-        emotion: null,
-        style: null,
-        prompt: null,
       },
     }),
   },

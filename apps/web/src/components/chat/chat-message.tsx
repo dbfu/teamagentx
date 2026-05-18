@@ -18,7 +18,7 @@ import { useIsMobile } from '@/hooks/use-mobile'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useChatStore, VOICE_MESSAGE_PLACEHOLDER } from '@/stores/chat-store'
 import { toVoicePanelConfig } from '@/lib/agent-speech'
-import { normalizeSpeechText, speakText, stopSpeechPlayback, supportsSpeechPlayback } from '@/lib/browser-speech'
+import { normalizeSpeechText, prewarmTts, speakText, stopSpeechPlayback, supportsSpeechPlayback } from '@/lib/browser-speech'
 import { resolveAssetUrl } from '@/lib/asset-url'
 
 function formatDuration(ms: number): string {
@@ -76,9 +76,10 @@ interface ChatMessageProps {
   onExecutionDetailClick?: (messageId: string, executionRecordId: string) => void
   onMentionAgent?: (agentId: string, agentName: string) => void
   onDeleteMessage?: (messageId: string) => Promise<void> | void
+  onStopSpeak?: (messageId: string) => void
 }
 
-export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechButton = true, typingAgents, mentionAgents, currentUser, hasBeenPlayed, onMarkPlayed, onAgentAvatarClick, onTypingAgentClick, onMentionClick, onReplyClick, onExecutionDetailClick, onMentionAgent, onDeleteMessage }: ChatMessageProps) {
+export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechButton = true, typingAgents, mentionAgents, currentUser, hasBeenPlayed, onMarkPlayed, onAgentAvatarClick, onTypingAgentClick, onMentionClick, onReplyClick, onExecutionDetailClick, onMentionAgent, onDeleteMessage, onStopSpeak }: ChatMessageProps) {
   const isMobile = useIsMobile()
   const allAgents = useChatStore((s) => s.allAgents)
   const playingVoiceMessageId = useChatStore((s) => s.playingVoiceMessageId)
@@ -204,6 +205,10 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
     if (!voiceConfig?.enabled || !message.content.trim()) return
 
     if (isCurrentlyPlaying) {
+      if (onStopSpeak) {
+        onStopSpeak(message.id)
+        return
+      }
       stopSpeechPlayback()
       setPlayingVoiceMessageId(null)
       return
@@ -230,10 +235,12 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
         temperature: voiceConfig.temperature,
         prompt: voiceConfig.prompt,
         agentId: message.agentId ?? undefined,
+        chatRoomId: message.chatRoomId,
         messageId: message.id,
       })
       onMarkPlayed?.()
     } catch (error) {
+      if (error instanceof Error && (error as Error & { cancelled?: boolean }).cancelled) return
       console.error('语音播报失败:', error)
       toast.error(error instanceof Error ? error.message : '语音播报失败')
     } finally {
@@ -241,7 +248,21 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
         setPlayingVoiceMessageId(null)
       }
     }
-  }, [isCurrentlyPlaying, message.content, message.id, message.agentId, normalizedContent, onMarkPlayed, setPlayingVoiceMessageId, voiceConfig])
+  }, [isCurrentlyPlaying, message.content, message.id, message.agentId, normalizedContent, onMarkPlayed, onStopSpeak, setPlayingVoiceMessageId, voiceConfig])
+
+  const handlePrewarm = useCallback(() => {
+    if (isCurrentlyPlaying || voiceConfig?.provider !== 'openai-compatible-tts') return
+    prewarmTts({
+      text: message.content,
+      provider: voiceConfig.provider,
+      model: voiceConfig.model,
+      voiceId: voiceConfig.voiceId,
+      rate: voiceConfig.speed,
+      format: voiceConfig.format ?? undefined,
+      agentId: message.agentId ?? undefined,
+      chatRoomId: message.chatRoomId,
+    })
+  }, [isCurrentlyPlaying, message.agentId, message.chatRoomId, message.content, voiceConfig])
 
   const renderContent = (content: string) => {
     // 用户消息：普通文本展示，但 @助手 需要高亮
@@ -511,6 +532,8 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
       <span className="relative inline-flex">
         <button
           onClick={handleSpeakMessage}
+          onMouseEnter={handlePrewarm}
+          onPointerDown={handlePrewarm}
           className={cn(
             "group inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs transition-colors",
             isCurrentlyPlaying

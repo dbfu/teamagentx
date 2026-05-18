@@ -6,7 +6,8 @@ import { useRef, useState, useEffect, DragEvent, ChangeEvent, ClipboardEvent, me
 import { useChatStore } from '@/stores/chat-store'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { toast } from 'sonner'
-import { startBrowserSpeechRecognition, supportsBrowserSpeechRecognition } from '@/lib/browser-speech'
+import { getApiBaseUrl } from '@/lib/config'
+import { llmProviderApi } from '@/lib/llm-provider-api'
 
 interface MentionAgent {
   id: string
@@ -40,19 +41,61 @@ export const ChatInputArea = memo(function ChatInputArea({
   const inputValue = useChatStore((s) => s.inputValue)
   const setInputValue = useChatStore((s) => s.setInputValue)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const speechSessionRef = useRef<ReturnType<typeof startBrowserSpeechRecognition> | null>(null)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
+  const mediaStreamRef = useRef<MediaStream | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [isRecording, setIsRecording] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [recordingSeconds, setRecordingSeconds] = useState(0)
+  const [hasSttProvider, setHasSttProvider] = useState<boolean | null>(null)
+  const isMountedRef = useRef(true)   // #31: 组件挂载状态跟踪
   const isMobile = useIsMobile()
+
+  // #30: 组件卸载时清理 MediaRecorder 和媒体流
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        try { mediaRecorderRef.current.stop() } catch { /* ignore */ }
+      }
+      mediaStreamRef.current?.getTracks().forEach((t) => t.stop())
+      mediaStreamRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    llmProviderApi.getAll().then((res) => {
+      if (res.success && res.data) {
+        const has = res.data.some(
+          (p) => p.modelType === 'audio' && p.isActive && (p.audioUsage === 'stt' || p.audioUsage === 'both'),
+        )
+        setHasSttProvider(has)
+      }
+    }).catch(() => {
+      // #37: 检测失败时设为 null（不影响其他功能），后续点击录音时再提示
+      setHasSttProvider(null)
+    })
+  }, [])
 
   useEffect(() => {
     if (!isRecording) {
       setRecordingSeconds(0)
       return
     }
-    const timer = setInterval(() => setRecordingSeconds((s) => s + 1), 1000)
+    const timer = setInterval(() => {
+      setRecordingSeconds((s) => {
+        // #38: 超过 120 秒自动停止录音
+        if (s >= 119) {
+          toast.info('录音已达最大时长（2分钟），自动停止')
+          mediaRecorderRef.current?.stop()
+          setIsRecording(false)
+          return 0
+        }
+        return s + 1
+      })
+    }, 1000)
     return () => clearInterval(timer)
   }, [isRecording])
 
@@ -109,40 +152,103 @@ export const ChatInputArea = memo(function ChatInputArea({
   const handleAudioButtonClick = async () => {
     // 停止录音
     if (isRecording) {
-      const session = speechSessionRef.current
-      if (!session) return
+      mediaRecorderRef.current?.stop()
       setIsRecording(false)
+      return
+    }
+
+    // 浏览器不支持 MediaRecorder
+    if (typeof MediaRecorder === 'undefined') {
+      toast.error('当前浏览器不支持录音，请手动输入')
+      return
+    }
+
+    // 未配置语音识别模型
+    if (hasSttProvider === false) {
+      toast.error('请先在模型管理中添加语音类型（STT/both）模型', {
+        action: { label: '去配置', onClick: () => window.location.hash = '#/models' },
+      })
+      return
+    }
+
+    let stream: MediaStream
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    } catch {
+      toast.error('请允许麦克风权限后重试')
+      return
+    }
+
+    mediaStreamRef.current = stream
+    audioChunksRef.current = []
+
+    const recorder = new MediaRecorder(stream)
+    mediaRecorderRef.current = recorder
+
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) audioChunksRef.current.push(e.data)
+    }
+
+    recorder.onstop = async () => {
+      mediaStreamRef.current?.getTracks().forEach((t) => t.stop())
+      mediaStreamRef.current = null
+
+      const chunks = audioChunksRef.current
+      audioChunksRef.current = []
+
+      const recordedMimeType = recorder.mimeType || 'audio/webm'
+      const blob = new Blob(chunks, { type: recordedMimeType })
+
+      // #42: blob 太小时 toast 提示
+      if (blob.size < 1000) {
+        toast.info('录音太短，请重试')
+        return
+      }
+
+      // #36: 根据 mimeType 动态生成文件名扩展名（Safari 录音为 mp4）
+      let fileExt = 'webm'
+      if (recordedMimeType.includes('mp4') || recordedMimeType.includes('m4a')) fileExt = 'mp4'
+      else if (recordedMimeType.includes('ogg')) fileExt = 'ogg'
+      else if (recordedMimeType.includes('wav')) fileExt = 'wav'
+
       setIsProcessing(true)
       try {
-        const transcript = await session.stop()
-        speechSessionRef.current = null
-        if (transcript.trim()) {
-          const current = useChatStore.getState().inputValue
-          setInputValue(current ? `${current} ${transcript}` : transcript)
-        } else {
-          toast.info('未识别到语音内容，请手动输入或重试')
+        const baseUrl = await getApiBaseUrl()
+        const token = localStorage.getItem('auth_token') ?? ''
+        const form = new FormData()
+        form.append('file', blob, `recording.${fileExt}`)
+
+        const response = await fetch(`${baseUrl}/speech/stt`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: form,
+        })
+
+        // #31: 检查组件是否仍挂载
+        if (!isMountedRef.current) return
+
+        if (!response.ok) {
+          const errJson = await response.json().catch(() => ({})) as { error?: string }
+          throw new Error(errJson.error || '语音识别失败')
         }
-      } catch {
-        toast.error('语音识别失败')
+
+        const json = await response.json() as { text?: string }
+        const text = (json.text ?? '').trim()
+        if (text) {
+          const current = useChatStore.getState().inputValue
+          setInputValue(current ? `${current} ${text}` : text)
+        } else {
+          toast.info('未识别到语音内容，请重试')
+        }
+      } catch (err) {
+        if (!isMountedRef.current) return
+        toast.error(err instanceof Error ? err.message : '语音识别失败，请稍后重试')
       } finally {
-        setIsProcessing(false)
+        if (isMountedRef.current) setIsProcessing(false)
       }
-      return
     }
 
-    // 启动录音
-    if (!supportsBrowserSpeechRecognition()) {
-      toast.error('当前浏览器不支持语音输入，请手动输入')
-      return
-    }
-
-    const session = startBrowserSpeechRecognition()
-    if (!session) {
-      toast.error('无法启动语音识别')
-      return
-    }
-
-    speechSessionRef.current = session
+    recorder.start()
     setIsRecording(true)
   }
 
@@ -182,34 +288,40 @@ export const ChatInputArea = memo(function ChatInputArea({
         />
 
         <div className="flex items-center gap-1 shrink-0">
-          {isRecording && (
-            <span className="min-w-[2.5rem] text-center text-xs font-mono text-red-500">
-              {`${Math.floor(recordingSeconds / 60)}:${String(recordingSeconds % 60).padStart(2, '0')}`}
-            </span>
+          {hasSttProvider === true && (
+            <>
+              {isRecording && (
+                <span className="min-w-[2.5rem] text-center text-xs font-mono text-red-500">
+                  {`${Math.floor(recordingSeconds / 60)}:${String(recordingSeconds % 60).padStart(2, '0')}`}
+                </span>
+              )}
+              {isProcessing && (
+                <span className="text-xs text-muted-foreground">识别中</span>
+              )}
+              <button
+                type="button"
+                className={cn(
+                  "rounded transition-colors touch-manipulation",
+                  isMobile ? "p-2.5" : "p-1.5",
+                  isRecording
+                    ? "bg-red-500/10 text-red-500 hover:bg-red-500/20"
+                    : "text-muted-foreground hover:text-foreground hover:bg-accent",
+                  isProcessing && "opacity-70"
+                )}
+                onClick={handleAudioButtonClick}
+                title={isRecording ? '完成录音' : '语音输入'}
+                disabled={isProcessing}
+              >
+                {isProcessing ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : isRecording ? (
+                  <Square className="size-4 fill-current" />
+                ) : (
+                  <Mic className="size-4" />
+                )}
+              </button>
+            </>
           )}
-
-          <button
-            type="button"
-            className={cn(
-              "rounded transition-colors touch-manipulation",
-              isMobile ? "p-2.5" : "p-1.5",
-              isRecording
-                ? "bg-red-500/10 text-red-500 hover:bg-red-500/20"
-                : "text-muted-foreground hover:text-foreground hover:bg-accent",
-              isProcessing && "opacity-70"
-            )}
-            onClick={handleAudioButtonClick}
-            title={isRecording ? '完成录音' : '语音输入'}
-            disabled={isProcessing}
-          >
-            {isProcessing ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : isRecording ? (
-              <Square className="size-4 fill-current" />
-            ) : (
-              <Mic className="size-4" />
-            )}
-          </button>
 
           <button
             type="button"
@@ -233,7 +345,7 @@ export const ChatInputArea = memo(function ChatInputArea({
 
           <button
             type="button"
-            disabled={!canSend || hasUploadingImages}
+            disabled={!canSend || hasUploadingImages || isRecording}
             className={cn(
               "rounded transition-colors touch-manipulation",
               isMobile ? "p-2.5" : "p-1.5",
