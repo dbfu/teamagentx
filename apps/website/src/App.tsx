@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type MouseEvent } from 'react'
 import { DocsPage } from './docs-page'
+import { startResolvedDownload } from './download-helper'
 import { useSiteConfig } from './site-config'
 
 const GITHUB_URL = 'https://github.com/dbfu/teamagentx'
@@ -371,6 +372,7 @@ function App() {
     winUrl: DOWNLOAD_URL_WIN,
     iosUrl: DOWNLOAD_URL_IOS,
     androidUrl: DOWNLOAD_URL_ANDROID,
+    downloadResolverUrl: DOWNLOAD_RESOLVER_URL,
   } = useSiteConfig()
   const isDocsRoute = typeof window !== 'undefined' && window.location.pathname.startsWith('/docs')
 
@@ -384,9 +386,16 @@ function App() {
           winUrl: DOWNLOAD_URL_WIN,
           iosUrl: DOWNLOAD_URL_IOS,
           androidUrl: DOWNLOAD_URL_ANDROID,
+          downloadResolverUrl: DOWNLOAD_RESOLVER_URL,
         }}
       />
     )
+  }
+
+  const triggerResolvedDownload = (url: string) => startResolvedDownload(url, DOWNLOAD_RESOLVER_URL)
+  const handleResolvedDownload = (url: string) => (event: MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault()
+    void triggerResolvedDownload(url)
   }
 
   // Apple Silicon vs Intel 架构检测
@@ -504,11 +513,11 @@ function App() {
             </p>
             <div className="hero-actions">
               {IS_IOS && DOWNLOAD_URL_IOS ? (
-                <a href={DOWNLOAD_URL_IOS} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-hero">
+                <a href={DOWNLOAD_URL_IOS} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-hero" onClick={handleResolvedDownload(DOWNLOAD_URL_IOS)}>
                   {downloadIcon(15)} 下载 iOS App
                 </a>
               ) : IS_ANDROID && DOWNLOAD_URL_ANDROID ? (
-                <a href={DOWNLOAD_URL_ANDROID} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-hero">
+                <a href={DOWNLOAD_URL_ANDROID} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-hero" onClick={handleResolvedDownload(DOWNLOAD_URL_ANDROID)}>
                   {downloadIcon(15)} 下载 Android App
                 </a>
               ) : IS_MAC ? (
@@ -516,7 +525,7 @@ function App() {
                   {downloadIcon(15)} 下载 macOS 客户端
                 </button>
               ) : (
-                <a href={DOWNLOAD_URL_WIN} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-hero">
+                <a href={DOWNLOAD_URL_WIN} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-hero" onClick={handleResolvedDownload(DOWNLOAD_URL_WIN)}>
                   {downloadIcon(15)} 下载 Windows 客户端
                 </a>
               )}
@@ -697,20 +706,20 @@ function App() {
           {IS_MOBILE ? (
             <>
               {DOWNLOAD_URL_IOS && (
-                <a href={DOWNLOAD_URL_IOS} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-lg">{downloadIcon(16)}下载 iOS App</a>
+                <a href={DOWNLOAD_URL_IOS} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-lg" onClick={handleResolvedDownload(DOWNLOAD_URL_IOS)}>{downloadIcon(16)}下载 iOS App</a>
               )}
               {DOWNLOAD_URL_ANDROID && (
-                <a href={DOWNLOAD_URL_ANDROID} target="_blank" rel="noopener noreferrer" className={`btn btn-lg ${DOWNLOAD_URL_IOS ? 'btn-outline' : 'btn-primary'}`}>{downloadIcon(16)}下载 Android App</a>
+                <a href={DOWNLOAD_URL_ANDROID} target="_blank" rel="noopener noreferrer" className={`btn btn-lg ${DOWNLOAD_URL_IOS ? 'btn-outline' : 'btn-primary'}`} onClick={handleResolvedDownload(DOWNLOAD_URL_ANDROID)}>{downloadIcon(16)}下载 Android App</a>
               )}
             </>
           ) : IS_MAC ? (
             <>
               <button type="button" className="btn btn-primary btn-lg" onClick={() => setShowMacModal(true)}>{downloadIcon(16)}下载 macOS 客户端</button>
-              <a href={DOWNLOAD_URL_WIN} target="_blank" rel="noopener noreferrer" className="btn btn-outline btn-lg">下载 Windows 客户端</a>
+              <a href={DOWNLOAD_URL_WIN} target="_blank" rel="noopener noreferrer" className="btn btn-outline btn-lg" onClick={handleResolvedDownload(DOWNLOAD_URL_WIN)}>下载 Windows 客户端</a>
             </>
           ) : (
             <>
-              <a href={DOWNLOAD_URL_WIN} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-lg">{downloadIcon(16)}下载 Windows 客户端</a>
+              <a href={DOWNLOAD_URL_WIN} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-lg" onClick={handleResolvedDownload(DOWNLOAD_URL_WIN)}>{downloadIcon(16)}下载 Windows 客户端</a>
               <button type="button" className="btn btn-outline btn-lg" onClick={() => setShowMacModal(true)}>下载 macOS 客户端</button>
             </>
           )}
@@ -722,7 +731,7 @@ function App() {
           <div className="mobile-download-row reveal">
             <span className="mobile-download-label">移动端</span>
             {DOWNLOAD_URL_IOS ? (
-              <a href={DOWNLOAD_URL_IOS} target="_blank" rel="noopener noreferrer" className="mobile-store-btn">
+              <a href={DOWNLOAD_URL_IOS} target="_blank" rel="noopener noreferrer" className="mobile-store-btn" onClick={handleResolvedDownload(DOWNLOAD_URL_IOS)}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98l-.09.06c-.22.14-2.2 1.28-2.18 3.82.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.76M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
                 App Store
               </a>
@@ -733,7 +742,7 @@ function App() {
               </span>
             )}
             {DOWNLOAD_URL_ANDROID ? (
-              <a href={DOWNLOAD_URL_ANDROID} target="_blank" rel="noopener noreferrer" className="mobile-store-btn">
+              <a href={DOWNLOAD_URL_ANDROID} target="_blank" rel="noopener noreferrer" className="mobile-store-btn" onClick={handleResolvedDownload(DOWNLOAD_URL_ANDROID)}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M17.523 15.341 5.477 8.659a.5.5 0 0 0-.727.444v13.794a.5.5 0 0 0 .727.444l12.046-6.682a.5.5 0 0 0 0-.888v-.43zM3.25 7.084V20.75A2.25 2.25 0 0 0 5.5 23h.051L5.5 23l12.047-6.682a2.25 2.25 0 0 0 0-3.912L5.5 5.724A2.25 2.25 0 0 0 3.25 7.084zM14.5 2a.75.75 0 0 1 .75.75v2.5a.75.75 0 0 1-1.5 0v-2.5A.75.75 0 0 1 14.5 2zm-5 0a.75.75 0 0 1 .75.75v2.5a.75.75 0 0 1-1.5 0v-2.5A.75.75 0 0 1 9.5 2z"/></svg>
                 Android APK
               </a>
@@ -786,7 +795,10 @@ function App() {
               target="_blank"
               rel="noopener noreferrer"
               className="btn btn-primary mac-modal-download-btn"
-              onClick={() => setShowMacModal(false)}
+              onClick={(event) => {
+                setShowMacModal(false)
+                handleResolvedDownload(selectedArch === 'arm64' ? DOWNLOAD_URL_MAC_ARM64 : DOWNLOAD_URL_MAC_X64)(event)
+              }}
             >
               {downloadIcon(15)} 下载 {selectedArch === 'arm64' ? 'Apple Silicon' : 'Intel'} 版本
             </a>

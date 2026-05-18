@@ -7,6 +7,7 @@ interface ImportMetaEnv {
   readonly VITE_DOWNLOAD_URL_WIN: string
   readonly VITE_DOWNLOAD_URL_IOS: string
   readonly VITE_DOWNLOAD_URL_ANDROID: string
+  readonly VITE_DOWNLOAD_RESOLVER_URL: string
 }
 
 interface ImportMeta {

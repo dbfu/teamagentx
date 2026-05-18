@@ -1,0 +1,11 @@
+{
+  "name": "@teamagentx/download-resolver",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Tiny download URL resolver for TeamAgentX website",
+  "scripts": {
+    "dev": "node --watch src/index.mjs",
+    "start": "node src/index.mjs"
+  }
+}
