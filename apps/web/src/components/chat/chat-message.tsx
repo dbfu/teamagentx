@@ -448,51 +448,41 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
     if (!voiceConfig?.enabled || !normalizedContent || !supportsSpeechPlayback(voiceConfig)) return null
 
     return (
-      <span className="relative inline-flex">
-        <button
-          onClick={handleSpeakMessage}
-          onMouseEnter={handlePrewarm}
-          onPointerDown={handlePrewarm}
-          className={cn(
-            "group inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs transition-colors",
-            isCurrentlyPlaying
-              ? "bg-primary/10 text-primary hover:bg-primary/15"
-              : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground"
-          )}
-          title={isCurrentlyPlaying ? '停止播报' : '语音播报'}
-          aria-label={isCurrentlyPlaying ? '停止播报' : '语音播报'}
-        >
-          <span
-            className={cn(
-              "flex size-3.5 items-center justify-center transition-colors",
-              isCurrentlyPlaying
-                ? "text-primary"
-                : "text-muted-foreground group-hover:text-foreground"
-            )}
-          >
-            {isCurrentlyPlaying ? (
-              <span className="flex h-3 items-end gap-[2px]" aria-hidden>
-                <span className="w-[2px] rounded-full bg-current origin-bottom" style={{ height: '100%', animation: 'sound-bar 0.7s ease-in-out infinite', animationDelay: '0ms' }} />
-                <span className="w-[2px] rounded-full bg-current origin-bottom" style={{ height: '78%', animation: 'sound-bar 0.7s ease-in-out infinite', animationDelay: '180ms' }} />
-                <span className="w-[2px] rounded-full bg-current origin-bottom" style={{ height: '62%', animation: 'sound-bar 0.7s ease-in-out infinite', animationDelay: '360ms' }} />
-              </span>
-            ) : (
-              <Volume2 className="size-3.5" strokeWidth={2} />
-            )}
-          </span>
-          <span>
-            {isCurrentlyPlaying ? '播放中' : '播报'}
-          </span>
-        </button>
-        {!hasBeenPlayed && !isCurrentlyPlaying && (
-          <span
-            role="status"
-            aria-label="未播放"
-            title="未播放"
-            className="absolute -right-0.5 top-0 size-2 rounded-full bg-orange-500/90 ring-2 ring-background dark:ring-slate-900"
-          />
+      <button
+        onClick={handleSpeakMessage}
+        onMouseEnter={handlePrewarm}
+        onPointerDown={handlePrewarm}
+        className={cn(
+          "group inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs transition-colors",
+          isCurrentlyPlaying
+            ? "bg-primary/10 text-primary hover:bg-primary/15"
+            : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground"
         )}
-      </span>
+        title={isCurrentlyPlaying ? '停止播报' : '语音播报'}
+        aria-label={isCurrentlyPlaying ? '停止播报' : '语音播报'}
+      >
+        <span
+          className={cn(
+            "flex size-3.5 items-center justify-center transition-colors",
+            isCurrentlyPlaying
+              ? "text-primary"
+              : "text-muted-foreground group-hover:text-foreground"
+          )}
+        >
+          {isCurrentlyPlaying ? (
+            <span className="flex h-3 items-end gap-[2px]" aria-hidden>
+              <span className="w-[2px] rounded-full bg-current origin-bottom" style={{ height: '100%', animation: 'sound-bar 0.7s ease-in-out infinite', animationDelay: '0ms' }} />
+              <span className="w-[2px] rounded-full bg-current origin-bottom" style={{ height: '78%', animation: 'sound-bar 0.7s ease-in-out infinite', animationDelay: '180ms' }} />
+              <span className="w-[2px] rounded-full bg-current origin-bottom" style={{ height: '62%', animation: 'sound-bar 0.7s ease-in-out infinite', animationDelay: '360ms' }} />
+            </span>
+          ) : (
+            <Volume2 className="size-3.5 transition-transform group-hover:scale-110" strokeWidth={2} />
+          )}
+        </span>
+        <span className="transition-colors">
+          {isCurrentlyPlaying ? '播放中' : '播报'}
+        </span>
+      </button>
     )
   }
 
