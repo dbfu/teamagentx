@@ -161,11 +161,41 @@ if (syncResult.settings.copied || syncResult.state.copied || syncResult.credenti
 
 ## 多平台行为
 
-| 平台 | `~/.claude/.credentials.json` 是否存在 | 修复后能否拿到 OAuth |
-|---|---|---|
-| Windows | ✅ 存在（凭据管理器没有 Claude 条目） | ✅ |
-| macOS | ✅ 存在（Keychain 中也有镜像） | ✅ |
-| Linux | ✅ 存在（libsecret 是补充而非唯一来源） | ✅ |
+### SDK 源码核实
+
+从 `@anthropic-ai/claude-agent-sdk` 反编译的鉴权读取流程：
+
+```js
+let V = options.env?.CLAUDE_CONFIG_DIR ?? process.env.CLAUDE_CONFIG_DIR;
+let B = V ?? path.join(os.homedir(), ".claude");
+z = await fs.readFile(path.join(B, ".credentials.json"), "utf-8");
+// macOS Keychain 回退，但被 !V 闸住——CLAUDE_CONFIG_DIR 被设了就不会进
+if (!V && !ANTHROPIC_API_KEY && !CLAUDE_CODE_OAUTH_TOKEN)
+  z = await F6$() ?? z;
+```
+
+`F6$()` 内部用 `security find-generic-password -s <service>` 查 Keychain，且 service name 在设置了 `CLAUDE_CONFIG_DIR` 时会被附加 sha256 哈希后缀，与宿主登录时存入的 service name 不一致——所以即使我们手动调用 Keychain 也读不到原 token。
+
+### 三平台覆盖
+
+我们的执行器**总是设置 `CLAUDE_CONFIG_DIR`**（per-agent 隔离），SDK 路径走「只读文件、不查 Keychain」。
+
+| 平台 | 宿主登录后 token 主存储 | SDK 实际读取来源 | 本次 fix 是否覆盖 |
+|---|---|---|---|
+| Windows | `~/.claude/.credentials.json`（凭据管理器无 Claude 条目） | 文件 | ✅ |
+| Linux | `~/.claude/.credentials.json`（libsecret 是辅助、可缺失） | 文件 | ✅ |
+| macOS | `~/.claude/.credentials.json` + Keychain 镜像 | 文件（Keychain 被 `!CLAUDE_CONFIG_DIR` 跳过） | ✅ |
+
+### 已知边界（极端情况）
+
+宿主上**手动**删除了 `~/.claude/.credentials.json` 但 Keychain 仍保留 token：
+
+- 宿主 `claude` CLI 能用（无 `CLAUDE_CONFIG_DIR` → Keychain 回退生效，会自动把文件重建）
+- TeamAgentX 助手在该刻同步会得到 `source_missing`，CLI 会报 "Not logged in"
+
+**自愈办法**：用户在终端直接执行任意一次 `claude`，CLI 触发 Keychain 回退并把 `.credentials.json` 写回宿主，下次助手执行 sync 即可拿到。
+
+这种状态不是正常 `claude /login` 后的形态——`/login` 默认会把文件落盘。日常使用不会遇到。
 
 ## 升级路径
 
