@@ -4,8 +4,12 @@ import { SpeechRouter } from './speech.router.js';
 
 /**
  * #48/#12: 配置/校验类错误，不可通过 fallback 恢复。
- * provider 层通过 throw new SpeechConfigError(...) 标记此类错误，
- * service 层通过 instanceof 判断，无需字符串匹配。
+ *
+ * providers 层应通过 `throw new SpeechConfigError(message)` 标记此类错误，
+ * service 层通过 `instanceof SpeechConfigError` 判断，无需依赖字符串匹配。
+ *
+ * `UNRECOVERABLE_ERROR_KEYWORDS` 的关键字匹配仅作为遗留数据 / 第三方库抛出的
+ * 普通 Error 的兜底识别手段，新代码不应依赖关键字。
  */
 export class SpeechConfigError extends Error {
   constructor(message: string) {
@@ -13,6 +17,21 @@ export class SpeechConfigError extends Error {
     this.name = 'SpeechConfigError';
   }
 }
+
+/**
+ * #59: 不可恢复错误关键词常量化，便于测试与维护。
+ * 仅作为 providers 层未使用 SpeechConfigError 时的兜底匹配。
+ */
+export const UNRECOVERABLE_ERROR_KEYWORDS = [
+  '仅支持',
+  'Invalid',
+  '不支持',
+  'empty',
+  '非法字符',
+  '不允许',
+  '无效',
+  '未配置',
+] as const;
 
 export class SpeechService {
   constructor(private readonly router: SpeechRouter) {}
@@ -25,6 +44,12 @@ export class SpeechService {
       triedProviderIds.push(primaryProvider.id);
       return await this.executeWithProvider(primaryProvider, task);
     } catch (error) {
+      // #151: 用户主动取消（如播放被中断）不应触发 fallback，
+      // 否则会在流式 TTS 被打断后又走 browser-local 重新播放一遍。
+      if ((error as { cancelled?: unknown })?.cancelled === true) {
+        throw error;
+      }
+
       if (!task.preferences?.allowFallback || !task.profile?.fallbackProvider) {
         throw error;
       }
@@ -70,6 +95,5 @@ function isUnrecoverableError(error: unknown): boolean {
   if (error instanceof SpeechConfigError) return true;
   if (!(error instanceof Error)) return false;
   const message = error.message || '';
-  const keywords = ['仅支持', 'Invalid', '不支持', 'empty', '非法字符', '不允许', '无效', '未配置'];
-  return keywords.some((kw) => message.includes(kw));
+  return UNRECOVERABLE_ERROR_KEYWORDS.some((kw) => message.includes(kw));
 }

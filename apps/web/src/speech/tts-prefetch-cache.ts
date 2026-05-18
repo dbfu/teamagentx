@@ -53,6 +53,10 @@ class RoomTtsPrefetchCacheManager {
     }
     return cache
   }
+
+  deleteRoom(chatRoomId: string): void {
+    this.rooms.delete(chatRoomId)
+  }
 }
 
 export const roomTtsPrefetchCache = new RoomTtsPrefetchCacheManager()
@@ -63,7 +67,9 @@ export function buildTtsCacheKey(opts: {
   voice: string | null | undefined
   speed: number | null | undefined
   format: string | null | undefined
+  vendorOptions?: Record<string, unknown> | null
   text: string
 }): string {
-  return `${opts.provider}|${opts.model ?? ''}|${opts.voice ?? ''}|${opts.speed ?? ''}|${opts.format ?? ''}|${opts.text}`
+  const voKey = opts.vendorOptions ? JSON.stringify(opts.vendorOptions) : ''
+  return `${opts.provider}|${opts.model ?? ''}|${opts.voice ?? ''}|${opts.speed ?? ''}|${opts.format ?? ''}|${voKey}|${opts.text}`
 }

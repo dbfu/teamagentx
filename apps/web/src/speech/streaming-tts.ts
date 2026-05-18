@@ -1,4 +1,6 @@
 const MIN_CHUNK_CHARS = 50
+const PLAY_TIMEOUT_MS = 60_000
+const MAX_QUEUE_LENGTH = 50
 
 function findSentenceBoundary(text: string, start: number): number {
   for (let i = start; i < text.length; i++) {
@@ -9,6 +11,8 @@ function findSentenceBoundary(text: string, start: number): number {
   }
   return -1
 }
+
+export { findSentenceBoundary }
 
 export function extractNewChunks(
   text: string,
@@ -35,42 +39,77 @@ export function extractNewChunks(
 export type FetchStreamFn = (text: string) => Promise<Response>
 
 // 用 MediaSource 播放一个流式 TTS Response
-function playStreamResponse(
+export function playStreamResponse(
   response: Response,
   onAbort: (abortFn: () => void) => void,
 ): Promise<void> {
-  return new Promise<void>((resolve) => {
+  return new Promise<void>((resolve, reject) => {
     const mediaSource = new MediaSource()
     const audio = new Audio()
     const blobUrl = URL.createObjectURL(mediaSource)
     audio.src = blobUrl
     let aborted = false
+    let settled = false
 
-    const cleanup = () => {
+    const cleanupPrimary = () => {
       try { audio.pause(); audio.src = ''; audio.load() } catch { /* ignore */ }
-      URL.revokeObjectURL(blobUrl)
+      try { URL.revokeObjectURL(blobUrl) } catch { /* ignore */ }
+    }
+
+    const timeoutId = setTimeout(() => {
+      if (settled) return
+      settled = true
+      aborted = true
+      cleanupPrimary()
+      reject(new Error('音频播放超时'))
+    }, PLAY_TIMEOUT_MS)
+
+    const safeResolve = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeoutId)
+      resolve()
+    }
+    const safeReject = (err: Error) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeoutId)
+      reject(err)
     }
 
     onAbort(() => {
       aborted = true
-      cleanup()
-      resolve()
+      cleanupPrimary()
+      safeResolve()
     })
 
     // MediaSource 不支持时降级：等全量 arrayBuffer 再播
     const fallbackBlob = async () => {
+      // 先 cleanup 原 primary audio/blobUrl，避免泄漏
+      cleanupPrimary()
       try {
         const ab = await response.arrayBuffer()
-        if (aborted) { cleanup(); resolve(); return }
+        if (aborted) { safeResolve(); return }
         const blob = new Blob([ab], { type: 'audio/mpeg' })
         const url = URL.createObjectURL(blob)
-        URL.revokeObjectURL(blobUrl)
         const a2 = new Audio(url)
-        onAbort(() => { aborted = true; a2.pause(); a2.src = ''; URL.revokeObjectURL(url); resolve() })
-        a2.onended = () => { URL.revokeObjectURL(url); resolve() }
-        a2.onerror = () => { URL.revokeObjectURL(url); resolve() }
-        void a2.play().catch(() => {})
-      } catch { cleanup(); resolve() }
+        const cleanupFallback = () => {
+          try { a2.pause(); a2.src = ''; a2.load() } catch { /* ignore */ }
+          try { URL.revokeObjectURL(url) } catch { /* ignore */ }
+        }
+        onAbort(() => { aborted = true; cleanupFallback(); safeResolve() })
+        a2.onended = () => { cleanupFallback(); safeResolve() }
+        a2.onerror = () => { cleanupFallback(); safeReject(new Error('音频播放错误')) }
+        try {
+          await a2.play()
+        } catch (err) {
+          cleanupFallback()
+          safeReject(err instanceof Error ? err : new Error(String(err)))
+        }
+      } catch (err) {
+        cleanupPrimary()
+        safeReject(err instanceof Error ? err : new Error(String(err)))
+      }
     }
 
     if (!('MediaSource' in window) || !MediaSource.isTypeSupported('audio/mpeg') || !response.body) {
@@ -103,29 +142,43 @@ function playStreamResponse(
           sourceBuffer.appendBuffer(value)
           if (firstChunk) {
             firstChunk = false
-            void audio.play().catch(() => {})
+            audio.play().catch((err) => {
+              cleanupPrimary()
+              safeReject(err instanceof Error ? err : new Error(String(err)))
+            })
           }
         }
 
         if (!aborted) {
           await waitUpdate()
           if (mediaSource.readyState === 'open') mediaSource.endOfStream()
-          audio.addEventListener('ended', () => { cleanup(); resolve() }, { once: true })
-          audio.addEventListener('error', () => { cleanup(); resolve() }, { once: true })
+          // 防御：若 audio 在监听器注册前已 ended，直接 resolve
+          if (audio.ended) {
+            cleanupPrimary()
+            safeResolve()
+            return
+          }
+          audio.addEventListener('ended', () => { cleanupPrimary(); safeResolve() }, { once: true })
+          audio.addEventListener('error', () => { cleanupPrimary(); safeReject(new Error('音频播放错误')) }, { once: true })
         } else {
-          cleanup()
-          resolve()
+          cleanupPrimary()
+          safeResolve()
         }
-      } catch {
-        cleanup()
-        resolve()
+      } catch (err) {
+        cleanupPrimary()
+        safeReject(err instanceof Error ? err : new Error(String(err)))
       }
     }, { once: true })
   })
 }
 
+interface QueueItem {
+  text: string
+  fetchStream: FetchStreamFn
+}
+
 export class StreamingTtsSession {
-  private queue: Array<Promise<Response>> = []
+  private queue: QueueItem[] = []
   private isProcessing = false
   stopped = false
   private abortCurrent: (() => void) | null = null
@@ -139,10 +192,11 @@ export class StreamingTtsSession {
     this.onFinish?.()
   }
 
-  // text 立刻触发网络请求（并行预取），playback 在 process() 中串行消费
+  // 入队后由 process() 在消费时才发起 fetchStream，避免一次性并发大量请求
   add(text: string, fetchStream: FetchStreamFn): void {
     if (this.stopped) return
-    this.queue.push(fetchStream(text))
+    if (this.queue.length >= MAX_QUEUE_LENGTH) return
+    this.queue.push({ text, fetchStream })
     if (!this.isProcessing) void this.process()
   }
 
@@ -159,9 +213,9 @@ export class StreamingTtsSession {
   private async process(): Promise<void> {
     this.isProcessing = true
     while (this.queue.length > 0 && !this.stopped) {
-      const responsePromise = this.queue.shift()!
+      const item = this.queue.shift()!
       try {
-        const response = await responsePromise
+        const response = await item.fetchStream(item.text)
         if (this.stopped) break
         await playStreamResponse(response, (fn) => { this.abortCurrent = fn })
         this.abortCurrent = null
@@ -204,3 +258,4 @@ class StreamingTtsManager {
 }
 
 export const streamingTtsManager = new StreamingTtsManager()
+export { StreamingTtsManager }

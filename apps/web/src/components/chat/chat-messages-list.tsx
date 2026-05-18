@@ -294,12 +294,16 @@ export function ChatMessagesList({
     const runId = speechRunIdRef.current
     while (speechQueueRef.current.length > 0) {
       if (runId !== speechRunIdRef.current) {
-        setPlayingVoiceMessageId(null)
         break
       }
       const item = speechQueueRef.current.shift()!
+      // 避免重复播报：在 shift 后再次检查 playedIds
+      if (playedIdsRef.current.has(item.messageId)) {
+        queuedVoiceMessageIdsRef.current.delete(item.messageId)
+        continue
+      }
       setPlayingVoiceMessageId(item.messageId)
-      // 预热队列中接下来两条，避免播完等待
+      // 预热队列中接下来 3 条，避免播完等待
       for (const next of speechQueueRef.current.slice(0, 3)) {
         prewarmTts({
           text: next.text,
@@ -346,7 +350,6 @@ export function ChatMessagesList({
       queuedVoiceMessageIdsRef.current.delete(item.messageId)
       if (interrupted || runId !== speechRunIdRef.current) {
         deferredVoiceMessageIdsRef.current.add(item.messageId)
-        setPlayingVoiceMessageId(null)
         break
       }
       if (playedSuccessfully) {
@@ -356,9 +359,9 @@ export function ChatMessagesList({
       } else {
         deferredVoiceMessageIdsRef.current.add(item.messageId)
       }
-      setPlayingVoiceMessageId(null)
     }
     if (speechRunIdRef.current === runId) {
+      setPlayingVoiceMessageId(null)
       isSpeakingRef.current = false
     }
   }, [chatRoomId, markVoiceMessagesHandled, markVoiceMessagesPlayed, setPlayingVoiceMessageId])

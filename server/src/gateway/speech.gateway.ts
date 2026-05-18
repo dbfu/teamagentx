@@ -9,11 +9,16 @@ import { fetchTtsApiResponse } from '../modules/speech/providers/remote-tts.prov
 
 type SpeechGatewayDependencies = {
   execute: (task: SpeechTask) => Promise<SpeechArtifact | SpeechSession>;
+  fetchTtsStream?: (
+    task: SpeechTask<{ text: string }>,
+  ) => Promise<{ response: Response; mimeType: string; model: string; voice: string }>;
 };
 
 export function createSpeechGateway(dependencies: SpeechGatewayDependencies = {
   execute: (task) => serverSpeechService.execute(task),
+  fetchTtsStream: (task) => fetchTtsApiResponse(task),
 }) {
+  const fetchTtsStream = dependencies.fetchTtsStream ?? ((task) => fetchTtsApiResponse(task));
   return async function speechGateway(app: FastifyInstance) {
     async function requireAuth(request: FastifyRequest, reply: FastifyReply): Promise<boolean> {
       const authHeader = request.headers.authorization;
@@ -70,14 +75,21 @@ export function createSpeechGateway(dependencies: SpeechGatewayDependencies = {
             error: '文本不能为空',
           });
         }
-        if (inputText.length > 5000) {
+        if (inputText.length > 5000 || [...inputText].length > 5000) {
           return reply.code(400).send({
             success: false,
             error: '文本长度超出限制（最多 5000 字符）',
           });
         }
 
-        const result = await dependencies.execute(task);
+        let result: SpeechArtifact | SpeechSession;
+        try {
+          result = await dependencies.execute(task);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'TTS 服务不可用';
+          return reply.code(502).send({ success: false, error: message });
+        }
+
         if (!isAudioArtifact(result) || !result.audioBuffer || !result.mimeType) {
           return reply.code(502).send({
             success: false,

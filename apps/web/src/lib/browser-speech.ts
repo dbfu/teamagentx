@@ -189,6 +189,7 @@ export function prewarmTts(options: SpeakTextOptions): void {
     voice: options.voiceId ?? null,
     speed: options.rate ?? 1.3,
     format: options.format ?? null,
+    vendorOptions: options.vendorOptions ?? null,
     text,
   })
   if (roomCache.has(cacheKey)) return
@@ -196,34 +197,41 @@ export function prewarmTts(options: SpeakTextOptions): void {
   const promise = (async () => {
     const baseUrl = await getApiBaseUrl()
     const token = localStorage.getItem('auth_token')
-    const response = await fetch(`${baseUrl}/speech/tts`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({
-        type: 'tts',
-        input: { text },
-        profile: {
-          provider,
-          model: options.model ?? null,
-          voice: options.voiceId ?? null,
-          speed: options.rate ?? 1.3,
-          format: options.format ?? null,
-          vendorOptions: options.vendorOptions ?? null,
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 30_000)
+    try {
+      const response = await fetch(`${baseUrl}/speech/tts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        context: {
-          agentId: options.agentId,
-          chatRoomId: options.chatRoomId,
-        },
-      }),
-    })
-    if (!response.ok) throw new Error(`prewarm failed: ${response.status}`)
-    const contentType = response.headers.get('content-type') || 'audio/mpeg'
-    const mimeType = contentType.split(';')[0].trim()
-    const blob = new Blob([await response.arrayBuffer()], { type: mimeType })
-    return { blob, mimeType }
+        body: JSON.stringify({
+          type: 'tts',
+          input: { text },
+          profile: {
+            provider,
+            model: options.model ?? null,
+            voice: options.voiceId ?? null,
+            speed: options.rate ?? 1.3,
+            format: options.format ?? null,
+            vendorOptions: options.vendorOptions ?? null,
+          },
+          context: {
+            agentId: options.agentId,
+            chatRoomId: options.chatRoomId,
+          },
+        }),
+        signal: controller.signal,
+      })
+      if (!response.ok) throw new Error(`prewarm failed: ${response.status}`)
+      const contentType = response.headers.get('content-type') || 'audio/mpeg'
+      const mimeType = contentType.split(';')[0].trim()
+      const blob = new Blob([await response.arrayBuffer()], { type: mimeType })
+      return { blob, mimeType }
+    } finally {
+      clearTimeout(timeoutId)
+    }
   })()
 
   roomCache.set(cacheKey, promise)

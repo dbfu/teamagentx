@@ -140,6 +140,7 @@ export function createRemoteTtsSpeechProvider(
           voice: task.profile?.voice ?? null,
           speed: task.profile?.speed ?? 1.3,
           format: task.profile?.format ?? null,
+          vendorOptions: task.profile?.vendorOptions ?? null,
           text,
         })
         const cached = roomTtsPrefetchCache.forRoom(chatRoomId).get(cacheKey)
@@ -155,7 +156,9 @@ export function createRemoteTtsSpeechProvider(
               text,
               metadata: { runtime: 'client', transport: providerId, fromCache: true },
             } satisfies SpeechArtifact
-          } catch {
+          } catch (err) {
+            // cancelled 错误不降级到 fetch，直接向上传播
+            if (err instanceof Error && (err as Error & { cancelled?: boolean }).cancelled) throw err
             // 缓存条目失效，降级到正常 fetch
           }
         }
@@ -171,6 +174,7 @@ export function createRemoteTtsSpeechProvider(
           ...(streamToken ? { Authorization: `Bearer ${streamToken}` } : {}),
         },
         body: JSON.stringify(task),
+        signal: AbortSignal.timeout(60_000),
       })
       if (!response.ok) throw new Error(`TTS failed: ${response.status}`)
       const contentType = response.headers.get('content-type') || 'audio/mpeg'

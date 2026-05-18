@@ -2,6 +2,7 @@ import type { Agent, LlmProvider } from '@prisma/client';
 import prisma from '../../../lib/prisma.js';
 import type { SpeechProvider } from '../domain/provider.js';
 import type { SpeechArtifact, SpeechTask } from '../domain/types.js';
+import { SpeechConfigError } from '../speech.service.js';
 
 type RemoteTtsDependencies = {
   resolveLlmProvider?: (task: SpeechTask<{ text: string }>) => Promise<LlmProvider>;
@@ -10,6 +11,7 @@ type RemoteTtsDependencies = {
 
 const SILICONFLOW_COSYVOICE2_MODEL = 'FunAudioLLM/CosyVoice2-0.5B';
 const SILICONFLOW_COSYVOICE2_DEFAULT_VOICE = `${SILICONFLOW_COSYVOICE2_MODEL}:anna`;
+const MAX_RESPONSE_BYTES = 50 * 1024 * 1024;
 
 const VENDOR_OPTION_WHITELIST = new Set([
   'speed',
@@ -27,7 +29,7 @@ function getSpeechEndpoint(apiUrl?: string | null): string {
   return `${trimmed}/audio/speech`;
 }
 
-function isPrivateOrReservedHost(hostname: string): boolean {
+export function isPrivateOrReservedHost(hostname: string): boolean {
   const host = hostname.toLowerCase();
   if (host === '0.0.0.0' || host === '::' || host === '[::]') return true;
 
@@ -66,7 +68,7 @@ function isPrivateOrReservedHost(hostname: string): boolean {
   return false;
 }
 
-function validateRemoteUrl(url: string): void {
+export function validateRemoteUrl(url: string): void {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -91,6 +93,10 @@ function validateRemoteUrl(url: string): void {
   if (protocol === 'http:') {
     // #5: 仅在非生产环境允许 localhost http
     if (hostname === 'localhost' && process.env.NODE_ENV !== 'production') return;
+    // 生产环境/非 localhost 主机也需阻断私有 IP，防止纯 http 直连内网
+    if (isPrivateOrReservedHost(hostname)) {
+      throw new Error('远程语音服务地址不允许指向内网');
+    }
     throw new Error('远程语音服务地址必须使用 https');
   }
   throw new Error('远程语音服务地址协议不被支持');
@@ -162,169 +168,37 @@ async function resolveLlmProviderFromTask(task: SpeechTask<{ text: string }>): P
   throw new Error('未找到可用的语音（TTS）供应商，请在模型管理中添加语音类型模型并设为默认');
 }
 
-export function createRemoteTtsProvider(dependencies: RemoteTtsDependencies = {}): SpeechProvider {
-  const resolveLlmProvider = dependencies.resolveLlmProvider ?? resolveLlmProviderFromTask;
-  const providerId = dependencies.providerId ?? 'openai-compatible-tts';
-
-  return {
-    id: providerId,
-    runtime: 'server',
-    capabilities: {
-      provider: providerId,
-      runtime: 'server',
-      taskTypes: ['tts'],
-      formats: ['mp3', 'wav', 'opus', 'aac', 'flac', 'pcm'],
-    },
-    async synthesize(task) {
-      const text = String((task.input as { text?: string }).text || '').trim();
-      if (!text) {
-        return {
-          kind: 'audio',
-          provider: providerId,
-          text: '',
-        };
-      }
-
-      const llmProvider = await resolveLlmProvider(task as SpeechTask<{ text: string }>);
-      if (llmProvider.apiProtocol !== 'openai') {
-        throw new Error(`${providerId} 仅支持 openai 协议供应商，当前为 ${llmProvider.apiProtocol}`);
-      }
-
-      // #20: 使用 spread 语法计算 Unicode codepoint 长度，避免 UTF-16 surrogate pair 计数错误
-      const charCount = [...text].length;
-      if (charCount > 5000) {
-        throw new Error('文本长度超出限制（最多 5000 个字符）');
-      }
-
-      const format = task.profile?.format?.trim() || 'mp3';
-      const model = task.profile?.model?.trim() || llmProvider.model;
-      const voice = normalizeVoiceValue(llmProvider.apiUrl, model, task.profile?.voice);
-      const endpoint = getSpeechEndpoint(llmProvider.apiUrl);
-      validateRemoteUrl(endpoint);
-      const instructions = buildInstructions(task as SpeechTask<{ text: string }>);
-      const rawVendorOptions = task.profile?.vendorOptions && typeof task.profile.vendorOptions === 'object'
-        ? task.profile.vendorOptions
-        : {};
-      const vendorOptions: Record<string, unknown> = {};
-      for (const [key, value] of Object.entries(rawVendorOptions)) {
-        if (VENDOR_OPTION_WHITELIST.has(key)) {
-          vendorOptions[key] = value;
-        }
-      }
-
-      const baseBody: Record<string, unknown> = {
-        ...vendorOptions,
-        model,
-        voice,
-        input: text,
-        response_format: format,
-      };
-
-      if (typeof task.profile?.speed === 'number') {
-        baseBody.speed = task.profile.speed;
-      }
-      if (instructions) {
-        baseBody.instructions = instructions;
-      }
-
-      let response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${llmProvider.apiKey}`,
-        },
-        body: JSON.stringify(baseBody),
-        signal: AbortSignal.timeout(30_000),
-        redirect: 'error', // #7: 禁止重定向，防止 SSRF
-      });
-
-      // #15: 仅在 400 且错误体含 "instructions" 关键词时才 fallback
-      if (!response.ok && response.status === 400 && instructions) {
-        let shouldFallback = false;
-        try {
-          const errClone = response.clone();
-          const errBody = await errClone.text();
-          shouldFallback = errBody.toLowerCase().includes('instructions');
-        } catch {
-          // 读取失败时不 fallback
-        }
-
-        if (shouldFallback) {
-          const fallbackBody = { ...baseBody };
-          delete fallbackBody.instructions;
-          response = await fetch(endpoint, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${llmProvider.apiKey}`,
-            },
-            body: JSON.stringify(fallbackBody),
-            signal: AbortSignal.timeout(30_000),
-            redirect: 'error', // #7
-          });
-        }
-      }
-
-      if (!response.ok) {
-        let errorText = '';
-        try {
-          const j = await response.json() as { error?: { message?: string } };
-          errorText = j?.error?.message || JSON.stringify(j);
-        } catch {
-          errorText = await response.text().catch(() => '');
-        }
-        // #8: 只打印 hostname，不暴露完整 URL（含 auth 信息）
-        console.error('[remote-tts] 远程语音合成失败', {
-          status: response.status,
-          host: new URL(endpoint).hostname,
-          providerId,
-          errorText,
-        });
-        throw new Error('TTS 服务请求失败，请稍后重试');
-      }
-
-      // #25: 检查响应大小，超过 50MB 拒绝
-      const contentLength = response.headers.get('content-length');
-      if (contentLength && Number(contentLength) > 50 * 1024 * 1024) {
-        throw new Error('TTS 服务返回内容超过大小限制');
-      }
-
-      const contentType = response.headers.get('content-type') || 'audio/mpeg';
-      const mimeType = contentType.split(';')[0].trim() || 'audio/mpeg';
-      const ab = await response.arrayBuffer();
-      const audioBuffer = Buffer.from(ab);
-
-      return {
-        kind: 'audio',
-        provider: providerId,
-        text,
-        audioBuffer,
-        mimeType,
-        model,
-        voice,
-        metadata: {
-          runtime: 'server',
-          llmProviderId: llmProvider.id,
-          llmProviderName: llmProvider.name,
-        },
-      } satisfies SpeechArtifact;
-    },
-  };
-}
-
-export async function fetchTtsApiResponse(
+/**
+ * 构建 TTS 请求所需的所有参数。统一处理：
+ * - apiProtocol 校验
+ * - 5000 字符限制（Unicode codepoint）
+ * - URL 校验（SSRF 防护）
+ * - vendorOptions 白名单过滤
+ * - apiKey CRLF 清理（防注入）
+ */
+async function buildTtsRequest(
   task: SpeechTask<{ text: string }>,
-  deps: { resolveLlmProvider?: (task: SpeechTask<{ text: string }>) => Promise<import('@prisma/client').LlmProvider> } = {},
-): Promise<{ response: Response; mimeType: string; model: string; voice: string }> {
-  const resolveLlmProvider = deps.resolveLlmProvider ?? resolveLlmProviderFromTask;
-
+  resolveLlmProvider: (task: SpeechTask<{ text: string }>) => Promise<LlmProvider>,
+  providerLabel: string,
+): Promise<{
+  text: string;
+  endpoint: string;
+  model: string;
+  voice: string;
+  format: string;
+  baseBody: Record<string, unknown>;
+  instructions: string | null;
+  authHeader: string;
+  llmProvider: LlmProvider;
+}> {
   const text = String((task.input as { text?: string }).text || '').trim();
 
   const llmProvider = await resolveLlmProvider(task);
   if (llmProvider.apiProtocol !== 'openai') {
-    throw new Error(`openai-compatible-tts 仅支持 openai 协议供应商，当前为 ${llmProvider.apiProtocol}`);
+    throw new Error(`${providerLabel} 仅支持 openai 协议供应商，当前为 ${llmProvider.apiProtocol}`);
   }
 
+  // #20: 使用 spread 语法计算 Unicode codepoint 长度，避免 UTF-16 surrogate pair 计数错误
   const charCount = [...text].length;
   if (charCount > 5000) {
     throw new Error('文本长度超出限制（最多 5000 个字符）');
@@ -336,6 +210,7 @@ export async function fetchTtsApiResponse(
   const endpoint = getSpeechEndpoint(llmProvider.apiUrl);
   validateRemoteUrl(endpoint);
   const instructions = buildInstructions(task);
+
   const rawVendorOptions = task.profile?.vendorOptions && typeof task.profile.vendorOptions === 'object'
     ? task.profile.vendorOptions
     : {};
@@ -361,17 +236,40 @@ export async function fetchTtsApiResponse(
     baseBody.instructions = instructions;
   }
 
-  let response = await fetch(endpoint, {
+  // 清理 apiKey 中的 CRLF / Tab，防止 header 注入
+  const sanitizedApiKey = (llmProvider.apiKey || '').replace(/[\r\n\t]/g, '');
+  const authHeader = `Bearer ${sanitizedApiKey}`;
+
+  return { text, endpoint, model, voice, format, baseBody, instructions, authHeader, llmProvider };
+}
+
+/**
+ * 发送 TTS 请求，包含 instructions fallback 和上游错误处理。
+ * 返回的 Response 已确认 ok。
+ */
+async function postTtsApi(args: {
+  endpoint: string;
+  baseBody: Record<string, unknown>;
+  instructions: string | null;
+  authHeader: string;
+  providerLabel: string;
+}): Promise<Response> {
+  const { endpoint, baseBody, instructions, authHeader, providerLabel } = args;
+
+  const doFetch = (body: Record<string, unknown>) => fetch(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${llmProvider.apiKey}`,
+      Authorization: authHeader,
     },
-    body: JSON.stringify(baseBody),
+    body: JSON.stringify(body),
     signal: AbortSignal.timeout(30_000),
-    redirect: 'error',
+    redirect: 'error', // #7: 禁止重定向，防止 SSRF
   });
 
+  let response = await doFetch(baseBody);
+
+  // #15: 仅在 400 且错误体含 "instructions" 关键词时才 fallback
   if (!response.ok && response.status === 400 && instructions) {
     let shouldFallback = false;
     try {
@@ -385,16 +283,7 @@ export async function fetchTtsApiResponse(
     if (shouldFallback) {
       const fallbackBody = { ...baseBody };
       delete fallbackBody.instructions;
-      response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${llmProvider.apiKey}`,
-        },
-        body: JSON.stringify(fallbackBody),
-        signal: AbortSignal.timeout(30_000),
-        redirect: 'error',
-      });
+      response = await doFetch(fallbackBody);
     }
   }
 
@@ -406,13 +295,108 @@ export async function fetchTtsApiResponse(
     } catch {
       errorText = await response.text().catch(() => '');
     }
+    // #8: 只打印 hostname，不暴露完整 URL（含 auth 信息）
     console.error('[remote-tts] 远程语音合成失败', {
       status: response.status,
       host: new URL(endpoint).hostname,
+      providerId: providerLabel,
       errorText,
     });
     throw new Error('TTS 服务请求失败，请稍后重试');
   }
+
+  // #45: 响应大小限制（header 检查，chunked 场景由调用方做 body 二次校验）
+  const contentLength = parseInt(response.headers.get('content-length') || '0', 10);
+  if (contentLength > MAX_RESPONSE_BYTES) {
+    throw new SpeechConfigError('TTS 响应过大，超过 50MB 限制');
+  }
+
+  return response;
+}
+
+export function createRemoteTtsProvider(dependencies: RemoteTtsDependencies = {}): SpeechProvider {
+  const resolveLlmProvider = dependencies.resolveLlmProvider ?? resolveLlmProviderFromTask;
+  const providerId = dependencies.providerId ?? 'openai-compatible-tts';
+
+  return {
+    id: providerId,
+    runtime: 'server',
+    capabilities: {
+      provider: providerId,
+      runtime: 'server',
+      taskTypes: ['tts'],
+      formats: ['mp3', 'wav', 'opus', 'aac', 'flac', 'pcm'],
+    },
+    async synthesize(task) {
+      const typedTask = task as SpeechTask<{ text: string }>;
+      const text = String((typedTask.input as { text?: string }).text || '').trim();
+      if (!text) {
+        return {
+          kind: 'audio',
+          provider: providerId,
+          text: '',
+        };
+      }
+
+      const { endpoint, model, voice, baseBody, instructions, authHeader, llmProvider } =
+        await buildTtsRequest(typedTask, resolveLlmProvider, providerId);
+
+      const response = await postTtsApi({
+        endpoint,
+        baseBody,
+        instructions,
+        authHeader,
+        providerLabel: providerId,
+      });
+
+      const contentType = response.headers.get('content-type') || 'audio/mpeg';
+      const mimeType = contentType.split(';')[0].trim() || 'audio/mpeg';
+      const arrayBuffer = await response.arrayBuffer();
+
+      // #49: chunked transfer 时 content-length 缺失，需在读完 body 后做实际大小二次校验
+      if (arrayBuffer.byteLength > MAX_RESPONSE_BYTES) {
+        throw new SpeechConfigError(
+          `TTS 响应过大: ${(arrayBuffer.byteLength / 1024 / 1024).toFixed(1)}MB`,
+        );
+      }
+
+      const audioBuffer = Buffer.from(arrayBuffer);
+
+      return {
+        kind: 'audio',
+        provider: providerId,
+        text,
+        audioBuffer,
+        mimeType,
+        model,
+        voice,
+        metadata: {
+          runtime: 'server',
+          llmProviderId: llmProvider.id,
+          llmProviderName: llmProvider.name,
+        },
+      } satisfies SpeechArtifact;
+    },
+  };
+}
+
+export async function fetchTtsApiResponse(
+  task: SpeechTask<{ text: string }>,
+  deps: { resolveLlmProvider?: (task: SpeechTask<{ text: string }>) => Promise<LlmProvider> } = {},
+): Promise<{ response: Response; mimeType: string; model: string; voice: string }> {
+  const resolveLlmProvider = deps.resolveLlmProvider ?? resolveLlmProviderFromTask;
+  const providerLabel = 'openai-compatible-tts';
+
+  const { endpoint, model, voice, baseBody, instructions, authHeader } =
+    await buildTtsRequest(task, resolveLlmProvider, providerLabel);
+
+  const response = await postTtsApi({
+    endpoint,
+    baseBody,
+    instructions,
+    authHeader,
+    providerLabel,
+  });
 
   const contentType = response.headers.get('content-type') || 'audio/mpeg';
   const mimeType = contentType.split(';')[0].trim() || 'audio/mpeg';
