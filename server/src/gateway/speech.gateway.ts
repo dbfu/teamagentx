@@ -1,9 +1,11 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { Readable } from 'node:stream';
 import prisma from '../lib/prisma.js';
 import { serverSpeechService } from '../modules/speech/default-service.js';
 import type { SpeechArtifact, SpeechSession, SpeechTask } from '../modules/speech/domain/types.js';
 import { deserializeAgentSpeechConfig } from '../modules/speech/speech-config.js';
 import { authService } from '../modules/auth/auth.service.js';
+import { fetchTtsApiResponse } from '../modules/speech/providers/remote-tts.provider.js';
 
 type SpeechGatewayDependencies = {
   execute: (task: SpeechTask) => Promise<SpeechArtifact | SpeechSession>;
@@ -98,6 +100,68 @@ export function createSpeechGateway(dependencies: SpeechGatewayDependencies = {
         return reply.send(result.audioBuffer);
       },
     );
+
+    app.post<{ Body: SpeechTask<{ text: string }> }>(
+      '/speech/tts/stream',
+      {
+        preHandler: async (request, reply) => {
+          const ok = await requireAuth(request, reply)
+          if (!ok) return
+        },
+        schema: {
+          body: {
+            type: 'object',
+            required: ['input'],
+            properties: {
+              type: { type: 'string', enum: ['tts'] },
+              profile: { type: 'object', nullable: true, additionalProperties: true },
+              context: { type: 'object', nullable: true, additionalProperties: true },
+              preferences: { type: 'object', nullable: true, additionalProperties: true },
+              input: {
+                type: 'object',
+                required: ['text'],
+                properties: {
+                  text: { type: 'string', maxLength: 5000 },
+                },
+              },
+            },
+          },
+        },
+      },
+      async (request, reply) => {
+        const task: SpeechTask = {
+          ...request.body,
+          type: 'tts',
+        }
+
+        const inputText = String((task.input as { text?: string })?.text ?? '')
+        if (!inputText.trim()) {
+          return reply.code(400).send({ success: false, error: '文本不能为空' })
+        }
+
+        let fetchResult: { response: Response; mimeType: string; model: string; voice: string }
+        try {
+          fetchResult = await fetchTtsApiResponse(task as SpeechTask<{ text: string }>)
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : '流式语音服务失败'
+          return reply.code(502).send({ success: false, error: msg })
+        }
+
+        const { response, mimeType, model, voice } = fetchResult
+        if (!response.body) {
+          return reply.code(502).send({ success: false, error: 'TTS 服务不支持流式响应' })
+        }
+
+        reply.header('Content-Type', mimeType)
+        reply.header('Cache-Control', 'no-store')
+        reply.header('X-Speech-Provider', 'openai-compatible-tts')
+        if (model) reply.header('X-Speech-Model', model)
+        if (voice) reply.header('X-Speech-Voice', voice)
+
+        const nodeStream = Readable.fromWeb(response.body as import('node:stream/web').ReadableStream<Uint8Array>)
+        return reply.send(nodeStream)
+      },
+    )
 
     app.post(
       '/speech/stt',

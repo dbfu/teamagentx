@@ -51,6 +51,135 @@ export function stopRemoteTtsPlayback(): void {
   playbackManager.stopAll()
 }
 
+// 流式 MediaSource 播放：一个请求边下载边播放，无需等待全部音频
+async function playStreamingAudio(
+  streamUrl: string,
+  body: object,
+  token: string | null,
+): Promise<void> {
+  const supportsMediaSource =
+    typeof MediaSource !== 'undefined' && MediaSource.isTypeSupported('audio/mpeg')
+  if (!supportsMediaSource) {
+    // 降级：先获取全量 blob 再播放
+    const response = await fetch(streamUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(body),
+    })
+    if (!response.ok) throw new Error(`TTS stream failed: ${response.status}`)
+    const blob = new Blob([await response.arrayBuffer()], { type: 'audio/mpeg' })
+    return playAudioUrl(URL.createObjectURL(blob))
+  }
+
+  const mediaSource = new MediaSource()
+  const audio = new Audio()
+  const blobUrl = URL.createObjectURL(mediaSource)
+  audio.src = blobUrl
+
+  return new Promise<void>((resolve, reject) => {
+    let settled = false
+    const settle = (fn: () => void) => {
+      if (settled) return
+      settled = true
+      fn()
+    }
+
+    const abort = new AbortController()
+
+    const controller: ActiveRemotePlayback = {
+      stop: () => {
+        abort.abort()
+        try { audio.pause(); audio.src = '' } catch { /* ignore */ }
+        URL.revokeObjectURL(blobUrl)
+        settle(() => reject(Object.assign(new Error('播放已取消'), { cancelled: true })))
+      },
+    }
+
+    mediaSource.addEventListener('sourceopen', async () => {
+      let sourceBuffer: SourceBuffer
+      try {
+        sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg')
+      } catch {
+        URL.revokeObjectURL(blobUrl)
+        settle(() => reject(new Error('MediaSource audio/mpeg 不受支持')))
+        return
+      }
+
+      const waitUpdate = () =>
+        new Promise<void>((r) => {
+          if (!sourceBuffer.updating) { r(); return }
+          sourceBuffer.addEventListener('updateend', () => r(), { once: true })
+        })
+
+      playbackManager.set(controller)
+
+      try {
+        const response = await fetch(streamUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify(body),
+          signal: abort.signal,
+        })
+
+        if (!response.ok) throw new Error(`TTS stream ${response.status}`)
+        if (!response.body) throw new Error('No stream body')
+
+        // 收到第一个 chunk 后再开始播放，避免 play() 时 buffer 为空
+        const reader = response.body.getReader()
+        let firstChunk = true
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          await waitUpdate()
+          sourceBuffer.appendBuffer(value)
+          if (firstChunk) {
+            firstChunk = false
+            void audio.play().catch(() => {})
+          }
+        }
+
+        await waitUpdate()
+        if (mediaSource.readyState === 'open') mediaSource.endOfStream()
+
+        audio.addEventListener(
+          'ended',
+          () => {
+            playbackManager.clearIf(controller)
+            URL.revokeObjectURL(blobUrl)
+            settle(resolve)
+          },
+          { once: true },
+        )
+        audio.addEventListener(
+          'error',
+          () => {
+            playbackManager.clearIf(controller)
+            URL.revokeObjectURL(blobUrl)
+            settle(() => reject(new Error('音频播放错误')))
+          },
+          { once: true },
+        )
+      } catch (err) {
+        playbackManager.clearIf(controller)
+        URL.revokeObjectURL(blobUrl)
+        settle(() => {
+          if (err instanceof Error && err.name === 'AbortError') {
+            reject(Object.assign(new Error('播放已取消'), { cancelled: true }))
+          } else {
+            reject(err)
+          }
+        })
+      }
+    }, { once: true })
+  })
+}
+
 async function playAudioUrl(audioUrl: string): Promise<void> {
   playbackManager.stopAll()
   const audio = new Audio(audioUrl)
@@ -162,6 +291,19 @@ export function createRemoteTtsSpeechProvider(
             // 缓存条目失效，降级到正常 fetch
           }
         }
+      }
+
+      // 长文本走流式播放（一个请求边下边播），短文本走缓存+blob 路径
+      if (text.length > PREWARM_MAX_TEXT_LENGTH) {
+        const token = localStorage.getItem('auth_token')
+        const baseUrl = await getBaseUrl()
+        await playStreamingAudio(`${baseUrl}/speech/tts/stream`, task, token)
+        return {
+          kind: 'audio',
+          provider: providerId,
+          text: String((task.input as { text?: string }).text || ''),
+          metadata: { runtime: 'client', transport: providerId },
+        } satisfies SpeechArtifact
       }
 
       const token = localStorage.getItem('auth_token')
