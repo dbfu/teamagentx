@@ -1,9 +1,14 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
+import type { Agent } from '@prisma/client';
 import { llmProviderService } from '../modules/llm-provider/llm-provider.service.js';
-import { getSharedSkillsDir } from '../core/agent/tools/skill-manager.tools.js';
-import { getSkillsHelperDefinition, SKILL_MANAGER_ID } from './system-agent-definitions.js';
+import {
+  getSharedSkillsDir,
+  PREINSTALLED_SKILL_NAMES,
+  SKILL_MANAGER_DEFAULT_SKILLS,
+} from '../modules/skill/preinstalled-skills.js';
+import { skillInstallService } from '../modules/skill/skill-install.service.js';
+import { getSkillsHelperDefinition } from './system-agent-definitions.js';
 import { syncSystemAgent } from './system-agent-sync.js';
 
 /**
@@ -21,9 +26,7 @@ async function copyPreinstalledSkills(): Promise<void> {
 
   fs.mkdirSync(sharedSkillsDir, { recursive: true });
 
-  const preinstalledSkills = ['find-skills', 'skill-creator'];
-
-  for (const skillName of preinstalledSkills) {
+  for (const skillName of PREINSTALLED_SKILL_NAMES) {
     const sourceDir = path.join(preinstalledSkillsDir, skillName);
     const targetDir = path.join(sharedSkillsDir, skillName);
 
@@ -45,23 +48,17 @@ async function copyPreinstalledSkills(): Promise<void> {
 /**
  * 为技能管理助手默认安装预置技能（symlink 方式）
  */
-async function installDefaultSkillsToManager(): Promise<void> {
+async function installDefaultSkillsToManager(
+  agent: Pick<Agent, 'id' | 'name' | 'type' | 'workDir'>,
+): Promise<void> {
   console.log('[init-skills-helper] 为技能管理助手安装默认技能...');
 
   const sharedSkillsDir = getSharedSkillsDir();
-  const managerSkillsDir = path.join(
-    os.homedir(),
-    '.teamagentx',
-    'builtin',
-    'skills',
-    SKILL_MANAGER_ID,
-  );
+  const managerSkillsDir = skillInstallService.getAgentSkillsDir(agent);
 
   fs.mkdirSync(managerSkillsDir, { recursive: true });
 
-  const defaultSkills = ['find-skills', 'skill-creator'];
-
-  for (const skillName of defaultSkills) {
+  for (const skillName of SKILL_MANAGER_DEFAULT_SKILLS) {
     const sourceDir = path.join(sharedSkillsDir, skillName);
     const targetSymlink = path.join(managerSkillsDir, skillName);
 
@@ -101,5 +98,5 @@ export async function ensureSkillsHelperExists(): Promise<void> {
   const agent = await syncSystemAgent(getSkillsHelperDefinition(defaultProvider?.id));
   console.log(`[init-skills-helper] 技能管理助手已同步: ID=${agent.id}, name=${agent.name}`);
 
-  await installDefaultSkillsToManager();
+  await installDefaultSkillsToManager(agent);
 }

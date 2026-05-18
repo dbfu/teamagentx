@@ -75,17 +75,20 @@ export const BRIDGE_PLATFORM_PLAYBOOKS: BridgePlatformPlaybook[] = [
       '优先使用一键创建入口：https://open.feishu.cn/page/openclaw?form=multiAgent，可快速创建机器人并预选常用能力',
       '如未使用快捷入口，也可以在飞书开放平台手动创建企业自建应用',
       '添加应用能力 → 机器人',
-      '权限管理中勾选 im:message（消息收发）权限，尽量一次性全部开齐',
+      '权限管理中勾选 im:message（消息收发）以及消息表情回复相关权限，尽量一次性全部开齐',
       '事件与回调 → 选择「使用长连接接收事件」→ 添加 im.message.receive_v1 事件',
       '发布应用版本（内测发布即可）',
     ],
     bindSteps: [
       '把 App ID 和 App Secret 交给 TeamAgentX 接入助手保存并绑定（无需配置公网地址）',
+      '如果需要 TeamAgentX 在飞书侧首次发消息前主动推送，额外填写默认飞书会话 ID（chat_id/open_chat_id）',
       '在飞书直接私聊该机器人，发一条消息，消息会进入绑定的 TeamAgentX 群聊',
     ],
     notes: [
       '飞书使用 WebSocket 长连接接收消息，无需公网地址或 ngrok',
       '用户与机器人 1-on-1 私聊即可，无需把机器人加入任何飞书群',
+      '未配置默认飞书会话 ID 时，系统需要先收到一次飞书消息，才能知道后续回推目标',
+      '工作中标识通过给用户原消息添加 Typing 表情反应实现；如果应用没有 reaction 权限，只影响该标识，不影响正常回复',
       '快捷创建页会显著减少手工配权限步骤，优先推荐',
       '凭证保存后服务端自动建立连接，日志可见 [Bridge/Feishu-WS] 启动 WebSocket 长连接',
     ],
@@ -163,7 +166,7 @@ export const BRIDGE_PLATFORM_PLAYBOOKS: BridgePlatformPlaybook[] = [
     consoleSteps: [
       '在企业微信管理后台创建自建应用，记录 Corp ID（我的企业页）和 Agent Secret（应用凭证页）',
       '在应用「接收消息」页，自定义填写 Token 和 EncodingAESKey（两项都可随机生成），记录下来',
-      '将「接收消息 URL」填写为 TeamAgentX 的企业微信 webhook 地址（可在 TeamAgentX 集成页查看，格式：https://你的域名/api/bridge/webhook/wecom）',
+      '将「接收消息 URL」填写为 TeamAgentX 的企业微信 webhook 地址（可在 TeamAgentX 频道页查看，格式：https://你的域名/api/bridge/webhook/wecom）',
       '开启应用消息收发权限',
     ],
     bindSteps: [
@@ -200,7 +203,7 @@ export const BRIDGE_PLATFORM_PLAYBOOKS: BridgePlatformPlaybook[] = [
     ],
     consoleSteps: [
       '在 QQ 开放平台创建机器人应用，记录 App ID 和 Client Secret',
-      '在「事件订阅」中，将回调地址填写为 TeamAgentX 的 QQ webhook 地址（可在 TeamAgentX 集成页查看，格式：https://你的域名/api/bridge/webhook/qq）',
+      '在「事件订阅」中，将回调地址填写为 TeamAgentX 的 QQ webhook 地址（可在 TeamAgentX 频道页查看，格式：https://你的域名/api/bridge/webhook/qq）',
       '开启 C2C_MESSAGE_CREATE 事件订阅（单聊消息）',
       '开启消息发送权限',
     ],

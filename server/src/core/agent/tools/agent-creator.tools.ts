@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { createSystemTool as tool } from './system-tool.js';
 import { agentService } from '../../../core/agent/agent.service.js';
 import { llmProviderService } from '../../../modules/llm-provider/llm-provider.service.js';
+import { installDefaultSkillsForNewAgent } from '../../../modules/skill/preinstalled-skills.js';
 import { installSkillFromSourceTool } from './skills-helper.tools.js';
 import { getChatHistoryTool } from './skill-manager.tools.js';
 import {
@@ -129,6 +130,7 @@ export const createAgentTool = tool(
           currentSpeechConfig: null,
         }),
       });
+      const installedDefaultSkills = await installDefaultSkillsForNewAgent(agent);
 
       return JSON.stringify({
         success: true,
@@ -138,6 +140,7 @@ export const createAgentTool = tool(
           description: agent.description,
           type: agent.type,
         },
+        installedDefaultSkills,
         message: `成功创建助手 "${name}"。用户可以在群聊中通过 @${name} 来使用它。`,
       });
     } catch (error) {
@@ -190,6 +193,7 @@ export const createAgentsTool = tool(
       name: string;
       success: boolean;
       agent?: { id: string; name: string; description: string; type: string };
+      installedDefaultSkills?: string[];
       error?: string;
     }> = [];
 
@@ -229,6 +233,7 @@ export const createAgentsTool = tool(
             currentSpeechConfig: null,
           }),
         });
+        const installedDefaultSkills = await installDefaultSkillsForNewAgent(agent);
 
         results.push({
           name: config.name,
@@ -239,6 +244,7 @@ export const createAgentsTool = tool(
             description: agent.description || '',
             type: agent.type,
           },
+          installedDefaultSkills,
         });
         successCount++;
       } catch (error) {

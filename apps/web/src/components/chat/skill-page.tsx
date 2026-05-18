@@ -932,7 +932,7 @@ export function SkillPage() {
                                       return next;
                                     });
                                   }}
-                                  className="size-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                  className="size-4 rounded border-gray-300 text-primary outline-none"
                                 />
                                 <div className="flex-1 min-w-0">
                                   <div className="font-medium text-foreground text-sm">{skill.name}</div>

@@ -464,7 +464,7 @@ export function RoomSettingsPanel({
               </div>
             ) : (
               <div className="rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
-                当前群聊还没有绑定机器人。你可以在集成页创建机器人实例后直接绑定到这里，或者在群里让“外部平台接入助手”拿到凭证后自动绑定当前群聊。
+                当前群聊还没有绑定机器人。你可以在频道页创建机器人实例后直接绑定到这里，或者在群里让“外部平台接入助手”拿到凭证后自动绑定当前群聊。
               </div>
             )}
           </div>

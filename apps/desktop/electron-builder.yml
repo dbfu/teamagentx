@@ -20,6 +20,10 @@ extraResources:
     to: server/prisma/
     filter:
       - "**/*"
+  - from: ../../server/preinstalled-skills/
+    to: server/preinstalled-skills/
+    filter:
+      - "**/*"
   - from: ../../server/package.json
     to: server/package.json
   - from: ../../server/node_modules-prod/node_modules/

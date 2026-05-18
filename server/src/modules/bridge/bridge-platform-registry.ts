@@ -3,6 +3,7 @@ import type { Platform } from './bridge.service.js';
 export interface BridgePlatformConfigFieldDefinition {
   key: string;
   label: string;
+  description?: string;
   secret?: boolean;
   optional?: boolean;
 }
@@ -43,6 +44,12 @@ export const BRIDGE_PLATFORM_REGISTRY: BridgePlatformDefinition[] = [
     configFields: [
       { key: 'appId', label: 'App ID' },
       { key: 'appSecret', label: 'App Secret', secret: true },
+      {
+        key: 'defaultExternalId',
+        label: '默认飞书会话 ID（可选，chat_id/open_chat_id）',
+        description: '用于从 TeamAgentX 主动推送消息到飞书。未填写时，必须先让飞书群里发一条消息，系统记住最近会话后才能回推。可从最近的飞书入站事件 externalId 获取，通常形如 oc_xxx。',
+        optional: true,
+      },
     ],
   },
   {

@@ -556,6 +556,7 @@ model BridgeEvent {
   direction   String   // inbound | outbound
   status      String   // success | failed
   messageId   String?
+  dedupeKey   String?  @unique
   contentPreview String?
   agentName   String?
   errorMsg    String?

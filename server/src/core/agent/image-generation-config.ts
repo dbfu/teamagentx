@@ -13,7 +13,10 @@ export interface ImageGenerationEnvOptions {
 
 const BUILTIN_IMAGE_SKILL_DIR = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
-  'builtin-skills',
+  '..',
+  '..',
+  '..',
+  'preinstalled-skills',
   'image-generation-sdk',
 );
 

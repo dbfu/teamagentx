@@ -156,6 +156,11 @@ export function BotEditorForm({
             className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
             style={noDragStyle}
           />
+          {field.description && (
+            <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
+              {field.description}
+            </p>
+          )}
         </div>
       ))}
 

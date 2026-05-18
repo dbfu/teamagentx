@@ -1,4 +1,4 @@
-# Telegram 集成
+# Telegram 频道
 
 ## 适用模型
 
@@ -23,7 +23,7 @@ https://your-domain.com/api/bridge/webhook/telegram/<botId>
 
 1. 在 Telegram 使用 `@BotFather` 创建机器人
 2. 拿到 Bot Token
-3. 打开 TeamAgentX 集成页面，进入 Telegram
+3. 打开 TeamAgentX 频道页面，进入 Telegram
 4. 新建机器人实例，填写名称和 Bot Token
 5. 直接选择要绑定的 TeamAgentX 群聊，保存
 6. 如果采用 Webhook，把 TeamAgentX 生成的 webhook 地址配置到 Telegram

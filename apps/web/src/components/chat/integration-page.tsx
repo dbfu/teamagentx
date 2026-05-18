@@ -181,6 +181,7 @@ export function IntegrationPage() {
     }
     const missingFields = activeFields
       .filter((field) => {
+        if (field.optional) return false
         const value = botFields[field.key]?.trim()
         if (editingBotId && field.secret && !value) return false
         return !value
@@ -363,7 +364,7 @@ export function IntegrationPage() {
       >
         <div className="flex items-center gap-2">
           <Globe className="size-5 text-primary" />
-          <h1 className="text-base font-semibold">外部平台集成</h1>
+          <h1 className="text-base font-semibold">外部平台频道</h1>
         </div>
       </div>
 

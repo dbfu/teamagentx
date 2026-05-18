@@ -117,7 +117,7 @@ function CodeBlock({ label, code, language }: { label: string; code: string; lan
         <span>{label}</span>
         <button
           type="button"
-          className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-blue-50 hover:text-blue-600 focus-visible:bg-blue-50 focus-visible:text-blue-600 focus-visible:outline-none dark:hover:bg-blue-950/40 dark:hover:text-blue-300 dark:focus-visible:bg-blue-950/40 dark:focus-visible:text-blue-300"
+          className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-blue-50 hover:text-blue-600 outline-none dark:hover:bg-blue-950/40 dark:hover:text-blue-300"
           title="放大"
           onClick={() => setExpanded(true)}
         >
@@ -137,7 +137,7 @@ function CodeBlock({ label, code, language }: { label: string; code: string; lan
               </div>
               <button
                 type="button"
-                className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-gray-100 hover:text-foreground focus-visible:bg-gray-100 focus-visible:text-foreground focus-visible:outline-none dark:hover:bg-gray-800 dark:focus-visible:bg-gray-800"
+                className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-gray-100 hover:text-foreground outline-none dark:hover:bg-gray-800"
                 title="关闭"
                 onClick={() => setExpanded(false)}
               >

@@ -1,11 +1,13 @@
 import { randomUUID } from 'crypto';
 import prisma from '../../lib/prisma.js';
 import { messageEventEmitter } from '../../core/agent/agent-handler/index.js';
-import { registerTypingLoopSender } from './typing-loop.js';
+import { registerTypingLoopClearer, registerTypingLoopSender } from './typing-loop.js';
 import type { Message } from '../../types/message.js';
 import { messageService } from '../message/message.service.js';
 import { getBridgePlatformDefinition } from './bridge-platform-registry.js';
 import { decrypt } from './crypto.js';
+import { parseStoredBridgeConfig } from './bridge-platform-config.js';
+import { formatBridgeConversationSender } from './bridge-platform-display.js';
 import {
   bindBridgeBotToChatRoom,
   createBridgeBot,
@@ -44,25 +46,33 @@ function hasDedupeKey(key: string): boolean {
 }
 
 const platformSenders = new Map<string, (botId: string, externalId: string, text: string, agentName: string) => Promise<void>>();
-const platformTypingSenders = new Map<string, (botId: string, externalId: string) => Promise<void>>();
+const platformTypingSenders = new Map<string, (botId: string, externalId: string, sourceMessageId?: string) => Promise<void>>();
+const platformTypingClearers = new Map<string, (botId: string, externalId: string, sourceMessageId?: string) => Promise<void>>();
+type BridgeInboundMessageBroadcaster = (message: Message, chatRoomId: string) => void | Promise<void>;
+let bridgeInboundMessageBroadcaster: BridgeInboundMessageBroadcaster | null = null;
+
+export function setBridgeInboundMessageBroadcaster(broadcaster: BridgeInboundMessageBroadcaster | null) {
+  bridgeInboundMessageBroadcaster = broadcaster;
+}
 
 const SOURCE_CHANNEL_TTL_MS = 30 * 60 * 1000;
 const BRIDGE_EVENT_RETENTION_DAYS = parseInt(process.env.BRIDGE_EVENT_RETENTION_DAYS ?? '20', 10) || 20;
 
-type SourceConversation = { chatRoomId: string; botId: string; platform: Platform; externalId: string; replyTarget: string; expiresAt: number };
+type SourceConversation = { chatRoomId: string; botId: string; platform: Platform; externalId: string; replyTarget: string; sourceMessageId?: string; expiresAt: number };
 const lastSourceConversation = new Map<string, SourceConversation>();
 
 function sourceKey(botId: string, externalId: string): string {
   return `${botId}:${externalId}`;
 }
 
-function setSourceConversation(chatRoomId: string, botId: string, platform: Platform, externalId: string, replyTarget: string) {
+function setSourceConversation(chatRoomId: string, botId: string, platform: Platform, externalId: string, replyTarget: string, sourceMessageId?: string) {
   lastSourceConversation.set(sourceKey(botId, externalId), {
     chatRoomId,
     botId,
     platform,
     externalId,
     replyTarget,
+    sourceMessageId,
     expiresAt: Date.now() + SOURCE_CHANNEL_TTL_MS,
   });
 }
@@ -91,6 +101,63 @@ function getSourceConversation(botId: string, externalId?: string, chatRoomId?: 
     return null;
   }
   return entry;
+}
+
+function getConfiguredDefaultConversation(
+  bot: { id: string; platform: string; config?: string | null },
+  chatRoomId: string,
+): SourceConversation | null {
+  const parsedConfig = parseStoredBridgeConfig(bot);
+  const configuredExternalId = typeof parsedConfig?.defaultExternalId === 'string'
+    ? parsedConfig.defaultExternalId.trim()
+    : '';
+  if (!configuredExternalId) return null;
+
+  return {
+    chatRoomId,
+    botId: bot.id,
+    platform: bot.platform as Platform,
+    externalId: configuredExternalId,
+    replyTarget: configuredExternalId,
+    sourceMessageId: undefined,
+    expiresAt: Number.POSITIVE_INFINITY,
+  };
+}
+
+async function getPersistedSourceConversation(
+  bot: { id: string; platform: string },
+  chatRoomId: string,
+): Promise<SourceConversation | null> {
+  const events = await prisma.bridgeEvent.findMany({
+    where: {
+      platform: bot.platform,
+      status: 'success',
+      messageId: { not: null },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 100,
+  });
+
+  for (const event of events) {
+    if (!event.messageId || !event.externalId) continue;
+    const message = await prisma.message.findFirst({
+      where: { id: event.messageId, chatRoomId },
+      select: { id: true },
+    });
+    if (!message) continue;
+
+    return {
+      chatRoomId,
+      botId: bot.id,
+      platform: bot.platform as Platform,
+      externalId: event.externalId,
+      replyTarget: event.externalId,
+      sourceMessageId: undefined,
+      expiresAt: Number.POSITIVE_INFINITY,
+    };
+  }
+
+  return null;
 }
 
 // Periodic cleanup of old bridge events (replaces per-write delete).
@@ -150,13 +217,15 @@ async function getActiveBridgeTargets(chatRoomId: string) {
       defaultAgent: { select: { id: true, name: true, avatar: true, avatarColor: true } },
     },
   });
-  return bots
-    .map((bot) => {
-      const source = getSourceConversation(bot.id, undefined, chatRoomId);
+  const targets = await Promise.all(bots.map(async (bot) => {
+      const source = getSourceConversation(bot.id, undefined, chatRoomId)
+        ?? getConfiguredDefaultConversation(bot, chatRoomId)
+        ?? await getPersistedSourceConversation(bot, chatRoomId);
       if (!source) return null;
       return { bot, source };
-    })
-    .filter((item): item is { bot: (typeof bots)[number]; source: NonNullable<ReturnType<typeof getSourceConversation>> } => !!item);
+  }));
+  return targets
+    .filter((item): item is { bot: (typeof bots)[number]; source: SourceConversation } => !!item);
 }
 
 async function createBridgeEvent(data: {
@@ -165,6 +234,7 @@ async function createBridgeEvent(data: {
   direction: string;
   status: string;
   messageId?: string | null;
+  dedupeKey?: string | null;
   contentPreview?: string | null;
   agentName?: string | null;
   errorMsg?: string | null;
@@ -181,6 +251,7 @@ async function createBridgeEvent(data: {
       ...data,
       contentPreview: data.contentPreview ?? null,
       messageId: data.messageId ?? null,
+      dedupeKey: data.dedupeKey ?? null,
       agentName: data.agentName ?? null,
       errorMsg: data.errorMsg ?? null,
     },
@@ -291,10 +362,24 @@ export const bridgeService = {
     senderName: string;
     content: string;
     dedupeKey?: string;
+    sourceMessageId?: string;
   }) {
     if (params.dedupeKey) {
       if (hasDedupeKey(params.dedupeKey)) {
         console.info(`[Bridge] 重复消息已过滤: ${params.dedupeKey}`);
+        return null;
+      }
+      const persistedDuplicate = await prisma.bridgeEvent.findFirst({
+        where: {
+          dedupeKey: params.dedupeKey,
+          direction: 'inbound',
+          status: 'success',
+        },
+        select: { id: true },
+      });
+      if (persistedDuplicate) {
+        console.info(`[Bridge] 持久化重复消息已过滤: ${params.dedupeKey}`);
+        addDedupeKey(params.dedupeKey);
         return null;
       }
       addDedupeKey(params.dedupeKey);
@@ -308,45 +393,19 @@ export const bridgeService = {
     }
 
     const { chatRoomId } = binding;
-    setSourceConversation(chatRoomId, binding.id, params.platform, params.externalId, params.replyTarget ?? params.externalId);
+    setSourceConversation(
+      chatRoomId,
+      binding.id,
+      params.platform,
+      params.externalId,
+      params.replyTarget ?? params.externalId,
+      params.sourceMessageId,
+    );
 
-    const platformLabel: Record<Platform, string> = {
-      telegram: 'TG',
-      feishu: '飞书',
-      dingtalk: '钉钉',
-      wecom: '企微',
-      qq: 'QQ',
-    };
-    const prefixedContent = `[${platformLabel[params.platform]}·${params.senderName}] ${params.content}`;
+    const prefixedContent = params.content;
+    const displaySenderName = formatBridgeConversationSender(params.platform, params.externalId);
 
-    // Sanitize external content for routing: strip @ mentions to prevent injection
-    const hasAgentMention = /@\S+/.test(params.content);
-    const roomAgents = !binding.chatRoom.defaultAgentId
-      ? await prisma.chatRoomAgent.findMany({
-          where: {
-            chatRoomId,
-            agentId: { not: null },
-            agent: { is: { isActive: true } },
-          },
-          include: {
-            agent: {
-              select: { id: true, name: true },
-            },
-          },
-          orderBy: { joinedAt: 'asc' },
-          take: 2,
-        })
-      : [];
-
-    const fallbackDefaultAgentId = binding.chatRoom.defaultAgentId
-      || (roomAgents.length === 1 ? roomAgents[0]?.agentId ?? null : null);
-    const defaultAgent = fallbackDefaultAgentId
-      ? await prisma.agent.findUnique({ where: { id: fallbackDefaultAgentId } })
-      : null;
-
-    const finalContent = !hasAgentMention && defaultAgent
-      ? `${prefixedContent} @${defaultAgent.name}`
-      : prefixedContent;
+    const finalContent = prefixedContent;
 
     const msgId = randomUUID();
     const now = new Date();
@@ -365,11 +424,16 @@ export const bridgeService = {
       type: 'message',
       content: savedMsg.content,
       time: now,
-      user: params.senderName,
+      user: displaySenderName,
       userId: savedMsg.userId,
       chatRoomId,
       isHuman: true,
     };
+    if (bridgeInboundMessageBroadcaster) {
+      await Promise.resolve(bridgeInboundMessageBroadcaster(msgWithUser, chatRoomId)).catch((error) => {
+        console.error('[Bridge] 广播入站消息到群聊失败:', error);
+      });
+    }
     messageEventEmitter.emit('receivedMessage', { message: msgWithUser, chatRoomId });
 
     await createBridgeEvent({
@@ -378,6 +442,7 @@ export const bridgeService = {
       direction: 'inbound',
       status: 'success',
       messageId: msgId,
+      dedupeKey: params.dedupeKey ?? null,
       contentPreview: finalContent.slice(0, 280),
     }).catch((error) => console.error('[Bridge] 写入 inbound success 事件失败:', error));
 
@@ -396,8 +461,12 @@ export const bridgeService = {
     });
   },
 
-  registerTypingSender(platform: Platform, sender: (botId: string, externalId: string) => Promise<void>) {
+  registerTypingSender(platform: Platform, sender: (botId: string, externalId: string, sourceMessageId?: string) => Promise<void>) {
     platformTypingSenders.set(platform, sender);
+  },
+
+  registerTypingClearer(platform: Platform, clearer: (botId: string, externalId: string, sourceMessageId?: string) => Promise<void>) {
+    platformTypingClearers.set(platform, clearer);
   },
 
   async syncRoomMessage(chatRoomId: string, senderName: string, content: string, messageId?: string) {
@@ -428,7 +497,18 @@ export const bridgeService = {
     await Promise.all(targets.map(async ({ bot, source }) => {
       const sender = platformTypingSenders.get(bot.platform);
       if (!sender) return;
-      await sender(bot.id, source.replyTarget);
+      await sender(bot.id, source.replyTarget, source.sourceMessageId);
+    }));
+  },
+
+  async clearTypingIndicators(chatRoomId: string) {
+    const targets = await getActiveBridgeTargets(chatRoomId);
+    if (targets.length === 0) return;
+
+    await Promise.all(targets.map(async ({ bot, source }) => {
+      const clearer = platformTypingClearers.get(bot.platform);
+      if (!clearer) return;
+      await clearer(bot.id, source.replyTarget, source.sourceMessageId);
     }));
   },
 
@@ -471,3 +551,4 @@ export const bridgeService = {
 
 // 把 sendTypingIndicator 注册给 typing-loop 模块（避免循环依赖）
 registerTypingLoopSender((chatRoomId) => bridgeService.sendTypingIndicator(chatRoomId));
+registerTypingLoopClearer((chatRoomId) => bridgeService.clearTypingIndicators(chatRoomId));

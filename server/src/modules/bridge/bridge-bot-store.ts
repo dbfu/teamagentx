@@ -42,6 +42,16 @@ export interface UpdateBridgeBotInput {
   enabled?: boolean;
 }
 
+function parseEncryptedConfig(config?: string | null): Record<string, unknown> | undefined {
+  if (!config) return undefined;
+  try {
+    const parsed = JSON.parse(decrypt(config)) as Record<string, unknown>;
+    return parsed && typeof parsed === 'object' ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function createBridgeBot(input: CreateBridgeBotInput) {
   const credentialHash = computeCredentialHash(input.platform, input.botToken, input.config);
 
@@ -171,6 +181,14 @@ export async function getBridgeBotByChatRoom(chatRoomId: string) {
 
 export async function updateBridgeBot(id: string, input: UpdateBridgeBotInput) {
   const data: Record<string, unknown> = {};
+  const existing = input.botToken !== undefined || input.config !== undefined
+    ? await prisma.bridgeBot.findUnique({
+        where: { id },
+        select: { platform: true, botToken: true, config: true },
+      })
+    : null;
+  const existingConfig = parseEncryptedConfig(existing?.config);
+  let nextConfig = existingConfig;
 
   if (input.name !== undefined) {
     data.name = input.name.trim();
@@ -179,7 +197,13 @@ export async function updateBridgeBot(id: string, input: UpdateBridgeBotInput) {
     data.botToken = input.botToken ? encrypt(input.botToken) : null;
   }
   if (input.config !== undefined) {
-    data.config = input.config ? encrypt(JSON.stringify(input.config)) : null;
+    if (input.config) {
+      nextConfig = { ...(existingConfig ?? {}), ...input.config };
+      data.config = encrypt(JSON.stringify(nextConfig));
+    } else {
+      nextConfig = undefined;
+      data.config = null;
+    }
   }
   if ('defaultAgentId' in input) {
     data.defaultAgentId = input.defaultAgentId || null;
@@ -190,16 +214,9 @@ export async function updateBridgeBot(id: string, input: UpdateBridgeBotInput) {
 
   // 凭证变更时同步更新 credentialHash
   if (input.botToken !== undefined || input.config !== undefined) {
-    const existing = await prisma.bridgeBot.findUnique({
-      where: { id },
-      select: { platform: true, botToken: true, config: true },
-    });
     if (existing) {
       const newToken = input.botToken !== undefined ? input.botToken : (existing.botToken ? decrypt(existing.botToken) : undefined);
-      const newConfig = input.config !== undefined
-        ? input.config
-        : (existing.config ? (() => { try { return JSON.parse(decrypt(existing.config!)); } catch { return undefined; } })() : undefined);
-      data.credentialHash = computeCredentialHash(existing.platform as Platform, newToken, newConfig);
+      data.credentialHash = computeCredentialHash(existing.platform as Platform, newToken, nextConfig);
     }
   }
 

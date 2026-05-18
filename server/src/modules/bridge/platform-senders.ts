@@ -4,8 +4,10 @@ import { parseStoredBridgeConfig, resolveStoredBridgeBotToken } from './bridge-p
 
 type Platform = 'telegram' | 'feishu' | 'dingtalk' | 'wecom' | 'qq';
 type SenderFn = (botId: string, externalId: string, text: string, agentName: string) => Promise<void>;
-type TypingSenderFn = (botId: string, externalId: string) => Promise<void>;
+type TypingSenderFn = (botId: string, externalId: string, sourceMessageId?: string) => Promise<void>;
+type TypingClearerFn = (botId: string, externalId: string, sourceMessageId?: string) => Promise<void>;
 const DINGTALK_SESSION_WEBHOOK_PREFIX = 'sessionWebhook:';
+const FEISHU_TYPING_EMOJI_TYPE = 'Typing';
 
 // DingTalk session webhook 允许的外发 host（与 dingtalk-stream-client 保持一致）
 const ALLOWED_WEBHOOK_HOSTS = ['oapi.dingtalk.com', 'api.dingtalk.com'];
@@ -17,10 +19,12 @@ export interface BridgePlatformAdapter {
   platform: Platform;
   sendMessage: SenderFn;
   sendTyping?: TypingSenderFn;
+  clearTyping?: TypingClearerFn;
 }
 
 // Simple in-memory access token cache: key → { token, expiresAt }
 const tokenCache = new Map<string, { token: string; expiresAt: number }>();
+const feishuTypingReactions = new Map<string, { messageId: string; reactionId: string | null }>();
 
 function getCachedToken(key: string): string | null {
   const entry = tokenCache.get(key);
@@ -50,6 +54,10 @@ function splitMessage(text: string, maxLen: number): string[] {
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**
@@ -198,91 +206,28 @@ async function telegramTyping(botId: string, externalId: string): Promise<void> 
   });
 }
 
-// ─── 飞书 Post 富文本转换 ───
-// 将 Markdown 转为飞书 post content 格式的 content 段落数组
-type FeishuPostElement =
-  | { tag: 'text'; text: string; bold?: boolean; un_escape?: boolean }
-  | { tag: 'a'; text: string; href: string }
-  | { tag: 'code_block'; language?: string; text: string }
-
-function markdownToFeishuPost(agentName: string, md: string): { title: string; content: FeishuPostElement[][] } {
-  const paragraphs: FeishuPostElement[][] = [];
-
-  const lines = md.split('\n');
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-
-    // 围栏代码块
-    const fenceMatch = line.match(/^```(\w*)/);
-    if (fenceMatch) {
-      const lang = fenceMatch[1] || 'plain_text';
-      const codeLines: string[] = [];
-      i++;
-      while (i < lines.length && !lines[i].startsWith('```')) {
-        codeLines.push(lines[i]);
-        i++;
-      }
-      paragraphs.push([{ tag: 'code_block', language: lang, text: codeLines.join('\n') }]);
-      i++;
-      continue;
-    }
-
-    // 空行 / 分割线 → 跳过
-    if (line.trim() === '' || /^[-*_]{3,}$/.test(line.trim())) {
-      i++;
-      continue;
-    }
-
-    // 列表行：`- ` / `* ` / `+ ` → 前缀替换为 •
-    const listMatch = line.match(/^\s*[-*+]\s+(.*)/);
-    const textLine = listMatch ? `• ${listMatch[1]}` : line;
-
-    const els = parseFeishuInline(textLine);
-    if (els.length > 0) paragraphs.push(els);
-    i++;
-  }
-
-  // title 已展示助手名，content 不重复
-  return { title: `🤖 ${agentName}`, content: paragraphs };
+function escapeFeishuMdInline(text: string): string {
+  return escapeHtml(text).replace(/([\\*_`~[\]()])/g, '\\$1');
 }
 
-function parseFeishuInline(line: string): FeishuPostElement[] {
-  const els: FeishuPostElement[] = [];
+export function markdownToFeishuCard(agentName: string, md: string): Record<string, unknown> {
+  const isRoomUserMessage = md.startsWith(`[群聊·${agentName}]`);
+  const body = isRoomUserMessage
+    ? md.replace(new RegExp(`^\\[群聊·${escapeRegExp(agentName)}\\]\\s*`), '')
+    : md;
+  const header = isRoomUserMessage
+    ? `<font color='green'>**${escapeFeishuMdInline(agentName)}**</font> 消息`
+    : `🤖 <font color='blue'>**${escapeFeishuMdInline(agentName)}**</font> 消息`;
 
-  // 标题行去掉 # 前缀，标题文字加粗
-  const isHeading = /^#{1,5}\s+/.test(line);
-  const text = line.replace(/^#{1,5}\s+/, '');
-
-  // 匹配：**bold** | [link](url) | `code`
-  const pattern = /\*\*([^*]+)\*\*|\[([^\]]+)\]\((https?:\/\/[^)]+)\)|`([^`\n]+)`/g;
-  let last = 0;
-  let m: RegExpExecArray | null;
-
-  while ((m = pattern.exec(text)) !== null) {
-    if (m.index > last) {
-      const plain = text.slice(last, m.index);
-      if (plain) els.push({ tag: 'text', text: plain, ...(isHeading ? { bold: true } : {}) });
-    }
-    if (m[1] !== undefined) {
-      // **bold**
-      els.push({ tag: 'text', text: m[1], bold: true });
-    } else if (m[2] !== undefined) {
-      // [link](url)
-      els.push({ tag: 'a', text: m[2], href: m[3] });
-    } else {
-      // `code` → 飞书 post 无行内代码 tag，直接显示文字
-      els.push({ tag: 'text', text: m[4] });
-    }
-    last = m.index + m[0].length;
-  }
-
-  if (last < text.length) {
-    const tail = text.slice(last);
-    if (tail) els.push({ tag: 'text', text: tail, ...(isHeading ? { bold: true } : {}) });
-  }
-
-  return els;
+  return {
+    config: { wide_screen_mode: true },
+    elements: [
+      {
+        tag: 'markdown',
+        content: `${header}\n\n${body}`,
+      },
+    ],
+  };
 }
 
 // ─── 飞书 sender ───
@@ -320,14 +265,91 @@ async function feishuSend(botId: string, externalId: string, text: string, agent
     headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       receive_id: externalId,
-      msg_type: 'post',
-      content: JSON.stringify({ zh_cn: markdownToFeishuPost(agentName, text) }),
+      msg_type: 'interactive',
+      content: JSON.stringify(markdownToFeishuCard(agentName, text)),
     }),
   });
   if (!feishuRes.ok) {
     const body = await feishuRes.text().catch(() => '');
     console.error(`[Bridge/feishu] 发送失败 ${feishuRes.status}: ${body.slice(0, 200)}`);
     throw new Error(`[Feishu] send failed: ${feishuRes.status} ${body.slice(0, 200)}`);
+  }
+}
+
+function normalizeFeishuMessageId(messageId?: string): string {
+  return (messageId ?? '').trim().split(':')[0] ?? '';
+}
+
+async function feishuTyping(botId: string, _externalId: string, sourceMessageId?: string): Promise<void> {
+  const messageId = normalizeFeishuMessageId(sourceMessageId);
+  if (!messageId) return;
+
+  const cacheKey = `${botId}:${messageId}`;
+  if (feishuTypingReactions.has(cacheKey)) return;
+
+  const bridgeBot = await prisma.bridgeBot.findUnique({ where: { id: botId } });
+  const configJson = bridgeBot?.config ?? null;
+  if (!configJson) return;
+
+  const cfg = parseStoredBridgeConfig({ config: configJson }) as { appId: string; appSecret: string } | null;
+  if (!cfg?.appId || !cfg.appSecret) return;
+  const token = await getFeishuToken(botId, cfg.appId, cfg.appSecret);
+
+  try {
+    const feishuRes = await fetch(`https://open.feishu.cn/open-apis/im/v1/messages/${encodeURIComponent(messageId)}/reactions`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        reaction_type: { emoji_type: FEISHU_TYPING_EMOJI_TYPE },
+      }),
+    });
+    if (!feishuRes.ok) {
+      const body = await feishuRes.text().catch(() => '');
+      console.error(`[Bridge/feishu] typing reaction 添加失败 ${feishuRes.status}: ${body.slice(0, 200)}`);
+      return;
+    }
+    const payload = await feishuRes.json().catch(() => null) as { data?: { reaction_id?: string } } | null;
+    feishuTypingReactions.set(cacheKey, {
+      messageId,
+      reactionId: payload?.data?.reaction_id ?? null,
+    });
+  } catch (error) {
+    console.error('[Bridge/feishu] typing reaction 添加失败:', error);
+  }
+}
+
+async function clearFeishuTyping(botId: string, _externalId: string, sourceMessageId?: string): Promise<void> {
+  const messageId = normalizeFeishuMessageId(sourceMessageId);
+  if (!messageId) return;
+
+  const cacheKey = `${botId}:${messageId}`;
+  const state = feishuTypingReactions.get(cacheKey);
+  if (!state) return;
+  feishuTypingReactions.delete(cacheKey);
+  if (!state.reactionId) return;
+
+  const bridgeBot = await prisma.bridgeBot.findUnique({ where: { id: botId } });
+  const configJson = bridgeBot?.config ?? null;
+  if (!configJson) return;
+
+  const cfg = parseStoredBridgeConfig({ config: configJson }) as { appId: string; appSecret: string } | null;
+  if (!cfg?.appId || !cfg.appSecret) return;
+  const token = await getFeishuToken(botId, cfg.appId, cfg.appSecret);
+
+  try {
+    const feishuRes = await fetch(
+      `https://open.feishu.cn/open-apis/im/v1/messages/${encodeURIComponent(state.messageId)}/reactions/${encodeURIComponent(state.reactionId)}`,
+      {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` },
+      },
+    );
+    if (!feishuRes.ok) {
+      const body = await feishuRes.text().catch(() => '');
+      console.error(`[Bridge/feishu] typing reaction 删除失败 ${feishuRes.status}: ${body.slice(0, 200)}`);
+    }
+  } catch (error) {
+    console.error('[Bridge/feishu] typing reaction 删除失败:', error);
   }
 }
 
@@ -499,19 +521,22 @@ async function qqSend(botId: string, externalId: string, text: string, agentName
 
 export const BRIDGE_PLATFORM_ADAPTERS: BridgePlatformAdapter[] = [
   { platform: 'telegram', sendMessage: telegramSend, sendTyping: telegramTyping },
-  { platform: 'feishu', sendMessage: feishuSend },
+  { platform: 'feishu', sendMessage: feishuSend, sendTyping: feishuTyping, clearTyping: clearFeishuTyping },
   { platform: 'dingtalk', sendMessage: dingtalkSend },
   { platform: 'wecom', sendMessage: wecomSend },
   { platform: 'qq', sendMessage: qqSend },
 ];
 
 export function registerBridgePlatformAdapters(
-  service: Pick<typeof bridgeService, 'registerSender' | 'registerTypingSender'> = bridgeService,
+  service: Pick<typeof bridgeService, 'registerSender' | 'registerTypingSender' | 'registerTypingClearer'> = bridgeService,
 ): void {
   for (const adapter of BRIDGE_PLATFORM_ADAPTERS) {
     service.registerSender(adapter.platform, adapter.sendMessage);
     if (adapter.sendTyping) {
       service.registerTypingSender(adapter.platform, adapter.sendTyping);
+    }
+    if (adapter.clearTyping) {
+      service.registerTypingClearer(adapter.platform, adapter.clearTyping);
     }
   }
 }

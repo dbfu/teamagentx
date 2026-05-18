@@ -401,8 +401,14 @@
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border;
   }
+
+  /* 禁用所有元素的 focus-visible outline */
+  :focus-visible {
+    outline: none;
+  }
+
   body {
     @apply text-foreground;
     background: var(--app-shell);

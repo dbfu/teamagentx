@@ -18,7 +18,7 @@ import { messageService } from '../modules/message/message.service.js';
 import { userService } from '../modules/user/user.service.js';
 import { taskQueueService } from '../modules/task-queue/task-queue.service.js';
 import { todoService } from '../modules/todo/todo.service.js';
-import { bridgeService } from '../modules/bridge/bridge.service.js';
+import { bridgeService, setBridgeInboundMessageBroadcaster } from '../modules/bridge/bridge.service.js';
 import { startTypingLoop, stopTypingLoop } from '../modules/bridge/typing-loop.js';
 import { Message, Attachment } from '../types/message.js';
 
@@ -73,6 +73,7 @@ export function setupSocket(io: Server) {
       console.error('[emitMessageToChatRoomMembers] 发送用户房间消息失败:', error);
     }
   };
+  setBridgeInboundMessageBroadcaster(emitMessageToChatRoomMembers);
 
   // Emit function for AI responses - broadcasts to specific chatRoom room
   // 同时给群聊里所有用户发送未读更新通知
@@ -101,7 +102,10 @@ export function setupSocket(io: Server) {
             await bridgeService.sendAgentResponse(chatRoomId, data.agentName, msg.content, msg.id).catch(console.error);
           }
         }
+        await bridgeService.clearTypingIndicators(chatRoomId).catch(console.error);
       })().catch(console.error);
+    } else {
+      bridgeService.clearTypingIndicators(chatRoomId).catch(console.error);
     }
   };
 

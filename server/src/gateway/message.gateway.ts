@@ -7,6 +7,7 @@ import { agentMemoryService } from '../modules/agent-memory/agent-memory.service
 import { abortControllers, processingMap } from '../core/agent/agent-handler/cache.js';
 import { clearExecutorCache, executorCache, clearClaudeSdkFileSystemContext, clearCodexSdkFileSystemContext } from '../core/agent/agent-handler/index.js';
 import { chatRoomService } from '../modules/chatroom/chatroom.service.js';
+import { formatBridgeConversationSender } from '../modules/bridge/bridge-platform-display.js';
 import prisma from '../lib/prisma.js';
 
 const messageSchema = {
@@ -53,6 +54,48 @@ interface MessageQuery {
   chatRoomId?: string;
 }
 
+type MessageListItem = Awaited<ReturnType<typeof messageService.findMany>>[number];
+
+async function applyBridgeMessageSenders<T extends MessageListItem>(messages: T[]): Promise<T[]> {
+  const messageIds = messages
+    .filter((message) => message.isHuman && !message.userId && !message.user)
+    .map((message) => message.id);
+  if (messageIds.length === 0) return messages;
+
+  const bridgeEvents = await prisma.bridgeEvent.findMany({
+    where: {
+      direction: 'inbound',
+      status: 'success',
+      messageId: { in: messageIds },
+    },
+    select: {
+      messageId: true,
+      platform: true,
+      externalId: true,
+    },
+  });
+  if (bridgeEvents.length === 0) return messages;
+
+  const bridgeEventByMessageId = new Map(
+    bridgeEvents
+      .filter((event): event is typeof event & { messageId: string } => !!event.messageId)
+      .map((event) => [event.messageId, event]),
+  );
+
+  return messages.map((message) => {
+    const bridgeEvent = bridgeEventByMessageId.get(message.id);
+    if (!bridgeEvent) return message;
+    return {
+      ...message,
+      user: {
+        id: `bridge:${bridgeEvent.platform}:${bridgeEvent.externalId}`,
+        socketId: '',
+        username: formatBridgeConversationSender(bridgeEvent.platform, bridgeEvent.externalId),
+      },
+    };
+  }) as T[];
+}
+
 export async function messageGateway(app: FastifyInstance) {
   // Get messages - optionally filtered by chatRoom
   app.get<{ Querystring: MessageQuery }>('/messages', {
@@ -80,11 +123,11 @@ export async function messageGateway(app: FastifyInstance) {
 
     if (chatRoomId) {
       const messages = await messageService.findByChatRoomId(chatRoomId, { take: 100 });
-      return reply.send({ success: true, data: messages });
+      return reply.send({ success: true, data: await applyBridgeMessageSenders(messages) });
     }
 
     const messages = await messageService.findMany({ take: 100 });
-    return reply.send({ success: true, data: messages });
+    return reply.send({ success: true, data: await applyBridgeMessageSenders(messages) });
   });
 
   // Get single message by ID
@@ -121,7 +164,8 @@ export async function messageGateway(app: FastifyInstance) {
       return reply.code(404).send({ success: false, error: '消息不存在' });
     }
 
-    return reply.send({ success: true, data: message });
+    const [messageWithBridgeSender] = await applyBridgeMessageSenders([message]);
+    return reply.send({ success: true, data: messageWithBridgeSender });
   });
 
   const deleteMessagesBatchHandler = async (

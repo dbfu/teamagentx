@@ -7,6 +7,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+} from '@/components/ui/select'
+import { GroupAvatarImage } from '@/lib/group-avatars'
 import { cn } from '@/lib/utils'
 import { Bot, Link2, MoreHorizontal, Plus, Search, Trash2, Unplug } from 'lucide-react'
 import type { CSSProperties } from 'react'
@@ -37,6 +44,25 @@ function buildWebhookUrl(baseUrl: string, bot: BridgeBot, platforms: BridgePlatf
   const platformDef = platforms.find((p) => p.key === bot.platform)
   if (!platformDef?.requiresPublicWebhook) return ''
   return `${baseUrl.replace(/\/$/, '')}/api/bridge/webhook/${bot.platform}/${bot.id}`
+}
+
+type BindingRoomOption = Pick<ChatRoom, 'id' | 'name' | 'avatar'>
+
+function RoomBindingLabel({ room }: { room: BindingRoomOption }) {
+  return (
+    <span className="flex min-w-0 items-center gap-2">
+      <GroupAvatarImage
+        avatar={room.avatar ?? room.id}
+        alt={room.name}
+        className="size-5 rounded-full"
+      />
+      <span className="min-w-0 flex-1 truncate">{room.name}</span>
+    </span>
+  )
+}
+
+function NoRoomBindingLabel() {
+  return <span className="truncate text-muted-foreground">未绑定</span>
 }
 
 export function BotListCard({
@@ -103,6 +129,16 @@ export function BotListCard({
             filteredBots.map((bot) => {
               const isPending = pendingBotIds.has(bot.id)
               const webhookUrl = buildWebhookUrl(baseUrl, bot, platforms)
+              const hasBoundRoomInList = Boolean(
+                bot.chatRoomId && rooms.some((room) => room.id === bot.chatRoomId),
+              )
+              const selectedRoom: BindingRoomOption | null = bot.chatRoomId
+                ? rooms.find((room) => room.id === bot.chatRoomId) ?? {
+                    id: bot.chatRoomId,
+                    name: bot.chatRoom?.name ?? '已绑定群聊',
+                    avatar: bot.chatRoomId,
+                  }
+                : null
               return (
                 <div
                   key={bot.id}
@@ -147,26 +183,39 @@ export function BotListCard({
                     {/* Room binding area */}
                     <div className="flex w-[220px] shrink-0 items-center px-4 py-3" style={noDragStyle}>
                       <div className="flex w-full items-center gap-1.5">
-                        <select
+                        <Select
                           value={bot.chatRoomId ?? '__none__'}
                           disabled={isPending}
-                          onChange={(event) => {
-                            const nextRoomId = event.target.value
+                          onValueChange={(nextRoomId) => {
                             if (nextRoomId === '__none__') {
                               onUnbindBot(bot)
                               return
                             }
                             onSelectRoom(bot, nextRoomId)
                           }}
-                          className="min-w-0 flex-1 rounded-lg border border-gray-200 bg-background px-2.5 py-1.5 text-xs focus:border-blue-500 focus:outline-none disabled:opacity-50"
                         >
-                          <option value="__none__">未绑定</option>
-                          {rooms.map((room) => (
-                            <option key={room.id} value={room.id}>
-                              {room.name}
-                            </option>
-                          ))}
-                        </select>
+                          <SelectTrigger
+                            size="sm"
+                            className="min-w-0 flex-1 rounded-lg border-gray-200 bg-background text-xs focus:border-blue-500"
+                          >
+                            {selectedRoom ? <RoomBindingLabel room={selectedRoom} /> : <NoRoomBindingLabel />}
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">
+                              <NoRoomBindingLabel />
+                            </SelectItem>
+                            {bot.chatRoomId && !hasBoundRoomInList && (
+                              <SelectItem value={bot.chatRoomId}>
+                                {selectedRoom ? <RoomBindingLabel room={selectedRoom} /> : '已绑定群聊'}
+                              </SelectItem>
+                            )}
+                            {rooms.map((room) => (
+                              <SelectItem key={room.id} value={room.id}>
+                                <RoomBindingLabel room={room} />
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                         {bot.chatRoomId && (
                           <button
                             disabled={isPending}

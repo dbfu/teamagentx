@@ -10,6 +10,7 @@ import {checkpointService} from '../modules/checkpoint/checkpoint.service.js';
 import {promptOptimizeService} from '../modules/prompt-optimize/prompt-optimize.service.js';
 import {spawnAcpToolInstall} from '../core/agent/acp-tool-install.service.js';
 import { deserializeAgentSpeechConfig } from '../modules/speech/speech-config.js';
+import { installDefaultSkillsForNewAgent } from '../modules/skill/preinstalled-skills.js';
 
 // 所有支持的 LLM 供应商类型（与 Prisma 保持一致）
 const LLM_PROVIDER_TYPES = [
@@ -621,6 +622,7 @@ export async function agentGateway(app: FastifyInstance) {
           llmProviderId,
           imageGeneration,
         });
+        await installDefaultSkillsForNewAgent(agent);
         return reply.code(201).send({ success: true, data: serializeAgentForResponse(agent) });
       } catch (error: any) {
         if (error.code === 'P2002') {

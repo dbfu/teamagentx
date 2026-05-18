@@ -6,7 +6,9 @@ import {
   bindBridgeBotToChatRoom,
   createBridgeBot,
   listBridgeBots,
+  updateBridgeBot,
 } from './bridge-bot-store.js';
+import { decrypt } from './crypto.js';
 
 async function createChatRoom(id: string, name: string) {
   return prisma.chatRoom.create({
@@ -90,4 +92,23 @@ test('bindBridgeBotToChatRoom supports confirmed rebind and auto-unbinds previou
 
   assert.equal(rebound.chatRoomId, 'room-bot-2');
   assert.equal(stored?.chatRoomId, 'room-bot-2');
+});
+
+test('updateBridgeBot merges partial config so unchanged secrets are preserved', async () => {
+  const bot = await createBridgeBot({
+    platform: 'feishu',
+    name: '飞书机器人',
+    config: { appId: 'app-a', appSecret: 'secret-a' },
+  });
+
+  const updated = await updateBridgeBot(bot.id, {
+    config: { defaultExternalId: 'oc_default_chat' },
+  });
+  const storedConfig = updated.config ? JSON.parse(decrypt(updated.config)) as Record<string, unknown> : null;
+
+  assert.deepEqual(storedConfig, {
+    appId: 'app-a',
+    appSecret: 'secret-a',
+    defaultExternalId: 'oc_default_chat',
+  });
 });

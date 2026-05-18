@@ -43,6 +43,15 @@ echo "  TeamAgentX Desktop Build (macOS DMG)"
 echo "======================================="
 echo ""
 
+# Step 0: 清理临时文件
+log_info "Step 0/4: Cleaning temporary files..."
+rm -rf "$SCRIPT_DIR/apps/desktop/release" 2>/dev/null
+rm -rf "$SCRIPT_DIR/apps/desktop/dist" 2>/dev/null
+rm -rf "$SCRIPT_DIR/server/dist" 2>/dev/null
+rm -rf "$SCRIPT_DIR/server/node_modules-prod" 2>/dev/null
+log_info "Temporary files cleaned"
+echo ""
+
 # Step 1: 编译后端
 log_info "Step 1/4: Building server..."
 cd "$SCRIPT_DIR/server"
