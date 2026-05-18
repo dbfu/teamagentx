@@ -503,6 +503,7 @@ body.nav-scrolled .top-nav{background:rgba(8,11,18,.85);backdrop-filter:blur(16p
   transition:color .15s,border-color .15s,background .15s;
 }
 .mobile-store-btn:hover{color:var(--t1);border-color:var(--accent);background:rgba(79,123,255,.06)}
+.mobile-store-soon{opacity:.5;cursor:default;pointer-events:none}
 
 /* ════════════════════ Footer ════════════════════ */
 footer{padding:60px var(--shell-gutter);background:var(--bg);border-top:1px solid var(--border)}
