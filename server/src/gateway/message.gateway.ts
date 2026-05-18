@@ -304,6 +304,9 @@ export async function messageGateway(app: FastifyInstance) {
     const affectedUserIds = [...new Set(affectedTodos.map(t => t.ownerUserId).filter((id) => id !== null) as string[])];
     await todoService.deleteByChatRoomId(chatRoomId);
 
+    // 2.6. 删除群聊的所有执行记录
+    await executionRecordService.deleteByChatRoomId(chatRoomId);
+
     // 通知受影响用户更新待办列表
     const io = (app as any).io as Server;
     for (const userId of affectedUserIds) {
