@@ -72,11 +72,23 @@ function pickVoice(profile?: SpeechProfile | null): SpeechSynthesisVoice | null 
   }
 
   const normalizedVoiceId = voiceId.trim().toLowerCase()
-  return voices.find((voice) =>
+  // 精确匹配优先，避免 "anna" 误命中 "Anna2"
+  const exact = voices.find((voice) =>
+    voice.voiceURI.toLowerCase() === normalizedVoiceId
+    || voice.name.toLowerCase() === normalizedVoiceId,
+  )
+  if (exact) return exact
+
+  const langExact = voices.find((voice) => voice.lang.toLowerCase() === normalizedVoiceId)
+  if (langExact) return langExact
+
+  const fuzzy = voices.find((voice) =>
     voice.name.toLowerCase().includes(normalizedVoiceId)
-    || voice.voiceURI.toLowerCase().includes(normalizedVoiceId)
-    || voice.lang.toLowerCase() === normalizedVoiceId,
-  ) || voices.find((voice) => voice.lang.toLowerCase().startsWith('zh')) || voices[0] || null
+    || voice.voiceURI.toLowerCase().includes(normalizedVoiceId),
+  )
+  if (fuzzy) return fuzzy
+
+  return voices.find((voice) => voice.lang.toLowerCase().startsWith('zh')) || voices[0] || null
 }
 
 function startBrowserRecognitionSession(language = 'zh-CN'): BrowserSpeechRecognitionSession | null {
@@ -125,7 +137,17 @@ function startBrowserRecognitionSession(language = 'zh-CN'): BrowserSpeechRecogn
       }
 
       return new Promise<string>((resolve) => {
-        resolveStop = resolve
+        // 部分 Webkit 环境下 recognition.stop() 不会触发 onend，
+        // 加 5 秒超时兜底，避免 Promise 永远 pending。
+        const timeoutId = setTimeout(() => {
+          if (resolved) return
+          resolved = true
+          resolve(finalChunks.join('').trim())
+        }, 5000)
+        resolveStop = (value) => {
+          clearTimeout(timeoutId)
+          resolve(value)
+        }
         recognition.stop()
       })
     },
@@ -204,6 +226,8 @@ async function synthesizeWithBrowser(task: SpeechTask<{ text: string }>): Promis
       } catch {
         // ignore
       }
+      // 兜底超时也需要消费 stop 标志，避免泄漏到下一次 speak
+      externalStopRequested = false
       resolve({
         kind: 'audio',
         provider: 'browser-local',
@@ -218,6 +242,8 @@ async function synthesizeWithBrowser(task: SpeechTask<{ text: string }>): Promis
 
     utterance.onend = () => {
       clearTimeout(timeoutId)
+      // 正常结束也消费一次 stop 标志，避免泄漏给下一个 utterance
+      externalStopRequested = false
       resolve({
         kind: 'audio',
         provider: 'browser-local',
@@ -230,12 +256,14 @@ async function synthesizeWithBrowser(task: SpeechTask<{ text: string }>): Promis
     }
     utterance.onerror = (event) => {
       clearTimeout(timeoutId)
+      // 先读出再立即重置，保证并发/连续播放时每次 stop 标志只被消费一次
+      const wasExternalStop = externalStopRequested
+      externalStopRequested = false
       const errorCode = (event as SpeechSynthesisErrorEvent).error
       if (errorCode === 'interrupted' || errorCode === 'canceled') {
         // 仅当外部显式调用 stopBrowserSpeechSynthesis() 时才视为"外部中断"，
         // 否则 Chrome 偶发的 interrupted/canceled 是噪音，应视为正常结束。
-        if (externalStopRequested) {
-          externalStopRequested = false
+        if (wasExternalStop) {
           reject(new Error('speech_interrupted'))
         } else {
           resolve({

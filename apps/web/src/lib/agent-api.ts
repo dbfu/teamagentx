@@ -94,6 +94,7 @@ export interface AgentSpeechBehaviorConfig {
 export interface AgentSpeechConfig {
   behavior: AgentSpeechBehaviorConfig
   profile: SpeechProfile
+  sttProfile?: SpeechProfile | null
 }
 
 export interface CreateAgentRequest {
