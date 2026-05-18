@@ -816,7 +816,7 @@ function buildExternalPlatformHelperPrompt(): string {
 
 - **已有公网地址**：直接把对应的 webhook URL 给用户填入平台控制台
 - **没有公网地址**：告诉用户：
-  > “需要一个公网 HTTPS 地址。如果没有，可以用 ngrok 临时解决：在终端运行 \`ngrok http ${config.server.port}\`，把输出的 \`https://xxxx.ngrok-free.app\` 地址告诉我。也可以在集成页面的「服务公网地址」处填入你的正式域名。”
+  > “需要一个公网 HTTPS 地址。如果没有，可以用 ngrok 临时解决：在终端运行 \`ngrok http ${config.server.port}\`，把输出的 \`https://xxxx.ngrok-free.app\` 地址告诉我。也可以在频道页面的「服务公网地址」处填入你的正式域名。”
   - 用户告诉你 URL 后，直接拼出 webhook 地址给用户：
     - 企业微信：\`{URL}/api/bridge/webhook/wecom\`
     - QQ：\`{URL}/api/bridge/webhook/qq\`

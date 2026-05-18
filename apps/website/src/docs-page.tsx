@@ -10,7 +10,7 @@ const sections = [
   { id: 'assistants', title: '助手管理' },
   { id: 'models', title: '模型管理' },
   { id: 'skills', title: '技能体系' },
-  { id: 'automation', title: '自动化与集成' },
+  { id: 'automation', title: '自动化与频道' },
   { id: 'settings', title: '设置与多端连接' },
 ] as const
 
@@ -151,7 +151,7 @@ export function DocsPage({ siteConfig }: DocsPageProps) {
             </div>
             <div className="docs-callout">
               <strong>建议的使用顺序</strong>
-              <p>先配置模型，再创建助手，然后建群聊并开始对话；技能、定时任务和外部平台集成适合在基础流程跑通后逐步引入。</p>
+              <p>先配置模型，再创建助手，然后建群聊并开始对话；技能、定时任务和外部平台频道适合在基础流程跑通后逐步引入。</p>
             </div>
           </DocsSection>
 
@@ -376,7 +376,7 @@ export function DocsPage({ siteConfig }: DocsPageProps) {
 
           <DocsSection
             id="automation"
-            title="自动化与集成"
+            title="自动化与频道"
             intro="当日常协作跑顺后，可以把 TeamAgentX 推进到“自动运行”阶段，让它定时执行并连接外部平台。"
           >
             <div className="docs-grid docs-grid-2">
@@ -387,7 +387,7 @@ export function DocsPage({ siteConfig }: DocsPageProps) {
                   <li>任务卡片会展示下次执行时间、上次执行时间、最近错误，并支持测试执行、查看历史、启停和编辑。</li>
                 </ul>
               </DocCard>
-              <DocCard title="外部平台集成" eyebrow="入口：集成">
+              <DocCard title="外部平台频道" eyebrow="入口：频道">
                 <ul className="docs-list">
                   <li>按平台维护机器人实例，录入平台字段后可直接绑定到群聊。</li>
                   <li>支持启停机器人、修改凭证、重绑房间、删除实例。</li>

@@ -695,7 +695,7 @@ function App() {
               <h4>资源</h4>
               <a href="/docs#quickstart">快速开始</a>
               <a href="/docs#workspace">消息与工作区</a>
-              <a href="/docs#automation">自动化与集成</a>
+              <a href="/docs#automation">自动化与频道</a>
               <a href="/docs#settings">设置与多端连接</a>
             </div>
             <div className="footer-col">

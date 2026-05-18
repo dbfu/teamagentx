@@ -244,7 +244,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
           <span className="text-xs">模型</span>
         </button>
 
-        {/* 集成 Tab */}
+        {/* 频道 Tab */}
         <button
           onClick={() => handleTabChange('integration')}
           className={cn(
@@ -256,7 +256,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
           style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
         >
           <Globe className="size-5" />
-          <span className="text-xs">集成</span>
+          <span className="text-xs">频道</span>
         </button>
 
         {/* 待办按钮 */}

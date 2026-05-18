@@ -166,7 +166,7 @@ export const BRIDGE_PLATFORM_PLAYBOOKS: BridgePlatformPlaybook[] = [
     consoleSteps: [
       '在企业微信管理后台创建自建应用，记录 Corp ID（我的企业页）和 Agent Secret（应用凭证页）',
       '在应用「接收消息」页，自定义填写 Token 和 EncodingAESKey（两项都可随机生成），记录下来',
-      '将「接收消息 URL」填写为 TeamAgentX 的企业微信 webhook 地址（可在 TeamAgentX 集成页查看，格式：https://你的域名/api/bridge/webhook/wecom）',
+      '将「接收消息 URL」填写为 TeamAgentX 的企业微信 webhook 地址（可在 TeamAgentX 频道页查看，格式：https://你的域名/api/bridge/webhook/wecom）',
       '开启应用消息收发权限',
     ],
     bindSteps: [
@@ -203,7 +203,7 @@ export const BRIDGE_PLATFORM_PLAYBOOKS: BridgePlatformPlaybook[] = [
     ],
     consoleSteps: [
       '在 QQ 开放平台创建机器人应用，记录 App ID 和 Client Secret',
-      '在「事件订阅」中，将回调地址填写为 TeamAgentX 的 QQ webhook 地址（可在 TeamAgentX 集成页查看，格式：https://你的域名/api/bridge/webhook/qq）',
+      '在「事件订阅」中，将回调地址填写为 TeamAgentX 的 QQ webhook 地址（可在 TeamAgentX 频道页查看，格式：https://你的域名/api/bridge/webhook/qq）',
       '开启 C2C_MESSAGE_CREATE 事件订阅（单聊消息）',
       '开启消息发送权限',
     ],

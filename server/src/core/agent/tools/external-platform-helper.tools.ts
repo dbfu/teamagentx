@@ -325,7 +325,7 @@ export function createExternalPlatformHelperTools(chatRoomId: string) {
       description: '用新凭证创建一个平台机器人实例并立即绑定到当前群聊或指定群聊。用户把凭证和名字给你后，必须调用此工具写入系统。',
       schema: z.object({
         platform: z.enum(PLATFORM_VALUES).describe('外部平台标识'),
-        name: z.string().describe('机器人实例名称，用户提供，便于在集成页区分'),
+        name: z.string().describe('机器人实例名称，用户提供，便于在频道页区分'),
         targetChatRoomId: z.string().optional().describe('要绑定的目标 TeamAgentX 群聊，默认当前群聊'),
         botToken: z.string().optional().describe('Telegram Bot Token，可选；也可放进 values.botToken'),
         values: z.record(z.string(), z.string()).optional().describe(`平台凭证键值对。请只传该平台需要的字段。\n${PLATFORM_VALUES.map((platform) => `${platform}:\n${formatCredentialList(platform)}`).join('\n')}`),
@@ -571,7 +571,7 @@ export function createExternalPlatformHelperTools(chatRoomId: string) {
             : null,
           message: baseUrl
             ? `已配置公网地址：${baseUrl}`
-            : '尚未配置公网地址。企业微信和 QQ 需要公网地址才能接收消息。可在 TeamAgentX 集成页面顶部配置，或让用户自行运行 ngrok http 3001 后告诉你 URL。',
+            : '尚未配置公网地址。企业微信和 QQ 需要公网地址才能接收消息。可在 TeamAgentX 频道页面顶部配置，或让用户自行运行 ngrok http 3001 后告诉你 URL。',
         });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : '请稍后重试';
