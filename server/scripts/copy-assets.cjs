@@ -2,11 +2,16 @@ const fs = require('fs');
 const path = require('path');
 
 const assets = [
-  {
-    from: path.join(__dirname, '..', 'src', 'core', 'agent', 'builtin-skills'),
-    to: path.join(__dirname, '..', 'dist', 'core', 'agent', 'builtin-skills'),
-  },
+  // Keep this list for non-TypeScript runtime assets that must be copied to dist.
 ];
+
+const legacyTargets = [
+  path.join(__dirname, '..', 'dist', 'core', 'agent', 'builtin-skills'),
+];
+
+for (const target of legacyTargets) {
+  fs.rmSync(target, { recursive: true, force: true });
+}
 
 for (const asset of assets) {
   if (!fs.existsSync(asset.from)) continue;

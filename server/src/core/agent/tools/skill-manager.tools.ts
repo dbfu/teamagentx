@@ -4,21 +4,18 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import { z } from 'zod';
 import { createSystemTool as tool } from './system-tool.js';
 import { agentService } from '../../../core/agent/agent.service.js';
 import { messageService } from '../../../modules/message/message.service.js';
 import { skillInstallService } from '../../../modules/skill/skill-install.service.js';
+import { getSharedSkillsDir } from '../../../modules/skill/preinstalled-skills.js';
 import { clearExecutorCacheEntries } from '../agent-handler/cache.js';
 
 // 技能管理助手的专用 ID
 export const SKILL_MANAGER_AGENT_ID = '596667f7-f901-4613-92a7-cc71d859fa22';
 
-// 共享技能目录路径
-export function getSharedSkillsDir(): string {
-  return path.join(os.homedir(), '.teamagentx', 'skills');
-}
+export { getSharedSkillsDir };
 
 // 获取对话历史工具
 export const getChatHistoryTool = tool(

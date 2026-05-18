@@ -2,7 +2,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { llmProviderService } from '../modules/llm-provider/llm-provider.service.js';
-import { getSharedSkillsDir } from '../core/agent/tools/skill-manager.tools.js';
+import {
+  getSharedSkillsDir,
+  PREINSTALLED_SKILL_NAMES,
+  SKILL_MANAGER_DEFAULT_SKILLS,
+} from '../modules/skill/preinstalled-skills.js';
 import { getSkillsHelperDefinition, SKILL_MANAGER_ID } from './system-agent-definitions.js';
 import { syncSystemAgent } from './system-agent-sync.js';
 
@@ -21,9 +25,7 @@ async function copyPreinstalledSkills(): Promise<void> {
 
   fs.mkdirSync(sharedSkillsDir, { recursive: true });
 
-  const preinstalledSkills = ['find-skills', 'skill-creator'];
-
-  for (const skillName of preinstalledSkills) {
+  for (const skillName of PREINSTALLED_SKILL_NAMES) {
     const sourceDir = path.join(preinstalledSkillsDir, skillName);
     const targetDir = path.join(sharedSkillsDir, skillName);
 
@@ -59,9 +61,7 @@ async function installDefaultSkillsToManager(): Promise<void> {
 
   fs.mkdirSync(managerSkillsDir, { recursive: true });
 
-  const defaultSkills = ['find-skills', 'skill-creator'];
-
-  for (const skillName of defaultSkills) {
+  for (const skillName of SKILL_MANAGER_DEFAULT_SKILLS) {
     const sourceDir = path.join(sharedSkillsDir, skillName);
     const targetSymlink = path.join(managerSkillsDir, skillName);
 
