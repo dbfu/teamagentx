@@ -181,6 +181,7 @@ export function IntegrationPage() {
     }
     const missingFields = activeFields
       .filter((field) => {
+        if (field.optional) return false
         const value = botFields[field.key]?.trim()
         if (editingBotId && field.secret && !value) return false
         return !value

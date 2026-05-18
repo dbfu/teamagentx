@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import prisma from '../../lib/prisma.js';
-import { bridgeService } from './bridge.service.js';
+import { bridgeService, setBridgeInboundMessageBroadcaster } from './bridge.service.js';
 
 const originalFetch = globalThis.fetch;
 
@@ -70,9 +70,10 @@ test.beforeEach(async () => {
 
 test.afterEach(() => {
   globalThis.fetch = originalFetch;
+  setBridgeInboundMessageBroadcaster(null);
 });
 
-test('receiveBridgeMessage injects default agent mention for bridge messages without userId', async () => {
+test('receiveBridgeMessage does not auto append default agent mention for bridge messages', async () => {
   const agent = await prisma.agent.create({
     data: {
       id: 'bridge-service-agent',
@@ -123,7 +124,7 @@ test('receiveBridgeMessage injects default agent mention for bridge messages wit
   });
 
   assert.ok(savedMessage);
-  assert.match(savedMessage.content, /@BridgeServiceDefaultAgent/);
+  assert.equal(savedMessage.content, '你好');
 });
 
 test('receiveBridgeMessage does not append agent mention when chat room has no default agent and no single room agent fallback', async () => {
@@ -159,6 +160,7 @@ test('receiveBridgeMessage does not append agent mention when chat room has no d
   });
 
   assert.ok(savedMessage);
+  assert.equal(savedMessage.content, '你好');
   assert.doesNotMatch(savedMessage.content, /@BridgeServiceDefaultAgent/);
 });
 
@@ -271,6 +273,140 @@ test('sendTypingIndicator notifies all bound bots with active source conversatio
   );
 });
 
+test('sendTypingIndicator and clearTypingIndicators pass source message id to platform adapters', async () => {
+  await prisma.chatRoom.create({
+    data: {
+      id: 'bridge-service-room',
+      name: 'Bridge Service Room',
+      updatedAt: new Date(),
+    },
+  });
+
+  const feishuBot = await bridgeService.createBot({
+    platform: 'feishu',
+    name: 'Feishu Bridge Bot',
+    config: { appId: 'feishu-app-id', appSecret: 'feishu-secret' },
+  });
+  await bridgeService.bindBot(feishuBot.id, 'bridge-service-room');
+
+  await bridgeService.receiveBridgeMessage({
+    botId: feishuBot.id,
+    platform: 'feishu',
+    externalId: 'oc_source_chat',
+    senderName: 'feishu-user',
+    content: 'typing source',
+    sourceMessageId: 'om_source_message',
+  });
+
+  const calls: Array<{ kind: 'typing' | 'clear'; externalId: string; sourceMessageId?: string }> = [];
+  bridgeService.registerTypingSender('feishu', async (_botId, externalId, sourceMessageId) => {
+    calls.push({ kind: 'typing', externalId, sourceMessageId });
+  });
+  bridgeService.registerTypingClearer('feishu', async (_botId, externalId, sourceMessageId) => {
+    calls.push({ kind: 'clear', externalId, sourceMessageId });
+  });
+
+  await bridgeService.sendTypingIndicator('bridge-service-room');
+  await bridgeService.clearTypingIndicators('bridge-service-room');
+
+  assert.deepEqual(calls, [
+    { kind: 'typing', externalId: 'oc_source_chat', sourceMessageId: 'om_source_message' },
+    { kind: 'clear', externalId: 'oc_source_chat', sourceMessageId: 'om_source_message' },
+  ]);
+});
+
+test('syncRoomMessage can use configured default external conversation without inbound source', async () => {
+  await prisma.chatRoom.create({
+    data: {
+      id: 'bridge-service-room',
+      name: 'Bridge Service Room',
+      updatedAt: new Date(),
+    },
+  });
+
+  const feishuBot = await bridgeService.createBot({
+    platform: 'feishu',
+    name: 'Feishu Bridge Bot',
+    config: {
+      appId: 'feishu-app-id',
+      appSecret: 'feishu-secret',
+      defaultExternalId: 'oc_default_chat',
+    },
+  });
+  await bridgeService.bindBot(feishuBot.id, 'bridge-service-room');
+
+  const sent: Array<{ externalId: string; text: string; agentName: string }> = [];
+  bridgeService.registerSender('feishu', async (_botId, externalId, text, agentName) => {
+    sent.push({ externalId, text, agentName });
+  });
+
+  await bridgeService.syncRoomMessage('bridge-service-room', '群成员A', '主动推送这条消息');
+
+  assert.deepEqual(sent, [
+    {
+      externalId: 'oc_default_chat',
+      text: '[群聊·群成员A] 主动推送这条消息',
+      agentName: '群成员A',
+    },
+  ]);
+});
+
+test('syncRoomMessage restores latest external conversation from bridge events after restart', async () => {
+  await prisma.chatRoom.create({
+    data: {
+      id: 'bridge-service-room',
+      name: 'Bridge Service Room',
+      updatedAt: new Date(),
+    },
+  });
+
+  const feishuBot = await bridgeService.createBot({
+    platform: 'feishu',
+    name: 'Feishu Bridge Bot',
+    config: {
+      appId: 'feishu-app-id',
+      appSecret: 'feishu-secret',
+    },
+  });
+  await bridgeService.bindBot(feishuBot.id, 'bridge-service-room');
+
+  await prisma.message.create({
+    data: {
+      id: 'persisted-bridge-message',
+      type: 'MESSAGE',
+      content: '[飞书·Alice] hello @claude',
+      chatRoomId: 'bridge-service-room',
+      isHuman: true,
+      updatedAt: new Date(),
+    },
+  });
+  await prisma.bridgeEvent.create({
+    data: {
+      platform: 'feishu',
+      externalId: 'oc_persisted_chat',
+      direction: 'inbound',
+      status: 'success',
+      messageId: 'persisted-bridge-message',
+      contentPreview: '[飞书·Alice] hello @claude',
+    },
+  });
+
+  const sent: Array<{ externalId: string; text: string; agentName: string }> = [];
+  bridgeService.registerSender('feishu', async (_botId, externalId, text, agentName) => {
+    sent.push({ externalId, text, agentName });
+  });
+
+  await bridgeService.syncRoomMessage('bridge-service-room', '群成员A', '重启后也要同步');
+
+  assert.deepEqual(sent, [
+    {
+      externalId: 'oc_persisted_chat',
+      text: '[群聊·群成员A] 重启后也要同步',
+      agentName: '群成员A',
+    },
+  ]);
+});
+
 test('createBot rejects incomplete platform credentials', async () => {
   await assert.rejects(
     () => bridgeService.createBot({
@@ -323,7 +459,7 @@ test('createBot rejects invalid feishu app credentials', async () => {
   );
 });
 
-test('receiveBridgeMessage falls back to the only active room agent when no default agent is configured', async () => {
+test('receiveBridgeMessage does not fall back to the only active room agent', async () => {
   const agent = await prisma.agent.create({
     data: {
       id: 'bridge-service-agent-single-room',
@@ -373,7 +509,7 @@ test('receiveBridgeMessage falls back to the only active room agent when no defa
   });
 
   assert.ok(savedMessage);
-  assert.match(savedMessage.content, /@BridgeServiceDefaultAgent/);
+  assert.equal(savedMessage.content, '你好');
 });
 
 test('receiveBridgeMessage preserves explicit agent mentions from external platforms without appending default agent', async () => {
@@ -419,8 +555,150 @@ test('receiveBridgeMessage preserves explicit agent mentions from external platf
   });
 
   assert.ok(savedMessage);
+  assert.equal(savedMessage.content, '@other-agent 你好');
   assert.equal(savedMessage.content.includes('@BridgeServiceDefaultAgent'), false);
-  assert.match(savedMessage.content, /@other-agent/);
+});
+
+test('receiveBridgeMessage stores Feishu inbound text without content prefix or auto agent mention', async () => {
+  const agent = await prisma.agent.create({
+    data: {
+      id: 'bridge-service-agent',
+      name: 'BridgeServiceDefaultAgent',
+      prompt: 'test prompt',
+      updatedAt: new Date(),
+    },
+  });
+
+  await prisma.chatRoom.create({
+    data: {
+      id: 'bridge-service-room',
+      name: 'Bridge Service Room',
+      defaultAgentId: agent.id,
+      updatedAt: new Date(),
+    },
+  });
+
+  const bot = await bridgeService.createBot({
+    platform: 'feishu',
+    name: 'Feishu Bridge Bot',
+    config: {
+      appId: 'feishu-app-id',
+      appSecret: 'feishu-secret',
+    },
+  });
+  await bridgeService.bindBot(bot.id, 'bridge-service-room');
+
+  await bridgeService.receiveBridgeMessage({
+    botId: bot.id,
+    platform: 'feishu',
+    externalId: 'oc_feishu_chat',
+    senderName: 'ou_1ce0b2e7a131d7d54cf1fd026ee3f81d',
+    content: '你好 @claude',
+  });
+
+  const savedMessage = await prisma.message.findFirst({
+    where: {
+      chatRoomId: 'bridge-service-room',
+    },
+    orderBy: { time: 'desc' },
+  });
+
+  assert.ok(savedMessage);
+  assert.equal(savedMessage.content, '你好 @claude');
+});
+
+test('receiveBridgeMessage broadcasts every platform inbound message with consistent sender display', async () => {
+  const agent = await prisma.agent.create({
+    data: {
+      id: 'bridge-service-agent',
+      name: 'BridgeServiceDefaultAgent',
+      prompt: 'test prompt',
+      updatedAt: new Date(),
+    },
+  });
+
+  await prisma.chatRoom.create({
+    data: {
+      id: 'bridge-service-room',
+      name: 'Bridge Service Room',
+      defaultAgentId: agent.id,
+      updatedAt: new Date(),
+    },
+  });
+
+  const broadcasts: Array<{ content: string; chatRoomId: string; user?: string }> = [];
+  setBridgeInboundMessageBroadcaster((message, chatRoomId) => {
+    broadcasts.push({ content: message.content, chatRoomId, user: message.user });
+  });
+
+  const cases = [
+    {
+      platform: 'telegram' as const,
+      name: 'Telegram Bridge Bot',
+      externalId: 'tg-chat-1',
+      expectedUser: 'Telegram:tg-chat-1',
+      botToken: 'telegram-token-consistent-display',
+    },
+    {
+      platform: 'feishu' as const,
+      name: 'Feishu Bridge Bot',
+      externalId: 'oc_feishu_chat',
+      expectedUser: '飞书:oc_feishu_chat',
+      config: { appId: 'feishu-app-id', appSecret: 'feishu-secret' },
+    },
+    {
+      platform: 'dingtalk' as const,
+      name: 'DingTalk Bridge Bot',
+      externalId: 'dd-chat-1',
+      expectedUser: '钉钉:dd-chat-1',
+      config: { appKey: 'dd-app-key', appSecret: 'dd-secret' },
+    },
+    {
+      platform: 'wecom' as const,
+      name: 'WeCom Bridge Bot',
+      externalId: 'wx-chat-1',
+      expectedUser: '企微:wx-chat-1',
+      config: {
+        corpId: 'wx-corp',
+        agentSecret: 'wx-agent-secret',
+        token: 'wx-token',
+        encodingAESKey: 'wx-encoding-aes-key',
+      },
+    },
+    {
+      platform: 'qq' as const,
+      name: 'QQ Bridge Bot',
+      externalId: 'qq-chat-1',
+      expectedUser: 'QQ:qq-chat-1',
+      config: { appId: 'qq-app-id', clientSecret: 'qq-secret' },
+    },
+  ];
+
+  for (const bridgeCase of cases) {
+    const bot = await bridgeService.createBot({
+      platform: bridgeCase.platform,
+      name: bridgeCase.name,
+      botToken: 'botToken' in bridgeCase ? bridgeCase.botToken : undefined,
+      config: 'config' in bridgeCase ? bridgeCase.config : undefined,
+    });
+    await bridgeService.bindBot(bot.id, 'bridge-service-room');
+    await bridgeService.receiveBridgeMessage({
+      botId: bot.id,
+      platform: bridgeCase.platform,
+      externalId: bridgeCase.externalId,
+      senderName: 'external-user',
+      content: `原文 ${bridgeCase.platform}`,
+    });
+  }
+
+  assert.deepEqual(
+    broadcasts,
+    cases.map((bridgeCase) => ({
+      content: `原文 ${bridgeCase.platform}`,
+      chatRoomId: 'bridge-service-room',
+      user: bridgeCase.expectedUser,
+    })),
+  );
 });
 
 test('bridge events store content preview for new inbound and outbound syncs', async () => {

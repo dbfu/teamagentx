@@ -30,7 +30,7 @@ function isDuplicateCredentialError(err: unknown): err is DuplicateCredentialErr
 
 const PLATFORM_CONFIG_FIELDS: Record<string, string[]> = {
   telegram: ['botToken'],
-  feishu: ['appId', 'appSecret'],
+  feishu: ['appId', 'appSecret', 'defaultExternalId'],
   dingtalk: ['appKey', 'appSecret'],
   wecom: ['corpId', 'agentSecret', 'token', 'encodingAESKey'],
   qq: ['appId', 'clientSecret'],

@@ -5,7 +5,9 @@ export type Platform = 'telegram' | 'feishu' | 'dingtalk' | 'wecom' | 'qq'
 export interface BridgePlatformConfigFieldDefinition {
   key: string
   label: string
+  description?: string
   secret?: boolean
+  optional?: boolean
 }
 
 export interface BridgePlatformDefinition {

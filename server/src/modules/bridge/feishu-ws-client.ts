@@ -10,7 +10,6 @@ const { WSClient, EventDispatcher } = lark;
 
 const wsClients = new Map<string, InstanceType<typeof WSClient>>();
 const stoppedBotIds = new Set<string>();
-const reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 // Fix #55: cache for resolved sender names (open_id -> display name), TTL 1 hour
 const nameCache = new Map<string, { name: string; expiresAt: number }>();
@@ -32,9 +31,6 @@ export function setFeishuBindCodeHandler(handler: BindCodeHandler) {
   bindCodeHandler = handler;
 }
 
-const MAX_RETRIES = 20;
-const BASE_DELAY_MS = 2000;
-const MAX_DELAY_MS = 60000;
 const NAME_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 // Fix #55: resolve open_id to display name, with cache
@@ -75,107 +71,105 @@ async function resolveFeishuSenderName(
   return openId;
 }
 
-// Fix #41: supervisor loop with exponential backoff
+// The Lark SDK resolves start() once the client is ready; it keeps the
+// websocket and reconnect loop alive internally after that.
 async function supervisedStart(
   botId: string,
   appId: string,
   appSecret: string,
   log: { info: (...a: unknown[]) => void; error: (...a: unknown[]) => void; warn: (...a: unknown[]) => void },
 ): Promise<void> {
-  let attempt = 0;
+  try {
+    const adapter = getBridgeInboundTextAdapter('feishu');
 
-  while (!stoppedBotIds.has(botId)) {
-    if (attempt >= MAX_RETRIES) {
-      log.error({ botId }, '[Bridge/Feishu-WS] 达到最大重试次数，需要手动重启 bot');
-      wsClients.delete(botId);
-      return;
-    }
+    const dispatcher = new EventDispatcher({}).register({
+      'im.message.receive_v1': async (data) => {
+        try {
+          const msg = data.message;
+          if (!msg?.chat_id) return;
 
-    try {
-      const adapter = getBridgeInboundTextAdapter('feishu');
-
-      const dispatcher = new EventDispatcher({}).register({
-        'im.message.receive_v1': async (data) => {
-          try {
-            const msg = data.message;
-            if (!msg?.chat_id) return;
-
-            const externalId = msg.chat_id;
-
-            // 提取文本
-            let rawText = '';
-            try {
-              const parsed = JSON.parse(msg.content ?? '{}') as { text?: string };
-              rawText = parsed.text ?? '';
-            } catch {
-              rawText = msg.content ?? '';
-            }
-
-            const text = adapter.normalizeText(rawText);
-            if (!text) return;
-
-            // 处理 /bind CODE
-            const bindCode = adapter.extractBindCode(text);
-            if (bindCode && bindCodeHandler) {
-              const sendReply = async (replyText: string) => {
-                await sendFeishuMessage(appId, appSecret, externalId, replyText, log);
-              };
-              await bindCodeHandler('feishu', botId, externalId, `飞书群 ${externalId}`, bindCode, sendReply, log);
-              return;
-            }
-
-            const openId = data.sender?.sender_id?.open_id ?? '未知用户';
-            // Fix #55: resolve display name from open_id
-            const senderName = openId !== '未知用户'
-              ? await resolveFeishuSenderName(openId, appId, appSecret, log)
-              : openId;
-
-            // Fix #43: add dedupeKey to prevent duplicate responses on reconnect
-            await bridgeService.receiveBridgeMessage({
-              botId,
-              platform: 'feishu',
-              externalId,
-              senderName,
-              content: text,
-              dedupeKey: msg.message_id ? `feishu:${msg.message_id}` : undefined,
-            });
-          } catch (err) {
-            log.error({ err }, '[Bridge/Feishu-WS] 消息处理失败');
+          const senderType = data.sender?.sender_type;
+          if (senderType && senderType !== 'user') {
+            log.info(
+              { botId, senderType, messageId: msg.message_id },
+              '[Bridge/Feishu-WS] 忽略非用户消息，避免机器人自发消息回环',
+            );
+            return;
           }
-        },
-      });
 
-      const wsClient = new WSClient({ appId, appSecret });
-      wsClients.set(botId, wsClient);
-      log.info({ botId, attempt }, '[Bridge/Feishu-WS] 启动 WebSocket 长连接...');
+          if (msg.message_type === 'interactive') {
+            log.info(
+              { botId, messageId: msg.message_id },
+              '[Bridge/Feishu-WS] 忽略飞书卡片消息，避免机器人自发消息回环',
+            );
+            return;
+          }
 
-      // Fix #37: properly catch promise rejection from wsClient.start()
-      await wsClient.start({ eventDispatcher: dispatcher });
+          const externalId = msg.chat_id;
 
-      // start() resolved normally — reset retry counter but wait before reconnecting
-      attempt = 0;
-      if (stoppedBotIds.has(botId)) return;
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, BASE_DELAY_MS);
-        reconnectTimers.set(botId, timer);
-      });
-      reconnectTimers.delete(botId);
-    } catch (err) {
-      log.error({ err, botId, attempt }, '[Bridge/Feishu-WS] WebSocket 连接失败');
-      wsClients.delete(botId);
+          // 提取文本
+          let rawText = '';
+          try {
+            const parsed = JSON.parse(msg.content ?? '{}') as { text?: string };
+            rawText = parsed.text ?? '';
+          } catch {
+            rawText = msg.content ?? '';
+          }
 
-      if (stoppedBotIds.has(botId)) return;
+          const text = adapter.normalizeText(rawText);
+          if (!text) return;
 
-      attempt++;
-      const delay = Math.min(BASE_DELAY_MS * Math.pow(2, attempt - 1), MAX_DELAY_MS);
-      log.info({ botId, attempt, delayMs: delay }, '[Bridge/Feishu-WS] 将在延迟后重连...');
+          // 处理 /bind CODE
+          const bindCode = adapter.extractBindCode(text);
+          if (bindCode && bindCodeHandler) {
+            const sendReply = async (replyText: string) => {
+              await sendFeishuMessage(appId, appSecret, externalId, replyText, log);
+            };
+            await bindCodeHandler('feishu', botId, externalId, `飞书群 ${externalId}`, bindCode, sendReply, log);
+            return;
+          }
 
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, delay);
-        reconnectTimers.set(botId, timer);
-      });
-      reconnectTimers.delete(botId);
-    }
+          const openId = data.sender?.sender_id?.open_id ?? '未知用户';
+          // Fix #55: resolve display name from open_id
+          const senderName = openId !== '未知用户'
+            ? await resolveFeishuSenderName(openId, appId, appSecret, log)
+            : openId;
+
+          // Fix #43: add dedupeKey to prevent duplicate responses on reconnect
+          await bridgeService.receiveBridgeMessage({
+            botId,
+            platform: 'feishu',
+            externalId,
+            senderName,
+            content: text,
+            dedupeKey: msg.message_id ? `feishu:${msg.message_id}` : undefined,
+            sourceMessageId: msg.message_id,
+          });
+        } catch (err) {
+          log.error({ err }, '[Bridge/Feishu-WS] 消息处理失败');
+        }
+      },
+    });
+
+    const wsClient = new WSClient({
+      appId,
+      appSecret,
+      onReady: () => log.info({ botId }, '[Bridge/Feishu-WS] WebSocket 长连接已就绪'),
+      onReconnecting: () => log.warn({ botId }, '[Bridge/Feishu-WS] WebSocket 断开，SDK 正在重连'),
+      onReconnected: () => log.info({ botId }, '[Bridge/Feishu-WS] WebSocket 已重连'),
+      onError: (err) => {
+        log.error({ err, botId }, '[Bridge/Feishu-WS] WebSocket 连接失败，需要检查飞书应用长连接配置或连接数量');
+        wsClients.delete(botId);
+      },
+    });
+    wsClients.set(botId, wsClient);
+    log.info({ botId }, '[Bridge/Feishu-WS] 启动 WebSocket 长连接...');
+
+    // Fix #37: properly catch promise rejection from wsClient.start()
+    await wsClient.start({ eventDispatcher: dispatcher });
+  } catch (err) {
+    log.error({ err, botId }, '[Bridge/Feishu-WS] WebSocket 启动异常');
+    wsClients.delete(botId);
   }
 }
 
@@ -202,13 +196,6 @@ export async function startFeishuWSClient(
 
 export function stopFeishuWSClient(botId: string): void {
   stoppedBotIds.add(botId);
-
-  // Cancel any pending reconnect timer
-  const timer = reconnectTimers.get(botId);
-  if (timer) {
-    clearTimeout(timer);
-    reconnectTimers.delete(botId);
-  }
 
   const wsClient = wsClients.get(botId);
   if (wsClient) {

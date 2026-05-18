@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   BRIDGE_PLATFORM_ADAPTERS,
   registerBridgePlatformAdapters,
+  markdownToFeishuCard,
   markdownToTelegramHtml,
 } from './platform-senders.js';
 
@@ -38,7 +39,7 @@ test('bridge platform adapters expose all supported platforms exactly once', () 
 });
 
 test('registerBridgePlatformAdapters registers every adapter sender', () => {
-  const registrations: Array<{ platform: string; sender: unknown; kind: 'message' | 'typing' }> = [];
+  const registrations: Array<{ platform: string; sender: unknown; kind: 'message' | 'typing' | 'clearTyping' }> = [];
 
   registerBridgePlatformAdapters({
     registerSender(platform, sender) {
@@ -46,6 +47,9 @@ test('registerBridgePlatformAdapters registers every adapter sender', () => {
     },
     registerTypingSender(platform, sender) {
       registrations.push({ platform, sender, kind: 'typing' });
+    },
+    registerTypingClearer(platform, sender) {
+      registrations.push({ platform, sender, kind: 'clearTyping' });
     },
   });
 
@@ -56,6 +60,14 @@ test('registerBridgePlatformAdapters registers every adapter sender', () => {
   assert.deepEqual(
     registrations.filter((item) => item.kind === 'message').map((item) => item.platform),
     BRIDGE_PLATFORM_ADAPTERS.map((adapter) => adapter.platform),
+  );
+  assert.deepEqual(
+    registrations.filter((item) => item.kind === 'typing').map((item) => item.platform),
+    ['telegram', 'feishu'],
+  );
+  assert.deepEqual(
+    registrations.filter((item) => item.kind === 'clearTyping').map((item) => item.platform),
+    ['feishu'],
   );
   for (const item of registrations) {
     assert.equal(typeof item.sender, 'function');
@@ -90,6 +102,32 @@ test('markdownToTelegramHtml escapes HTML special characters in plain text', () 
   assert.ok(result.includes('&amp;'), `expected &amp; in: ${result}`);
   assert.ok(result.includes('&lt;'), `expected &lt; in: ${result}`);
   assert.ok(result.includes('&gt;'), `expected &gt; in: ${result}`);
+});
+
+test('markdownToFeishuCard renders assistant name through card markdown', () => {
+  const result = markdownToFeishuCard('claude', '你好') as {
+    config: Record<string, unknown>;
+    elements: Array<{ tag: string; content: string }>;
+  };
+  assert.deepEqual(result.config, { wide_screen_mode: true });
+  assert.deepEqual(result.elements, [
+    {
+      tag: 'markdown',
+      content: "🤖 <font color='blue'>**claude**</font> 消息\n\n你好",
+    },
+  ]);
+});
+
+test('markdownToFeishuCard renders room user messages without bot icon', () => {
+  const result = markdownToFeishuCard('admin', '[群聊·admin] @claude 你叫什么名字') as {
+    elements: Array<{ tag: string; content: string }>;
+  };
+  assert.deepEqual(result.elements, [
+    {
+      tag: 'markdown',
+      content: "<font color='green'>**admin**</font> 消息\n\n@claude 你叫什么名字",
+    },
+  ]);
 });
 
 // ─── Telegram HTML fallback test ───
