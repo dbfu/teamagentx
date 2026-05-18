@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button';
-import { llmProviderApi, type CreateLlmProviderRequest, type LlmProvider, type UpdateLlmProviderRequest } from '@/lib/llm-provider-api';
+import { llmProviderApi, type AudioUsage, type CreateLlmProviderRequest, type LlmProvider, type UpdateLlmProviderRequest } from '@/lib/llm-provider-api';
 import { tokenUsageApi, type TokenUsageByProvider } from '@/lib/token-usage-api';
+import { getProviderMeta as getAudioProviderMeta } from '@/lib/voice-provider-metadata';
 import { cn } from '@/lib/utils';
 import { Activity, BadgeCheck, Copy, Cpu, Download, Eye, EyeOff, Image, Mic, Pencil, Plus, Power, RefreshCw, Search, ServerCog, Sparkles, Star, Trash2, Upload, Video, Wifi, WifiOff, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
@@ -68,13 +69,28 @@ type ExportableProvider = Required<Pick<
   'name' | 'apiKey' | 'model'
 >> & Pick<
   CreateLlmProviderRequest,
-  'type' | 'modelType' | 'apiProtocol' | 'apiUrl' | 'imageProvider' | 'imageApiType' | 'isActive' | 'isDefault'
+  'type' | 'modelType' | 'apiProtocol' | 'apiUrl' | 'sttModel' | 'imageProvider' | 'imageApiType' | 'isActive' | 'isDefault'
 >
 
 interface ModelProvidersImportPayload {
   version: 1
   exportedAt: string
   providers: ExportableProvider[]
+}
+
+function isAudioSttDefaultEligible(provider: Pick<LlmProvider, 'modelType' | 'audioUsage'>): boolean {
+  return provider.modelType !== 'audio' || provider.audioUsage !== 'tts'
+}
+
+function getAudioUsageLabel(audioUsage: AudioUsage): string {
+  switch (audioUsage) {
+    case 'tts':
+      return '仅 TTS'
+    case 'stt':
+      return '仅 STT'
+    default:
+      return 'TTS + STT'
+  }
 }
 
 function toExportableProvider(provider: LlmProvider): ExportableProvider {
@@ -86,6 +102,7 @@ function toExportableProvider(provider: LlmProvider): ExportableProvider {
     apiUrl: provider.apiUrl || '',
     apiKey: provider.apiKey,
     model: provider.model,
+    sttModel: provider.sttModel,
     imageProvider: provider.imageProvider,
     imageApiType: provider.imageApiType,
     isActive: provider.isActive,
@@ -174,6 +191,8 @@ export function ModelPage() {
     apiUrl: '',
     apiKey: '',
     model: '',
+    sttModel: null,
+    audioUsage: 'both',
     imageProvider: 'openai',
     imageApiType: 'sync',
     isActive: true,
@@ -196,6 +215,22 @@ export function ModelPage() {
   // 搜索与筛选
   const [searchQuery, setSearchQuery] = useState('')
   const [filterType, setFilterType] = useState<'all' | 'text' | 'image' | 'video' | 'audio'>('all')
+
+  // 自动填充音频模型名：当 apiUrl 匹配已知供应商时，填入推荐模型名
+  const autoFilledUrlRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (formData.modelType !== 'audio') return
+    const url = (formData.apiUrl ?? '').trim()
+    if (!url || url === autoFilledUrlRef.current) return
+    const meta = getAudioProviderMeta(url)
+    if (!meta) return
+    autoFilledUrlRef.current = url
+    setFormData((prev) => ({
+      ...prev,
+      model: prev.model || (meta.ttsModels[0] ?? ''),
+      sttModel: prev.sttModel ?? (meta.sttModels[0] ?? null),
+    }))
+  }, [formData.apiUrl, formData.modelType])
 
   // 加载供应商列表
   useEffect(() => {
@@ -286,6 +321,8 @@ export function ModelPage() {
       apiUrl: '',
       apiKey: '',
       model: '',
+      sttModel: null,
+      audioUsage: 'both' as AudioUsage,
       imageProvider: 'openai',
       imageApiType: 'sync',
       isActive: true,
@@ -307,6 +344,8 @@ export function ModelPage() {
       apiUrl,
       apiKey: provider.apiKey,
       model: provider.model,
+      sttModel: provider.sttModel ?? null,
+      audioUsage: ((provider as any).audioUsage ?? 'both') as AudioUsage,
       imageProvider,
       imageApiType: provider.imageApiType || 'sync',
       isActive: provider.isActive,
@@ -329,6 +368,8 @@ export function ModelPage() {
       apiUrl,
       apiKey: provider.apiKey,
       model: provider.model,
+      sttModel: provider.sttModel ?? null,
+      audioUsage: ((provider as any).audioUsage ?? 'both') as AudioUsage,
       imageProvider,
       imageApiType: provider.imageApiType || 'sync',
       isActive: true,
@@ -348,9 +389,13 @@ export function ModelPage() {
       return
     }
 
+    const payload = formData.modelType === 'audio' && formData.audioUsage === 'tts'
+      ? { ...formData, isDefault: false }
+      : formData
+
     if (editingProvider) {
       // 更新
-      const response = await llmProviderApi.update(editingProvider.id, formData as UpdateLlmProviderRequest)
+      const response = await llmProviderApi.update(editingProvider.id, payload as UpdateLlmProviderRequest)
       if (response.success) {
         toast.success('更新成功')
         setIsDialogOpen(false)
@@ -360,7 +405,7 @@ export function ModelPage() {
       }
     } else {
       // 创建
-      const response = await llmProviderApi.create(formData)
+      const response = await llmProviderApi.create(payload)
       if (response.success) {
         toast.success('创建成功')
         setIsDialogOpen(false)
@@ -401,7 +446,7 @@ export function ModelPage() {
   const handleSetDefault = async (provider: LlmProvider) => {
     const response = await llmProviderApi.setDefault(provider.id)
     if (response.success) {
-      toast.success('已设为默认')
+      toast.success(provider.modelType === 'audio' ? '已设为默认 STT' : '已设为默认')
       loadProviders()
     } else {
       toast.error(response.error || '操作失败')
@@ -684,7 +729,7 @@ export function ModelPage() {
                         {provider.isDefault && (
                           <span className="inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
                             <Star className="size-3" />
-                            默认
+                            {provider.modelType === 'audio' ? '默认 STT' : '默认'}
                           </span>
                         )}
                       </div>
@@ -694,6 +739,8 @@ export function ModelPage() {
                           <span>{provider._count?.agents || 0} 个助手</span>
                         ) : provider.modelType === 'image' ? (
                           <span>{provider.imageProvider || 'custom'} / {provider.imageApiType || 'sync'}</span>
+                        ) : provider.modelType === 'audio' ? (
+                          <span>{getAudioUsageLabel(provider.audioUsage)}</span>
                         ) : (
                           <span>预留配置</span>
                         )}
@@ -762,11 +809,11 @@ export function ModelPage() {
                       >
                         <Copy className="size-3.5" />
                       </button>
-                      {!provider.isDefault && provider.isActive && (
+                      {!provider.isDefault && provider.isActive && isAudioSttDefaultEligible(provider) && (
                         <button
                           onClick={() => handleSetDefault(provider)}
                           className="inline-flex size-7 items-center justify-center rounded-[calc(var(--radius-control)-0.125rem)] text-muted-foreground transition-colors hover:bg-[var(--surface-subtle)] hover:text-primary"
-                          title="设为默认"
+                          title={provider.modelType === 'audio' ? '设为默认 STT' : '设为默认'}
                         >
                           <Star className="size-3.5" />
                         </button>
@@ -833,10 +880,11 @@ export function ModelPage() {
                   <label className="mb-1.5 block text-sm font-medium text-foreground">
                     模型类型 <span className="text-red-500">*</span>
                   </label>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-3 gap-2">
                     {[
                       { value: 'text', label: '文本', icon: Cpu },
                       { value: 'image', label: '图片', icon: Image },
+                      { value: 'audio', label: '语音', icon: Mic },
                     ].map(item => {
                       const Icon = item.icon
                       return (
@@ -852,6 +900,14 @@ export function ModelPage() {
                                 imageProvider: prev.imageProvider || 'openai',
                                 imageApiType: prev.imageApiType || 'sync',
                               }, prev.imageProvider || 'openai')
+                              : item.value === 'audio'
+                              ? {
+                                ...prev,
+                                modelType: 'audio',
+                                apiProtocol: 'openai',
+                                model: '',
+                                apiUrl: '',
+                              }
                               : {
                                 ...prev,
                                 modelType: 'text',
@@ -871,7 +927,61 @@ export function ModelPage() {
                       )
                     })}
                   </div>
+                  {formData.modelType === 'audio' && (formData.apiUrl ?? '').trim() && (() => {
+                    const base = (formData.apiUrl ?? '').trim().replace(/\/+$/, '')
+                    return (
+                      <div className="mt-1.5 space-y-0.5 text-xs text-muted-foreground">
+                        <p>只需填写 base URL，系统会自动追加接口路径：</p>
+                        {(formData.audioUsage === 'tts' || formData.audioUsage === 'both') && (
+                          <p className="font-mono">
+                            朗读：<span className="text-foreground">{base}</span>/audio/speech
+                          </p>
+                        )}
+                        {(formData.audioUsage === 'stt' || formData.audioUsage === 'both') && (
+                          <p className="font-mono">
+                            识别：<span className="text-foreground">{base}</span>/audio/transcriptions
+                          </p>
+                        )}
+                      </div>
+                    )
+                  })()}
+                  {formData.modelType === 'audio' && !(formData.apiUrl ?? '').trim() && (
+                    <p className="mt-1.5 text-xs text-muted-foreground">
+                      使用 OpenAI 兼容协议（/audio/speech 朗读、/audio/transcriptions 识别）。
+                    </p>
+                  )}
                 </div>
+
+                {formData.modelType === 'audio' && (
+                <div className="mb-4">
+                  <label className="mb-1.5 block text-sm font-medium text-foreground">用途</label>
+                  <div className="flex gap-2">
+                    {([
+                      { value: 'tts', label: '仅 TTS 朗读' },
+                      { value: 'stt', label: '仅 STT 识别' },
+                      { value: 'both', label: 'TTS + STT' },
+                    ] as const).map(item => (
+                      <button
+                        key={item.value}
+                        type="button"
+                        onClick={() => setFormData(prev => ({
+                          ...prev,
+                          audioUsage: item.value,
+                          isDefault: item.value === 'tts' ? false : prev.isDefault,
+                        }))}
+                        className={cn(
+                          'flex h-8 items-center rounded-md border px-3 text-xs font-medium transition-colors',
+                          formData.audioUsage === item.value
+                            ? 'border-primary bg-primary/10 text-primary'
+                            : 'border-border text-muted-foreground hover:border-primary/50 hover:bg-accent'
+                        )}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                )}
 
                 {formData.modelType === 'image' && (
                   <div className="grid grid-cols-2 gap-4">
@@ -923,6 +1033,8 @@ export function ModelPage() {
                     onChange={e => setFormData(prev => ({ ...prev, apiUrl: e.target.value }))}
                     placeholder={formData.modelType === 'image'
                       ? imageProviderPlaceholder(formData.imageProvider)
+                      : formData.modelType === 'audio'
+                      ? 'https://api.siliconflow.cn/v1'
                       : 'https://api.anthropic.com'}
                     className="ta-input w-full shadow-none"
                   />
@@ -976,17 +1088,46 @@ export function ModelPage() {
                 </div>
 
                 {/* 模型 */}
+                {formData.modelType !== 'audio' || formData.audioUsage !== 'stt' ? (
                 <div className="mb-4">
                   <label className="mb-1.5 block text-sm font-medium text-foreground">
-                    模型 <span className="text-red-500">*</span>
+                    {formData.modelType === 'audio' ? 'TTS 模型（朗读）' : '模型'} <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="text"
                     value={formData.model}
                     onChange={e => setFormData(prev => ({ ...prev, model: e.target.value }))}
-                    placeholder="输入模型 ID"
+                    placeholder={formData.modelType === 'audio' ? 'FunAudioLLM/CosyVoice2-0.5B' : '输入模型 ID'}
                     className="ta-input w-full shadow-none"
                   />
+                </div>
+                ) : null}
+
+                {formData.modelType === 'audio' && (formData.audioUsage === 'stt' || formData.audioUsage === 'both') && (
+                <div className="mb-4">
+                  <label className="mb-1.5 block text-sm font-medium text-foreground">
+                    {formData.audioUsage === 'stt' ? 'STT 模型（识别）' : 'STT 模型（识别）'} <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.audioUsage === 'stt' ? formData.model : (formData.sttModel ?? '')}
+                    onChange={e => {
+                      if (formData.audioUsage === 'stt') {
+                        setFormData(prev => ({ ...prev, model: e.target.value }))
+                      } else {
+                        setFormData(prev => ({ ...prev, sttModel: e.target.value || null }))
+                      }
+                    }}
+                    placeholder="FunAudioLLM/SenseVoiceSmall"
+                    className="ta-input w-full shadow-none"
+                  />
+                  {formData.audioUsage === 'both' && (
+                    <p className="mt-1.5 text-xs text-muted-foreground">留空则语音输入也使用 TTS 模型。</p>
+                  )}
+                </div>
+                )}
+
+                {formData.modelType !== 'audio' && <div className="mb-4">
                   {formData.modelType === 'image' && formData.imageProvider === 'openrouter' && (
                     <div className="mt-1.5 space-y-0.5 text-xs text-muted-foreground">
                       <p>OpenRouter 这里必须填写支持图片输出的模型 ID，不能填普通文本模型。</p>
@@ -1011,7 +1152,7 @@ export function ModelPage() {
                       <p>横竖比例和分辨率建议通过语义化请求生成 `aspect_ratio` / `resolution` 额外参数。</p>
                     </div>
                   )}
-                </div>
+                </div>}
 
                 {/* API 协议 */}
                 {formData.modelType === 'text' && (
@@ -1052,18 +1193,20 @@ export function ModelPage() {
                 )}
 
                 {/* 默认模型 */}
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="isDefault"
-                    checked={formData.isDefault}
-                    onChange={e => setFormData(prev => ({ ...prev, isDefault: e.target.checked }))}
-                    className="rounded border-input"
-                  />
-                  <label htmlFor="isDefault" className="text-sm text-foreground">
-                    设为默认模型
-                  </label>
-                </div>
+                {!(formData.modelType === 'audio' && formData.audioUsage === 'tts') && (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="isDefault"
+                      checked={formData.isDefault}
+                      onChange={e => setFormData(prev => ({ ...prev, isDefault: e.target.checked }))}
+                      className="rounded border-input"
+                    />
+                    <label htmlFor="isDefault" className="text-sm text-foreground">
+                      {formData.modelType === 'audio' ? '设为默认 STT' : '设为默认模型'}
+                    </label>
+                  </div>
+                )}
               </div>
 
               {/* Footer */}

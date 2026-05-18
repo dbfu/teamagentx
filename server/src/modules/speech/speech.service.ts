@@ -2,6 +2,18 @@ import type { SpeechProvider } from './domain/provider.js';
 import type { SpeechArtifact, SpeechSession, SpeechTask } from './domain/types.js';
 import { SpeechRouter } from './speech.router.js';
 
+/**
+ * #48/#12: 配置/校验类错误，不可通过 fallback 恢复。
+ * provider 层通过 throw new SpeechConfigError(...) 标记此类错误，
+ * service 层通过 instanceof 判断，无需字符串匹配。
+ */
+export class SpeechConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SpeechConfigError';
+  }
+}
+
 export class SpeechService {
   constructor(private readonly router: SpeechRouter) {}
 
@@ -54,8 +66,10 @@ export class SpeechService {
 }
 
 function isUnrecoverableError(error: unknown): boolean {
+  // #48: 优先用 instanceof 判断，保留字符串匹配作为兜底
+  if (error instanceof SpeechConfigError) return true;
   if (!(error instanceof Error)) return false;
   const message = error.message || '';
-  const keywords = ['仅支持', 'Invalid', '不支持', 'empty', '非法字符', '不允许', '无效'];
+  const keywords = ['仅支持', 'Invalid', '不支持', 'empty', '非法字符', '不允许', '无效', '未配置'];
   return keywords.some((kw) => message.includes(kw));
 }

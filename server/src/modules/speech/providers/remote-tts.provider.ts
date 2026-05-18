@@ -8,6 +8,9 @@ type RemoteTtsDependencies = {
   providerId?: string;
 };
 
+const SILICONFLOW_COSYVOICE2_MODEL = 'FunAudioLLM/CosyVoice2-0.5B';
+const SILICONFLOW_COSYVOICE2_DEFAULT_VOICE = `${SILICONFLOW_COSYVOICE2_MODEL}:anna`;
+
 const VENDOR_OPTION_WHITELIST = new Set([
   'speed',
   'pitch',
@@ -18,8 +21,9 @@ const VENDOR_OPTION_WHITELIST = new Set([
 ]);
 
 function getSpeechEndpoint(apiUrl?: string | null): string {
-  const trimmed = (apiUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
-  if (trimmed.endsWith('/audio/speech')) return trimmed;
+  if (!apiUrl?.trim()) throw new Error('语音服务地址未配置');
+  const trimmed = apiUrl.replace(/\/+$/, '');
+  if (trimmed.toLowerCase().endsWith('/audio/speech')) return trimmed;
   return `${trimmed}/audio/speech`;
 }
 
@@ -48,7 +52,9 @@ function isPrivateOrReservedHost(hostname: string): boolean {
     if (ipv6Raw === '::1' || ipv6Raw === '0:0:0:0:0:0:0:1') return true;
     // fc00::/7 唯一本地地址（私有）
     if (ipv6Raw.startsWith('fc') || ipv6Raw.startsWith('fd')) return true;
-    // fe80::/10 链路本地
+    // fec0::/10 站点本地（已废弃，但仍需阻断）
+    if (ipv6Raw.startsWith('fec') || ipv6Raw.startsWith('fed') || ipv6Raw.startsWith('fee') || ipv6Raw.startsWith('fef')) return true;
+    // fe80::/10 链路本地（fe80 ~ febf）
     if (ipv6Raw.startsWith('fe8') || ipv6Raw.startsWith('fe9') || ipv6Raw.startsWith('fea') || ipv6Raw.startsWith('feb')) return true;
     // ::ffff:0:0/96 IPv4 映射地址，提取后检查 IPv4 部分
     if (ipv6Raw.startsWith('::ffff:')) {
@@ -69,14 +75,22 @@ function validateRemoteUrl(url: string): void {
   }
   const protocol = parsed.protocol;
   const hostname = parsed.hostname.toLowerCase();
+
   if (protocol === 'https:') {
+    // #1: 禁止直连 IP 地址（含私有和公有 IP），防止 DNS rebinding
+    const isRawIpv4 = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname);
+    const isRawIpv6 = hostname.includes(':') || (hostname.startsWith('[') && hostname.endsWith(']'));
+    if (isRawIpv4 || isRawIpv6) {
+      throw new Error('远程语音服务地址不允许直连 IP，请使用域名');
+    }
     if (isPrivateOrReservedHost(hostname)) {
       throw new Error('远程语音服务地址不允许指向内网');
     }
     return;
   }
   if (protocol === 'http:') {
-    if (hostname === 'localhost') return;
+    // #5: 仅在非生产环境允许 localhost http
+    if (hostname === 'localhost' && process.env.NODE_ENV !== 'production') return;
     throw new Error('远程语音服务地址必须使用 https');
   }
   throw new Error('远程语音服务地址协议不被支持');
@@ -92,7 +106,43 @@ function buildInstructions(task: SpeechTask<{ text: string }>): string | null {
   return chunks.length > 0 ? chunks.join('\n') : null;
 }
 
+function normalizeVoiceValue(apiUrl: string | null | undefined, model: string, voice: string | null | undefined): string {
+  const trimmedVoice = voice?.trim();
+  const isSiliconFlowCosyVoice = (apiUrl ?? '').toLowerCase().includes('siliconflow')
+    && model === SILICONFLOW_COSYVOICE2_MODEL;
+
+  if (!isSiliconFlowCosyVoice) {
+    return trimmedVoice || 'alloy';
+  }
+
+  if (!trimmedVoice) {
+    return SILICONFLOW_COSYVOICE2_DEFAULT_VOICE;
+  }
+
+  if (trimmedVoice.startsWith('speech:') || trimmedVoice.includes(':')) {
+    return trimmedVoice;
+  }
+
+  return `${model}:${trimmedVoice}`;
+}
+
 async function resolveLlmProviderFromTask(task: SpeechTask<{ text: string }>): Promise<LlmProvider> {
+  // #6: 不信任客户端传入的 llmProviderId（@internal 协议，仅内部使用）
+  // 优先从 agentId 对应的 agent 配置中读取，再从客户端提供的 vendorOptions 读取
+  if (task.context?.agentId) {
+    const agent = await prisma.agent.findUnique({
+      where: { id: task.context.agentId },
+      include: {
+        llmProvider: true,
+      },
+    }) as (Agent & { llmProvider: LlmProvider | null }) | null;
+
+    if (agent?.llmProvider?.isActive && agent.llmProvider.apiProtocol === 'openai') {
+      return agent.llmProvider;
+    }
+  }
+
+  // vendorOptions.llmProviderId 是 @internal 协议，仅用于前端明确绑定的 provider ID
   const explicitProviderId = typeof task.profile?.vendorOptions?.llmProviderId === 'string'
     ? task.profile.vendorOptions.llmProviderId
     : null;
@@ -104,31 +154,12 @@ async function resolveLlmProviderFromTask(task: SpeechTask<{ text: string }>): P
     }
   }
 
-  if (task.context?.agentId) {
-    const agent = await prisma.agent.findUnique({
-      where: { id: task.context.agentId },
-      include: {
-        llmProvider: true,
-      },
-    }) as (Agent & { llmProvider: LlmProvider | null }) | null;
-
-    if (agent?.llmProvider?.isActive) {
-      return agent.llmProvider;
-    }
-  }
-
-  const provider = await prisma.llmProvider.findFirst({
-    where: {
-      isActive: true,
-      isDefault: true,
-    },
+  const audioProvider = await prisma.llmProvider.findFirst({
+    where: { isActive: true, isDefault: true, modelType: 'audio', audioUsage: { in: ['tts', 'both'] } },
   });
+  if (audioProvider) return audioProvider;
 
-  if (!provider) {
-    throw new Error('未找到可用的默认语音模型供应商');
-  }
-
-  return provider;
+  throw new Error('未找到可用的语音（TTS）供应商，请在模型管理中添加语音类型模型并设为默认');
 }
 
 export function createRemoteTtsProvider(dependencies: RemoteTtsDependencies = {}): SpeechProvider {
@@ -159,9 +190,15 @@ export function createRemoteTtsProvider(dependencies: RemoteTtsDependencies = {}
         throw new Error(`${providerId} 仅支持 openai 协议供应商，当前为 ${llmProvider.apiProtocol}`);
       }
 
+      // #20: 使用 spread 语法计算 Unicode codepoint 长度，避免 UTF-16 surrogate pair 计数错误
+      const charCount = [...text].length;
+      if (charCount > 5000) {
+        throw new Error('文本长度超出限制（最多 5000 个字符）');
+      }
+
       const format = task.profile?.format?.trim() || 'mp3';
-      const voice = task.profile?.voice?.trim() || 'alloy';
       const model = task.profile?.model?.trim() || llmProvider.model;
+      const voice = normalizeVoiceValue(llmProvider.apiUrl, model, task.profile?.voice);
       const endpoint = getSpeechEndpoint(llmProvider.apiUrl);
       validateRemoteUrl(endpoint);
       const instructions = buildInstructions(task as SpeechTask<{ text: string }>);
@@ -198,20 +235,34 @@ export function createRemoteTtsProvider(dependencies: RemoteTtsDependencies = {}
         },
         body: JSON.stringify(baseBody),
         signal: AbortSignal.timeout(30_000),
+        redirect: 'error', // #7: 禁止重定向，防止 SSRF
       });
 
+      // #15: 仅在 400 且错误体含 "instructions" 关键词时才 fallback
       if (!response.ok && response.status === 400 && instructions) {
-        const fallbackBody = { ...baseBody };
-        delete fallbackBody.instructions;
-        response = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${llmProvider.apiKey}`,
-          },
-          body: JSON.stringify(fallbackBody),
-          signal: AbortSignal.timeout(30_000),
-        });
+        let shouldFallback = false;
+        try {
+          const errClone = response.clone();
+          const errBody = await errClone.text();
+          shouldFallback = errBody.toLowerCase().includes('instructions');
+        } catch {
+          // 读取失败时不 fallback
+        }
+
+        if (shouldFallback) {
+          const fallbackBody = { ...baseBody };
+          delete fallbackBody.instructions;
+          response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${llmProvider.apiKey}`,
+            },
+            body: JSON.stringify(fallbackBody),
+            signal: AbortSignal.timeout(30_000),
+            redirect: 'error', // #7
+          });
+        }
       }
 
       if (!response.ok) {
@@ -222,13 +273,20 @@ export function createRemoteTtsProvider(dependencies: RemoteTtsDependencies = {}
         } catch {
           errorText = await response.text().catch(() => '');
         }
+        // #8: 只打印 hostname，不暴露完整 URL（含 auth 信息）
         console.error('[remote-tts] 远程语音合成失败', {
           status: response.status,
-          endpoint,
+          host: new URL(endpoint).hostname,
           providerId,
           errorText,
         });
         throw new Error('TTS 服务请求失败，请稍后重试');
+      }
+
+      // #25: 检查响应大小，超过 50MB 拒绝
+      const contentLength = response.headers.get('content-length');
+      if (contentLength && Number(contentLength) > 50 * 1024 * 1024) {
+        throw new Error('TTS 服务返回内容超过大小限制');
       }
 
       const contentType = response.headers.get('content-type') || 'audio/mpeg';

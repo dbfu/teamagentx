@@ -99,7 +99,10 @@ async function playAudioUrl(audioUrl: string): Promise<void> {
         } catch {
           // ignore stop errors from browser media APIs
         }
-        finish()
+        // #17: stop 走 reject（标记为 cancelled），让调用方知道播放被中断
+        finished = true
+        cleanup()
+        reject(Object.assign(new Error('播放已取消'), { cancelled: true }))
       },
     }
 
@@ -125,10 +128,12 @@ export function createRemoteTtsSpeechProvider(
       taskTypes: ['tts'],
     },
     async synthesize(task) {
+      const token = localStorage.getItem('auth_token')
       const response = await fetch(`${await getBaseUrl()}/speech/tts`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify(task),
       })
@@ -147,13 +152,13 @@ export function createRemoteTtsSpeechProvider(
 
       await playAudioUrl(audioUrl)
 
+      // #11: audioUrl 在 playAudioUrl 内播放完成后已 revoke，不在 artifact 中暴露已失效的 URL
       return {
         kind: 'audio',
         provider,
         model,
         voice,
         mimeType,
-        audioUrl,
         text: String((task.input as { text?: string }).text || ''),
         metadata: {
           runtime: 'client',

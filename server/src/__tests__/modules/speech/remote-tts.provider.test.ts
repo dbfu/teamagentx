@@ -18,6 +18,8 @@ function createOpenAiProvider(overrides: Partial<LlmProvider> = {}): LlmProvider
     imageProvider: null,
     imageApiType: null,
     supportsThinking: null,
+    sttModel: null,
+    audioUsage: 'both',
     isActive: true,
     isDefault: true,
     createdAt: new Date('2026-05-13T00:00:00.000Z'),
@@ -99,5 +101,42 @@ describe('openai-compatible-tts provider', () => {
       }) ?? Promise.reject(new Error('provider missing')),
       /仅支持 openai 协议/,
     );
+  });
+
+  test('应为 SiliconFlow 裸音色值补全模型前缀', async () => {
+    globalThis.fetch = async (_input, init) => {
+      const body = JSON.parse(String(init?.body));
+      assert.strictEqual(body.model, 'FunAudioLLM/CosyVoice2-0.5B');
+      assert.strictEqual(body.voice, 'FunAudioLLM/CosyVoice2-0.5B:diana');
+
+      return new Response(new Uint8Array([5, 6, 7]), {
+        status: 200,
+        headers: {
+          'content-type': 'audio/mpeg',
+        },
+      });
+    };
+
+    const provider = createRemoteTtsProvider({
+      resolveLlmProvider: async () => createOpenAiProvider({
+        apiUrl: 'https://api.siliconflow.cn/v1',
+        model: 'FunAudioLLM/CosyVoice2-0.5B',
+      }),
+    });
+
+    const result = await provider.synthesize?.({
+      type: 'tts',
+      profile: {
+        provider: 'openai-compatible-tts',
+        voice: 'diana',
+        format: 'mp3',
+      },
+      input: {
+        text: 'Hello world',
+      },
+    });
+
+    assert.ok(result);
+    assert.strictEqual(result?.voice, 'FunAudioLLM/CosyVoice2-0.5B:diana');
   });
 });

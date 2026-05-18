@@ -2,6 +2,8 @@ import { FastifyInstance } from 'fastify';
 import { createLlmClient } from '../lib/llm-client.js';
 import { llmProviderService } from '../modules/llm-provider/llm-provider.service.js';
 import { clearExecutorCache } from '../core/agent/agent-handler/index.js';
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import { authService } from '../modules/auth/auth.service.js';
 
 // 所有支持的 LLM 供应商类型 - 仅支持自定义
 const LLM_PROVIDER_TYPES = ['custom'] as const;
@@ -24,6 +26,8 @@ const llmProviderResponseSchema = {
     apiUrl: { type: 'string', nullable: true },
     apiKey: { type: 'string' },
     model: { type: 'string' },
+    sttModel: { type: 'string', nullable: true },
+    audioUsage: { type: 'string', nullable: true },
     imageProvider: { type: 'string', nullable: true },
     imageApiType: { type: 'string', enum: IMAGE_GEN_API_TYPES, nullable: true },
     isActive: { type: 'boolean' },
@@ -44,6 +48,8 @@ const llmProviderWithCountResponseSchema = {
     apiUrl: { type: 'string', nullable: true },
     apiKey: { type: 'string' },
     model: { type: 'string' },
+    sttModel: { type: 'string', nullable: true },
+    audioUsage: { type: 'string', nullable: true },
     imageProvider: { type: 'string', nullable: true },
     imageApiType: { type: 'string', enum: IMAGE_GEN_API_TYPES, nullable: true },
     isActive: { type: 'boolean' },
@@ -69,7 +75,9 @@ const createLlmProviderBodySchema = {
     apiProtocol: { type: 'string', enum: ['anthropic', 'openai'], description: 'API 协议类型' },
     apiUrl: { type: 'string', description: 'API URL（可选，用于自定义供应商）' },
     apiKey: { type: 'string', description: 'API Key' },
-    model: { type: 'string', description: '模型名称' },
+    model: { type: 'string', description: '模型名称（TTS 朗读模型）' },
+    sttModel: { type: 'string', nullable: true, description: '语音识别模型（留空则与 model 共用）' },
+    audioUsage: { type: 'string', nullable: true, description: '语音用途：tts | stt | both' },
     imageProvider: { type: 'string', description: '图片模型供应商类型，例如 openai、apimart、openrouter、gemini' },
     imageApiType: { type: 'string', enum: IMAGE_GEN_API_TYPES, description: '图片模型调用方式' },
     isActive: { type: 'boolean', description: '是否激活' },
@@ -87,6 +95,8 @@ const updateLlmProviderBodySchema = {
     apiUrl: { type: 'string' },
     apiKey: { type: 'string' },
     model: { type: 'string' },
+    sttModel: { type: 'string', nullable: true },
+    audioUsage: { type: 'string', nullable: true },
     imageProvider: { type: 'string' },
     imageApiType: { type: 'string', enum: IMAGE_GEN_API_TYPES },
     isActive: { type: 'boolean' },
@@ -114,6 +124,8 @@ interface CreateLlmProviderBody {
   apiUrl?: string;
   apiKey: string;
   model: string;
+  sttModel?: string | null;
+  audioUsage?: string | null;
   imageProvider?: string | null;
   imageApiType?: ImageGenApiType | null;
   isActive?: boolean;
@@ -128,6 +140,8 @@ interface UpdateLlmProviderBody {
   apiUrl?: string;
   apiKey?: string;
   model?: string;
+  sttModel?: string | null;
+  audioUsage?: string | null;
   imageProvider?: string | null;
   imageApiType?: ImageGenApiType | null;
   isActive?: boolean;
@@ -143,6 +157,78 @@ interface LlmProviderParams {
 }
 
 export async function llmProviderGateway(app: FastifyInstance) {
+
+  // #3: 鉴权检查（参考 speech.gateway.ts 模式）
+  async function requireAuth(request: FastifyRequest, reply: FastifyReply): Promise<boolean> {
+    const authHeader = request.headers.authorization;
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
+    if (!token) {
+      reply.code(401).send({ success: false, error: 'Unauthorized' });
+      return false;
+    }
+    const user = await authService.getUserFromToken(token);
+    if (!user) {
+      reply.code(401).send({ success: false, error: 'Unauthorized' });
+      return false;
+    }
+    return true;
+  }
+
+  // #4: API Key 掩码（返回给客户端时使用）
+  function maskApiKey(apiKey: string): string {
+    if (apiKey.length > 8) {
+      return `${apiKey.slice(0, 3)}***${apiKey.slice(-4)}`;
+    }
+    return '****';
+  }
+
+  // #2: apiUrl 格式校验（写入时调用）
+  function validateApiUrl(apiUrl: string | null | undefined): void {
+    if (!apiUrl) return; // 允许为空
+    let parsed: URL;
+    try {
+      parsed = new URL(apiUrl);
+    } catch {
+      throw new Error('apiUrl 格式无效，请输入合法的 HTTP/HTTPS 地址');
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error('apiUrl 协议不支持，仅允许 http 或 https');
+    }
+  }
+
+  function createSilentWavBlob(durationMs = 300): Blob {
+    const sampleRate = 16000;
+    const channels = 1;
+    const bitsPerSample = 16;
+    const bytesPerSample = bitsPerSample / 8;
+    const frameCount = Math.max(1, Math.floor((sampleRate * durationMs) / 1000));
+    const dataSize = frameCount * channels * bytesPerSample;
+    const buffer = new ArrayBuffer(44 + dataSize);
+    const view = new DataView(buffer);
+
+    const writeAscii = (offset: number, value: string) => {
+      for (let index = 0; index < value.length; index += 1) {
+        view.setUint8(offset + index, value.charCodeAt(index));
+      }
+    };
+
+    writeAscii(0, 'RIFF');
+    view.setUint32(4, 36 + dataSize, true);
+    writeAscii(8, 'WAVE');
+    writeAscii(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, channels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * channels * bytesPerSample, true);
+    view.setUint16(32, channels * bytesPerSample, true);
+    view.setUint16(34, bitsPerSample, true);
+    writeAscii(36, 'data');
+    view.setUint32(40, dataSize, true);
+
+    return new Blob([buffer], { type: 'audio/wav' });
+  }
+
   // 获取所有供应商列表
   app.get(
     '/llm-providers',
@@ -161,9 +247,13 @@ export async function llmProviderGateway(app: FastifyInstance) {
         },
       },
     },
-    async (_request, reply) => {
+    async (request, reply) => {
+      const ok = await requireAuth(request, reply);
+      if (!ok) return;
       const providers = await llmProviderService.findAll();
-      return reply.send({ success: true, data: providers });
+      // #4: API Key 掩码
+      const masked = providers.map((p: any) => ({ ...p, apiKey: maskApiKey(p.apiKey) }));
+      return reply.send({ success: true, data: masked });
     }
   );
 
@@ -229,6 +319,8 @@ export async function llmProviderGateway(app: FastifyInstance) {
       },
     },
     async (request, reply) => {
+      const ok = await requireAuth(request, reply);
+      if (!ok) return;
       const { id } = request.params;
       const provider = await llmProviderService.findById(id);
 
@@ -236,7 +328,8 @@ export async function llmProviderGateway(app: FastifyInstance) {
         return reply.code(404).send({ success: false, error: 'LLM 供应商不存在' });
       }
 
-      return reply.send({ success: true, data: provider });
+      // #4: API Key 掩码
+      return reply.send({ success: true, data: { ...(provider as any), apiKey: maskApiKey((provider as any).apiKey) } });
     }
   );
 
@@ -267,7 +360,16 @@ export async function llmProviderGateway(app: FastifyInstance) {
       },
     },
     async (request, reply) => {
-      const { name, type, modelType, apiProtocol, apiUrl, apiKey, model, imageProvider, imageApiType, isActive, isDefault } = request.body;
+      const ok = await requireAuth(request, reply);
+      if (!ok) return;
+      const { name, type, modelType, apiProtocol, apiUrl, apiKey, model, sttModel, audioUsage, imageProvider, imageApiType, isActive, isDefault } = request.body;
+
+      // #2: apiUrl 格式校验
+      try {
+        validateApiUrl(apiUrl);
+      } catch (err: any) {
+        return reply.code(400).send({ success: false, error: err.message });
+      }
 
       try {
         const provider = await llmProviderService.create({
@@ -278,6 +380,8 @@ export async function llmProviderGateway(app: FastifyInstance) {
           apiUrl,
           apiKey,
           model,
+          sttModel,
+          audioUsage,
           imageProvider,
           imageApiType,
           isActive,
@@ -334,8 +438,19 @@ export async function llmProviderGateway(app: FastifyInstance) {
       },
     },
     async (request, reply) => {
+      const ok = await requireAuth(request, reply);
+      if (!ok) return;
       const { id } = request.params;
       const data = request.body;
+
+      // #2: apiUrl 格式校验
+      if ('apiUrl' in data) {
+        try {
+          validateApiUrl(data.apiUrl as string | null | undefined);
+        } catch (err: any) {
+          return reply.code(400).send({ success: false, error: err.message });
+        }
+      }
 
       try {
         const provider = await llmProviderService.update(id, data);
@@ -387,6 +502,8 @@ export async function llmProviderGateway(app: FastifyInstance) {
       },
     },
     async (request, reply) => {
+      const ok = await requireAuth(request, reply);
+      if (!ok) return;
       const { id } = request.params;
 
       try {
@@ -435,6 +552,8 @@ export async function llmProviderGateway(app: FastifyInstance) {
       },
     },
     async (request, reply) => {
+      const ok = await requireAuth(request, reply);
+      if (!ok) return;
       const { id } = request.params;
       const { isActive } = request.body;
 
@@ -483,6 +602,8 @@ export async function llmProviderGateway(app: FastifyInstance) {
       },
     },
     async (request, reply) => {
+      const ok = await requireAuth(request, reply);
+      if (!ok) return;
       const { id } = request.params;
 
       try {
@@ -490,6 +611,11 @@ export async function llmProviderGateway(app: FastifyInstance) {
         clearProviderDependentExecutors();
         return reply.send({ success: true, data: provider });
       } catch (error: any) {
+        if (error instanceof Error && error.message.includes('默认 STT')) {
+          return reply
+            .code(400)
+            .send({ success: false, error: error.message });
+        }
         if (error.code === 'P2025') {
           return reply
             .code(404)
@@ -537,12 +663,21 @@ export async function llmProviderGateway(app: FastifyInstance) {
       },
     },
     async (request, reply) => {
+      const ok = await requireAuth(request, reply);
+      if (!ok) return;
       const { id } = request.params;
 
       try {
         const provider = await llmProviderService.findById(id);
         if (!provider) {
           return reply.code(404).send({ success: false, error: 'LLM 供应商不存在' });
+        }
+
+        // #2: test 端点也校验 apiUrl
+        try {
+          validateApiUrl((provider as any).apiUrl);
+        } catch (err: any) {
+          return reply.send({ success: true, data: { connected: false, message: err.message, model: (provider as any).model } });
         }
 
         if ((provider as any).modelType === 'image') {
@@ -553,6 +688,70 @@ export async function llmProviderGateway(app: FastifyInstance) {
               message: '图片模型配置已保存，实际生成时将验证接口',
               model: provider.model,
             },
+          });
+        }
+
+        if ((provider as any).modelType === 'audio') {
+          const base = ((provider.apiUrl as string) || 'https://api.openai.com/v1').replace(/\/+$/, '');
+          const ttsModel = provider.model;
+          const sttModel = (provider as any).sttModel || provider.model;
+          const ttsVoice = base.toLowerCase().includes('siliconflow') && ttsModel === 'FunAudioLLM/CosyVoice2-0.5B'
+            ? `${ttsModel}:anna`
+            : 'alloy';
+
+          async function testAudioEndpoint(
+            endpoint: string,
+            body: BodyInit,
+            headers: Record<string, string>,
+            options: { acceptBadRequestAsReachable?: boolean } = {},
+          ): Promise<{ ok: boolean; message: string }> {
+            try {
+              const resp = await fetch(endpoint, {
+                method: 'POST',
+                headers,
+                body,
+                signal: AbortSignal.timeout(10_000),
+              });
+              if (resp.ok) return { ok: true, message: '连接成功' };
+              const status = resp.status;
+              const text = await resp.text().catch(() => '');
+              if (status === 401) return { ok: false, message: 'API Key 无效或已过期' };
+              if (status === 403) return { ok: false, message: 'API Key 权限不足或模型不可用' };
+              if (status === 404) return { ok: false, message: '模型不存在或 API URL 错误' };
+              if (status === 429) return { ok: false, message: '请求频率超限' };
+              if ((status === 400 || status === 422) && options.acceptBadRequestAsReachable) {
+                return { ok: true, message: '接口可达，样例参数未通过供应商校验' };
+              }
+              return { ok: false, message: text ? `请求失败 (${status}): ${text.slice(0, 120)}` : `请求失败 (${status})` };
+            } catch (err: any) {
+              return { ok: false, message: err?.message?.includes('timeout') ? '连接超时' : '网络请求失败' };
+            }
+          }
+
+          const ttsResult = await testAudioEndpoint(
+            base.endsWith('/audio/speech') ? base : `${base}/audio/speech`,
+            JSON.stringify({ model: ttsModel, input: '你好', voice: ttsVoice }),
+            { 'Authorization': `Bearer ${provider!.apiKey}`, 'Content-Type': 'application/json' },
+            { acceptBadRequestAsReachable: true },
+          );
+          const sttForm = new FormData();
+          sttForm.append('file', createSilentWavBlob(), 'test.wav');
+          sttForm.append('model', sttModel);
+          sttForm.append('response_format', 'json');
+          const sttResult = await testAudioEndpoint(
+            base.endsWith('/audio/transcriptions') ? base : `${base}/audio/transcriptions`,
+            sttForm,
+            { 'Authorization': `Bearer ${provider!.apiKey}` },
+            { acceptBadRequestAsReachable: true },
+          );
+
+          const connected = ttsResult.ok || sttResult.ok;
+          const parts: string[] = [];
+          parts.push(`TTS: ${ttsResult.ok ? '✓' : '✗ ' + ttsResult.message}`);
+          parts.push(`STT: ${sttResult.ok ? '✓' : '✗ ' + sttResult.message}`);
+          return reply.send({
+            success: true,
+            data: { connected, message: parts.join(' | '), model: provider.model },
           });
         }
 
@@ -638,6 +837,8 @@ export async function llmProviderGateway(app: FastifyInstance) {
       },
     },
     async (request, reply) => {
+      const ok = await requireAuth(request, reply);
+      if (!ok) return;
       const { description } = request.body;
 
       if (!description || description.trim().length < 10) {

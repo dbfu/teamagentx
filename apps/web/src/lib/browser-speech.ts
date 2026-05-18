@@ -65,6 +65,10 @@ export function startBrowserSpeechRecognition(language = 'zh-CN'): BrowserSpeech
     if (!session || typeof session !== 'object') {
       throw new Error('语音识别会话启动失败')
     }
+    // #35: 校验 session 具有必要方法，避免不安全的类型断言
+    if (typeof (session as { stop?: unknown }).stop !== 'function') {
+      throw new Error('语音识别会话接口不完整')
+    }
     return session as BrowserSpeechRecognitionSession
   }
 
