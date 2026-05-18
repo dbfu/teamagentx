@@ -781,12 +781,22 @@ ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
     const claudeConfigDir = this.getClaudeConfigDir();
     if (!this.llmProvider) {
       const syncResult = syncGlobalClaudeLocalConfig(claudeConfigDir);
-      if (syncResult.settings.copied || syncResult.state.copied) {
+      if (
+        syncResult.settings.copied ||
+        syncResult.state.copied ||
+        syncResult.credentials.copied
+      ) {
         logClaudeSdkDebug('synced global Claude settings', {
           agentName: this.name,
           agentId: this.agentId,
           settings: syncResult.settings,
           state: syncResult.state,
+          credentials: {
+            ...syncResult.credentials,
+            // 不要把 token 内容写进日志
+            sourcePath: syncResult.credentials.sourcePath,
+            targetPath: syncResult.credentials.targetPath,
+          },
         });
       }
     }

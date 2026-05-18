@@ -2,10 +2,22 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-const CLAUDE_AUTH_ENV_KEYS = [
+// 全局 settings.json 对这些 env 键拥有权威：全局有则推到 per-agent，
+// 全局没有则从 per-agent 里删除。否则切换登录方式（OAuth ↔ API Key/Token）
+// 后会留下陈旧凭证，把当前生效的鉴权顶掉。
+// 保持与 claude-sdk.executor.ts `buildEnv` 里的清单一致。
+const CLAUDE_GLOBAL_AUTH_ENV_KEYS = [
   'ANTHROPIC_API_KEY',
   'ANTHROPIC_AUTH_TOKEN',
   'ANTHROPIC_CUSTOM_HEADERS',
+  'ANTHROPIC_BASE_URL',
+  'ANTHROPIC_API_URL',
+  'ANTHROPIC_MODEL',
+  'ANTHROPIC_SMALL_FAST_MODEL',
+  'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  'ANTHROPIC_DEFAULT_OPUS_MODEL',
+  'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+  'ANTHROPIC_REASONING_MODEL',
 ] as const;
 
 const CLAUDE_GLOBAL_STATE_KEYS = [
@@ -31,15 +43,6 @@ function readJsonFile(filePath: string): Record<string, unknown> | null {
   }
 }
 
-function hasClaudeAuthEnv(settings: Record<string, unknown> | null): boolean {
-  if (!settings) return false;
-  const env = settings.env;
-  if (!isRecord(env)) return false;
-  return CLAUDE_AUTH_ENV_KEYS.some(
-    (key) => typeof env[key] === 'string' && env[key].trim().length > 0,
-  );
-}
-
 function mergeClaudeSettings(
   globalSettings: Record<string, unknown>,
   targetSettings: Record<string, unknown> | null,
@@ -49,13 +52,22 @@ function mergeClaudeSettings(
   const globalEnv = isRecord(globalSettings.env) ? globalSettings.env : {};
   const targetEnv = isRecord(targetSettings.env) ? targetSettings.env : {};
 
+  // 先把 per-agent 的 auth 类 env 全部抹掉，再把全局 env 整体覆盖上去。
+  // 这样全局即为 auth 鉴权类 env 的唯一 source of truth：
+  //  - 全局有 -> per-agent 跟着拿到新值
+  //  - 全局没有 -> per-agent 也不会留陈旧凭证
+  const mergedEnv: Record<string, unknown> = {...targetEnv};
+  for (const key of CLAUDE_GLOBAL_AUTH_ENV_KEYS) {
+    delete mergedEnv[key];
+  }
+  for (const [key, value] of Object.entries(globalEnv)) {
+    mergedEnv[key] = value;
+  }
+
   return {
     ...targetSettings,
     ...globalSettings,
-    env: {
-      ...targetEnv,
-      ...globalEnv,
-    },
+    env: mergedEnv,
   };
 }
 
@@ -65,11 +77,9 @@ export interface ClaudeSettingsSyncResult {
   targetPath: string;
   reason:
     | 'source_missing'
-    | 'source_without_auth_env'
     | 'target_current'
     | 'target_missing'
-    | 'target_without_auth_env'
-    | 'source_newer';
+    | 'content_changed';
 }
 
 export function getGlobalClaudeSettingsPath(): string {
@@ -78,6 +88,14 @@ export function getGlobalClaudeSettingsPath(): string {
 
 export function getGlobalClaudeStatePath(): string {
   return path.join(os.homedir(), '.claude.json');
+}
+
+// Claude Code 把 OAuth access_token / refresh_token 存在这个文件里
+// （Windows 上不走系统凭据管理器，macOS 同样写文件、加 Keychain 拷贝；
+// Linux 走 libsecret，但文件也存在）。
+// per-agent 的 CLAUDE_CONFIG_DIR 必须有这个文件，OAuth 模式才能工作。
+export function getGlobalClaudeCredentialsPath(): string {
+  return path.join(os.homedir(), '.claude', '.credentials.json');
 }
 
 function hasClaudeAccountState(state: Record<string, unknown> | null): boolean {
@@ -112,42 +130,36 @@ export function syncGlobalClaudeSettingsToConfigDir(
   }
 
   const globalSettings = readJsonFile(sourcePath);
-  if (!hasClaudeAuthEnv(globalSettings)) {
-    return {
-      copied: false,
-      sourcePath,
-      targetPath,
-      reason: 'source_without_auth_env',
-    };
+  if (!globalSettings) {
+    return {copied: false, sourcePath, targetPath, reason: 'source_missing'};
   }
 
-  const targetSettings = fs.existsSync(targetPath) ? readJsonFile(targetPath) : null;
-  const sourceMtime = fs.statSync(sourcePath).mtimeMs;
-  const targetMtime = fs.existsSync(targetPath)
-    ? fs.statSync(targetPath).mtimeMs
-    : 0;
+  const targetExists = fs.existsSync(targetPath);
+  const targetSettings = targetExists ? readJsonFile(targetPath) : null;
+  const mergedSettings = mergeClaudeSettings(globalSettings, targetSettings);
+  const mergedContent = `${JSON.stringify(mergedSettings, null, 2)}\n`;
 
-  let reason: ClaudeSettingsSyncResult['reason'] | null = null;
-  if (!fs.existsSync(targetPath)) {
-    reason = 'target_missing';
-  } else if (!hasClaudeAuthEnv(targetSettings)) {
-    reason = 'target_without_auth_env';
-  } else if (sourceMtime > targetMtime + 1000) {
-    reason = 'source_newer';
-  }
-
-  if (!reason) {
-    return {copied: false, sourcePath, targetPath, reason: 'target_current'};
+  if (targetExists) {
+    const currentContent = fs.readFileSync(targetPath, 'utf-8');
+    if (currentContent === mergedContent) {
+      return {copied: false, sourcePath, targetPath, reason: 'target_current'};
+    }
   }
 
   fs.mkdirSync(configDir, {recursive: true, mode: 0o700});
-  const mergedSettings = mergeClaudeSettings(globalSettings!, targetSettings);
-  fs.writeFileSync(targetPath, `${JSON.stringify(mergedSettings, null, 2)}\n`, {
-    mode: 0o600,
-  });
-  fs.chmodSync(targetPath, 0o600);
+  fs.writeFileSync(targetPath, mergedContent, {mode: 0o600});
+  try {
+    fs.chmodSync(targetPath, 0o600);
+  } catch {
+    // Windows 上 chmod 行为受限，失败不影响功能。
+  }
 
-  return {copied: true, sourcePath, targetPath, reason};
+  return {
+    copied: true,
+    sourcePath,
+    targetPath,
+    reason: targetExists ? 'content_changed' : 'target_missing',
+  };
 }
 
 export interface ClaudeStateSyncResult {
@@ -217,12 +229,70 @@ export function syncGlobalClaudeStateToConfigDir(
   return {copied: true, sourcePath, targetPath, reason};
 }
 
+export interface ClaudeCredentialsSyncResult {
+  copied: boolean;
+  sourcePath: string;
+  targetPath: string;
+  reason:
+    | 'source_missing'
+    | 'target_current'
+    | 'target_missing'
+    | 'content_changed';
+}
+
+export function syncGlobalClaudeCredentialsToConfigDir(
+  configDir: string,
+): ClaudeCredentialsSyncResult {
+  const sourcePath = getGlobalClaudeCredentialsPath();
+  const targetPath = path.join(configDir, '.credentials.json');
+
+  if (!fs.existsSync(sourcePath)) {
+    return {copied: false, sourcePath, targetPath, reason: 'source_missing'};
+  }
+
+  let sourceContent: string;
+  try {
+    sourceContent = fs.readFileSync(sourcePath, 'utf-8');
+  } catch {
+    return {copied: false, sourcePath, targetPath, reason: 'source_missing'};
+  }
+
+  const targetExists = fs.existsSync(targetPath);
+  if (targetExists) {
+    try {
+      const currentContent = fs.readFileSync(targetPath, 'utf-8');
+      if (currentContent === sourceContent) {
+        return {copied: false, sourcePath, targetPath, reason: 'target_current'};
+      }
+    } catch {
+      // 读不出来就当作要重写
+    }
+  }
+
+  fs.mkdirSync(configDir, {recursive: true, mode: 0o700});
+  fs.writeFileSync(targetPath, sourceContent, {mode: 0o600});
+  try {
+    fs.chmodSync(targetPath, 0o600);
+  } catch {
+    // Windows 上 chmod 行为受限，失败不影响功能。
+  }
+
+  return {
+    copied: true,
+    sourcePath,
+    targetPath,
+    reason: targetExists ? 'content_changed' : 'target_missing',
+  };
+}
+
 export function syncGlobalClaudeLocalConfig(configDir: string): {
   settings: ClaudeSettingsSyncResult;
   state: ClaudeStateSyncResult;
+  credentials: ClaudeCredentialsSyncResult;
 } {
   return {
     settings: syncGlobalClaudeSettingsToConfigDir(configDir),
     state: syncGlobalClaudeStateToConfigDir(configDir),
+    credentials: syncGlobalClaudeCredentialsToConfigDir(configDir),
   };
 }
