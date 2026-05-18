@@ -5,6 +5,8 @@ set -e
 
 HTML_DIR=/usr/share/nginx/html
 UPDATE_JSON="${HTML_DIR}/update.json"
+NGINX_TEMPLATE="/etc/nginx/templates/default.conf.template"
+NGINX_OUTPUT="/etc/nginx/conf.d/default.conf"
 
 VERSION="${VITE_APP_VERSION:-v1.2.0}"
 MAC_URL_ARM64="${VITE_DOWNLOAD_URL_MAC_ARM64:-}"
@@ -12,7 +14,7 @@ MAC_URL_X64="${VITE_DOWNLOAD_URL_MAC_X64:-}"
 WIN_URL="${VITE_DOWNLOAD_URL_WIN:-}"
 IOS_URL="${VITE_DOWNLOAD_URL_IOS:-}"
 ANDROID_URL="${VITE_DOWNLOAD_URL_ANDROID:-}"
-DOWNLOAD_RESOLVER_URL="${VITE_DOWNLOAD_RESOLVER_URL:-}"
+DOWNLOAD_RESOLVER_PROXY_TARGET="${DOWNLOAD_RESOLVER_PROXY_TARGET:-http://download-resolver:3207}"
 NOTES="${VITE_APP_VERSION_NOTE:-}"
 
 cat > "$UPDATE_JSON" <<EOF
@@ -23,7 +25,6 @@ cat > "$UPDATE_JSON" <<EOF
   "winUrl": "${WIN_URL}",
   "iosUrl": "${IOS_URL}",
   "androidUrl": "${ANDROID_URL}",
-  "downloadResolverUrl": "${DOWNLOAD_RESOLVER_URL}",
   "downloads": {
     "macArm64": "${MAC_URL_ARM64}",
     "macX64": "${MAC_URL_X64}",
@@ -37,5 +38,9 @@ EOF
 
 echo "[entrypoint] update.json 已生成："
 cat "$UPDATE_JSON"
+
+export DOWNLOAD_RESOLVER_PROXY_TARGET
+envsubst '${DOWNLOAD_RESOLVER_PROXY_TARGET}' < "$NGINX_TEMPLATE" > "$NGINX_OUTPUT"
+echo "[entrypoint] nginx resolver upstream: ${DOWNLOAD_RESOLVER_PROXY_TARGET}"
 
 exec nginx -g "daemon off;"

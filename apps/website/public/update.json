@@ -1,20 +1,19 @@
 {
   "version": "v1.2.0",
-  "url": "https://releases.teamagentx.com/1.2.0/TeamAgentX-1.2.0-mac-arm64.dmg",
-  "macUrlArm64": "https://releases.teamagentx.com/1.2.0/TeamAgentX-1.2.0-mac-arm64.dmg",
-  "macUrlX64": "https://releases.teamagentx.com/1.2.0/TeamAgentX-1.2.0-mac-x64.dmg",
-  "macUrl": "https://releases.teamagentx.com/1.2.0/TeamAgentX-1.2.0-mac-arm64.dmg",
-  "winUrl": "https://releases.teamagentx.com/1.2.0/TeamAgentX-1.2.0-win.exe",
-  "iosUrl": "",
-  "androidUrl": "",
+  "url": "https://wwbjc.lanzouu.com/i5DHP3pnjish",
+  "macUrlArm64": "https://wwbjc.lanzouu.com/i5DHP3pnjish",
+  "macUrlX64": "https://wwbjc.lanzouu.com/ikOUn3pfb5yj",
+  "macUrl": "https://wwbjc.lanzouu.com/i5DHP3pnjish",
+  "winUrl": "https://wwbjc.lanzouu.com/iDW313pfb0mh",
+  "iosUrl": "https://wwbjc.lanzouu.com/iB17B3pqk04j",
+  "androidUrl": "https://apps.apple.com/app/teamagentx/id000000000",
   "downloads": {
-    "macArm64": "https://releases.teamagentx.com/1.2.0/TeamAgentX-1.2.0-mac-arm64.dmg",
-    "macX64": "https://releases.teamagentx.com/1.2.0/TeamAgentX-1.2.0-mac-x64.dmg",
-    "mac": "https://releases.teamagentx.com/1.2.0/TeamAgentX-1.2.0-mac-arm64.dmg",
-    "win": "https://releases.teamagentx.com/1.2.0/TeamAgentX-1.2.0-win.exe",
-    "ios": "",
-    "android": ""
+    "macArm64": "https://wwbjc.lanzouu.com/i5DHP3pnjish",
+    "macX64": "https://wwbjc.lanzouu.com/ikOUn3pfb5yj",
+    "mac": "https://wwbjc.lanzouu.com/i5DHP3pnjish",
+    "win": "https://wwbjc.lanzouu.com/iDW313pfb0mh",
+    "ios": "https://wwbjc.lanzouu.com/iB17B3pqk04j",
+    "android": "https://apps.apple.com/app/teamagentx/id000000000"
   },
-  "downloadResolverUrl": "",
-  "notes": "dddd"
+  "notes": "版本更新测试"
 }

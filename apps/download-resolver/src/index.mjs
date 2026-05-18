@@ -26,6 +26,14 @@ function sendNoContent(res) {
   res.end();
 }
 
+function redirect(res, targetUrl) {
+  res.writeHead(302, {
+    Location: targetUrl,
+    'Cache-Control': 'no-store',
+  });
+  res.end();
+}
+
 function isHttpUrl(value) {
   try {
     const parsed = new URL(value);
@@ -79,6 +87,27 @@ const server = http.createServer(async (req, res) => {
         originalUrl,
         error: message,
       });
+    }
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/download') {
+    const originalUrl = url.searchParams.get('url') || '';
+    if (!originalUrl) {
+      sendJson(res, 400, { success: false, error: 'Missing "url" query parameter' });
+      return;
+    }
+
+    if (!isHttpUrl(originalUrl)) {
+      sendJson(res, 400, { success: false, error: 'Only http/https URLs are supported' });
+      return;
+    }
+
+    try {
+      const resolvedUrl = await resolveLanzouDownloadUrl(originalUrl);
+      redirect(res, resolvedUrl);
+    } catch {
+      redirect(res, originalUrl);
     }
     return;
   }

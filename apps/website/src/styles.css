@@ -184,7 +184,16 @@ body.nav-scrolled .top-nav{background:rgba(8,11,18,.85);backdrop-filter:blur(16p
 .hero h1 span{color:transparent;background:linear-gradient(135deg,var(--accent),var(--purple));-webkit-background-clip:text;background-clip:text}
 .hero p{font-size:17px;color:var(--t2);line-height:1.75;margin-bottom:36px;max-width:520px}
 .hero p strong{color:var(--t1);font-weight:600}
-.hero-actions{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:48px}
+.hero-actions{display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:48px}
+.hero-download-stack{display:flex;flex-direction:column;align-items:flex-start;gap:10px}
+.hero-more-download{
+  display:inline-flex;align-items:center;gap:6px;
+  font-size:13px;font-weight:600;color:var(--t2);
+  align-self:center;
+  transition:color .15s,transform .15s;
+}
+.hero-more-download:hover{color:var(--accent);transform:translateY(-1px)}
+.hero-more-download span{font-size:12px}
 .hero-stats{display:flex;gap:32px;flex-wrap:wrap}
 .hero-stats div{display:flex;flex-direction:column;gap:2px}
 .hero-stats span{font-size:22px;font-weight:800;color:var(--t1);letter-spacing:-.5px}
@@ -487,6 +496,14 @@ body.nav-scrolled .top-nav{background:rgba(8,11,18,.85);backdrop-filter:blur(16p
 .cta-title{font-size:clamp(30px,4vw,52px);font-weight:800;letter-spacing:-1.5px;margin-bottom:16px;position:relative}
 .cta-sub{font-size:17px;color:var(--t2);margin-bottom:36px;position:relative;line-height:1.7}
 .cta-actions{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;position:relative}
+.download-platform-row{
+  display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;
+  width:100%;
+}
+.download-platform-label{
+  font-size:12px;font-weight:700;color:var(--t3);letter-spacing:.6px;
+  text-transform:uppercase;min-width:56px;text-align:right;
+}
 .download-note{font-size:12px;color:var(--t3);margin-top:16px;position:relative}
 .mobile-download-row{
   display:flex;align-items:center;justify-content:center;gap:10px;
@@ -602,6 +619,8 @@ footer{padding:60px var(--shell-gutter);background:var(--bg);border-top:1px soli
   .oss-github{padding:20px}
   .showcase{grid-template-columns:1fr}
   .cta-actions,.hero-actions{flex-direction:column}
+  .hero-download-stack,.download-platform-row{width:100%}
+  .download-platform-label{min-width:auto;text-align:center}
   .btn-hero,.btn-lg,.showcase-btn{width:100%}
   .footer-inner{gap:32px}
   .footer-bottom{flex-direction:column;align-items:flex-start;gap:8px}

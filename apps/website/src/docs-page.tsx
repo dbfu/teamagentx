@@ -1,5 +1,5 @@
-import { useEffect, useState, type MouseEvent, type ReactNode } from 'react'
-import { startResolvedDownload } from './download-helper'
+import { useEffect, useState, type ReactNode } from 'react'
+import { getResolvedDownloadHref } from './download-helper'
 import type { SiteConfig } from './site-config'
 
 const IS_MAC = /Mac|iPhone|iPad/.test(navigator.userAgent)
@@ -74,11 +74,6 @@ export function DocsPage({ siteConfig }: DocsPageProps) {
   const [showMacModal, setShowMacModal] = useState(false)
   const [selectedArch, setSelectedArch] = useState<'arm64' | 'x64'>('arm64')
   const [detectedArch, setDetectedArch] = useState<'arm64' | 'x64' | null>(null)
-  const triggerResolvedDownload = (url: string) => startResolvedDownload(url, siteConfig.downloadResolverUrl)
-  const handleResolvedDownload = (url: string) => (event: MouseEvent<HTMLAnchorElement>) => {
-    event.preventDefault()
-    void triggerResolvedDownload(url)
-  }
 
   useEffect(() => {
     if (!IS_MAC) return
@@ -484,16 +479,16 @@ export function DocsPage({ siteConfig }: DocsPageProps) {
               <button type="button" className="btn btn-primary" onClick={() => setShowMacModal(true)}>
                 {downloadIcon(14)} 下载 macOS 客户端
               </button>
-              <a href={siteConfig.winUrl} target="_blank" rel="noopener noreferrer" className="btn btn-outline" onClick={handleResolvedDownload(siteConfig.winUrl)}>
+              <a href={getResolvedDownloadHref(siteConfig.winUrl)} target="_blank" rel="noopener noreferrer" className="btn btn-outline">
                 下载 Windows 客户端
               </a>
               {siteConfig.iosUrl && (
-                <a href={siteConfig.iosUrl} target="_blank" rel="noopener noreferrer" className="btn btn-outline" onClick={handleResolvedDownload(siteConfig.iosUrl)}>
+                <a href={getResolvedDownloadHref(siteConfig.iosUrl)} target="_blank" rel="noopener noreferrer" className="btn btn-outline">
                   下载 iOS App
                 </a>
               )}
               {siteConfig.androidUrl && (
-                <a href={siteConfig.androidUrl} target="_blank" rel="noopener noreferrer" className="btn btn-outline" onClick={handleResolvedDownload(siteConfig.androidUrl)}>
+                <a href={getResolvedDownloadHref(siteConfig.androidUrl)} target="_blank" rel="noopener noreferrer" className="btn btn-outline">
                   下载 Android App
                 </a>
               )}
@@ -540,13 +535,12 @@ export function DocsPage({ siteConfig }: DocsPageProps) {
               </button>
             </div>
             <a
-              href={selectedArch === 'arm64' ? siteConfig.macUrlArm64 : siteConfig.macUrlX64}
+              href={getResolvedDownloadHref(selectedArch === 'arm64' ? siteConfig.macUrlArm64 : siteConfig.macUrlX64)}
               target="_blank"
               rel="noopener noreferrer"
               className="btn btn-primary mac-modal-download-btn"
-              onClick={(event) => {
+              onClick={() => {
                 setShowMacModal(false)
-                handleResolvedDownload(selectedArch === 'arm64' ? siteConfig.macUrlArm64 : siteConfig.macUrlX64)(event)
               }}
             >
               {downloadIcon(15)} 下载 {selectedArch === 'arm64' ? 'Apple Silicon' : 'Intel'} 版本

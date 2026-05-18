@@ -18,7 +18,6 @@ const macUrlX64 = env.VITE_DOWNLOAD_URL_MAC_X64 || env.VITE_DOWNLOAD_URL_MAC || 
 const winUrl = env.VITE_DOWNLOAD_URL_WIN || ''
 const iosUrl = env.VITE_DOWNLOAD_URL_IOS || ''
 const androidUrl = env.VITE_DOWNLOAD_URL_ANDROID || ''
-const downloadResolverUrl = env.VITE_DOWNLOAD_RESOLVER_URL || ''
 
 const updateInfo = {
   version,
@@ -38,7 +37,6 @@ const updateInfo = {
     ios: iosUrl,
     android: androidUrl,
   },
-  downloadResolverUrl,
   notes: env.VITE_UPDATE_NOTES || env.VITE_APP_VERSION_NOTE || '',
 }
 

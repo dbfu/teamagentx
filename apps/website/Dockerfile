@@ -8,7 +8,6 @@ ARG VITE_DOWNLOAD_URL_MAC_X64
 ARG VITE_DOWNLOAD_URL_WIN
 ARG VITE_DOWNLOAD_URL_IOS
 ARG VITE_DOWNLOAD_URL_ANDROID
-ARG VITE_DOWNLOAD_RESOLVER_URL
 
 # 设置工作目录
 WORKDIR /repo
@@ -35,8 +34,7 @@ RUN echo "VITE_APP_VERSION=${VITE_APP_VERSION}" > .env && \
     echo "VITE_DOWNLOAD_URL_MAC_X64=${VITE_DOWNLOAD_URL_MAC_X64}" >> .env && \
     echo "VITE_DOWNLOAD_URL_WIN=${VITE_DOWNLOAD_URL_WIN}" >> .env && \
     echo "VITE_DOWNLOAD_URL_IOS=${VITE_DOWNLOAD_URL_IOS}" >> .env && \
-    echo "VITE_DOWNLOAD_URL_ANDROID=${VITE_DOWNLOAD_URL_ANDROID}" >> .env && \
-    echo "VITE_DOWNLOAD_RESOLVER_URL=${VITE_DOWNLOAD_RESOLVER_URL}" >> .env
+    echo "VITE_DOWNLOAD_URL_ANDROID=${VITE_DOWNLOAD_URL_ANDROID}" >> .env
 
 # 执行构建
 RUN pnpm build
@@ -44,8 +42,8 @@ RUN pnpm build
 # ── Stage 2: 运行阶段（nginx 静态文件服务） ──
 FROM nginx:alpine
 
-# 复制自定义 nginx 配置
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# 复制自定义 nginx 模板配置
+COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 
 # 从构建阶段复制产物
 COPY --from=builder /repo/apps/website/dist /usr/share/nginx/html

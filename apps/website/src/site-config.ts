@@ -7,7 +7,6 @@ export interface SiteConfig {
   winUrl: string
   iosUrl: string
   androidUrl: string
-  downloadResolverUrl: string
 }
 
 const BUILD_TIME_CONFIG: SiteConfig = {
@@ -17,7 +16,6 @@ const BUILD_TIME_CONFIG: SiteConfig = {
   winUrl: import.meta.env.VITE_DOWNLOAD_URL_WIN || '',
   iosUrl: import.meta.env.VITE_DOWNLOAD_URL_IOS || '',
   androidUrl: import.meta.env.VITE_DOWNLOAD_URL_ANDROID || '',
-  downloadResolverUrl: import.meta.env.VITE_DOWNLOAD_RESOLVER_URL || '',
 }
 
 export function useSiteConfig(): SiteConfig {
@@ -39,8 +37,6 @@ export function useSiteConfig(): SiteConfig {
             data.iosUrl || data.downloads?.ios || BUILD_TIME_CONFIG.iosUrl,
           androidUrl:
             data.androidUrl || data.downloads?.android || BUILD_TIME_CONFIG.androidUrl,
-          downloadResolverUrl:
-            data.downloadResolverUrl || BUILD_TIME_CONFIG.downloadResolverUrl,
         })
       })
       .catch(() => {
