@@ -193,7 +193,6 @@ describe('openai-compatible-tts provider', () => {
         apiUrl: 'https://chat.example.com/v1',
         model: 'gpt-4.1',
         modelType: 'text',
-        audioUsage: null,
       }),
     })) as unknown) as typeof prisma.agent.findUnique;
 
