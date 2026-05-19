@@ -1,6 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const { createRequire } = require('module');
+const { execFileSync } = require('child_process');
 const { pipeline } = require('stream/promises');
 const zlib = require('zlib');
 const tar = require('tar');
@@ -93,7 +94,7 @@ exports.default = async function (context) {
   }
 
   // Shrink bundled runtime payload by removing files that are not needed on
-  // the shipped macOS arm64 runtime:
+  // the shipped target runtime:
   // - test output and type/source-map artifacts
   // - Prisma CLI/helper/studio packages (runtime uses generated client + libsql only)
   // - non-arm64-darwin vendor assets bundled with Claude SDK
@@ -121,6 +122,7 @@ exports.default = async function (context) {
       'esbuild@',
     ]),
     ...prunePlatformPackages(nodeModulesDir, targetPlatform, targetArch),
+    ...patchDarwinX64LibsqlUnwindDependency(nodeModulesDir, targetPlatform, targetArch),
     ...pruneClaudeAgentSdkVendor(nodeModulesDir, targetPlatform, targetArch),
     ...prunePrismaClientRuntime(nodeModulesDir),
     ...removeFilesByPattern(nodeModulesDir, (fullPath) => (
@@ -580,6 +582,77 @@ function getTargetLibsqlPlatforms(targetPlatform, targetArch) {
   }
 
   return [`linux-${arch}-gnu`];
+}
+
+const LIBSQL_DARWIN_X64_LLVM_UNWIND = '/usr/local/opt/llvm@15/lib/libunwind.1.dylib';
+const LIBSQL_DARWIN_X64_ROOT_UNWIND = '/usr/lib/libunwind.dylib';
+const LIBSQL_DARWIN_X64_SYSTEM_UNWIND = '/usr/lib/system/libunwind.dylib';
+const LIBSQL_DARWIN_X64_BAD_UNWIND_NAMES = [
+  LIBSQL_DARWIN_X64_LLVM_UNWIND,
+  LIBSQL_DARWIN_X64_ROOT_UNWIND,
+];
+
+function patchDarwinX64LibsqlUnwindDependency(nodeModulesDir, targetPlatform, targetArch) {
+  if (targetPlatform !== 'darwin') {
+    return [];
+  }
+
+  const targetLibsqlPlatforms = getTargetLibsqlPlatforms(targetPlatform, targetArch);
+  if (!targetLibsqlPlatforms.includes('darwin-x64')) {
+    return [];
+  }
+
+  const packageNodeModules = findPnpmPackageNodeModules(nodeModulesDir, '@libsql+darwin-x64@');
+  const nativeCandidates = [
+    packageNodeModules
+      ? path.join(packageNodeModules, '@libsql', 'darwin-x64', 'index.node')
+      : null,
+    path.join(nodeModulesDir, '@libsql', 'darwin-x64', 'index.node'),
+  ].filter(Boolean);
+
+  const nativePath = nativeCandidates.find(candidate => fs.existsSync(candidate));
+  if (!nativePath) {
+    return [];
+  }
+
+  let linkedLibraries;
+  try {
+    linkedLibraries = execFileSync('otool', ['-L', nativePath], { encoding: 'utf8' });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`[afterPack] Failed to inspect @libsql/darwin-x64 native dependencies: ${message}`);
+  }
+
+  if (linkedLibraries.includes(LIBSQL_DARWIN_X64_SYSTEM_UNWIND)) {
+    return [];
+  }
+
+  const badUnwindName = LIBSQL_DARWIN_X64_BAD_UNWIND_NAMES.find(name => linkedLibraries.includes(name));
+  if (!badUnwindName) {
+    return [];
+  }
+
+  try {
+    execFileSync('install_name_tool', [
+      '-change',
+      badUnwindName,
+      LIBSQL_DARWIN_X64_SYSTEM_UNWIND,
+      nativePath,
+    ], { stdio: 'pipe' });
+
+    linkedLibraries = execFileSync('otool', ['-L', nativePath], { encoding: 'utf8' });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`[afterPack] Failed to patch @libsql/darwin-x64 libunwind dependency: ${message}`);
+  }
+
+  if (!linkedLibraries.includes(LIBSQL_DARWIN_X64_SYSTEM_UNWIND)) {
+    throw new Error('[afterPack] @libsql/darwin-x64 libunwind patch did not persist.');
+  }
+
+  return [
+    `patched @libsql/darwin-x64 libunwind dependency: ${badUnwindName} -> ${LIBSQL_DARWIN_X64_SYSTEM_UNWIND}`,
+  ];
 }
 
 function normalizeElectronBuilderArch(targetArch) {

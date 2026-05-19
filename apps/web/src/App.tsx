@@ -1,6 +1,6 @@
 import { ArrowLeft, ChevronLeft, ClipboardList, Eraser, Loader2, MoreVertical, RefreshCw, Square } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Route, Routes, useNavigate, useSearchParams, useParams } from 'react-router-dom'
+import { Route, Routes, useLocation, useNavigate, useSearchParams, useParams } from 'react-router-dom'
 import { LoginModal } from './components/auth/login-modal'
 import { RegisterModal } from './components/auth/register-modal'
 import { AssistantDetailPage } from './components/chat/assistant-detail'
@@ -341,6 +341,7 @@ function DesktopMessagePage({
 
 function AppContent() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
   const isMobile = useIsMobile()
   const chatRooms = useChatRoomStore((s) => s.chatRooms)
@@ -354,8 +355,16 @@ function AppContent() {
   const updateUnreadCount = useChatStore((s) => s.updateUnreadCount)
   const executingChatRooms = useChatStore((s) => s.executingChatRooms)
   const setScrollToMessageId = useChatStore((s) => s.setScrollToMessageId)
-  const { isConnected, onUnreadUpdate, requestUnreadCounts, requestTodos, onTodoList, onTodoCreated, onTodoUpdated, onMessage, onChatRoomCreated, onAgentsUpdated, user: socketUser } = useSocketStore()
+  const { isConnected, onUnreadUpdate, requestUnreadCounts, requestTodos, onTodoList, onTodoCreated, onTodoUpdated, onMessage, onChatRoomCreated, onAgentsUpdated, onAgentStatus, user: socketUser } = useSocketStore()
   const { user } = useAuthStore()
+  const visibleChatRoomId = useMemo(() => {
+    if (isMobile) {
+      const match = location.pathname.match(/^\/chat\/([^/]+)$/)
+      return match ? decodeURIComponent(match[1]) : null
+    }
+
+    return location.pathname === '/' ? selectedRoomId : null
+  }, [isMobile, location.pathname, selectedRoomId])
 
   // 刷新状态
   const [isRefreshing, setIsRefreshing] = useState(false)
@@ -446,6 +455,29 @@ function AppContent() {
     return unsubscribe
   }, [isConnected, onAgentsUpdated, loadChatRooms])
 
+  // 全局维护群聊执行中状态。聊天区未挂载时也要能停止群头像 loading。
+  useEffect(() => {
+    if (!isConnected) return
+
+    const unsubscribe = onAgentStatus((data) => {
+      const hasExecutingAgent = Object.values(data.statuses).some(
+        status => status === 'executing' || status === 'busy'
+      )
+
+      useChatStore.setState((state) => {
+        const nextExecutingRooms = new Set(state.executingChatRooms)
+        if (hasExecutingAgent) {
+          nextExecutingRooms.add(data.chatRoomId)
+        } else {
+          nextExecutingRooms.delete(data.chatRoomId)
+        }
+        return { executingChatRooms: nextExecutingRooms }
+      })
+    })
+
+    return unsubscribe
+  }, [isConnected, onAgentStatus])
+
   // 处理 URL 参数中的 room 参数
   useEffect(() => {
     const roomId = searchParams.get('room')
@@ -472,10 +504,13 @@ function AppContent() {
     const unsubscribe = onUnreadUpdate((data) => {
       if (data.unreadCounts) {
         // 批量更新所有未读数
-        setUnreadCounts(data.unreadCounts)
+        setUnreadCounts(visibleChatRoomId
+          ? { ...data.unreadCounts, [visibleChatRoomId]: 0 }
+          : data.unreadCounts
+        )
       } else if (data.chatRoomId && data.count !== undefined) {
-        // 如果是当前选中的群聊，不显示未读数
-        if (data.chatRoomId === selectedRoomId) {
+        // 只有当前真正显示的聊天窗口才自动清零；停留在助手/模型等页面时仍显示未读。
+        if (data.chatRoomId === visibleChatRoomId) {
           updateUnreadCount(data.chatRoomId, 0)
         } else {
           updateUnreadCount(data.chatRoomId, data.count)
@@ -483,7 +518,7 @@ function AppContent() {
       }
     })
     return unsubscribe
-  }, [isConnected, onUnreadUpdate, setUnreadCounts, updateUnreadCount, selectedRoomId])
+  }, [isConnected, onUnreadUpdate, setUnreadCounts, updateUnreadCount, visibleChatRoomId])
 
   // 切换群聊时重新请求未读数
   useEffect(() => {

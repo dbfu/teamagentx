@@ -266,6 +266,9 @@ export function StreamPanel({
                 const { icon, color, label } = getTodoStatusIcon(todo.status)
                 return (
                   <div key={idx} data-todo-index={idx} className={cn('flex items-center gap-2 py-0.5', color)}>
+                    <span className="w-5 shrink-0 text-right text-xs font-medium tabular-nums opacity-70">
+                      {idx + 1}.
+                    </span>
                     {icon}
                     <span className="flex-1 text-sm truncate">{todo.content}</span>
                     <span className="text-xs opacity-60 shrink-0">{label}</span>
