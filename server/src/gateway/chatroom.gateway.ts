@@ -4,7 +4,18 @@ import { Server } from 'socket.io';
 import { chatRoomService } from '../modules/chatroom/chatroom.service.js';
 import { checkpointService } from '../modules/checkpoint/checkpoint.service.js';
 import { quickChatSessionService } from '../modules/quick-chat-session/quick-chat-session.service.js';
-import { clearExecutorCache, getAgentDebugInfo, executorCache, getCacheKey, broadcastAgentJoinedMessage } from '../core/agent/agent-handler/index.js';
+import {
+  abortControllers,
+  broadcastAgentStatus,
+  broadcastAgentTaskQueue,
+  clearExecutorCache,
+  discardExecutionResultKeys,
+  executorCache,
+  getAgentDebugInfo,
+  getCacheKey,
+  processingMap,
+  broadcastAgentJoinedMessage,
+} from '../core/agent/agent-handler/index.js';
 import { agentService } from '../core/agent/agent.service.js';
 import { executionRecordService } from '../modules/execution-record/execution-record.service.js';
 import { taskQueueService } from '../modules/task-queue/task-queue.service.js';
@@ -197,8 +208,13 @@ interface CreateChatRoomBody {
   avatar?: string;
   avatarColor?: string;
   description?: string;
+  rules?: string;
   workDir?: string | null;
   ownerId?: string;
+}
+
+interface DuplicateChatRoomBody {
+  name?: string;
 }
 
 interface UpdateChatRoomBody {
@@ -303,7 +319,7 @@ export async function chatRoomGateway(app: FastifyInstance) {
       },
     },
   }, async (request, reply) => {
-    const { name, avatar, avatarColor, description, workDir, ownerId } = request.body;
+    const { name, avatar, avatarColor, description, rules, workDir, ownerId } = request.body;
 
     // If ownerId is provided, use createWithOwner to auto-add OWNER agent
     const chatRoom = ownerId
@@ -312,6 +328,7 @@ export async function chatRoomGateway(app: FastifyInstance) {
           avatar,
           avatarColor,
           description,
+          rules,
           workDir,
           ownerId,
         })
@@ -320,6 +337,7 @@ export async function chatRoomGateway(app: FastifyInstance) {
           avatar,
           avatarColor,
           description,
+          rules,
           workDir,
         });
 
@@ -330,6 +348,57 @@ export async function chatRoomGateway(app: FastifyInstance) {
     }
 
     return reply.code(201).send({ success: true, data: chatRoom ? serializeChatRoomForResponse(chatRoom) : chatRoom });
+  });
+
+  // Duplicate chatRoom
+  app.post<{ Params: ChatRoomParams; Body: DuplicateChatRoomBody }>('/chatrooms/:id/duplicate', {
+    schema: {
+      description: '复制群聊配置（不复制消息和运行上下文）',
+      tags: ['ChatRooms'],
+      params: {
+        type: 'object',
+        properties: { id: { type: 'string' } },
+      },
+      body: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: '复制后的群聊名称；不传则使用“原名称 副本”' },
+        },
+      },
+      response: {
+        201: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: chatRoomSchema,
+          },
+        },
+        404: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const { name } = request.body ?? {};
+
+    const chatRoom = await chatRoomService.duplicate({
+      sourceChatRoomId: id,
+      name,
+    });
+
+    if (!chatRoom) {
+      return reply.code(404).send({ success: false, error: '群聊不存在' });
+    }
+
+    const io = (app as any).io as Server | undefined;
+    io?.emit('chatroom:created', { chatRoom });
+
+    return reply.code(201).send({ success: true, data: serializeChatRoomForResponse(chatRoom) });
   });
 
   // Add agent to chatRoom
@@ -553,6 +622,21 @@ export async function chatRoomGateway(app: FastifyInstance) {
 
       // 根据助手类型清空上下文
       await agentMemoryService.clear(id, agent.id);
+      const executionKey = `${id}_${agent.id}`;
+      const abortController = abortControllers.get(executionKey);
+      if (abortController) {
+        discardExecutionResultKeys.add(executionKey);
+        abortController.abort();
+        abortControllers.delete(executionKey);
+      } else {
+        discardExecutionResultKeys.delete(executionKey);
+      }
+      processingMap.delete(executionKey);
+      const [deletedTasks, deletedExecutions] = await Promise.all([
+        taskQueueService.deleteByChatRoomAndAgent(id, agent.id),
+        executionRecordService.deleteByChatRoomAndAgent(id, agent.id),
+      ]);
+
       if (agent.type === 'builtin') {
         await checkpointService.clearChatRoomAgentContext(id, agent.name);
         // 清空执行器缓存（传入 chatRoomId 精确删除）
@@ -589,6 +673,25 @@ export async function chatRoomGateway(app: FastifyInstance) {
           latestMessages[0]?.id ?? null,
         );
       }
+
+      broadcastAgentTaskQueue(id, agent.id, []);
+      const inactiveTasks = await taskQueueService.getInactiveTasks(id);
+      const inactiveTaskList = inactiveTasks.map(task => ({
+        id: task.id,
+        agentId: task.agentId,
+        agentName: task.agentName,
+        messageId: task.messageId,
+        messageContent: task.messageContent,
+        status: task.status,
+        createdAt: task.createdAt,
+      }));
+      const io = (app as any).io as Server | undefined;
+      io?.to(id).emit('agent:inactive-tasks', { chatRoomId: id, tasks: inactiveTaskList });
+      await broadcastAgentStatus(id);
+
+      console.log(
+        `[ClearContext] 已清理群聊 ${id} 助手 ${agent.name} 的任务 ${deletedTasks.count} 条、执行记录 ${deletedExecutions.count} 条`
+      );
 
       return reply.send({
         success: true,

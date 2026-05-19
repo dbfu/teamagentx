@@ -3,10 +3,6 @@ import { tokenUsageApi } from '@/lib/token-usage-api'
 import { cn, formatDateTime } from '@/lib/utils'
 import { copyToClipboard } from '@/lib/copy-utils'
 import { Bot, CheckSquare, MessageSquareMore, Info, Copy, XCircle, Trash2, Volume2, ChevronDown, ChevronUp } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import rehypeRaw from 'rehype-raw'
-import { remarkMentions, MENTION_MARKER_CLASS } from '@/lib/remark-mentions'
 import { useState, useCallback, useMemo } from 'react'
 import { toast } from 'sonner'
 import { ImageViewerModal } from './image-viewer-modal'
@@ -18,8 +14,9 @@ import { useIsMobile } from '@/hooks/use-mobile'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useChatStore, VOICE_MESSAGE_PLACEHOLDER } from '@/stores/chat-store'
 import { toVoicePanelConfig } from '@/lib/agent-speech'
-import { normalizeSpeechText, speakText, stopSpeechPlayback, supportsSpeechPlayback } from '@/lib/browser-speech'
+import { normalizeSpeechText, prewarmTts, speakText, stopSpeechPlayback, supportsSpeechPlayback } from '@/lib/browser-speech'
 import { resolveAssetUrl } from '@/lib/asset-url'
+import { MarkdownContent } from './markdown-content'
 
 function formatDuration(ms: number): string {
   const totalSeconds = Math.round(ms / 1000)
@@ -89,9 +86,10 @@ interface ChatMessageProps {
   selectionMode?: boolean
   isSelected?: boolean
   disableContentCollapse?: boolean
+  onStopSpeak?: (messageId: string) => void
 }
 
-export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechButton = true, typingAgents, mentionAgents, currentUser, hasBeenPlayed, onMarkPlayed, onAgentAvatarClick, onTypingAgentClick, onMentionClick, onReplyClick, onExecutionDetailClick, onMentionAgent, onDeleteMessage, onStartMultiSelect, onToggleSelection, selectionMode, isSelected, disableContentCollapse = false }: ChatMessageProps) {
+export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechButton = true, typingAgents, mentionAgents, currentUser, hasBeenPlayed, onMarkPlayed, onAgentAvatarClick, onTypingAgentClick, onMentionClick, onReplyClick, onExecutionDetailClick, onMentionAgent, onDeleteMessage, onStartMultiSelect, onToggleSelection, selectionMode, isSelected, disableContentCollapse = false, onStopSpeak }: ChatMessageProps) {
   const isMobile = useIsMobile()
   const allAgents = useChatStore((s) => s.allAgents)
   const playingVoiceMessageId = useChatStore((s) => s.playingVoiceMessageId)
@@ -233,6 +231,10 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
     if (!voiceConfig?.enabled || !message.content.trim()) return
 
     if (isCurrentlyPlaying) {
+      if (onStopSpeak) {
+        onStopSpeak(message.id)
+        return
+      }
       stopSpeechPlayback()
       setPlayingVoiceMessageId(null)
       return
@@ -259,10 +261,14 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
         temperature: voiceConfig.temperature,
         prompt: voiceConfig.prompt,
         agentId: message.agentId ?? undefined,
+        chatRoomId: message.chatRoomId,
         messageId: message.id,
       })
       onMarkPlayed?.()
     } catch (error) {
+      // 用户主动停止不显示错误提示
+      if (error instanceof Error && (error as Error & { cancelled?: boolean }).cancelled) return
+      if (error instanceof Error && error.message === 'speech_interrupted') return
       console.error('语音播报失败:', error)
       toast.error(error instanceof Error ? error.message : '语音播报失败')
     } finally {
@@ -270,7 +276,21 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
         setPlayingVoiceMessageId(null)
       }
     }
-  }, [isCurrentlyPlaying, message.content, message.id, message.agentId, normalizedContent, onMarkPlayed, setPlayingVoiceMessageId, voiceConfig])
+  }, [isCurrentlyPlaying, message.chatRoomId, message.content, message.id, message.agentId, normalizedContent, onMarkPlayed, onStopSpeak, setPlayingVoiceMessageId, voiceConfig])
+
+  const handlePrewarm = useCallback(() => {
+    if (isCurrentlyPlaying || voiceConfig?.provider !== 'openai-compatible-tts') return
+    prewarmTts({
+      text: message.content,
+      provider: voiceConfig.provider,
+      model: voiceConfig.model,
+      voiceId: voiceConfig.voiceId,
+      rate: voiceConfig.speed,
+      format: voiceConfig.format ?? undefined,
+      agentId: message.agentId ?? undefined,
+      chatRoomId: message.chatRoomId,
+    })
+  }, [isCurrentlyPlaying, message.agentId, message.chatRoomId, message.content, voiceConfig])
 
   const renderContent = (content: string) => {
     // 用户消息：普通文本展示，但 @助手 需要高亮
@@ -327,91 +347,13 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
     }
 
     // 助手消息：使用 markdown 渲染
-    // 如果没有 mentionAgents，直接渲染 markdown（不处理 @mentions）
-    if (!mentionAgents || mentionAgents.length === 0) {
-      return (
-        <div className="prose prose-sm max-w-none break-words [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_pre]:whitespace-pre-wrap [&_code]:whitespace-pre-wrap [&_img]:max-h-[360px] [&_img]:w-auto [&_img]:max-w-[min(560px,80vw)] [&_img]:rounded-lg [&_img]:object-contain [&_img]:cursor-pointer">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={{
-              a: ({ href, children }) => (
-                <a href={href} target="_blank" rel="noopener noreferrer">
-                  {children}
-                </a>
-              ),
-              img: ({ src, alt }) => {
-                const imageUrl = resolveAssetUrl(src)
-                return (
-                  <img
-                    src={imageUrl}
-                    alt={alt || '图片'}
-                    className="max-h-[360px] w-auto max-w-[min(560px,80vw)] rounded-lg object-contain cursor-pointer transition-opacity hover:opacity-90"
-                    onClick={() => imageUrl && setViewerImage({ url: imageUrl, name: alt || '图片' })}
-                  />
-                )
-              },
-            }}
-          >
-            {content}
-          </ReactMarkdown>
-        </div>
-      )
-    }
-
-    // 使用 remarkMentions 插件处理 @mentions，将有效的 @助手名 转换为 HTML span
-    // 使用 rehypeRaw 来处理这些 HTML 节点
-    // 在自定义 span 组件中识别我们的标记 class 并渲染为高亮元素
     return (
-      <div className="prose prose-sm max-w-none break-words [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_pre]:whitespace-pre-wrap [&_code]:whitespace-pre-wrap [&_img]:max-h-[360px] [&_img]:w-auto [&_img]:max-w-[min(560px,80vw)] [&_img]:rounded-lg [&_img]:object-contain [&_img]:cursor-pointer">
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm, [remarkMentions, { mentionAgents }]]}
-          rehypePlugins={[rehypeRaw]}
-          components={{
-            a: ({ href, children }) => (
-              <a href={href} target="_blank" rel="noopener noreferrer">
-                {children}
-              </a>
-            ),
-            img: ({ src, alt }) => {
-              const imageUrl = resolveAssetUrl(src)
-              return (
-                <img
-                  src={imageUrl}
-                  alt={alt || '图片'}
-                  className="max-h-[360px] w-auto max-w-[min(560px,80vw)] rounded-lg object-contain cursor-pointer transition-opacity hover:opacity-90"
-                  onClick={() => imageUrl && setViewerImage({ url: imageUrl, name: alt || '图片' })}
-                />
-              )
-            },
-            span: ({ className, children, ...props }) => {
-              // 只处理带有我们唯一标记 class 的 span（由我们的 remark 插件插入）
-              // 其他 span（包括助手消息中可能包含的其他 HTML span）保持原样
-              if (className === MENTION_MARKER_CLASS) {
-                // 从 props 中获取 agent 信息
-                // rehype-raw 将 data-* 属性转换为 camelCase
-                const agentId = (props as any).agentId || (props as any)['data-agent-id']
-                const agentName = (props as any).agentName || (props as any)['data-agent-name']
-
-                if (agentId && agentName) {
-                  return (
-                    <span
-                      className="text-primary cursor-pointer hover:text-primary/80 whitespace-nowrap"
-                      onClick={() => onMentionClick?.(agentId, agentName)}
-                      title={`点击查看 ${agentName} 详情`}
-                    >
-                      {children}
-                    </span>
-                  )
-                }
-              }
-              // 其他 span 保持原样渲染（显示为纯文本）
-              return <span className={className} {...props}>{children}</span>
-            },
-          }}
-        >
-          {content}
-        </ReactMarkdown>
-      </div>
+      <MarkdownContent
+        content={content}
+        mentionAgents={mentionAgents}
+        onMentionClick={onMentionClick}
+        onImageClick={setViewerImage}
+      />
     )
   }
 
@@ -540,6 +482,8 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
       <span className="relative inline-flex">
         <button
           onClick={handleSpeakMessage}
+          onMouseEnter={handlePrewarm}
+          onPointerDown={handlePrewarm}
           className={cn(
             "group inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs transition-colors",
             isCurrentlyPlaying
@@ -564,10 +508,10 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
                 <span className="w-[2px] rounded-full bg-current origin-bottom" style={{ height: '62%', animation: 'sound-bar 0.7s ease-in-out infinite', animationDelay: '360ms' }} />
               </span>
             ) : (
-              <Volume2 className="size-3.5" strokeWidth={2} />
+              <Volume2 className="size-3.5 transition-transform group-hover:scale-110" strokeWidth={2} />
             )}
           </span>
-          <span>
+          <span className="transition-colors">
             {isCurrentlyPlaying ? '播放中' : '播报'}
           </span>
         </button>

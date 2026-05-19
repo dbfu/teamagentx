@@ -3,8 +3,7 @@ import { ExecutionEvent, ExecutionRecord, ThinkingRecord } from '@/lib/agent-api
 import { tokenUsageApi } from '@/lib/token-usage-api'
 import { cn, formatDateTime, truncateToolName } from '@/lib/utils'
 import { CheckCircle, ChevronDown, ChevronRight, CircleStop, XCircle } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import { MarkdownContent } from '../markdown-content'
 import { CodeEditToolContent, CodeReadToolOutput, isCodeEditTool, isCodeReadTool, renderToolValue } from './tool-call-content'
 
 // 格式化耗时显示（1m40s 格式，分钟为0时只显示秒）
@@ -160,27 +159,6 @@ export function RecordDetailPanel({ selectedRecord }: RecordDetailPanelProps) {
         </div>
       )}
 
-      {/* 上下文消息 */}
-      {selectedRecord.context && (
-        <Collapsible className="rounded border border-border bg-muted/50 text-xs">
-          <CollapsibleTrigger asChild>
-            <div className="group flex items-center gap-2 p-2 cursor-pointer hover:opacity-80">
-              <CollapsibleStateIcon />
-              <span className="inline-flex items-center px-2 py-0.5 rounded bg-yellow-500/20 text-yellow-700 dark:text-yellow-400 font-medium">
-                📋 上下文消息
-              </span>
-            </div>
-          </CollapsibleTrigger>
-          <CollapsibleContent>
-            <div className="px-3 pb-3 prose prose-sm max-w-none dark:prose-invert [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap [&_pre]:bg-muted/50 [&_pre]:p-2 [&_pre]:rounded [&_code]:text-xs max-h-96 overflow-y-auto">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {selectedRecord.context}
-              </ReactMarkdown>
-            </div>
-          </CollapsibleContent>
-        </Collapsible>
-      )}
-
       {/* 触发消息 */}
       <Collapsible className="rounded border border-border bg-muted/50 text-xs">
         <CollapsibleTrigger asChild>
@@ -192,11 +170,10 @@ export function RecordDetailPanel({ selectedRecord }: RecordDetailPanelProps) {
           </div>
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <div className="px-3 pb-3 prose prose-sm max-w-none dark:prose-invert [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap [&_pre]:bg-muted/50 [&_pre]:p-2 [&_pre]:rounded [&_code]:text-xs max-h-96 overflow-y-auto">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {selectedRecord.triggerMessage}
-            </ReactMarkdown>
-          </div>
+          <MarkdownContent
+            content={selectedRecord.triggerMessage}
+            className="px-3 pb-3 dark:prose-invert [&_pre]:bg-muted/50 [&_pre]:p-2 [&_pre]:rounded [&_code]:text-xs max-h-96 overflow-y-auto"
+          />
         </CollapsibleContent>
       </Collapsible>
 
@@ -216,11 +193,10 @@ export function RecordDetailPanel({ selectedRecord }: RecordDetailPanelProps) {
                     </div>
                   </CollapsibleTrigger>
                   <CollapsibleContent>
-                    <div className="px-3 pb-3 prose prose-sm max-w-none dark:prose-invert [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap [&_pre]:bg-muted/50 [&_pre]:p-2 [&_pre]:rounded [&_code]:text-xs max-h-96 overflow-y-auto">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {event.data.content}
-                      </ReactMarkdown>
-                    </div>
+                    <MarkdownContent
+                      content={event.data.content ?? ''}
+                      className="px-3 pb-3 dark:prose-invert [&_pre]:bg-muted/50 [&_pre]:p-2 [&_pre]:rounded [&_code]:text-xs max-h-96 overflow-y-auto"
+                    />
                   </CollapsibleContent>
                 </Collapsible>
               )
@@ -301,11 +277,10 @@ export function RecordDetailPanel({ selectedRecord }: RecordDetailPanelProps) {
                     </div>
                   </CollapsibleTrigger>
                   <CollapsibleContent>
-                    <div className="px-3 pb-3 prose prose-sm max-w-none dark:prose-invert [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap [&_pre]:bg-muted/50 [&_pre]:p-2 [&_pre]:rounded [&_code]:text-xs">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {event.data.content}
-                      </ReactMarkdown>
-                    </div>
+                    <MarkdownContent
+                      content={event.data.content ?? ''}
+                      className="px-3 pb-3 dark:prose-invert [&_pre]:bg-muted/50 [&_pre]:p-2 [&_pre]:rounded [&_code]:text-xs"
+                    />
                   </CollapsibleContent>
                 </Collapsible>
               )

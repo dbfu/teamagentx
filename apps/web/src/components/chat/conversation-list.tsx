@@ -3,7 +3,7 @@ import { ChatRoom, chatRoomApi } from '@/lib/agent-api'
 import { AgentAvatarImage } from '@/lib/agent-avatars'
 import { GroupAvatarImage } from '@/lib/group-avatars'
 import { cn, formatDateTime } from '@/lib/utils'
-import { Loader2, MessageSquare, Pin, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { Copy, Loader2, MessageSquare, Pin, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
 
@@ -27,6 +27,7 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
   // 右键菜单状态
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; room: ChatRoom } | null>(null)
   const [pinning, setPinning] = useState(false)
+  const [duplicating, setDuplicating] = useState(false)
   const [deleting, setDeleting] = useState(false)
   // 删除确认对话框状态
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
@@ -69,6 +70,28 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
       toast.error('操作失败')
     } finally {
       setPinning(false)
+      handleCloseContextMenu()
+    }
+  }
+
+  // 复制群聊
+  const handleDuplicate = async () => {
+    if (!contextMenu || duplicating) return
+    const room = contextMenu.room
+    setDuplicating(true)
+    try {
+      const response = await chatRoomApi.duplicate(room.id)
+      if (response.success && response.data) {
+        toast.success('群聊已复制')
+        onRefresh?.()
+        onSelect(response.data.id)
+      } else {
+        toast.error(response.error || '复制失败')
+      }
+    } catch (error) {
+      toast.error('复制失败')
+    } finally {
+      setDuplicating(false)
       handleCloseContextMenu()
     }
   }
@@ -320,6 +343,14 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
             >
               <Pin className="size-4" />
               {contextMenu.room.isPinned ? '取消置顶' : '置顶'}
+            </button>
+            <button
+              onClick={handleDuplicate}
+              disabled={duplicating}
+              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-popover-foreground hover:bg-accent disabled:opacity-50"
+            >
+              {duplicating ? <Loader2 className="size-4 animate-spin" /> : <Copy className="size-4" />}
+              复制群聊
             </button>
             <button
               onClick={handleDeleteClick}

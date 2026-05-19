@@ -140,7 +140,8 @@ function findLocalIp(interfaces: NodeJS.Dict<os.NetworkInterfaceInfo[]>): string
   return candidates[0] || null;
 }
 
-type FolderOpenTarget = 'system' | 'vscode' | 'cursor' | 'trae' | 'trae-cn';
+type FolderOpenTarget = 'system' | 'terminal' | 'vscode' | 'cursor' | 'trae' | 'trae-cn';
+type EditorOpenTarget = Exclude<FolderOpenTarget, 'system' | 'terminal'>;
 
 type UpdateInfo = {
   version: string;
@@ -164,7 +165,7 @@ type DownloadProgress = {
   total: number | null;
 };
 
-const EDITOR_APP_NAMES: Record<Exclude<FolderOpenTarget, 'system'>, string> = {
+const EDITOR_APP_NAMES: Record<EditorOpenTarget, string> = {
   vscode: 'Visual Studio Code',
   cursor: 'Cursor',
   trae: 'Trae',
@@ -172,7 +173,7 @@ const EDITOR_APP_NAMES: Record<Exclude<FolderOpenTarget, 'system'>, string> = {
 };
 
 // macOS app paths
-const MAC_APP_CANDIDATES: Record<Exclude<FolderOpenTarget, 'system'>, string[]> = {
+const MAC_APP_CANDIDATES: Record<EditorOpenTarget, string[]> = {
   vscode: [
     '/Applications/Visual Studio Code.app',
     '~/Applications/Visual Studio Code.app',
@@ -192,7 +193,7 @@ const MAC_APP_CANDIDATES: Record<Exclude<FolderOpenTarget, 'system'>, string[]> 
 };
 
 // Windows app paths (user may install to LocalAppData or ProgramFiles)
-const WIN_APP_CANDIDATES: Record<Exclude<FolderOpenTarget, 'system'>, string[]> = {
+const WIN_APP_CANDIDATES: Record<EditorOpenTarget, string[]> = {
   vscode: [
     '${LOCALAPPDATA}\\Programs\\Microsoft VS Code\\Code.exe',
     '${PROGRAMFILES}\\Microsoft VS Code\\Code.exe',
@@ -209,7 +210,7 @@ const WIN_APP_CANDIDATES: Record<Exclude<FolderOpenTarget, 'system'>, string[]> 
   ],
 };
 
-function getAppCandidates(target: Exclude<FolderOpenTarget, 'system'>): string[] {
+function getAppCandidates(target: EditorOpenTarget): string[] {
   if (process.platform === 'win32') {
     const candidates = WIN_APP_CANDIDATES[target];
     // Expand environment variables
@@ -244,6 +245,64 @@ function openFolderInApp(folderPath: string, appName: string): Promise<void> {
         resolve();
       });
     }
+  });
+}
+
+function openFolderInTerminal(folderPath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (process.platform === 'darwin') {
+      execFile('open', ['-a', 'Terminal', folderPath], (error, _stdout, stderr) => {
+        if (error) {
+          reject(new Error(stderr || error.message));
+          return;
+        }
+        resolve();
+      });
+      return;
+    }
+
+    if (process.platform === 'win32') {
+      const child = spawn('cmd.exe', ['/c', 'start', '', 'cmd.exe', '/K', 'cd', '/d', folderPath], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: false,
+      });
+      child.on('error', reject);
+      child.unref();
+      resolve();
+      return;
+    }
+
+    const candidates = [
+      { command: 'x-terminal-emulator', args: [] },
+      { command: 'gnome-terminal', args: [] },
+      { command: 'konsole', args: [] },
+      { command: 'xfce4-terminal', args: [] },
+      { command: 'xterm', args: [] },
+    ];
+
+    const terminal = candidates.find(({ command }) => {
+      try {
+        execFileSync('which', [command], { stdio: 'ignore' });
+        return true;
+      } catch {
+        return false;
+      }
+    });
+
+    if (!terminal) {
+      reject(new Error('Terminal not found'));
+      return;
+    }
+
+    const child = spawn(terminal.command, terminal.args, {
+      cwd: folderPath,
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.on('error', reject);
+    child.unref();
+    resolve();
   });
 }
 
@@ -552,9 +611,9 @@ function getServerNodeModulesPath(): string {
 }
 
 /**
- * 把 resources/server/ 整个拷贝到 userData/runtime/<version>/server/。
+ * 把 resources/server/ 整个拷贝到 userData/runtime/<version>-<platform>-<arch>/server/。
  *
- * - 用 `app.getVersion()` 作为子目录名，同版本只拷一次；升级后旧版本目录会被清理。
+ * - 用版本 + 平台 + 架构作为子目录名，同架构同版本只拷一次；升级后旧版本目录会被清理。
  * - 用 `.ready` sentinel 标记拷贝完成；缺失或损坏时自动重拷。
  * - 拷贝失败时返回 null，调用方回退到 resources（旧路径仍然能跑，只是无法解决文件锁问题）。
  */
@@ -573,14 +632,15 @@ async function ensureRuntimeServer(): Promise<string | null> {
   }
 
   const version = app.getVersion();
+  const runtimeKey = `${version}-${process.platform}-${process.arch}`;
   const runtimeBase = path.join(app.getPath('userData'), 'runtime');
-  const targetRoot = path.join(runtimeBase, version, 'server');
+  const targetRoot = path.join(runtimeBase, runtimeKey, 'server');
   const sentinel = path.join(targetRoot, '.ready');
 
   if (fs.existsSync(sentinel)) {
     writeLog(`[Runtime] server runtime 已就绪：${targetRoot}`);
     runtimePhase = 'ready';
-    void cleanupOldRuntimeVersions(runtimeBase, version);
+    void cleanupOldRuntimeVersions(runtimeBase, runtimeKey, version);
     return targetRoot;
   }
 
@@ -606,11 +666,11 @@ async function ensureRuntimeServer(): Promise<string | null> {
       await copyServerWithProgress(sourceRoot, targetRoot);
     }
 
-    await fs.promises.writeFile(sentinel, version, 'utf8');
+    await fs.promises.writeFile(sentinel, runtimeKey, 'utf8');
     writeLog(`[Runtime] server 准备完成，耗时 ${Date.now() - start}ms`);
 
     runtimePhase = 'ready';
-    void cleanupOldRuntimeVersions(runtimeBase, version);
+    void cleanupOldRuntimeVersions(runtimeBase, runtimeKey, version);
     mainWindow?.webContents.send('runtime:prepare-done');
     return targetRoot;
   } catch (error) {
@@ -761,12 +821,13 @@ async function copyServerWithProgress(sourceRoot: string, targetRoot: string): P
   emit(true);
 }
 
-async function cleanupOldRuntimeVersions(runtimeBase: string, currentVersion: string): Promise<void> {
+async function cleanupOldRuntimeVersions(runtimeBase: string, currentKey: string, currentVersion: string): Promise<void> {
   try {
     if (!fs.existsSync(runtimeBase)) return;
     const entries = await fs.promises.readdir(runtimeBase);
     for (const entry of entries) {
-      if (entry === currentVersion) continue;
+      if (entry === currentKey) continue;
+      if (entry.startsWith(`${currentVersion}-`)) continue;
       const oldPath = path.join(runtimeBase, entry);
       writeLog(`[Runtime] 清理旧版 runtime：${oldPath}`);
       await fs.promises.rm(oldPath, { recursive: true, force: true });
@@ -1722,7 +1783,7 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle('get-open-target-icons', async () => {
-    const targets = Object.keys(MAC_APP_CANDIDATES) as Array<Exclude<FolderOpenTarget, 'system'>>;
+    const targets = Object.keys(MAC_APP_CANDIDATES) as EditorOpenTarget[];
     const entries = await Promise.all(
       targets.map(async (target) => {
         try {
@@ -1757,6 +1818,8 @@ app.whenReady().then(async () => {
         if (errorMessage) {
           return { success: false, error: errorMessage };
         }
+      } else if (target === 'terminal') {
+        await openFolderInTerminal(resolvedPath);
       } else {
         const appPath = resolveExistingAppPath(getAppCandidates(target));
         if (!appPath) {

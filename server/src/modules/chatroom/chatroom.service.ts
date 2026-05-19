@@ -20,6 +20,11 @@ export interface CreateChatRoomData {
   rules?: string;
 }
 
+export interface DuplicateChatRoomData {
+  sourceChatRoomId: string;
+  name?: string;
+}
+
 export interface UpdateChatRoomData {
   name?: string;
   avatar?: string;
@@ -321,6 +326,84 @@ export const chatRoomService = {
     if (!result) return null;
     const systemAgents = await getSystemAgents();
     return addVirtualSystemAgents(result, systemAgents);
+  },
+
+  async duplicate(data: DuplicateChatRoomData) {
+    const source = await prisma.chatRoom.findUnique({
+      where: { id: data.sourceChatRoomId },
+      include: {
+        chatRoomAgents: true,
+      },
+    });
+
+    if (!source) {
+      return null;
+    }
+
+    const now = new Date();
+    const newChatRoomId = randomUUID();
+    const copiedName = data.name?.trim() || `${source.name} 副本`;
+    const copiedWorkDir = source.workDir?.trim() || null;
+
+    await prisma.$transaction(async (tx) => {
+      await tx.chatRoom.create({
+        data: {
+          id: newChatRoomId,
+          name: copiedName,
+          avatar: source.avatar,
+          avatarColor: source.avatarColor,
+          description: source.description,
+          rules: source.rules,
+          workDir: copiedWorkDir,
+          ownerId: source.ownerId,
+          isQuickChatRoom: source.isQuickChatRoom,
+          quickChatAgentId: source.quickChatAgentId,
+          defaultAgentId: source.defaultAgentId,
+          agentTriggerMode: source.agentTriggerMode,
+          updatedAt: now,
+        },
+      });
+
+      if (source.chatRoomAgents.length > 0) {
+        await tx.chatRoomAgent.createMany({
+          data: source.chatRoomAgents.map((roomAgent) => ({
+            id: randomUUID(),
+            chatRoomId: newChatRoomId,
+            userId: roomAgent.userId,
+            agentId: roomAgent.agentId,
+            role: roomAgent.role,
+            injectGroupHistory: roomAgent.injectGroupHistory,
+            customWorkDir: roomAgent.customWorkDir,
+            lastInjectedMessageId: null,
+            joinedAt: now,
+            lastReadAt: now,
+          })),
+        });
+      }
+    });
+
+    ensureWorkDirExists(newChatRoomId, copiedWorkDir);
+
+    const result = await prisma.chatRoom.findUnique({
+      where: { id: newChatRoomId },
+      include: {
+        chatRoomAgents: {
+          include: agentInclude,
+        },
+        owner: {
+          select: {
+            id: true,
+            username: true,
+            avatar: true,
+            avatarColor: true,
+          },
+        },
+      },
+    });
+
+    if (!result) return null;
+    const systemAgents = await getSystemAgents();
+    return addVirtualSystemAgents(syncQuickChatRoomAvatar(result), systemAgents);
   },
 
   async findById(id: string) {

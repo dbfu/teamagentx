@@ -19,7 +19,7 @@ declare global {
     getOpenTargetIcons: () => Promise<Partial<Record<'vscode' | 'cursor' | 'trae' | 'trae-cn', string | null>>>;
     openFolder: (
       path: string,
-      target?: 'system' | 'vscode' | 'cursor' | 'trae' | 'trae-cn'
+      target?: 'system' | 'terminal' | 'vscode' | 'cursor' | 'trae' | 'trae-cn'
     ) => Promise<{ success: boolean; error?: string }>;
     selectFolder: () => Promise<{ success: boolean; path: string | null }>;
     openExternal: (url: string) => Promise<{ success: boolean; error?: string }>;

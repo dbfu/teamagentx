@@ -9,6 +9,9 @@ export const processingMap = new Map<string, boolean>();
 // Abort controllers - track running executions for cancellation
 export const abortControllers = new Map<string, AbortController>();
 
+// Executions cleared by context/message cleanup should not write final records.
+export const discardExecutionResultKeys = new Set<string>();
+
 // 流式事件缓存 - 用于刷新页面后恢复数据
 interface CachedStreamEvent {
   id: string;
@@ -91,6 +94,7 @@ export function clearAllExecutionState(): void {
   executorCache.clear();
   processingMap.clear();
   abortControllers.clear();
+  discardExecutionResultKeys.clear();
   streamEventsCache.clear();
 
   console.log('[AgentHandler] 已清理所有执行状态');

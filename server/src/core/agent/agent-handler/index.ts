@@ -5,6 +5,7 @@ export {
   executorCache,
   processingMap,
   abortControllers,
+  discardExecutionResultKeys,
   streamEventsCache,
   getCachedStreamEvents,
   clearCachedStreamEvents,
@@ -21,6 +22,7 @@ export {
   broadcastAgentStatus,
   broadcastAgentTaskQueue,
   broadcastChatRoomCreated,
+  broadcastAgentsUpdated,
 } from './status.js';
 
 // 从 executor-manager 导出

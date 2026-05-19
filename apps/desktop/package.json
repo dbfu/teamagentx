@@ -1,6 +1,6 @@
 {
   "name": "@teamagentx/desktop",
-  "version": "0.1.11",
+  "version": "0.1.14",
   "private": true,
   "type": "module",
   "description": "TeamAgentX desktop shell",

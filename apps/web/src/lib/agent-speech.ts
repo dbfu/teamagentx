@@ -1,10 +1,10 @@
 import type { AgentSpeechConfig } from '@/lib/agent-api'
 
-// remote-tts 是历史 ID，统一归一化为 openai-compatible-tts（同一接口的规范名称），
-// 保证旧配置在新 provider 注册表下仍可命中。
+// 历史 provider ID 归一化：remote-tts → openai-compatible-tts，edge-tts → browser-local
 function normalizeSpeechProviderId(provider?: string | null): string | null {
   if (!provider) return null
   if (provider === 'remote-tts') return 'openai-compatible-tts'
+  if (provider === 'edge-tts') return 'browser-local'
   return provider
 }
 
@@ -12,10 +12,12 @@ export type AgentVoicePanelConfig = {
   enabled: boolean
   outputMode: 'off' | 'manual' | 'auto_final_only'
   autoPlay: boolean
-  provider: string | null
-  model: string | null
-  fallbackProvider: string | null
+  // TTS 配置（助手级别，控制助手回复如何朗读）
+  provider: string | null           // 'browser-local' | 'openai-compatible-tts'
+  ttsProviderId: string | null      // 指定使用哪个 LlmProvider（audio 类型），null = 系统默认
+  model: string | null              // 读显示用，由 ttsProviderId 对应的 provider 决定
   voiceId: string | null
+  fallbackProvider: string | null
   speed: number
   volume: number
   pitch: number | null
@@ -25,7 +27,7 @@ export type AgentVoicePanelConfig = {
   sampleRate: number | null
   temperature: number | null
   prompt: string | null
-  vendorOptionsText: string
+  // STT 是用户全局输入行为，不在助手维度配置，由系统默认音频供应商决定
 }
 
 export type AgentVoicePresetId =
@@ -33,9 +35,6 @@ export type AgentVoicePresetId =
   | 'gentle-guide'
   | 'steady-pro'
   | 'bright-host'
-  | 'edge-xiaoxiao'
-  | 'edge-xiaoyi'
-  | 'edge-yunxi'
 
 export interface AgentVoicePreset {
   id: AgentVoicePresetId
@@ -114,62 +113,12 @@ export const AGENT_VOICE_PRESETS: AgentVoicePreset[] = [
       prompt: '语气轻快、有节奏感，像在做自然播报。',
     },
   },
-  {
-    id: 'edge-xiaoxiao',
-    name: 'Edge 晓晓',
-    description: '女声自然顺滑，适合通用讲解和日常对话。',
-    recommendedFor: ['通用', '讲解', '客服'],
-    patch: {
-      provider: 'edge-tts',
-      fallbackProvider: 'browser-local',
-      voiceId: 'zh-CN-XiaoxiaoNeural',
-      speed: 1,
-      volume: 1,
-      pitch: null,
-      emotion: null,
-      style: null,
-      prompt: null,
-    },
-  },
-  {
-    id: 'edge-xiaoyi',
-    name: 'Edge 晓伊',
-    description: '女声更柔和，适合陪伴和轻声引导。',
-    recommendedFor: ['陪伴', '引导', '温和回复'],
-    patch: {
-      provider: 'edge-tts',
-      fallbackProvider: 'browser-local',
-      voiceId: 'zh-CN-XiaoyiNeural',
-      speed: 1,
-      volume: 1,
-      pitch: null,
-      emotion: null,
-      style: null,
-      prompt: null,
-    },
-  },
-  {
-    id: 'edge-yunxi',
-    name: 'Edge 云希',
-    description: '男声更稳，适合播报、分析和专业回答。',
-    recommendedFor: ['播报', '分析', '专业场景'],
-    patch: {
-      provider: 'edge-tts',
-      fallbackProvider: 'browser-local',
-      voiceId: 'zh-CN-YunxiNeural',
-      speed: 1,
-      volume: 1,
-      pitch: null,
-      emotion: null,
-      style: null,
-      prompt: null,
-    },
-  },
 ]
 
 type PartialAgentSpeechConfig = {
   behavior?: Partial<AgentSpeechConfig['behavior']>
   profile?: Partial<AgentSpeechConfig['profile']>
+  sttProfile?: AgentSpeechConfig['sttProfile']
 }
 
 export function createDefaultAgentSpeechConfig(): AgentSpeechConfig {
@@ -195,6 +144,7 @@ export function createDefaultAgentSpeechConfig(): AgentSpeechConfig {
       prompt: null,
       vendorOptions: null,
     },
+    sttProfile: null,
   }
 }
 
@@ -222,16 +172,21 @@ export function normalizeAgentSpeechConfig(config?: PartialAgentSpeechConfig | n
       prompt: config?.profile?.prompt ?? defaults.profile.prompt,
       vendorOptions: config?.profile?.vendorOptions ?? defaults.profile.vendorOptions,
     },
+    sttProfile: config?.sttProfile ?? null,
   }
 }
 
 export function toVoicePanelConfig(config?: AgentSpeechConfig | null): AgentVoicePanelConfig {
   const normalized = normalizeAgentSpeechConfig(config)
+  // #52: 运行时校验 llmProviderId 类型，防止非 string 值流入状态
+  const rawProviderId = normalized.profile.vendorOptions?.llmProviderId
+  const ttsProviderId: string | null = typeof rawProviderId === 'string' ? rawProviderId : null
   return {
     enabled: normalized.behavior.enabled,
     outputMode: normalized.behavior.outputMode,
     autoPlay: normalized.behavior.autoPlay,
     provider: normalized.profile.provider ?? 'browser-local',
+    ttsProviderId,
     model: normalized.profile.model ?? null,
     fallbackProvider: normalized.profile.fallbackProvider ?? null,
     voiceId: normalized.profile.voice ?? null,
@@ -244,27 +199,13 @@ export function toVoicePanelConfig(config?: AgentSpeechConfig | null): AgentVoic
     sampleRate: normalized.profile.sampleRate ?? null,
     temperature: normalized.profile.temperature ?? null,
     prompt: normalized.profile.prompt ?? null,
-    vendorOptionsText: normalized.profile.vendorOptions
-      ? JSON.stringify(normalized.profile.vendorOptions, null, 2)
-      : '',
   }
 }
 
-export function fromVoicePanelConfig(config: AgentVoicePanelConfig): AgentSpeechConfig {
-  const vendorOptionsText = config.vendorOptionsText.trim()
-  let vendorOptions: Record<string, unknown> | null = null
-  if (vendorOptionsText) {
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(vendorOptionsText)
-    } catch {
-      throw new Error('Vendor Options 不是有效的 JSON 格式')
-    }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new Error('高级参数必须是 JSON 对象')
-    }
-    vendorOptions = parsed as Record<string, unknown>
-  }
+export function fromVoicePanelConfig(config: AgentVoicePanelConfig, sttProfile?: AgentSpeechConfig['sttProfile']): AgentSpeechConfig {
+  const ttsVendorOptions: Record<string, unknown> | null = config.ttsProviderId
+    ? { llmProviderId: config.ttsProviderId }
+    : null
 
   return normalizeAgentSpeechConfig({
     behavior: {
@@ -286,8 +227,10 @@ export function fromVoicePanelConfig(config: AgentVoicePanelConfig): AgentSpeech
       sampleRate: config.sampleRate,
       temperature: config.temperature,
       prompt: config.prompt?.trim() || null,
-      vendorOptions,
+      vendorOptions: ttsVendorOptions,
     },
+    // #23: 透传 sttProfile，避免丢失语音识别配置
+    sttProfile: sttProfile ?? null,
   })
 }
 
@@ -297,13 +240,16 @@ export function applyVoicePreset(
 ): AgentVoicePanelConfig {
   const preset = AGENT_VOICE_PRESETS.find((item) => item.id === presetId)
   if (!preset) return config
+  // #51: 仅当 preset 明确指定 provider 为 'browser-local' 时才清除远程 provider 绑定
+  const shouldClearTtsProvider = preset.patch.provider === 'browser-local'
   return {
     ...config,
     ...preset.patch,
+    ttsProviderId: shouldClearTtsProvider ? null : config.ttsProviderId,
   }
 }
 
-// 仅比较影响预设身份的核心字段，避免依赖字段顺序或非关键字段。
+// 仅比较影响预设身份的核心字段
 const PRESET_CORE_FIELDS: (keyof AgentVoicePanelConfig)[] = [
   'provider',
   'fallbackProvider',
@@ -316,17 +262,26 @@ const PRESET_CORE_FIELDS: (keyof AgentVoicePanelConfig)[] = [
   'prompt',
 ]
 
+const FLOAT_TOLERANCE = 1e-9
+
 export function inferVoicePresetId(config: AgentVoicePanelConfig): AgentVoicePresetId | null {
   for (const preset of AGENT_VOICE_PRESETS) {
     const matches = PRESET_CORE_FIELDS.every((key) => {
       if (!(key in preset.patch)) return true
-      return config[key] === preset.patch[key]
+      const configVal = config[key]
+      const patchVal = preset.patch[key as keyof typeof preset.patch]
+      // #39: patch 中显式定义为 null 的字段，config 中也必须是 null 才匹配
+      if (patchVal === null) return configVal === null
+      // #24: 数值字段用容差比较，避免浮点精度问题
+      if (typeof patchVal === 'number' && typeof configVal === 'number') {
+        return Math.abs(configVal - patchVal) < FLOAT_TOLERANCE
+      }
+      return configVal === patchVal
     })
     if (matches) {
       return preset.id
     }
   }
-
   return null
 }
 

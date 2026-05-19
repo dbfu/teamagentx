@@ -14,6 +14,8 @@ export type CreateLlmProviderInput = {
   apiUrl?: string;
   apiKey: string;
   model: string;
+  sttModel?: string | null;
+  audioUsage?: string | null;
   imageProvider?: string | null;
   imageApiType?: ImageGenApiType | null;
   isActive?: boolean;
@@ -29,6 +31,32 @@ export type ParsedModelConfig = {
   model: string | null;
   apiProtocol: 'anthropic' | 'openai' | null;
 };
+
+function normalizeAudioUsage(audioUsage?: string | null): 'tts' | 'stt' | 'both' {
+  if (audioUsage === 'tts' || audioUsage === 'stt') return audioUsage;
+  return 'both';
+}
+
+function canUseAudioDefault(modelType: LlmModelType, audioUsage?: string | null): boolean {
+  return modelType !== 'audio' || normalizeAudioUsage(audioUsage) !== 'tts';
+}
+
+function buildDefaultResetWhere(modelType: LlmModelType, idToExclude?: string) {
+  if (modelType === 'audio') {
+    return {
+      isDefault: true,
+      modelType,
+      ...(idToExclude ? { id: { not: idToExclude } } : {}),
+      audioUsage: { in: ['stt', 'both'] },
+    };
+  }
+
+  return {
+    isDefault: true,
+    modelType,
+    ...(idToExclude ? { id: { not: idToExclude } } : {}),
+  };
+}
 
 // AI 解析模型配置的系统提示词
 const PARSE_CONFIG_PROMPT = `你是一个模型配置解析助手。用户会提供他们的 API 配置信息描述，你需要从中提取出以下字段并以 JSON 格式返回：
@@ -47,12 +75,15 @@ export const llmProviderService = {
   async create(data: CreateLlmProviderInput): Promise<LlmProvider> {
     const modelType = data.modelType || 'text';
     const existingProviderCount = await prisma.llmProvider.count();
-    const shouldSetDefault = existingProviderCount === 0 || (data.isDefault ?? false);
+    const audioUsage = normalizeAudioUsage(data.audioUsage);
+    const requestedDefault = data.isDefault ?? false;
+    const canSetDefault = canUseAudioDefault(modelType, audioUsage);
+    const shouldSetDefault = canSetDefault && (existingProviderCount === 0 || requestedDefault);
 
     // 如果设置为默认，需要先清除其他默认
     if (shouldSetDefault) {
       await prisma.llmProvider.updateMany({
-        where: { isDefault: true, modelType },
+        where: buildDefaultResetWhere(modelType),
         data: { isDefault: false },
       });
     }
@@ -67,6 +98,8 @@ export const llmProviderService = {
         apiUrl: data.apiUrl,
         apiKey: data.apiKey,
         model: data.model,
+        sttModel: modelType === 'audio' ? (data.sttModel || null) : null,
+        audioUsage: modelType === 'audio' ? audioUsage : 'both',
         imageProvider: modelType === 'image' ? data.imageProvider : null,
         imageApiType: modelType === 'image' ? (data.imageApiType || 'sync') : null,
         isActive: data.isActive ?? true,
@@ -123,7 +156,7 @@ export const llmProviderService = {
   async update(id: string, data: UpdateLlmProviderInput): Promise<LlmProvider> {
     const current = await prisma.llmProvider.findUnique({
       where: { id },
-      select: { modelType: true, isDefault: true },
+      select: { modelType: true, isDefault: true, audioUsage: true },
     });
     if (!current) {
       return prisma.llmProvider.update({
@@ -132,21 +165,35 @@ export const llmProviderService = {
       });
     }
     const modelType = data.modelType || (current.modelType as LlmModelType);
+    const nextAudioUsage = modelType === 'audio'
+      ? normalizeAudioUsage(data.audioUsage ?? current.audioUsage)
+      : 'both';
+    const normalizedIsDefault = data.isDefault === undefined
+      ? undefined
+      : canUseAudioDefault(modelType, nextAudioUsage) && data.isDefault;
 
     // 如果设置为默认，需要先清除其他默认
-    if (data.isDefault || (current.isDefault && data.modelType && data.modelType !== current.modelType)) {
+    if (
+      normalizedIsDefault
+      || (current.isDefault && data.modelType && data.modelType !== current.modelType)
+    ) {
       await prisma.llmProvider.updateMany({
-        where: { isDefault: true, id: { not: id }, modelType },
+        where: buildDefaultResetWhere(modelType, id),
         data: { isDefault: false },
       });
     }
 
+    const { audioUsage: rawAudioUsage, ...restData } = data;
     return prisma.llmProvider.update({
       where: { id },
       data: {
-        ...data,
+        ...restData,
+        ...(rawAudioUsage !== undefined ? { audioUsage: nextAudioUsage } : {}),
+        ...(normalizedIsDefault !== undefined ? { isDefault: normalizedIsDefault } : {}),
+        ...(modelType === 'audio' && !canUseAudioDefault(modelType, nextAudioUsage) ? { isDefault: false } : {}),
         ...(data.modelType && data.modelType !== 'image' ? { imageProvider: null, imageApiType: null } : {}),
         ...(data.modelType === 'image' && data.imageApiType === undefined ? { imageApiType: 'sync' } : {}),
+        ...(data.modelType && data.modelType !== 'audio' ? { sttModel: null, audioUsage: 'both' } : {}),
         updatedAt: new Date(),
       },
     });
@@ -168,7 +215,7 @@ export const llmProviderService = {
   async setDefault(id: string): Promise<LlmProvider> {
     const provider = await prisma.llmProvider.findUnique({
       where: { id },
-      select: { modelType: true },
+      select: { modelType: true, audioUsage: true },
     });
     if (!provider) {
       return prisma.llmProvider.update({
@@ -177,9 +224,13 @@ export const llmProviderService = {
       });
     }
 
+    if (!canUseAudioDefault(provider.modelType as LlmModelType, provider.audioUsage)) {
+      throw new Error('仅支持将 STT 或 TTS + STT 语音模型设为默认 STT');
+    }
+
     // 清除其他默认
     await prisma.llmProvider.updateMany({
-      where: { isDefault: true, modelType: provider.modelType },
+      where: buildDefaultResetWhere(provider.modelType as LlmModelType, id),
       data: { isDefault: false },
     });
 

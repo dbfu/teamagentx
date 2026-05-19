@@ -34,6 +34,11 @@ export let globalEmitChatRoomCreated:
   | ((chatRoom: any) => void)
   | null = null;
 
+// 广播群聊助手列表更新的回调
+export let globalEmitAgentsUpdated:
+  | ((chatRoomId: string) => void)
+  | null = null;
+
 // 广播任务队列更新的回调
 export let globalBroadcastTaskQueue:
   | ((chatRoomId: string, agentId: string, tasks: { id: string; messageId: string; messageContent: string; status: string; createdAt: string }[]) => void)
@@ -76,6 +81,7 @@ export function setGlobalCallbacks(callbacks: {
   broadcastTaskQueue: (chatRoomId: string, agentId: string, tasks: { id: string; messageId: string; messageContent: string; status: string; createdAt: string }[]) => void;
   emitTodoCreated: (todo: any, ownerUserId: string) => void;
   emitChatRoomCreated: (chatRoom: any) => void;
+  emitAgentsUpdated: (chatRoomId: string) => void;
 }) {
   globalEmit = callbacks.emit;
   globalEmitTyping = callbacks.emitTyping;
@@ -87,6 +93,7 @@ export function setGlobalCallbacks(callbacks: {
   globalBroadcastTaskQueue = callbacks.broadcastTaskQueue;
   globalEmitTodoCreated = callbacks.emitTodoCreated;
   globalEmitChatRoomCreated = callbacks.emitChatRoomCreated;
+  globalEmitAgentsUpdated = callbacks.emitAgentsUpdated;
 }
 
 // Get agent status for a specific chatRoom-agent combination
@@ -150,5 +157,11 @@ export function broadcastAgentTaskQueue(
 export function broadcastChatRoomCreated(chatRoom: any) {
   if (globalEmitChatRoomCreated) {
     globalEmitChatRoomCreated(chatRoom);
+  }
+}
+
+export function broadcastAgentsUpdated(chatRoomId: string) {
+  if (globalEmitAgentsUpdated) {
+    globalEmitAgentsUpdated(chatRoomId);
   }
 }

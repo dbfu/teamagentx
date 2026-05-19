@@ -6,10 +6,14 @@ import { promisify } from 'node:util';
 import { config } from '../../../config/index.js';
 import type { SpeechProvider } from '../domain/provider.js';
 import type { SpeechArtifact, SpeechTask } from '../domain/types.js';
+import { SpeechConfigError } from '../speech.service.js';
 
 const execFileAsync = promisify(nodeExecFile);
 
 const VOICE_PATTERN = /^[A-Za-z0-9,\- ]+$/;
+const MAX_TEXT_LENGTH = 5000;
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHAR_PATTERN = /[\x00-\x08\x0B\x0C\x0E-\x1F]/g;
 
 type EdgeTtsDependencies = {
   edgeTtsBinary?: string;
@@ -30,8 +34,8 @@ function toRateArg(speed?: number | null): string | null {
     return null;
   }
   // 注意：edge-tts 不接受负值过大的 rate；speed=0 会得到 -100%。
-  // 将最小值 clamp 为 0.1，避免生成不被支持的极端参数。
-  const clamped = speed <= 0 ? 0.1 : speed;
+  // clamp 到 [0.1, 3]，避免生成不被支持的极端参数。
+  const clamped = Math.max(0.1, Math.min(speed, 3));
   return formatSignedValue(Math.round((clamped - 1) * 100), '%');
 }
 
@@ -84,7 +88,8 @@ export function createEdgeTtsProvider(dependencies: EdgeTtsDependencies = {}): S
       formats: ['mp3'],
     },
     async synthesize(task) {
-      const text = String((task.input as { text?: string }).text || '').trim();
+      const rawText = String((task.input as { text?: string }).text || '').trim();
+      const text = rawText.replace(CONTROL_CHAR_PATTERN, '');
       if (!text) {
         return {
           kind: 'audio',
@@ -92,57 +97,69 @@ export function createEdgeTtsProvider(dependencies: EdgeTtsDependencies = {}): S
           text: '',
         };
       }
+      if (text.length > MAX_TEXT_LENGTH) {
+        throw new SpeechConfigError(
+          `edge-tts text 长度超过限制（${text.length} > ${MAX_TEXT_LENGTH}）`,
+        );
+      }
 
       const voice = task.profile?.voice?.trim() || defaultVoice;
       if (!VOICE_PATTERN.test(voice)) {
-        throw new Error('edge-tts voice 参数包含非法字符');
+        throw new SpeechConfigError('edge-tts voice 参数包含非法字符');
       }
-      const outputPath = await createTempFile();
-      const args = [
-        '--voice',
-        voice,
-        '--text',
-        text,
-        '--write-media',
-        outputPath,
-      ];
-
-      const rateArg = toRateArg(task.profile?.speed);
-      const volumeArg = toVolumeArg(task.profile?.volume);
-      const pitchArg = toPitchArg(task.profile?.pitch);
-      if (rateArg) {
-        args.push('--rate', rateArg);
-      }
-      if (volumeArg) {
-        args.push('--volume', volumeArg);
-      }
-      if (pitchArg) {
-        args.push('--pitch', pitchArg);
-      }
-
+      let outputPath: string | null = null;
       try {
-        await runEdgeTts(edgeTtsBinary, args);
-        const audioBuffer = await readAudioFile(outputPath);
-        return {
-          kind: 'audio',
-          provider: providerId,
-          text,
-          audioBuffer,
-          mimeType: 'audio/mp3',
+        outputPath = await createTempFile();
+        const args = [
+          '--voice',
           voice,
-          metadata: {
-            runtime: 'server',
-            transport: 'edge-tts',
-          },
-        } satisfies SpeechArtifact;
-      } catch (error) {
-        const commandError = error as Error & { code?: string };
-        if (commandError?.code === 'ENOENT') {
-          throw new Error('edge-tts 未安装或不可用，请先在服务端环境安装 edge-tts');
+          '--text',
+          text,
+          '--write-media',
+          outputPath,
+        ];
+
+        const rateArg = toRateArg(task.profile?.speed);
+        const volumeArg = toVolumeArg(task.profile?.volume);
+        const pitchArg = toPitchArg(task.profile?.pitch);
+        if (rateArg) {
+          args.push('--rate', rateArg);
         }
-        throw error;
+        if (volumeArg) {
+          args.push('--volume', volumeArg);
+        }
+        if (pitchArg) {
+          args.push('--pitch', pitchArg);
+        }
+
+        try {
+          await runEdgeTts(edgeTtsBinary, args);
+          const audioBuffer = await readAudioFile(outputPath);
+          return {
+            kind: 'audio',
+            provider: providerId,
+            text,
+            audioBuffer,
+            mimeType: 'audio/mp3',
+            voice,
+            metadata: {
+              runtime: 'server',
+              transport: 'edge-tts',
+            },
+          } satisfies SpeechArtifact;
+        } catch (error) {
+          const commandError = error as Error & { code?: string };
+          if (commandError?.code === 'ENOENT') {
+            throw new Error('edge-tts 未安装或不可用，请先在服务端环境安装 edge-tts');
+          }
+          throw error;
+        }
       } finally {
-        await cleanupFile(outputPath).catch(() => undefined);
+        if (outputPath) {
+          await cleanupFile(outputPath).catch((e) =>
+            console.warn('[edge-tts] 清理临时文件失败:', e),
+          );
+        }
       }
     },
   };

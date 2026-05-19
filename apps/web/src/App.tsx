@@ -354,7 +354,7 @@ function AppContent() {
   const updateUnreadCount = useChatStore((s) => s.updateUnreadCount)
   const executingChatRooms = useChatStore((s) => s.executingChatRooms)
   const setScrollToMessageId = useChatStore((s) => s.setScrollToMessageId)
-  const { isConnected, onUnreadUpdate, requestUnreadCounts, requestTodos, onTodoList, onTodoCreated, onTodoUpdated, onMessage, onChatRoomCreated, user: socketUser } = useSocketStore()
+  const { isConnected, onUnreadUpdate, requestUnreadCounts, requestTodos, onTodoList, onTodoCreated, onTodoUpdated, onMessage, onChatRoomCreated, onAgentsUpdated, user: socketUser } = useSocketStore()
   const { user } = useAuthStore()
 
   // 刷新状态
@@ -434,6 +434,17 @@ function AppContent() {
     })
     return unsubscribe
   }, [isConnected, onChatRoomCreated, chatRooms, addRoom])
+
+  // 监听群聊助手列表更新事件
+  useEffect(() => {
+    if (!isConnected) return
+
+    const unsubscribe = onAgentsUpdated(() => {
+      // 重新加载群聊数据以更新助手列表
+      loadChatRooms()
+    })
+    return unsubscribe
+  }, [isConnected, onAgentsUpdated, loadChatRooms])
 
   // 处理 URL 参数中的 room 参数
   useEffect(() => {

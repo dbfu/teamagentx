@@ -16,6 +16,10 @@ export class SpeechService {
       if (!task.preferences?.allowFallback || !task.profile?.fallbackProvider) {
         throw error
       }
+      // 主动取消（cancelled）不触发 fallback，避免流式 TTS 停止后意外走 browser-local
+      if (error instanceof Error && (error as Error & { cancelled?: boolean }).cancelled) {
+        throw error
+      }
 
       const fallbackProvider = this.router.route(task, {
         preferredProviderId: task.profile.fallbackProvider,

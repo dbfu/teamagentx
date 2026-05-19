@@ -3,6 +3,7 @@ import { getApiBaseUrl } from './config'
 // LLM 供应商类型 - 仅支持自定义
 export type LlmProviderType = 'custom'
 export type LlmModelType = 'text' | 'image' | 'video' | 'audio'
+export type AudioUsage = 'tts' | 'stt' | 'both'
 export type ImageGenApiType = 'sync' | 'async' | 'auto'
 
 // LLM 供应商接口
@@ -15,6 +16,8 @@ export interface LlmProvider {
   apiUrl: string | null
   apiKey: string
   model: string
+  sttModel: string | null
+  audioUsage: AudioUsage
   imageProvider: string | null
   imageApiType: ImageGenApiType | null
   isActive: boolean
@@ -35,6 +38,8 @@ export interface CreateLlmProviderRequest {
   apiUrl?: string
   apiKey: string
   model: string
+  sttModel?: string | null
+  audioUsage?: AudioUsage
   imageProvider?: string | null
   imageApiType?: ImageGenApiType | null
   isActive?: boolean
@@ -50,6 +55,8 @@ export interface UpdateLlmProviderRequest {
   apiUrl?: string
   apiKey?: string
   model?: string
+  sttModel?: string | null
+  audioUsage?: AudioUsage
   imageProvider?: string | null
   imageApiType?: ImageGenApiType | null
   isActive?: boolean
@@ -69,9 +76,11 @@ async function request<T>(
   options?: RequestInit
 ): Promise<ApiResponse<T>> {
   const baseUrl = await getApiBaseUrl()
+  const token = localStorage.getItem('auth_token')
   const hasBody = options?.body !== undefined
   const headers: HeadersInit = {
     ...(hasBody && { 'Content-Type': 'application/json' }),
+    ...(token && { Authorization: `Bearer ${token}` }),
     ...options?.headers,
   }
 

@@ -271,6 +271,7 @@ interface SocketStore {
   requestInactiveTasks: (chatRoomId: string) => void
   onInactiveTasks: (callback: (data: InactiveTasksData) => void) => () => void
   onChatRoomCreated: (callback: (data: ChatRoomCreatedData) => void) => () => void
+  onAgentsUpdated: (callback: (data: { chatRoomId: string }) => void) => () => void
 
   // 未读消息相关方法
   markChatRoomRead: (chatRoomId: string) => void
@@ -538,6 +539,13 @@ export const useSocketStore = create<SocketStore>((set, get) => ({
     if (!socket) return () => {}
     socket.on('chatroom:created', callback)
     return () => socket?.off('chatroom:created', callback)
+  },
+
+  onAgentsUpdated: (callback) => {
+    const socket = get().socket
+    if (!socket) return () => {}
+    socket.on('chatroom:agents-updated', callback)
+    return () => socket?.off('chatroom:agents-updated', callback)
   },
 
   // 未读消息相关方法

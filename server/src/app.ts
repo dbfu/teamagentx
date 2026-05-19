@@ -13,6 +13,7 @@ import { ensureChatroomHelperExists } from './scripts/init-chatroom-helper.js';
 import { ensureExternalPlatformHelperExists } from './scripts/init-external-platform-helper.js';
 import { migrateAgentAvatars } from './scripts/migrate-agent-avatars.js';
 import { migrateChatRoomAvatars } from './scripts/migrate-chatroom-avatars.js';
+import { migrateSiliconflowVoiceIds } from './scripts/migrate-siliconflow-voice-ids.js';
 import { agentGateway } from './gateway/agent.gateway.js';
 import { authGateway } from './gateway/auth.gateway.js';
 import { categoryGateway } from './gateway/category.gateway.js';
@@ -73,6 +74,14 @@ export async function createApp(options?: { enableSwagger?: boolean }) {
     root: uploadService.getStaticRootDir(),
     prefix: '/uploads/',
     maxAge: '7d',
+  });
+
+  // 注册 multipart（供上传和语音 STT 接口共用）
+  await app.register(import('@fastify/multipart'), {
+    limits: {
+      fileSize: 25 * 1024 * 1024, // 25MB，覆盖图片上传（10MB）和音频 STT（25MB）
+      files: 5,
+    },
   });
 
   // 初始化数据库（WAL 模式 + busy_timeout 避免并发写锁）
@@ -149,6 +158,7 @@ export async function createApp(options?: { enableSwagger?: boolean }) {
   console.log(`[Startup] 任务队列初始化完成，共有 ${executingInterrupted + pendingInterrupted} 个任务需要恢复`);
 
   // 初始化 Agent（内部会清理执行状态，但不再清空任务队列）
+  await migrateSiliconflowVoiceIds();
   await initAgents();
 
   // 清理所有执行状态（服务重启时中断）

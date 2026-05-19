@@ -94,6 +94,7 @@ export interface AgentSpeechBehaviorConfig {
 export interface AgentSpeechConfig {
   behavior: AgentSpeechBehaviorConfig
   profile: SpeechProfile
+  sttProfile?: SpeechProfile | null
 }
 
 export interface CreateAgentRequest {
@@ -332,6 +333,14 @@ export const chatRoomApi = {
     return request<ChatRoom>('/chatrooms', {
       method: 'POST',
       body: JSON.stringify(data),
+    })
+  },
+
+  // 复制群组配置（不复制消息）
+  async duplicate(id: string, data?: { name?: string }): Promise<ApiResponse<ChatRoom>> {
+    return request<ChatRoom>(`/chatrooms/${id}/duplicate`, {
+      method: 'POST',
+      body: JSON.stringify(data ?? {}),
     })
   },
 

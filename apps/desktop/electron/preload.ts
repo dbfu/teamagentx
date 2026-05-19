@@ -29,7 +29,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getOpenTargetIcons: () => ipcRenderer.invoke('get-open-target-icons'),
   openFolder: (
     path: string,
-    target: 'system' | 'vscode' | 'cursor' | 'trae' | 'trae-cn' = 'system'
+    target: 'system' | 'terminal' | 'vscode' | 'cursor' | 'trae' | 'trae-cn' = 'system'
   ) => ipcRenderer.invoke('open-folder', { path, target }),
   selectFolder: () => ipcRenderer.invoke('select-folder'),
   // 使用默认浏览器打开外部链接

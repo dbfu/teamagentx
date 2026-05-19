@@ -1,18 +1,19 @@
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { Check, ChevronDown, Copy, FolderOpen, Loader2, Pencil, X } from 'lucide-react'
+import { Check, ChevronDown, Copy, FolderOpen, Loader2, Pencil, Terminal, X } from 'lucide-react'
 import { isElectron } from '@/lib/config'
 
-export type FolderOpenTarget = 'system' | 'vscode' | 'cursor' | 'trae' | 'trae-cn'
+export type FolderOpenTarget = 'system' | 'terminal' | 'vscode' | 'cursor' | 'trae' | 'trae-cn'
 
 export const FOLDER_OPEN_OPTIONS: { target: FolderOpenTarget; label: string }[] = [
   { target: 'system', label: '系统文件夹' },
+  { target: 'terminal', label: '终端' },
   { target: 'vscode', label: 'VS Code' },
   { target: 'cursor', label: 'Cursor' },
   { target: 'trae', label: 'Trae' },
   { target: 'trae-cn', label: 'Trae CN' },
 ]
 
-function getIconPath(target: Exclude<FolderOpenTarget, 'system'>): string {
+function getIconPath(target: Exclude<FolderOpenTarget, 'system' | 'terminal'>): string {
   const basePath = isElectron() ? './open-target-icons' : '/open-target-icons'
   return `${basePath}/${target}.png`
 }
@@ -20,6 +21,10 @@ function getIconPath(target: Exclude<FolderOpenTarget, 'system'>): string {
 export function FolderOpenTargetIcon({ target }: { target: FolderOpenTarget }) {
   if (target === 'system') {
     return <FolderOpen className="size-4 text-amber-500" />
+  }
+
+  if (target === 'terminal') {
+    return <Terminal className="size-4 text-slate-600" />
   }
 
   return <img src={getIconPath(target)} alt={target} className="size-4 shrink-0 rounded-[4px]" />

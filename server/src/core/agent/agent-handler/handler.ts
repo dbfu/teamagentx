@@ -74,6 +74,7 @@ export function setupAIHandlers(
     ownerUserId: string,
   ) => void,
   emitChatRoomCreated: (chatRoom: any) => void,
+  emitAgentsUpdated: (chatRoomId: string) => void,
 ) {
   // 保存全局回调
   setGlobalCallbacks({
@@ -87,6 +88,7 @@ export function setupAIHandlers(
     broadcastTaskQueue,
     emitTodoCreated,
     emitChatRoomCreated,
+    emitAgentsUpdated,
   });
 
   // 注入 receivedMessage 触发器，供 broadcastCronTriggerMessage 调用

@@ -1,8 +1,14 @@
 import type { SpeechProfile } from './domain/types.js';
 
+/**
+ * #44: 历史 provider ID 归一化（source of truth 在此，前端 agent-speech.ts 需保持同步）
+ * 映射规则变更时，前后端必须同步更新。
+ * 参考：apps/web/src/lib/agent-speech.ts normalizeSpeechProviderId
+ */
 function normalizeSpeechProviderId(provider?: string | null): string | null {
   if (!provider) return null;
   if (provider === 'remote-tts') return 'openai-compatible-tts';
+  if (provider === 'edge-tts') return 'browser-local';
   return provider;
 }
 
@@ -15,11 +21,13 @@ export type AgentSpeechBehaviorConfig = {
 export type AgentSpeechConfig = {
   behavior: AgentSpeechBehaviorConfig;
   profile: SpeechProfile;
+  sttProfile?: SpeechProfile | null;
 };
 
 type PartialAgentSpeechConfig = {
   behavior?: Partial<AgentSpeechBehaviorConfig>;
   profile?: Partial<SpeechProfile>;
+  sttProfile?: SpeechProfile | null;
 };
 
 export function createDefaultAgentSpeechConfig(): AgentSpeechConfig {
@@ -72,6 +80,7 @@ export function normalizeAgentSpeechConfig(config?: PartialAgentSpeechConfig | n
       prompt: config?.profile?.prompt ?? defaults.profile.prompt,
       vendorOptions: config?.profile?.vendorOptions ?? defaults.profile.vendorOptions,
     },
+    sttProfile: config?.sttProfile ?? null,
   };
 }
 
@@ -85,7 +94,9 @@ export function deserializeAgentSpeechConfig(config?: string | null): AgentSpeec
   if (!config) return null;
   try {
     return normalizeAgentSpeechConfig(JSON.parse(config) as AgentSpeechConfig);
-  } catch {
+  } catch (err) {
+    // #22: 反序列化失败时记录警告，方便排查配置问题
+    console.warn('[speech-config] deserializeAgentSpeechConfig 解析失败，将使用默认配置', err);
     return null;
   }
 }

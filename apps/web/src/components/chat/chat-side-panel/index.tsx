@@ -110,6 +110,12 @@ export function ChatSidePanel({
   }, [sidePanelMode])
 
   // 根据当前面板层级决定关闭行为
+  const taskBoardExecutionRecord =
+    sidePanelMode === 'execution-detail' && previousModeRef.current === 'task-board'
+      ? selectedRecord
+      : null
+  const visibleExecutionDetailRecord = taskBoardExecutionRecord ?? executionDetailRecord
+  const isExecutionDetailLoading = !taskBoardExecutionRecord && executionDetailLoading
 
   const findRoomAgent = (agentId?: string | null) => {
     if (!agentId) return null
@@ -275,8 +281,9 @@ export function ChatSidePanel({
       return
     }
 
+    previousModeRef.current = 'task-board'
     setSelectedRecord(record)
-    setSidePanelMode('record-detail')
+    setSidePanelMode('execution-detail')
   }
 
   const handleViewTaskQueueFromTaskBoard = (agentId: string) => {
@@ -306,6 +313,14 @@ export function ChatSidePanel({
   // 根据当前面板层级决定关闭行为
   // 子面板点击 X 返回上一级，顶层面板点击 X 关闭侧拉
   const handleClose = () => {
+    // 任务看板中打开的执行详情，点击 X 直接关闭，避免落回历史执行结果
+    if (sidePanelMode === 'execution-detail' && previousModeRef.current === 'task-board') {
+      previousModeRef.current = null
+      setSelectedRecord(null)
+      setSidePanelMode(null)
+      return
+    }
+
     // 从任务看板进入的子面板，返回任务看板
     if (TASK_BOARD_CHILD_MODES.includes(sidePanelMode) && previousModeRef.current === 'task-board') {
       previousModeRef.current = 'task-board' // 保持来源，允许继续返回
@@ -414,20 +429,20 @@ export function ChatSidePanel({
         />
       )}
 
-      {sidePanelMode === 'execution-detail' && executionDetailLoading && (
+      {sidePanelMode === 'execution-detail' && isExecutionDetailLoading && (
         <div className="flex items-center justify-center py-6 text-muted-foreground">
           <Loader2 className="size-4 animate-spin mr-2" />
           <span>加载执行详情...</span>
         </div>
       )}
 
-      {sidePanelMode === 'execution-detail' && executionDetailRecord && !executionDetailLoading && (
+      {sidePanelMode === 'execution-detail' && visibleExecutionDetailRecord && !isExecutionDetailLoading && (
         <RecordDetailPanel
-          selectedRecord={executionDetailRecord}
+          selectedRecord={visibleExecutionDetailRecord}
         />
       )}
 
-      {sidePanelMode === 'execution-detail' && !executionDetailRecord && !executionDetailLoading && (
+      {sidePanelMode === 'execution-detail' && !visibleExecutionDetailRecord && !isExecutionDetailLoading && (
         <div className="flex items-center justify-center py-6 text-muted-foreground">
           <span>执行详情不可用</span>
         </div>
