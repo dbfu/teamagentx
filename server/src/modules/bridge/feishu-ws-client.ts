@@ -5,6 +5,7 @@
 import lark from '@larksuiteoapi/node-sdk';
 import { bridgeService } from './bridge.service.js';
 import { getBridgeInboundTextAdapter } from './platform-inbound-adapters.js';
+import { resolveFeishuReceiveIdType } from './platform-senders.js';
 
 const { WSClient, EventDispatcher } = lark;
 
@@ -127,6 +128,10 @@ async function supervisedStart(
           }
 
           const externalId = msg.chat_id;
+          log.info(
+            { botId, externalId, messageId: msg.message_id, messageType: msg.message_type, rawContentPreview: (msg.content ?? '').slice(0, 200) },
+            '[Bridge/Feishu-WS] 收到飞书消息事件',
+          );
 
           // 提取文本
           let rawText = '';
@@ -139,6 +144,10 @@ async function supervisedStart(
 
           const text = adapter.normalizeText(rawText);
           if (!text) return;
+          log.info(
+            { botId, externalId, messageId: msg.message_id, normalizedTextPreview: text.slice(0, 200) },
+            '[Bridge/Feishu-WS] 归一化后的飞书文本',
+          );
 
           // 处理 /bind CODE
           const bindCode = adapter.extractBindCode(text);
@@ -230,7 +239,7 @@ async function sendFeishuMessage(
   appSecret: string,
   chatId: string,
   text: string,
-  log: { error: (...a: unknown[]) => void },
+  log: { info: (...a: unknown[]) => void; error: (...a: unknown[]) => void },
 ): Promise<void> {
   try {
     const tokenRes = await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
@@ -241,7 +250,9 @@ async function sendFeishuMessage(
     const tokenData = await tokenRes.json() as { tenant_access_token?: string };
     if (!tokenData.tenant_access_token) return;
 
-    await fetch('https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id', {
+    const receiveIdType = resolveFeishuReceiveIdType(chatId);
+    log.info({ chatId, receiveIdType, textPreview: text.slice(0, 200) }, '[Bridge/Feishu-WS] sendReply 开始发送');
+    await fetch(`https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=${receiveIdType}`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${tokenData.tenant_access_token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({

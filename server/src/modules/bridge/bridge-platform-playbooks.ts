@@ -81,7 +81,7 @@ export const BRIDGE_PLATFORM_PLAYBOOKS: BridgePlatformPlaybook[] = [
     ],
     bindSteps: [
       '把 App ID 和 App Secret 交给 TeamAgentX 接入助手保存并绑定（无需配置公网地址）',
-      '如果需要 TeamAgentX 在飞书侧首次发消息前主动推送，额外填写默认飞书会话 ID（chat_id/open_chat_id）',
+      '如果需要 TeamAgentX 在飞书侧首次发消息前主动推送，额外填写默认飞书会话 ID（chat_id）',
       '在飞书直接私聊该机器人，发一条消息，消息会进入绑定的 TeamAgentX 群聊',
     ],
     notes: [
