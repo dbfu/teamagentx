@@ -3,8 +3,11 @@ FROM node:22-alpine AS builder
 
 ARG PNPM_VERSION=10.30.3
 ARG VITE_APP_VERSION
-ARG VITE_DOWNLOAD_URL_MAC
+ARG VITE_DOWNLOAD_URL_MAC_ARM64
+ARG VITE_DOWNLOAD_URL_MAC_X64
 ARG VITE_DOWNLOAD_URL_WIN
+ARG VITE_DOWNLOAD_URL_IOS
+ARG VITE_DOWNLOAD_URL_ANDROID
 
 # 设置工作目录
 WORKDIR /repo
@@ -27,8 +30,11 @@ WORKDIR /repo/apps/website
 
 # 将构建参数写入 .env 文件，Vite 构建时会自动读取
 RUN echo "VITE_APP_VERSION=${VITE_APP_VERSION}" > .env && \
-    echo "VITE_DOWNLOAD_URL_MAC=${VITE_DOWNLOAD_URL_MAC}" >> .env && \
-    echo "VITE_DOWNLOAD_URL_WIN=${VITE_DOWNLOAD_URL_WIN}" >> .env
+    echo "VITE_DOWNLOAD_URL_MAC_ARM64=${VITE_DOWNLOAD_URL_MAC_ARM64}" >> .env && \
+    echo "VITE_DOWNLOAD_URL_MAC_X64=${VITE_DOWNLOAD_URL_MAC_X64}" >> .env && \
+    echo "VITE_DOWNLOAD_URL_WIN=${VITE_DOWNLOAD_URL_WIN}" >> .env && \
+    echo "VITE_DOWNLOAD_URL_IOS=${VITE_DOWNLOAD_URL_IOS}" >> .env && \
+    echo "VITE_DOWNLOAD_URL_ANDROID=${VITE_DOWNLOAD_URL_ANDROID}" >> .env
 
 # 执行构建
 RUN pnpm build
@@ -36,8 +42,8 @@ RUN pnpm build
 # ── Stage 2: 运行阶段（nginx 静态文件服务） ──
 FROM nginx:alpine
 
-# 复制自定义 nginx 配置
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# 复制自定义 nginx 模板配置
+COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 
 # 从构建阶段复制产物
 COPY --from=builder /repo/apps/website/dist /usr/share/nginx/html

@@ -2,7 +2,7 @@ import { Message } from '@/lib/agent-api'
 import { tokenUsageApi } from '@/lib/token-usage-api'
 import { cn, formatDateTime } from '@/lib/utils'
 import { copyToClipboard } from '@/lib/copy-utils'
-import { Bot, MessageSquareMore, Info, Copy, XCircle, Trash2, Volume2 } from 'lucide-react'
+import { Bot, CheckSquare, MessageSquareMore, Info, Copy, XCircle, Trash2, Volume2, ChevronDown, ChevronUp } from 'lucide-react'
 import { useState, useCallback, useMemo } from 'react'
 import { toast } from 'sonner'
 import { ImageViewerModal } from './image-viewer-modal'
@@ -54,6 +54,14 @@ type CurrentUser = {
   avatar?: string | null
 } | null
 
+const LARGE_MESSAGE_CHAR_THRESHOLD = 1200
+const LARGE_MESSAGE_LINE_THRESHOLD = 18
+
+function isLargeMessageContent(content: string): boolean {
+  if (content.length > LARGE_MESSAGE_CHAR_THRESHOLD) return true
+  return content.split(/\r\n|\r|\n/).length > LARGE_MESSAGE_LINE_THRESHOLD
+}
+
 interface ChatMessageProps {
   message: Message
   isRight?: boolean
@@ -73,10 +81,15 @@ interface ChatMessageProps {
   onExecutionDetailClick?: (messageId: string, executionRecordId: string) => void
   onMentionAgent?: (agentId: string, agentName: string) => void
   onDeleteMessage?: (messageId: string) => Promise<void> | void
+  onStartMultiSelect?: (messageId: string) => void
+  onToggleSelection?: (messageId: string) => void
+  selectionMode?: boolean
+  isSelected?: boolean
+  disableContentCollapse?: boolean
   onStopSpeak?: (messageId: string) => void
 }
 
-export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechButton = true, typingAgents, mentionAgents, currentUser, hasBeenPlayed: _hasBeenPlayed, onMarkPlayed, onAgentAvatarClick, onTypingAgentClick, onMentionClick, onReplyClick, onExecutionDetailClick, onMentionAgent, onDeleteMessage, onStopSpeak }: ChatMessageProps) {
+export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechButton = true, typingAgents, mentionAgents, currentUser, hasBeenPlayed, onMarkPlayed, onAgentAvatarClick, onTypingAgentClick, onMentionClick, onReplyClick, onExecutionDetailClick, onMentionAgent, onDeleteMessage, onStartMultiSelect, onToggleSelection, selectionMode, isSelected, disableContentCollapse = false, onStopSpeak }: ChatMessageProps) {
   const isMobile = useIsMobile()
   const allAgents = useChatStore((s) => s.allAgents)
   const playingVoiceMessageId = useChatStore((s) => s.playingVoiceMessageId)
@@ -104,6 +117,7 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
   const [longPressTimer, setLongPressTimer] = useState<ReturnType<typeof setTimeout> | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [isContentExpanded, setIsContentExpanded] = useState(false)
 
   // 助手名称 hover 状态
   const [isNameHovered, setIsNameHovered] = useState(false)
@@ -179,6 +193,21 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
     setDeleteDialogOpen(true)
   }, [])
 
+  const handleStartMultiSelect = useCallback(() => {
+    setShowContextMenu(false)
+    onStartMultiSelect?.(message.id)
+  }, [message.id, onStartMultiSelect])
+
+  const handleSelectionClickCapture = useCallback((e: React.MouseEvent) => {
+    if (!selectionMode) return
+    const target = e.target as HTMLElement
+    if (target.closest('button,a,input,textarea')) return
+
+    e.preventDefault()
+    e.stopPropagation()
+    onToggleSelection?.(message.id)
+  }, [message.id, onToggleSelection, selectionMode])
+
   // 点击其他地方关闭菜单
   const handleClickOutside = useCallback(() => {
     setShowContextMenu(false)
@@ -247,7 +276,7 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
         setPlayingVoiceMessageId(null)
       }
     }
-  }, [isCurrentlyPlaying, message.content, message.id, message.agentId, normalizedContent, onMarkPlayed, onStopSpeak, setPlayingVoiceMessageId, voiceConfig])
+  }, [isCurrentlyPlaying, message.chatRoomId, message.content, message.id, message.agentId, normalizedContent, onMarkPlayed, onStopSpeak, setPlayingVoiceMessageId, voiceConfig])
 
   const handlePrewarm = useCallback(() => {
     if (isCurrentlyPlaying || voiceConfig?.provider !== 'openai-compatible-tts') return
@@ -450,41 +479,51 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
     if (!voiceConfig?.enabled || !normalizedContent || !supportsSpeechPlayback(voiceConfig)) return null
 
     return (
-      <button
-        onClick={handleSpeakMessage}
-        onMouseEnter={handlePrewarm}
-        onPointerDown={handlePrewarm}
-        className={cn(
-          "group inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs transition-colors",
-          isCurrentlyPlaying
-            ? "bg-primary/10 text-primary hover:bg-primary/15"
-            : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground"
-        )}
-        title={isCurrentlyPlaying ? '停止播报' : '语音播报'}
-        aria-label={isCurrentlyPlaying ? '停止播报' : '语音播报'}
-      >
-        <span
+      <span className="relative inline-flex">
+        <button
+          onClick={handleSpeakMessage}
+          onMouseEnter={handlePrewarm}
+          onPointerDown={handlePrewarm}
           className={cn(
-            "flex size-3.5 items-center justify-center transition-colors",
+            "group inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs transition-colors",
             isCurrentlyPlaying
-              ? "text-primary"
-              : "text-muted-foreground group-hover:text-foreground"
+              ? "bg-primary/10 text-primary hover:bg-primary/15"
+              : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground"
           )}
+          title={isCurrentlyPlaying ? '停止播报' : '语音播报'}
+          aria-label={isCurrentlyPlaying ? '停止播报' : '语音播报'}
         >
-          {isCurrentlyPlaying ? (
-            <span className="flex h-3 items-end gap-[2px]" aria-hidden>
-              <span className="w-[2px] rounded-full bg-current origin-bottom" style={{ height: '100%', animation: 'sound-bar 0.7s ease-in-out infinite', animationDelay: '0ms' }} />
-              <span className="w-[2px] rounded-full bg-current origin-bottom" style={{ height: '78%', animation: 'sound-bar 0.7s ease-in-out infinite', animationDelay: '180ms' }} />
-              <span className="w-[2px] rounded-full bg-current origin-bottom" style={{ height: '62%', animation: 'sound-bar 0.7s ease-in-out infinite', animationDelay: '360ms' }} />
-            </span>
-          ) : (
-            <Volume2 className="size-3.5 transition-transform group-hover:scale-110" strokeWidth={2} />
-          )}
-        </span>
-        <span className="transition-colors">
-          {isCurrentlyPlaying ? '播放中' : '播报'}
-        </span>
-      </button>
+          <span
+            className={cn(
+              "flex size-3.5 items-center justify-center transition-colors",
+              isCurrentlyPlaying
+                ? "text-primary"
+                : "text-muted-foreground group-hover:text-foreground"
+            )}
+          >
+            {isCurrentlyPlaying ? (
+              <span className="flex h-3 items-end gap-[2px]" aria-hidden>
+                <span className="w-[2px] rounded-full bg-current origin-bottom" style={{ height: '100%', animation: 'sound-bar 0.7s ease-in-out infinite', animationDelay: '0ms' }} />
+                <span className="w-[2px] rounded-full bg-current origin-bottom" style={{ height: '78%', animation: 'sound-bar 0.7s ease-in-out infinite', animationDelay: '180ms' }} />
+                <span className="w-[2px] rounded-full bg-current origin-bottom" style={{ height: '62%', animation: 'sound-bar 0.7s ease-in-out infinite', animationDelay: '360ms' }} />
+              </span>
+            ) : (
+              <Volume2 className="size-3.5 transition-transform group-hover:scale-110" strokeWidth={2} />
+            )}
+          </span>
+          <span className="transition-colors">
+            {isCurrentlyPlaying ? '播放中' : '播报'}
+          </span>
+        </button>
+        {!hasBeenPlayed && !isCurrentlyPlaying && (
+          <span
+            role="status"
+            aria-label="未播放"
+            title="未播放"
+            className="absolute -right-0.5 top-0 size-2 rounded-full bg-orange-500/90 ring-2 ring-background dark:ring-slate-900"
+          />
+        )}
+      </span>
     )
   }
 
@@ -551,6 +590,70 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
             删除消息
           </button>
         )}
+        {onStartMultiSelect && (
+          <button
+            onClick={handleStartMultiSelect}
+            className="flex w-full items-center gap-2 px-3 py-2 text-sm text-popover-foreground hover:bg-accent"
+          >
+            <CheckSquare className="size-4" />
+            多选
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  const renderCollapsibleContent = () => {
+    if (shouldHideContent) return null
+
+    const shouldCollapse = !disableContentCollapse && isLargeMessageContent(message.content)
+    const isCollapsed = shouldCollapse && !isContentExpanded
+
+    return (
+      <div
+        className={cn(
+          "relative",
+          isCollapsed && (isMobile ? "max-h-[300px] overflow-hidden" : "max-h-[420px] overflow-hidden")
+        )}
+      >
+        {renderContent(message.content)}
+        {shouldCollapse && (
+          <div
+            className={cn(
+              "flex justify-center",
+              isCollapsed
+                ? "absolute inset-x-0 bottom-0"
+                : "mt-2 border-t border-border/60 pt-2"
+            )}
+          >
+            <button
+              type="button"
+              className={cn(
+                "inline-flex items-center gap-1.5 text-xs text-blue-500 transition-colors hover:text-blue-600",
+                isCollapsed
+                  ? "h-24 w-full justify-center rounded-b-lg border-0 bg-gradient-to-t from-background via-background/95 to-transparent pt-12 pb-2 shadow-none hover:from-blue-50 hover:via-blue-50/95 dark:hover:from-blue-950/90 dark:hover:via-blue-950/60"
+                  : "rounded-full border border-gray-200 bg-background px-3 py-1.5 shadow-sm hover:bg-blue-50 dark:border-border dark:hover:bg-blue-950/30"
+              )}
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                setIsContentExpanded((expanded) => !expanded)
+              }}
+            >
+              {isCollapsed ? (
+                <>
+                  <ChevronDown className="size-3.5" />
+                  <span>展开完整内容</span>
+                </>
+              ) : (
+                <>
+                  <ChevronUp className="size-3.5" />
+                  <span>收起内容</span>
+                </>
+              )}
+            </button>
+          </div>
+        )}
       </div>
     )
   }
@@ -562,7 +665,10 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
           <div className="fixed inset-0 z-40" onClick={handleClickOutside} />
         )}
         {renderContextMenu()}
-        <div className={cn("flex justify-end py-2", isMobile ? "px-2" : "px-6")}>
+        <div
+          className={cn("flex justify-end py-2", isMobile ? "px-2" : "px-6")}
+          onClickCapture={handleSelectionClickCapture}
+        >
           <div className="flex flex-row-reverse items-start gap-3 w-0 min-w-0 flex-1 max-w-full">
             <UserAvatar avatar={currentUser?.avatar} size="md" />
             <div className="min-w-0 flex flex-col items-end gap-1">
@@ -577,14 +683,16 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
                   isAudioOnly
                     ? ""
                     : "rounded-lg bg-primary/15 px-4 py-2 border border-primary/20 dark:bg-primary/20 dark:border-primary/30",
-                  isMobile ? "select-none" : "select-text"
+                  isMobile ? "select-none" : "select-text",
+                  selectionMode && "cursor-pointer select-none",
+                  isSelected && "ring-2 ring-blue-500 ring-offset-2 ring-offset-background"
                 )}
                 onContextMenu={handleContextMenu}
                 onTouchStart={handleTouchStart}
                 onTouchEnd={handleTouchEnd}
               >
                 {renderAttachments()}
-                {!shouldHideContent && renderContent(message.content)}
+                {renderCollapsibleContent()}
               </div>
               <div className="flex items-center gap-2">
                 {renderTypingAgents()}
@@ -623,7 +731,10 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
         <div className="fixed inset-0 z-40" onClick={handleClickOutside} />
       )}
       {renderContextMenu()}
-      <div className={cn("py-2", isMobile ? "px-2" : "px-6")}>
+      <div
+        className={cn("py-2", isMobile ? "px-2" : "px-6")}
+        onClickCapture={handleSelectionClickCapture}
+      >
         <div className="flex items-start gap-3">
           {message.isHuman ? (
             <UserAvatar avatar={message.user?.avatar ?? currentUser?.avatar} size="md" />
@@ -670,14 +781,16 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
                 isAudioOnly
                   ? ""
                   : "rounded-lg bg-muted/50 px-4 py-3 border border-border/50 dark:bg-muted/40 dark:border-border",
-                isMobile ? "select-none" : "select-text"
+                isMobile ? "select-none" : "select-text",
+                selectionMode && "cursor-pointer select-none",
+                isSelected && "ring-2 ring-blue-500 ring-offset-2 ring-offset-background"
               )}
               onContextMenu={handleContextMenu}
               onTouchStart={handleTouchStart}
               onTouchEnd={handleTouchEnd}
             >
               {renderAttachments()}
-              {!shouldHideContent && renderContent(message.content)}
+              {renderCollapsibleContent()}
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               {renderTypingAgents()}

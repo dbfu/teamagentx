@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import {
+  syncGlobalClaudeCredentialsToConfigDir,
   syncGlobalClaudeLocalConfig,
   syncGlobalClaudeSettingsToConfigDir,
   syncGlobalClaudeStateToConfigDir,
@@ -11,11 +12,14 @@ import {
 
 describe('Claude local config sync', () => {
   const originalHome = process.env.HOME;
+  const originalUserProfile = process.env.USERPROFILE;
   let tempHome: string;
 
   beforeEach(() => {
     tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-claude-home-'));
     process.env.HOME = tempHome;
+    // os.homedir() 在 Windows 上读 USERPROFILE，需要同时覆盖
+    process.env.USERPROFILE = tempHome;
   });
 
   afterEach(() => {
@@ -23,6 +27,11 @@ describe('Claude local config sync', () => {
       delete process.env.HOME;
     } else {
       process.env.HOME = originalHome;
+    }
+    if (originalUserProfile === undefined) {
+      delete process.env.USERPROFILE;
+    } else {
+      process.env.USERPROFILE = originalUserProfile;
     }
     fs.rmSync(tempHome, {recursive: true, force: true});
   });
@@ -56,20 +65,83 @@ describe('Claude local config sync', () => {
     assert.strictEqual(synced.model, 'test-model');
   });
 
-  test('does not create an isolated settings file when global settings has no auth env', () => {
+  test('still syncs settings even when global has no auth env (cleans stale auth)', () => {
     const globalClaudeDir = path.join(tempHome, '.claude');
     fs.mkdirSync(globalClaudeDir, {recursive: true});
     fs.writeFileSync(
       path.join(globalClaudeDir, 'settings.json'),
-      JSON.stringify({env: {ANTHROPIC_MODEL: 'test-model'}}),
+      JSON.stringify({env: {}}),
     );
 
     const configDir = path.join(tempHome, '.teamagentx', 'acp-config', 'agent-1');
     const result = syncGlobalClaudeSettingsToConfigDir(configDir);
 
-    assert.strictEqual(result.copied, false);
-    assert.strictEqual(result.reason, 'source_without_auth_env');
-    assert.strictEqual(fs.existsSync(path.join(configDir, 'settings.json')), false);
+    assert.strictEqual(result.copied, true);
+    assert.strictEqual(result.reason, 'target_missing');
+    const synced = JSON.parse(
+      fs.readFileSync(path.join(configDir, 'settings.json'), 'utf-8'),
+    );
+    assert.deepStrictEqual(synced.env, {});
+  });
+
+  test('strips stale auth env from per-agent settings when global env clears them', () => {
+    const globalClaudeDir = path.join(tempHome, '.claude');
+    fs.mkdirSync(globalClaudeDir, {recursive: true});
+    // 全局 env 已经清空（用户切回 OAuth）
+    fs.writeFileSync(
+      path.join(globalClaudeDir, 'settings.json'),
+      JSON.stringify({env: {}, agentPushNotifEnabled: true}),
+    );
+
+    // per-agent 里残留之前的第三方 token + base URL
+    const configDir = path.join(tempHome, '.teamagentx', 'acp-config', 'agent-1');
+    fs.mkdirSync(configDir, {recursive: true});
+    fs.writeFileSync(
+      path.join(configDir, 'settings.json'),
+      JSON.stringify({
+        env: {
+          ANTHROPIC_AUTH_TOKEN: 'stale-token',
+          ANTHROPIC_BASE_URL: 'https://stale.example.com',
+          ANTHROPIC_MODEL: 'stale-model',
+          MY_CUSTOM_VAR: 'keep-me',
+        },
+        outputStyle: 'Chinese',
+      }),
+    );
+
+    const result = syncGlobalClaudeSettingsToConfigDir(configDir);
+
+    assert.strictEqual(result.copied, true);
+    assert.strictEqual(result.reason, 'content_changed');
+    const synced = JSON.parse(
+      fs.readFileSync(path.join(configDir, 'settings.json'), 'utf-8'),
+    );
+    // auth 类 env 全部被清掉
+    assert.strictEqual(synced.env.ANTHROPIC_AUTH_TOKEN, undefined);
+    assert.strictEqual(synced.env.ANTHROPIC_BASE_URL, undefined);
+    assert.strictEqual(synced.env.ANTHROPIC_MODEL, undefined);
+    // 非 auth 的自定义 env 保留
+    assert.strictEqual(synced.env.MY_CUSTOM_VAR, 'keep-me');
+    // 非 env 的字段：全局会覆盖同名顶层 key，但 per-agent 独有字段保留
+    assert.strictEqual(synced.outputStyle, 'Chinese');
+    assert.strictEqual(synced.agentPushNotifEnabled, true);
+  });
+
+  test('returns target_current when nothing changes between syncs', () => {
+    const globalClaudeDir = path.join(tempHome, '.claude');
+    fs.mkdirSync(globalClaudeDir, {recursive: true});
+    fs.writeFileSync(
+      path.join(globalClaudeDir, 'settings.json'),
+      JSON.stringify({env: {ANTHROPIC_AUTH_TOKEN: 'token-1'}}),
+    );
+
+    const configDir = path.join(tempHome, '.teamagentx', 'acp-config', 'agent-1');
+    const first = syncGlobalClaudeSettingsToConfigDir(configDir);
+    assert.strictEqual(first.copied, true);
+
+    const second = syncGlobalClaudeSettingsToConfigDir(configDir);
+    assert.strictEqual(second.copied, false);
+    assert.strictEqual(second.reason, 'target_current');
   });
 
   test('syncs official Claude account state from ~/.claude.json', () => {
@@ -95,6 +167,70 @@ describe('Claude local config sync', () => {
     assert.strictEqual(synced.userID, 'official-user-id');
     assert.strictEqual(synced.hasCompletedOnboarding, true);
     assert.strictEqual(synced.projects, undefined);
+  });
+
+  test('syncs ~/.claude/.credentials.json (OAuth tokens) into the isolated config dir', () => {
+    const globalClaudeDir = path.join(tempHome, '.claude');
+    fs.mkdirSync(globalClaudeDir, {recursive: true});
+    const credentials = {
+      claudeAiOauth: {
+        accessToken: 'sk-ant-oat01-fake-access',
+        refreshToken: 'sk-ant-ort01-fake-refresh',
+        expiresAt: 1900000000000,
+        scopes: ['user:inference'],
+      },
+    };
+    fs.writeFileSync(
+      path.join(globalClaudeDir, '.credentials.json'),
+      JSON.stringify(credentials),
+    );
+
+    const configDir = path.join(tempHome, '.teamagentx', 'acp-config', 'agent-1');
+    const result = syncGlobalClaudeCredentialsToConfigDir(configDir);
+
+    assert.strictEqual(result.copied, true);
+    assert.strictEqual(result.reason, 'target_missing');
+    const synced = JSON.parse(
+      fs.readFileSync(path.join(configDir, '.credentials.json'), 'utf-8'),
+    );
+    assert.strictEqual(synced.claudeAiOauth.accessToken, 'sk-ant-oat01-fake-access');
+    assert.strictEqual(synced.claudeAiOauth.refreshToken, 'sk-ant-ort01-fake-refresh');
+
+    // 第二次调用应返回 target_current
+    const second = syncGlobalClaudeCredentialsToConfigDir(configDir);
+    assert.strictEqual(second.copied, false);
+    assert.strictEqual(second.reason, 'target_current');
+  });
+
+  test('credentials sync returns source_missing when host has never logged in', () => {
+    const configDir = path.join(tempHome, '.teamagentx', 'acp-config', 'agent-1');
+    const result = syncGlobalClaudeCredentialsToConfigDir(configDir);
+    assert.strictEqual(result.copied, false);
+    assert.strictEqual(result.reason, 'source_missing');
+  });
+
+  test('credentials sync updates target when host tokens refresh', () => {
+    const globalClaudeDir = path.join(tempHome, '.claude');
+    fs.mkdirSync(globalClaudeDir, {recursive: true});
+    fs.writeFileSync(
+      path.join(globalClaudeDir, '.credentials.json'),
+      JSON.stringify({claudeAiOauth: {accessToken: 'old-token'}}),
+    );
+    const configDir = path.join(tempHome, '.teamagentx', 'acp-config', 'agent-1');
+    syncGlobalClaudeCredentialsToConfigDir(configDir);
+
+    // 模拟宿主刷新了 token
+    fs.writeFileSync(
+      path.join(globalClaudeDir, '.credentials.json'),
+      JSON.stringify({claudeAiOauth: {accessToken: 'new-token'}}),
+    );
+    const result = syncGlobalClaudeCredentialsToConfigDir(configDir);
+    assert.strictEqual(result.copied, true);
+    assert.strictEqual(result.reason, 'content_changed');
+    const synced = JSON.parse(
+      fs.readFileSync(path.join(configDir, '.credentials.json'), 'utf-8'),
+    );
+    assert.strictEqual(synced.claudeAiOauth.accessToken, 'new-token');
   });
 
   test('syncs third-party API settings and official account state together', () => {

@@ -64,6 +64,7 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
     handleAddAgents,
     handleClearMessages,
     deleteMessage,
+    deleteMessages,
     handleAgentAvatarClick,
     handleTypingAgentClick,
     handleReplyClick,
@@ -245,6 +246,7 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
               onExecutionDetailClick={handleExecutionDetailClick}
               onMentionAgent={handleMentionAgent}
               onDeleteMessage={deleteMessage}
+              onDeleteMessages={deleteMessages}
               currentUser={currentUser}
             />
 

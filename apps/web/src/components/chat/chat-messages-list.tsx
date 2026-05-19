@@ -8,6 +8,9 @@ import { cn } from '@/lib/utils'
 import { toVoicePanelConfig, type AgentVoicePanelConfig } from '@/lib/agent-speech'
 import { deleteTtsCache, loadRoomTtsCache, normalizeSpeechText, prewarmTts, speakText, stopSpeechPlayback, supportsSpeechPlayback } from '@/lib/browser-speech'
 import { buildTtsCacheKey, PREWARM_MAX_TEXT_LENGTH } from '@/speech/tts-prefetch-cache'
+import { Check, CheckSquare, Loader2, Trash2, X } from 'lucide-react'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { toast } from 'sonner'
 
 interface MentionAgent {
   id: string
@@ -40,6 +43,7 @@ interface ChatMessagesListProps {
   onExecutionDetailClick?: (messageId: string, executionRecordId: string) => void
   onMentionAgent?: (agentId: string, agentName: string) => void
   onDeleteMessage?: (messageId: string) => Promise<void> | void
+  onDeleteMessages?: (messageIds: string[]) => Promise<void> | void
   currentUser?: CurrentUser
 }
 
@@ -60,6 +64,7 @@ export function ChatMessagesList({
   onExecutionDetailClick,
   onMentionAgent,
   onDeleteMessage,
+  onDeleteMessages,
   currentUser,
 }: ChatMessagesListProps) {
   const isMobile = useIsMobile()
@@ -104,6 +109,10 @@ export function ChatMessagesList({
   const [isNearBottom, setIsNearBottom] = useState(true)
   // 是否显示新消息提示
   const [showNewMessageHint, setShowNewMessageHint] = useState(false)
+  const [isMultiSelectMode, setIsMultiSelectMode] = useState(false)
+  const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set())
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deletingSelected, setDeletingSelected] = useState(false)
   // 上一次消息数量，用于检测新消息
   const prevMessageCountRef = useRef(messages.length)
   // 记录上一次的群聊 ID，用于检测群聊切换
@@ -116,6 +125,46 @@ export function ChatMessagesList({
   const initialMessageIdsRef = useRef<Set<string>>(new Set())
   const initialCapturedRef = useRef(false)
   const recentlyStoppedVoiceMessageIdsRef = useRef<Map<string, number>>(new Map())
+
+  const selectedCount = selectedMessageIds.size
+
+  const exitMultiSelect = useCallback(() => {
+    setIsMultiSelectMode(false)
+    setSelectedMessageIds(new Set())
+  }, [])
+
+  const startMultiSelect = useCallback((messageId: string) => {
+    setIsMultiSelectMode(true)
+    setSelectedMessageIds(new Set([messageId]))
+  }, [])
+
+  const toggleMessageSelection = useCallback((messageId: string) => {
+    setSelectedMessageIds((current) => {
+      const next = new Set(current)
+      if (next.has(messageId)) {
+        next.delete(messageId)
+      } else {
+        next.add(messageId)
+      }
+      return next
+    })
+  }, [])
+
+  const handleDeleteSelected = useCallback(async () => {
+    if (!onDeleteMessages || selectedMessageIds.size === 0) return
+    setDeletingSelected(true)
+    try {
+      await onDeleteMessages(Array.from(selectedMessageIds))
+      toast.success(`已删除 ${selectedMessageIds.size} 条消息`)
+      setDeleteDialogOpen(false)
+      exitMultiSelect()
+    } catch (error) {
+      console.error('Failed to delete selected messages:', error)
+      toast.error('批量删除失败')
+    } finally {
+      setDeletingSelected(false)
+    }
+  }, [exitMultiSelect, onDeleteMessages, selectedMessageIds])
 
   // 检查是否在底部附近
   const checkIsNearBottom = useCallback(() => {
@@ -209,8 +258,9 @@ export function ChatMessagesList({
       // 重置底部状态
       setIsNearBottom(true)
       setShowNewMessageHint(false)
+      exitMultiSelect()
     }
-  }, [chatRoomId])
+  }, [chatRoomId, exitMultiSelect])
 
   useEffect(() => {
     const handleVisibilityChange = () => {
@@ -480,7 +530,7 @@ export function ChatMessagesList({
         onScroll={handleScroll}
         style={{ scrollbarGutter: 'stable' }}
         className={cn(
-          messages.length === 0 ? 'flex-1' : 'scrollbar-hover flex-1 overflow-y-auto py-4',
+          messages.length === 0 ? 'relative flex-1' : 'scrollbar-hover relative flex-1 overflow-y-auto py-4',
           isMobile && 'min-h-0'
         )}
       >
@@ -497,6 +547,14 @@ export function ChatMessagesList({
             <div
               key={message.id}
               data-message-id={message.id}
+              onClick={() => {
+                if (isMultiSelectMode) toggleMessageSelection(message.id)
+              }}
+              className={cn(
+                "relative transition-colors",
+                isMultiSelectMode && "cursor-pointer",
+                selectedMessageIds.has(message.id) && "bg-blue-50/70 dark:bg-blue-950/20"
+              )}
               ref={(el) => {
                 if (el) {
                   messageRefs.current.set(message.id, el)
@@ -505,6 +563,27 @@ export function ChatMessagesList({
                 }
               }}
             >
+              {isMultiSelectMode && (
+                <div
+                  role="button"
+                  tabIndex={0}
+                  data-message-row-select-overlay
+                  aria-pressed={selectedMessageIds.has(message.id)}
+                  aria-label={selectedMessageIds.has(message.id) ? '取消选择消息' : '选择消息'}
+                  className="absolute inset-0 z-20 cursor-pointer"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    toggleMessageSelection(message.id)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter' && e.key !== ' ') return
+                    e.preventDefault()
+                    e.stopPropagation()
+                    toggleMessageSelection(message.id)
+                  }}
+                />
+              )}
               <ChatMessage
                 message={message}
                 isRight={message.isHuman}
@@ -541,12 +620,60 @@ export function ChatMessagesList({
                     text,
                   }))
                 }}
+                onStartMultiSelect={startMultiSelect}
+                onToggleSelection={toggleMessageSelection}
+                selectionMode={isMultiSelectMode}
+                isSelected={selectedMessageIds.has(message.id)}
               />
+              {isMultiSelectMode && (
+                <div className="pointer-events-none absolute left-3 top-4 z-30 flex size-5 items-center justify-center rounded-full border border-blue-500 bg-background text-blue-500 shadow-sm">
+                  {selectedMessageIds.has(message.id) && <Check className="size-3.5" />}
+                </div>
+              )}
             </div>
           ))
         )}
         <div ref={messagesEndRef} className="h-1" />
       </div>
+
+      {isMultiSelectMode && (
+        <div className="absolute inset-x-4 bottom-4 z-30 flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-background px-4 py-3 shadow-lg dark:border-border">
+          <div className="flex min-w-0 items-center gap-2 text-sm text-foreground">
+            <CheckSquare className="size-4 text-blue-500" />
+            <span className="truncate">已选择 {selectedCount} 条消息</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={exitMultiSelect}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
+            >
+              <X className="size-4" />
+              取消
+            </button>
+            <button
+              type="button"
+              disabled={selectedCount === 0 || !onDeleteMessages}
+              onClick={() => setDeleteDialogOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-red-500 px-3 py-2 text-sm text-white hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {deletingSelected ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+              删除
+            </button>
+          </div>
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={deleteDialogOpen}
+        onOpenChange={setDeleteDialogOpen}
+        title="批量删除消息"
+        description={`确定要删除选中的 ${selectedCount} 条消息吗？删除后这些消息不会再进入后续上下文。`}
+        confirmText="删除"
+        onConfirm={handleDeleteSelected}
+        loading={deletingSelected}
+        icon={Trash2}
+      />
 
       {/* 新消息提示 */}
       {showNewMessageHint && (

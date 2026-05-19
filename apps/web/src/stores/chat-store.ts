@@ -46,10 +46,36 @@ function getMentionedAgentNames(content: string): string[] {
   return names
 }
 
-function hasMentionedDispatchableAgent(content: string, chatRoom: ChatRoom, allAgents: Agent[]): boolean {
-  const mentionedNames = getMentionedAgentNames(content)
-  if (mentionedNames.length === 0) return false
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\\/]/g, '\\$&')
+}
 
+function getMentionedKnownAgentNames(content: string, agentNames: string[]): string[] {
+  const names: string[] = []
+  if (agentNames.length === 0) return getMentionedAgentNames(content)
+  const escapedNames = agentNames
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length)
+    .map(escapeRegExp)
+  if (escapedNames.length === 0) return names
+
+  const boundaryChars = '*_>#`-'
+  const endBoundaryChars = '*_>#`!?.,:;！？。，；：'
+  const regex = new RegExp(
+    `(?:^|\\s|[${boundaryChars}])@(${escapedNames.join('|')})(?=\\s|$|[${endBoundaryChars}]|-(?![\\u4e00-\\u9fa5a-zA-Z0-9_]))`,
+    'g',
+  )
+
+  let match: RegExpExecArray | null
+  while ((match = regex.exec(content)) !== null) {
+    if (match[1] && !names.includes(match[1])) {
+      names.push(match[1])
+    }
+  }
+  return names
+}
+
+function hasMentionedDispatchableAgent(content: string, chatRoom: ChatRoom, allAgents: Agent[]): boolean {
   const dispatchableAgentNames = new Set(
     (chatRoom.chatRoomAgents ?? [])
       .map((roomAgent) => roomAgent.agent?.name)
@@ -61,6 +87,9 @@ function hasMentionedDispatchableAgent(content: string, chatRoom: ChatRoom, allA
       dispatchableAgentNames.add(agent.name)
     }
   }
+
+  const mentionedNames = getMentionedKnownAgentNames(content, Array.from(dispatchableAgentNames))
+  if (mentionedNames.length === 0) return false
 
   return mentionedNames.some((name) => dispatchableAgentNames.has(name))
 }
@@ -197,6 +226,7 @@ interface ChatStore {
   loadExecutionDetailByMessage: (messageId: string) => Promise<void>
   loadContextInfo: (chatRoomId: string, chatRoomAgentId: string) => Promise<void>
   deleteMessage: (messageId: string) => Promise<void>
+  deleteMessages: (messageIds: string[]) => Promise<void>
   clearMessages: (chatRoomId: string) => Promise<void>
   getAvailableAgents: (currentAgentIds: Set<string>) => Agent[]
   getMentionAgents: (chatRoomAgents: ChatRoom['chatRoomAgents']) => MentionAgent[]
@@ -483,6 +513,42 @@ export const useChatStore = create<ChatStore>()(
       }
     } catch (error) {
       console.error('Failed to delete message:', error)
+      throw error
+    }
+  },
+
+  deleteMessages: async (messageIds) => {
+    const uniqueIds = Array.from(new Set(messageIds))
+    if (uniqueIds.length === 0) return
+
+    const messagesById = new Map(get().messages.map(m => [m.id, m]))
+    const affectedRoomIds = new Set(
+      uniqueIds
+        .map(id => messagesById.get(id)?.chatRoomId)
+        .filter((id): id is string => Boolean(id))
+    )
+
+    try {
+      const response = await messageApi.deleteBatch(uniqueIds)
+      if (!response.success) {
+        throw new Error(response.error || '删除消息失败')
+      }
+
+      const deletedIds = new Set(uniqueIds)
+      set((state) => ({
+        messages: state.messages
+          .filter(m => !deletedIds.has(m.id))
+          .map(m => m.replyMessageId && deletedIds.has(m.replyMessageId) ? { ...m, replyMessageId: null } : m),
+        selectedReplyMessage: state.selectedReplyMessage && deletedIds.has(state.selectedReplyMessage.id)
+          ? null
+          : state.selectedReplyMessage,
+      }))
+
+      if (affectedRoomIds.size > 0) {
+        void useChatRoomStore.getState().loadChatRooms()
+      }
+    } catch (error) {
+      console.error('Failed to delete messages:', error)
       throw error
     }
   },
@@ -1609,6 +1675,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     handleAddAgents,
     handleClearMessages,
     deleteMessage,
+    deleteMessages: useChatStore((s) => s.deleteMessages),
     handleAgentAvatarClick,
     handleTypingAgentClick,
     handleReplyClick,

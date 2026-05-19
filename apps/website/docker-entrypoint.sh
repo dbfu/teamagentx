@@ -5,23 +5,32 @@ set -e
 
 HTML_DIR=/usr/share/nginx/html
 UPDATE_JSON="${HTML_DIR}/update.json"
+NGINX_TEMPLATE="/etc/nginx/templates/default.conf.template"
+NGINX_OUTPUT="/etc/nginx/conf.d/default.conf"
 
 VERSION="${VITE_APP_VERSION:-v1.2.0}"
-RELEASE_VERSION=$(echo "$VERSION" | sed 's/^[vV]//')
-
-MAC_URL="${VITE_DOWNLOAD_URL_MAC:-https://releases.teamagentx.com/${RELEASE_VERSION}/TeamAgentX-${RELEASE_VERSION}-mac.dmg}"
-WIN_URL="${VITE_DOWNLOAD_URL_WIN:-https://releases.teamagentx.com/${RELEASE_VERSION}/TeamAgentX-${RELEASE_VERSION}-win.exe}"
-NOTES="${VITE_APP_VERSION_NOTE:-${VITE_UPDATE_NOTES:-}}"
+MAC_URL_ARM64="${VITE_DOWNLOAD_URL_MAC_ARM64:-}"
+MAC_URL_X64="${VITE_DOWNLOAD_URL_MAC_X64:-}"
+WIN_URL="${VITE_DOWNLOAD_URL_WIN:-}"
+IOS_URL="${VITE_DOWNLOAD_URL_IOS:-}"
+ANDROID_URL="${VITE_DOWNLOAD_URL_ANDROID:-}"
+DOWNLOAD_RESOLVER_PROXY_TARGET="${DOWNLOAD_RESOLVER_PROXY_TARGET:-http://download-resolver:3207}"
+NOTES="${VITE_APP_VERSION_NOTE:-}"
 
 cat > "$UPDATE_JSON" <<EOF
 {
   "version": "${VERSION}",
-  "url": "${MAC_URL}",
-  "macUrl": "${MAC_URL}",
+  "macUrlArm64": "${MAC_URL_ARM64}",
+  "macUrlX64": "${MAC_URL_X64}",
   "winUrl": "${WIN_URL}",
+  "iosUrl": "${IOS_URL}",
+  "androidUrl": "${ANDROID_URL}",
   "downloads": {
-    "mac": "${MAC_URL}",
-    "win": "${WIN_URL}"
+    "macArm64": "${MAC_URL_ARM64}",
+    "macX64": "${MAC_URL_X64}",
+    "win": "${WIN_URL}",
+    "ios": "${IOS_URL}",
+    "android": "${ANDROID_URL}"
   },
   "notes": "${NOTES}"
 }
@@ -29,5 +38,9 @@ EOF
 
 echo "[entrypoint] update.json 已生成："
 cat "$UPDATE_JSON"
+
+export DOWNLOAD_RESOLVER_PROXY_TARGET
+envsubst '${DOWNLOAD_RESOLVER_PROXY_TARGET}' < "$NGINX_TEMPLATE" > "$NGINX_OUTPUT"
+echo "[entrypoint] nginx resolver upstream: ${DOWNLOAD_RESOLVER_PROXY_TARGET}"
 
 exec nginx -g "daemon off;"

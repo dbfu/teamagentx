@@ -175,6 +175,41 @@ export const messageService = {
     return result;
   },
 
+  async deleteByIds(ids: string[]) {
+    const uniqueIds = Array.from(new Set(ids)).filter(Boolean);
+    if (uniqueIds.length === 0) return { count: 0, chatRoomIds: [] as string[] };
+
+    const messages = await prisma.message.findMany({
+      where: { id: { in: uniqueIds } },
+      select: { id: true, chatRoomId: true },
+    });
+    if (messages.length === 0) return { count: 0, chatRoomIds: [] as string[] };
+
+    const existingIds = messages.map((message) => message.id);
+    const chatRoomIds = Array.from(new Set(messages.map((message) => message.chatRoomId)));
+    const audioAttachments = await prisma.attachment.findMany({
+      where: { type: 'audio', messageId: { in: existingIds } },
+      select: { url: true },
+    });
+
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.message.updateMany({
+        where: { replyMessageId: { in: existingIds } },
+        data: { replyMessageId: null },
+      });
+
+      return tx.message.deleteMany({
+        where: { id: { in: existingIds } },
+      });
+    });
+
+    for (const att of audioAttachments) {
+      await uploadService.deleteAudio(att.url).catch(() => {});
+    }
+
+    return { count: result.count, chatRoomIds };
+  },
+
   // 批量更新 executionRecordId、executionDuration 和 token 信息
   async updateExecutionRecordId(
     messageIds: string[],

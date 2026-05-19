@@ -13,18 +13,29 @@ const env = {
 }
 
 const version = env.VITE_APP_VERSION || 'v1.2.0'
-const macUrl = env.VITE_DOWNLOAD_URL_MAC || ''
+const macUrlArm64 = env.VITE_DOWNLOAD_URL_MAC_ARM64 || env.VITE_DOWNLOAD_URL_MAC || ''
+const macUrlX64 = env.VITE_DOWNLOAD_URL_MAC_X64 || env.VITE_DOWNLOAD_URL_MAC || ''
 const winUrl = env.VITE_DOWNLOAD_URL_WIN || ''
+const iosUrl = env.VITE_DOWNLOAD_URL_IOS || ''
+const androidUrl = env.VITE_DOWNLOAD_URL_ANDROID || ''
 
 const updateInfo = {
   version,
   // Backward compatible field for existing desktop clients.
-  url: macUrl || winUrl,
-  macUrl,
+  url: macUrlArm64 || macUrlX64 || winUrl,
+  macUrlArm64,
+  macUrlX64,
+  macUrl: macUrlArm64,
   winUrl,
+  iosUrl,
+  androidUrl,
   downloads: {
-    mac: macUrl,
+    macArm64: macUrlArm64,
+    macX64: macUrlX64,
+    mac: macUrlArm64,
     win: winUrl,
+    ios: iosUrl,
+    android: androidUrl,
   },
   notes: env.VITE_UPDATE_NOTES || env.VITE_APP_VERSION_NOTE || '',
 }
@@ -34,4 +45,4 @@ const updateInfo = {
 const outputPath = path.join(rootDir, 'public', 'update.json')
 fs.writeFileSync(outputPath, `${JSON.stringify(updateInfo, null, 2)}\n`, 'utf8')
 console.log(`[generate-update-json] 已写入 ${outputPath}`)
-console.log(`[generate-update-json] version=${version}, macUrl=${macUrl || '(未配置)'}, winUrl=${winUrl || '(未配置)'}`)
+console.log(`[generate-update-json] version=${version}, macArm64=${macUrlArm64 || '(未配置)'}, macX64=${macUrlX64 || '(未配置)'}, winUrl=${winUrl || '(未配置)'}`)

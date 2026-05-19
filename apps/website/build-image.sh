@@ -35,14 +35,37 @@ fi
 TAG="${VERSION#v}"
 
 echo "=================================================="
-echo "  镜像仓库 : ${IMAGE}"
-echo "  版本标签 : ${TAG}"
-echo "  完整版本 : ${VERSION}"
+echo "  镜像仓库  : ${IMAGE}"
+echo "  版本标签  : ${TAG}"
+echo "  完整版本  : ${VERSION}"
+echo "  mac-arm64 : ${VITE_DOWNLOAD_URL_MAC_ARM64:-（未设置）}"
+echo "  mac-x64   : ${VITE_DOWNLOAD_URL_MAC_X64:-（未设置）}"
+echo "  win       : ${VITE_DOWNLOAD_URL_WIN:-（未设置）}"
+echo "  ios       : ${VITE_DOWNLOAD_URL_IOS:-（未设置）}"
+echo "  android   : ${VITE_DOWNLOAD_URL_ANDROID:-（未设置）}"
+echo "  resolver  : ${DOWNLOAD_RESOLVER_PROXY_TARGET:-（未设置）}"
 echo "=================================================="
 
 # ── 确定脚本所在目录（支持从任意位置调用） ────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
+# ── 从 .env 加载下载链接（仅补充 shell 中未 export 的变量）──────────────────
+ENV_FILE="${SCRIPT_DIR}/.env"
+if [ -f "$ENV_FILE" ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    # 跳过注释和空行
+    case "$line" in '#'*|'') continue ;; esac
+    key="${line%%=*}"
+    val="${line#*=}"
+    # 只补充尚未在 shell 中设置的变量
+    case "$key" in
+      VITE_DOWNLOAD_URL_MAC_ARM64|VITE_DOWNLOAD_URL_MAC_X64|VITE_DOWNLOAD_URL_WIN|VITE_DOWNLOAD_URL_IOS|VITE_DOWNLOAD_URL_ANDROID|DOWNLOAD_RESOLVER_PROXY_TARGET|VITE_APP_VERSION_NOTE)
+        eval "[ -z \"\${${key}+x}\" ] && export ${key}=\"${val}\""
+        ;;
+    esac
+  done < "$ENV_FILE"
+fi
 
 # ── 准备临时 Docker 构建上下文 ────────────────────────────────────────────────
 # website 是 workspace 子包，依赖解析需要根目录的 workspace/package/lock 文件。
@@ -73,8 +96,11 @@ docker build \
   --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --label "org.opencontainers.image.revision=$(git rev-parse HEAD 2>/dev/null || echo 'unknown')" \
   --build-arg "VITE_APP_VERSION=${VERSION}" \
-  --build-arg "VITE_DOWNLOAD_URL_MAC=${VITE_DOWNLOAD_URL_MAC:-}" \
+  --build-arg "VITE_DOWNLOAD_URL_MAC_ARM64=${VITE_DOWNLOAD_URL_MAC_ARM64:-}" \
+  --build-arg "VITE_DOWNLOAD_URL_MAC_X64=${VITE_DOWNLOAD_URL_MAC_X64:-}" \
   --build-arg "VITE_DOWNLOAD_URL_WIN=${VITE_DOWNLOAD_URL_WIN:-}" \
+  --build-arg "VITE_DOWNLOAD_URL_IOS=${VITE_DOWNLOAD_URL_IOS:-}" \
+  --build-arg "VITE_DOWNLOAD_URL_ANDROID=${VITE_DOWNLOAD_URL_ANDROID:-}" \
   -t "${IMAGE}:${TAG}" \
   -t "${IMAGE}:latest" \
   -f "${BUILD_CONTEXT}/Dockerfile" \

@@ -144,6 +144,35 @@ export async function broadcastAgentJoinedMessage(
   return messageId;
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\\/]/g, '\\$&');
+}
+
+export function parseKnownMentions(content: string, agentNames: string[]): string[] {
+  const mentions: string[] = [];
+  const escapedNames = agentNames
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length)
+    .map(escapeRegExp);
+  if (escapedNames.length === 0) return mentions;
+
+  const boundaryChars = '*_>#`-';
+  const endBoundaryChars = '*_>#`!?.,:;！？。，；：';
+  const regex = new RegExp(
+    `(?:^|\\s|[${boundaryChars}])@(${escapedNames.join('|')})(?=\\s|$|[${endBoundaryChars}]|-(?![\\u4e00-\\u9fa5a-zA-Z0-9_]))`,
+    'g',
+  );
+
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(content)) !== null) {
+    const name = match[1];
+    if (name && !mentions.includes(name)) {
+      mentions.push(name);
+    }
+  }
+  return mentions;
+}
+
 // Parse @mentions from message content
 export function parseMentions(content: string): string[] {
   const mentions: string[] = [];

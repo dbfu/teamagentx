@@ -6,7 +6,7 @@ import type { Message } from '../../../types/message.js';
 import { setGlobalCallbacks, setGlobalEmitReceivedMessage } from './status.js';
 import type { AgentStatus } from './status.js';
 import type { ToolCall } from '../executor.interface.js';
-import { parseMentions } from './message-utils.js';
+import { parseKnownMentions } from './message-utils.js';
 import { debugLog } from './debug.js';
 import { enqueueAgentTask } from './agent-dispatch.service.js';
 // 消息接收事件接口
@@ -128,7 +128,9 @@ export function setupAIHandlers(
       }
 
       // 先解析 @mentions，判断是否有 @助手
-      const mentionNames = parseMentions(message.content);
+      const activeAgents = await agentService.findActive();
+      const activeAgentByName = new Map(activeAgents.map((agent) => [agent.name, agent]));
+      const mentionNames = parseKnownMentions(message.content, activeAgents.map((agent) => agent.name));
       const hasMentions = mentionNames.length > 0;
 
       // 快速对话群聊：如果没有 @其他助手，则触发快速对话助手
@@ -227,7 +229,7 @@ export function setupAIHandlers(
       // 将所有被 @ 的助手任务入队
       for (const agentName of mentionNames) {
         // Find agent by name
-        const agent = await agentService.findByName(agentName);
+        const agent = activeAgentByName.get(agentName);
         if (!agent || !agent.isActive) continue;
         if (!message.isHuman && message.agentId && agent.id === message.agentId) {
           debugLog('assistantMentionTriggerSkipped', {

@@ -1,11 +1,19 @@
 {
   "version": "v1.2.0",
-  "url": "",
-  "macUrl": "",
-  "winUrl": "",
+  "url": "https://wwbjc.lanzouu.com/i5DHP3pnjish",
+  "macUrlArm64": "https://wwbjc.lanzouu.com/i5DHP3pnjish",
+  "macUrlX64": "https://wwbjc.lanzouu.com/ikOUn3pfb5yj",
+  "macUrl": "https://wwbjc.lanzouu.com/i5DHP3pnjish",
+  "winUrl": "https://wwbjc.lanzouu.com/iDW313pfb0mh",
+  "iosUrl": "https://wwbjc.lanzouu.com/iB17B3pqk04j",
+  "androidUrl": "https://apps.apple.com/app/teamagentx/id000000000",
   "downloads": {
-    "mac": "",
-    "win": ""
+    "macArm64": "https://wwbjc.lanzouu.com/i5DHP3pnjish",
+    "macX64": "https://wwbjc.lanzouu.com/ikOUn3pfb5yj",
+    "mac": "https://wwbjc.lanzouu.com/i5DHP3pnjish",
+    "win": "https://wwbjc.lanzouu.com/iDW313pfb0mh",
+    "ios": "https://wwbjc.lanzouu.com/iB17B3pqk04j",
+    "android": "https://apps.apple.com/app/teamagentx/id000000000"
   },
-  "notes": ""
+  "notes": "版本更新测试"
 }
