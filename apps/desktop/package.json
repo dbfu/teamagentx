@@ -3,7 +3,7 @@
   "version": "0.1.14",
   "private": true,
   "type": "module",
-  "description": "TeamAgentX desktop shell",
+  "description": "TeamAgentX",
   "author": "TeamAgentX Team",
   "main": "dist-electron/main.js",
   "scripts": {
