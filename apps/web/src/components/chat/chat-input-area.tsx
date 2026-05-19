@@ -261,6 +261,137 @@ export const ChatInputArea = memo(function ChatInputArea({
     setIsRecording(true)
   }
 
+  const leftInputActions = (
+    <div className="flex items-center gap-1 shrink-0">
+      <button
+        type="button"
+        className={cn(
+          "rounded transition-colors touch-manipulation",
+          isMobile ? "p-2.5 text-muted-foreground hover:text-foreground hover:bg-accent active:bg-accent" : "p-1.5 text-muted-foreground hover:text-foreground hover:bg-accent"
+        )}
+        onClick={handleImageButtonClick}
+        title="上传图片"
+      >
+        <Image className="size-4" />
+      </button>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/gif,image/webp"
+        multiple
+        className="hidden"
+        onChange={handleFileChange}
+      />
+
+      {hasSttProvider === true && (
+        <>
+          {isRecording && (
+            <span className="min-w-[2.5rem] text-center text-xs font-mono text-red-500">
+              {`${Math.floor(recordingSeconds / 60)}:${String(recordingSeconds % 60).padStart(2, '0')}`}
+            </span>
+          )}
+          {isProcessing && (
+            <span className="text-xs text-muted-foreground">识别中</span>
+          )}
+          <button
+            type="button"
+            className={cn(
+              "rounded transition-colors touch-manipulation",
+              isMobile ? "p-2.5" : "p-1.5",
+              isRecording
+                ? "bg-red-500/10 text-red-500 hover:bg-red-500/20"
+                : "text-muted-foreground hover:text-foreground hover:bg-accent",
+              isProcessing && "opacity-70"
+            )}
+            onClick={handleAudioButtonClick}
+            title={isRecording ? '完成录音' : '语音输入'}
+            disabled={isProcessing}
+          >
+            {isProcessing ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : isRecording ? (
+              <Square className="size-4 fill-current" />
+            ) : (
+              <Mic className="size-4" />
+            )}
+          </button>
+        </>
+      )}
+    </div>
+  )
+
+  const inputEditor = (
+    <MentionInput
+      value={inputValue}
+      onChange={setInputValue}
+      onKeyDown={handleKeyDown}
+      placeholder={`发送至${chatRoomName}`}
+      agents={mentionAgents}
+      className={cn(
+        "min-w-0",
+        isInputExpanded ? "w-full" : "flex-1",
+        isInputExpanded && (
+          isMobile
+            ? "[&_[contenteditable=true]]:!min-h-32 [&_[contenteditable=true]]:!max-h-[42vh]"
+            : "[&_[contenteditable=true]]:!min-h-36 [&_[contenteditable=true]]:!max-h-[48vh]"
+        )
+      )}
+      onMentionClick={onMentionClick}
+    />
+  )
+
+  const rightInputActions = (
+    <div className="flex items-center gap-1 shrink-0">
+      <button
+        type="button"
+        className={cn(
+          "rounded transition-colors touch-manipulation",
+          isMobile ? "p-2.5" : "p-1.5",
+          isInputExpanded
+            ? "text-blue-500 hover:bg-blue-500/10 active:bg-blue-500/20"
+            : "text-muted-foreground hover:text-foreground hover:bg-accent"
+        )}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => setIsInputExpanded((expanded) => !expanded)}
+        title={isInputExpanded ? '收起输入区' : '展开输入区'}
+        aria-label={isInputExpanded ? '收起输入区' : '展开输入区'}
+        aria-pressed={isInputExpanded}
+      >
+        {isInputExpanded ? (
+          <Minimize2 className="size-4" />
+        ) : (
+          <Maximize2 className="size-4" />
+        )}
+      </button>
+
+      <button
+        type="button"
+        disabled={!canSend || hasUploadingImages || isRecording}
+        className={cn(
+          "rounded transition-colors touch-manipulation",
+          isMobile ? "p-2.5" : "p-1.5",
+          canSend && !hasUploadingImages && !isRecording
+            ? "text-blue-500 hover:bg-blue-500/10 active:bg-blue-500/20"
+            : "text-muted-foreground hover:bg-accent disabled:opacity-50"
+        )}
+        title="发送"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => {
+          const currentInputValue = useChatStore.getState().inputValue
+          const currentPendingImages = useChatStore.getState().pendingImages
+          const trimmedInput = currentInputValue.trim()
+          const uploadedImages = currentPendingImages.filter(img => img.uploadedData && !img.error)
+          const currentHasUploadingImages = currentPendingImages.some(img => img.uploading)
+          if ((trimmedInput || uploadedImages.length > 0) && !currentHasUploadingImages && !isRecording) {
+            handleSend()
+          }
+        }}
+      >
+        <Send className="size-4" />
+      </button>
+    </div>
+  )
+
   return (
     <div
       className={cn(
@@ -287,132 +418,28 @@ export const ChatInputArea = memo(function ChatInputArea({
 
       <div
         className={cn(
-          "flex gap-2 rounded-lg border border-border px-3 py-2 transition-shadow",
-          isInputExpanded ? "items-end" : "items-center",
+          "rounded-lg border border-border px-3 py-2 transition-shadow",
+          isInputExpanded
+            ? "flex flex-col items-stretch gap-2"
+            : "flex items-center gap-2",
           hasLargeInputContent && !isInputExpanded && "shadow-[inset_0_-10px_14px_-16px_rgba(15,23,42,0.5)]"
         )}
       >
-        <MentionInput
-          value={inputValue}
-          onChange={setInputValue}
-          onKeyDown={handleKeyDown}
-          placeholder={`发送至${chatRoomName}`}
-          agents={mentionAgents}
-          className={cn(
-            "flex-1 min-w-0",
-            isInputExpanded && (
-              isMobile
-                ? "[&_[contenteditable=true]]:!min-h-32 [&_[contenteditable=true]]:!max-h-[42vh]"
-                : "[&_[contenteditable=true]]:!min-h-36 [&_[contenteditable=true]]:!max-h-[48vh]"
-            )
-          )}
-          onMentionClick={onMentionClick}
-        />
-
-        <div className="flex items-center gap-1 shrink-0">
-          <button
-            type="button"
-            className={cn(
-              "rounded transition-colors touch-manipulation",
-              isMobile ? "p-2.5" : "p-1.5",
-              isInputExpanded
-                ? "text-blue-500 hover:bg-blue-500/10 active:bg-blue-500/20"
-                : "text-muted-foreground hover:text-foreground hover:bg-accent"
-            )}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => setIsInputExpanded((expanded) => !expanded)}
-            title={isInputExpanded ? '收起输入区' : '展开输入区'}
-            aria-label={isInputExpanded ? '收起输入区' : '展开输入区'}
-            aria-pressed={isInputExpanded}
-          >
-            {isInputExpanded ? (
-              <Minimize2 className="size-4" />
-            ) : (
-              <Maximize2 className="size-4" />
-            )}
-          </button>
-
-          {hasSttProvider === true && (
-            <>
-              {isRecording && (
-                <span className="min-w-[2.5rem] text-center text-xs font-mono text-red-500">
-                  {`${Math.floor(recordingSeconds / 60)}:${String(recordingSeconds % 60).padStart(2, '0')}`}
-                </span>
-              )}
-              {isProcessing && (
-                <span className="text-xs text-muted-foreground">识别中</span>
-              )}
-              <button
-                type="button"
-                className={cn(
-                  "rounded transition-colors touch-manipulation",
-                  isMobile ? "p-2.5" : "p-1.5",
-                  isRecording
-                    ? "bg-red-500/10 text-red-500 hover:bg-red-500/20"
-                    : "text-muted-foreground hover:text-foreground hover:bg-accent",
-                  isProcessing && "opacity-70"
-                )}
-                onClick={handleAudioButtonClick}
-                title={isRecording ? '完成录音' : '语音输入'}
-                disabled={isProcessing}
-              >
-                {isProcessing ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : isRecording ? (
-                  <Square className="size-4 fill-current" />
-                ) : (
-                  <Mic className="size-4" />
-                )}
-              </button>
-            </>
-          )}
-
-          <button
-            type="button"
-            className={cn(
-              "rounded transition-colors touch-manipulation",
-              isMobile ? "p-2.5 text-muted-foreground hover:text-foreground hover:bg-accent active:bg-accent" : "p-1.5 text-muted-foreground hover:text-foreground hover:bg-accent"
-            )}
-            onClick={handleImageButtonClick}
-            title="上传图片"
-          >
-            <Image className="size-4" />
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/jpeg,image/png,image/gif,image/webp"
-            multiple
-            className="hidden"
-            onChange={handleFileChange}
-          />
-
-          <button
-            type="button"
-            disabled={!canSend || hasUploadingImages || isRecording}
-            className={cn(
-              "rounded transition-colors touch-manipulation",
-              isMobile ? "p-2.5" : "p-1.5",
-              canSend && !hasUploadingImages && !isRecording
-                ? "text-blue-500 hover:bg-blue-500/10 active:bg-blue-500/20"
-                : "text-muted-foreground hover:bg-accent disabled:opacity-50"
-            )}
-            title="发送"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => {
-              const currentInputValue = useChatStore.getState().inputValue
-              const currentPendingImages = useChatStore.getState().pendingImages
-              const trimmedInput = currentInputValue.trim()
-              const uploadedImages = currentPendingImages.filter(img => img.uploadedData && !img.error)
-              const currentHasUploadingImages = currentPendingImages.some(img => img.uploading)
-              if ((trimmedInput || uploadedImages.length > 0) && !currentHasUploadingImages && !isRecording) {
-                handleSend()
-              }
-            }}
-          >
-            <Send className="size-4" />
-          </button>
-        </div>
+        {isInputExpanded ? (
+          <>
+            {inputEditor}
+            <div className="flex items-center justify-between gap-2">
+              {leftInputActions}
+              {rightInputActions}
+            </div>
+          </>
+        ) : (
+          <>
+            {leftInputActions}
+            {inputEditor}
+            {rightInputActions}
+          </>
+        )}
       </div>
     </div>
   )
