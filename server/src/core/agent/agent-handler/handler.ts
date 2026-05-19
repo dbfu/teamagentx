@@ -183,8 +183,7 @@ export function setupAIHandlers(
           message.isHuman &&
           chatRoom &&
           !chatRoom.isQuickChatRoom &&
-          chatRoom.defaultAgentId &&
-          message.userId
+          chatRoom.defaultAgentId
         ) {
           const agent = await agentService.findById(chatRoom.defaultAgentId);
 

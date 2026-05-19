@@ -68,10 +68,12 @@ function escapeTelegramCodeContent(s: string): string {
   return s.replace(/\\/g, '\\\\').replace(/`/g, '\\`');
 }
 
-/**
- * 兼容历史导出名；当前实际输出 Telegram MarkdownV2。
- */
-export function markdownToTelegramHtml(md: string): string {
+function escapeTelegramUrl(url: string): string {
+  return url.replace(/\\/g, '\\\\');
+}
+
+export function markdownToTelegramMarkdownV2(md: string): string {
+  md = md.replace(/[\x01\x02]/g, '');
   const saved: string[] = [];
   const PLACEHOLDER = '\x01';
 
@@ -102,7 +104,7 @@ export function markdownToTelegramHtml(md: string): string {
 
   // 3. 提取链接，避免普通文本转义影响 URL 结构
   out = out.replace(/!?\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (_, label: string, url: string) => {
-    saved.push(`[${escapeTelegramMarkdownV2Text(label)}](${url})`);
+    saved.push(`[${escapeTelegramMarkdownV2Text(label)}](${escapeTelegramUrl(url)})`);
     return `${PLACEHOLDER}${saved.length - 1}${PLACEHOLDER}`;
   });
 
@@ -169,6 +171,7 @@ function splitTelegramMarkdownV2(text: string, maxLen = 3800): string[] {
   while (remaining.length > maxLen) {
     let cut = remaining.lastIndexOf('\n', maxLen);
     if (cut <= 0) cut = maxLen;
+    if (remaining[cut - 1] === '\\') cut -= 1;
     chunks.push(remaining.slice(0, cut));
     remaining = remaining.slice(cut).trimStart();
   }
@@ -182,8 +185,10 @@ async function telegramSend(botId: string, externalId: string, text: string, age
   const botToken = bridgeBot ? resolveStoredBridgeBotToken(bridgeBot) : undefined;
   if (!botToken) return;
 
-  const header = `> 🤖 *${escapeTelegramMarkdownV2Text(agentName)}*`;
-  const body = markdownToTelegramHtml(text);
+  const { body: bodyText, isRoomUserMessage } = parseGroupPrefix(text, agentName);
+  const safeAgentName = escapeTelegramMarkdownV2Text(agentName.replace(/[\r\n]/g, ' '));
+  const header = isRoomUserMessage ? `> 👤 *${safeAgentName}*` : `> 🤖 *${safeAgentName}*`;
+  const body = markdownToTelegramMarkdownV2(bodyText);
   const full = header + '\n' + body;
   const chunks = splitTelegramMarkdownV2(full);
   const chatId = externalId;
@@ -239,13 +244,21 @@ async function telegramTyping(botId: string, externalId: string): Promise<void> 
   const botToken = bridgeBot ? resolveStoredBridgeBotToken(bridgeBot) : undefined;
   if (!botToken) return;
 
-  await fetch(`https://api.telegram.org/bot${botToken}/sendChatAction`, {
+  await fetch(`https://api.telegram.org/bot${encodeURIComponent(botToken)}/sendChatAction`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ chat_id: externalId, action: 'typing' }),
   }).catch((error) => {
     console.error('[Bridge/telegram] typing 发送失败:', error);
   });
+}
+
+function parseGroupPrefix(text: string, agentName: string): { body: string; isRoomUserMessage: boolean } {
+  const isRoomUserMessage = text.startsWith(`[群聊·${agentName}]`);
+  const body = isRoomUserMessage
+    ? text.replace(new RegExp(`^\\[群聊·${escapeRegExp(agentName)}\\]\\s*`), '')
+    : text;
+  return { body, isRoomUserMessage };
 }
 
 function escapeFeishuMdInline(text: string): string {
@@ -286,6 +299,7 @@ function convertMarkdownTable(text: string): string {
 
 // ─── 飞书 Markdown 规范化：仅降级已知兼容性较差的语法 ───
 function normalizeForFeishu(md: string): string {
+  md = md.replace(/[\x01\x02]/g, '');
   const saved: string[] = [];
   const PH = '\x02';
 
@@ -299,7 +313,10 @@ function normalizeForFeishu(md: string): string {
     const label = alt.trim() ? alt.trim() : '图片';
     return `[${label}](${url})`;
   });
-  out = out.replace(/^#{3,6}\s+(.+)$/gm, '**$1**');
+  out = out.replace(/^#{1,6}\s+(.+)$/gm, '**$1**');
+
+  // 引用块飞书 JSON 1.0 不支持，去掉 > 前缀保留内容
+  out = out.replace(/^>\s?/gm, '');
 
   out = out.replace(/^(\s*)[-*+]\s+\[([ xX])\]\s+(.+)$/gm, (_, indent: string, checked: string, text: string) => {
     const normalizedIndent = indent.replace(/\t/g, '  ');
@@ -308,8 +325,8 @@ function normalizeForFeishu(md: string): string {
     return `${'  '.repeat(level)}${icon} ${text}`;
   });
 
-  out = out.replace(/^(\s*)[-*+]\s+(.+)$/gm, (_, indent: string, text: string) => {
-    return `${indent.trim() ? '' : ''}- ${text}`;
+  out = out.replace(/^(\s*)[-*+]\s+(.+)$/gm, (_, _indent: string, text: string) => {
+    return `- ${text}`;
   });
 
   out = out.replace(/\$\$([\s\S]+?)\$\$/g, (_, expr: string) => `公式：\n${expr.trim()}`);
@@ -326,6 +343,7 @@ function normalizeForFeishu(md: string): string {
  * 不支持：标题 代码块 斜体 删除线 表格 引用 列表（部分支持 • 换行）
  */
 export function markdownToWecomMarkdown(md: string): string {
+  md = md.replace(/[\x01\x02]/g, '');
   const saved: string[] = [];
   const PH = '\x02';
 
@@ -361,14 +379,14 @@ export function markdownToWecomMarkdown(md: string): string {
   // 5. 引用 > → 去前缀
   out = out.replace(/^>\s?/gm, '');
 
-  // 6. 无序列表 - / * / + → •
-  out = out.replace(/^[ \t]*[-*+] /gm, '• ');
-
-  // 6.25 任务列表 → ☑ / ☐
-  out = out.replace(/^• \[([ xX])\]\s+(.+)$/gm, (_, checked: string, text: string) => {
+  // 6. 任务列表 → ☑ / ☐（先于普通列表处理，避免 • 插入后正则失配）
+  out = out.replace(/^([ \t]*)[-*+] \[([ xX])\]\s+(.+)$/gm, (_, indent: string, checked: string, text: string) => {
     const icon = /[xX]/.test(checked) ? '☑' : '☐';
-    return `${icon} ${text}`;
+    return `${indent}${icon} ${text}`;
   });
+
+  // 6.5 无序列表 - / * / + → •
+  out = out.replace(/^[ \t]*[-*+] /gm, '• ');
 
   // 6.5 图片 ![alt](url) → [alt](url)（企微 MD 不支持内联图片，降级为链接）
   out = out.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '[$1]($2)');
@@ -404,6 +422,7 @@ export function markdownToWecomMarkdown(md: string): string {
  * QQ 当前使用 msg_type=0 纯文本，MD 符号需全部清理
  */
 export function markdownToQQPlainText(md: string): string {
+  md = md.replace(/[\x01\x02]/g, '');
   const saved: string[] = [];
   const PH = '\x02';
 
@@ -470,6 +489,7 @@ export function markdownToQQPlainText(md: string): string {
 }
 
 export function markdownToDingTalkMarkdown(md: string): string {
+  md = md.replace(/[\x01\x02]/g, '');
   const saved: string[] = [];
   const PH = '\x02';
 
@@ -477,6 +497,11 @@ export function markdownToDingTalkMarkdown(md: string): string {
     const trimmed = code.replace(/\n$/, '');
     const title = lang.trim() ? `代码块（${lang.trim()}）` : '代码块';
     saved.push(`${title}\n\`\`\`\n${trimmed}\n\`\`\``);
+    return `${PH}${saved.length - 1}${PH}`;
+  });
+
+  out = out.replace(/`([^`\n]+)`/g, (_, code: string) => {
+    saved.push(`\`${code}\``);
     return `${PH}${saved.length - 1}${PH}`;
   });
 
@@ -503,10 +528,7 @@ export function markdownToDingTalkMarkdown(md: string): string {
 }
 
 export function markdownToFeishuCard(agentName: string, md: string): Record<string, unknown> {
-  const isRoomUserMessage = md.startsWith(`[群聊·${agentName}]`);
-  const rawBody = isRoomUserMessage
-    ? md.replace(new RegExp(`^\\[群聊·${escapeRegExp(agentName)}\\]\\s*`), '')
-    : md;
+  const { body: rawBody, isRoomUserMessage } = parseGroupPrefix(md, agentName);
   const body = normalizeForFeishu(rawBody);
   const header = isRoomUserMessage
     ? `<font color='green'>**${escapeFeishuMdInline(agentName)}**</font> 消息`
@@ -517,10 +539,7 @@ export function markdownToFeishuCard(agentName: string, md: string): Record<stri
     elements: [
       {
         tag: 'div',
-        text: {
-          tag: 'lark_md',
-          content: header,
-        },
+        text: { tag: 'lark_md', content: header },
       },
       {
         tag: 'markdown',
@@ -552,10 +571,11 @@ async function getFeishuToken(botId: string, appId: string, appSecret: string): 
 }
 
 async function feishuSend(botId: string, externalId: string, text: string, agentName: string): Promise<void> {
+  const receiveIdType = resolveFeishuReceiveIdType(externalId);
   logFeishuFlow('start', {
     botId,
     externalId,
-    receiveIdType: resolveFeishuReceiveIdType(externalId),
+    receiveIdType,
     agentName,
     textPreview: text.slice(0, 120),
   });
@@ -578,7 +598,6 @@ async function feishuSend(botId: string, externalId: string, text: string, agent
   }
 
   const sendFeishuRequest = async (msgType: string, content: string) => {
-    const receiveIdType = resolveFeishuReceiveIdType(externalId);
     const body = JSON.stringify({ receive_id: externalId, msg_type: msgType, content });
     const url = `https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=${receiveIdType}`;
     logFeishuFlow('request', {
@@ -611,7 +630,7 @@ async function feishuSend(botId: string, externalId: string, text: string, agent
   const cardRes = await sendFeishuRequest('interactive', cardContent);
 
   if (cardRes.ok) {
-    logFeishuFlow('interactive_success', { externalId, receiveIdType: resolveFeishuReceiveIdType(externalId) });
+    logFeishuFlow('interactive_success', { externalId, receiveIdType });
     return;
   }
 
@@ -619,7 +638,7 @@ async function feishuSend(botId: string, externalId: string, text: string, agent
   console.warn(`[Bridge/feishu] 卡片发送失败 status=${cardRes.status}: ${cardErr.slice(0, 400)}，降级为文本消息`);
   logFeishuFlow('interactive_failed_fallback_text', {
     externalId,
-    receiveIdType: resolveFeishuReceiveIdType(externalId),
+    receiveIdType,
     status: cardRes.status,
     errorPreview: cardErr.slice(0, 400),
   });
@@ -633,7 +652,7 @@ async function feishuSend(botId: string, externalId: string, text: string, agent
     console.error(`[Bridge/feishu] 文本消息发送也失败 status=${textRes.status}: ${textErr.slice(0, 400)}`);
     throw new Error(`[Feishu] send failed: ${textRes.status} ${textErr.slice(0, 400)}`);
   }
-  logFeishuFlow('text_fallback_success', { externalId, receiveIdType: resolveFeishuReceiveIdType(externalId) });
+  logFeishuFlow('text_fallback_success', { externalId, receiveIdType });
 }
 
 function normalizeFeishuMessageId(messageId?: string): string {
@@ -735,9 +754,11 @@ async function getDingtalkToken(botId: string, appKey: string, appSecret: string
 }
 
 async function dingtalkSend(botId: string, externalId: string, text: string, agentName: string): Promise<void> {
-  const formatted = markdownToDingTalkMarkdown(text);
+  const { body: bodyText, isRoomUserMessage } = parseGroupPrefix(text, agentName);
+  const formatted = markdownToDingTalkMarkdown(bodyText);
+  const icon = isRoomUserMessage ? '👤' : '🤖';
   if (externalId.startsWith(DINGTALK_SESSION_WEBHOOK_PREFIX)) {
-    await sendViaSessionWebhook(externalId.slice(DINGTALK_SESSION_WEBHOOK_PREFIX.length), agentName, formatted);
+    await sendViaSessionWebhook(externalId.slice(DINGTALK_SESSION_WEBHOOK_PREFIX.length), agentName, formatted, icon);
     return;
   }
 
@@ -757,7 +778,7 @@ async function dingtalkSend(botId: string, externalId: string, text: string, age
       chatId: externalId,
       robotCode: cfg.appKey,
       msgKey: 'sampleMarkdown',
-      msgParam: JSON.stringify({ title: `🤖 ${agentName}`, text: `# 🤖 ${agentName}\n\n${formatted}` }),
+      msgParam: JSON.stringify({ title: `${icon} ${agentName}`, text: `# ${icon} ${agentName}\n\n${formatted}` }),
     }),
   });
   if (!ddRes.ok) {
@@ -767,7 +788,7 @@ async function dingtalkSend(botId: string, externalId: string, text: string, age
   }
 }
 
-async function sendViaSessionWebhook(sessionWebhook: string, agentName: string, markdown: string): Promise<void> {
+async function sendViaSessionWebhook(sessionWebhook: string, agentName: string, markdown: string, icon = '🤖'): Promise<void> {
   // SSRF 防护：仅允许 https 且 host 在白名单内
   let webhookUrl: URL;
   try {
@@ -784,19 +805,34 @@ async function sendViaSessionWebhook(sessionWebhook: string, agentName: string, 
 
   const res = await fetch(sessionWebhook, {
     method: 'POST',
+    redirect: 'error',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       msgtype: 'markdown',
       markdown: {
-        title: `🤖 ${agentName}`,
-        text: `# 🤖 ${agentName}\n\n${markdown}`,
+        title: `${icon} ${agentName}`,
+        text: `# ${icon} ${agentName}\n\n${markdown}`,
       },
     }),
   });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`[DingTalk] session webhook send failed: ${res.status} ${body.slice(0, 200)}`);
+  if (res.ok) return;
+
+  const errBody = await res.text().catch(() => '');
+  // 部分 session webhook 不支持 markdown msgtype，降级为纯文本
+  if (errBody.includes('not support msgtype') || errBody.includes('400008')) {
+    const fallback = await fetch(sessionWebhook, {
+      method: 'POST',
+      redirect: 'error',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ msgtype: 'text', text: { content: `[${agentName}] ${markdown}` } }),
+    });
+    if (!fallback.ok) {
+      const fallbackBody = await fallback.text().catch(() => '');
+      throw new Error(`[DingTalk] session webhook send failed: ${fallback.status} ${fallbackBody.slice(0, 200)}`);
+    }
+    return;
   }
+  throw new Error(`[DingTalk] session webhook send failed: ${res.status} ${errBody.slice(0, 200)}`);
 }
 
 // ─── 企业微信 sender ───
@@ -819,6 +855,8 @@ async function getWecomToken(botId: string, corpId: string, agentSecret: string)
 }
 
 async function wecomSend(botId: string, externalId: string, text: string, agentName: string): Promise<void> {
+  const { body: bodyText, isRoomUserMessage } = parseGroupPrefix(text, agentName);
+  const icon = isRoomUserMessage ? '👤' : '🤖';
   const bridgeBot = await prisma.bridgeBot.findUnique({ where: { id: botId } });
   const configJson = bridgeBot?.config ?? null;
   if (!configJson) return;
@@ -833,7 +871,7 @@ async function wecomSend(botId: string, externalId: string, text: string, agentN
     body: JSON.stringify({
       chatid: externalId,
       msgtype: 'markdown',
-      markdown: { content: `<font color="info">**🤖 ${agentName}**</font>\n\n${markdownToWecomMarkdown(text)}` },
+      markdown: { content: `<font color="info">**${icon} ${agentName}**</font>\n\n${markdownToWecomMarkdown(bodyText)}` },
     }),
   });
   if (!wecomRes.ok) {
@@ -866,6 +904,8 @@ async function getQQToken(botId: string, appId: string, clientSecret: string): P
 }
 
 async function qqSend(botId: string, externalId: string, text: string, agentName: string): Promise<void> {
+  const { body: bodyText, isRoomUserMessage } = parseGroupPrefix(text, agentName);
+  const icon = isRoomUserMessage ? '👤' : '🤖';
   const bridgeBot = await prisma.bridgeBot.findUnique({ where: { id: botId } });
   const configJson = bridgeBot?.config ?? null;
   if (!configJson) return;
@@ -877,7 +917,7 @@ async function qqSend(botId: string, externalId: string, text: string, agentName
   const qqRes = await fetch(`https://api.sgroup.qq.com/v2/groups/${externalId}/messages`, {
     method: 'POST',
     headers: { 'Authorization': `QQBot ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ msg_type: 0, content: `[${agentName}] ${markdownToQQPlainText(text)}` }),
+    body: JSON.stringify({ msg_type: 0, content: `[${icon} ${agentName}] ${markdownToQQPlainText(bodyText)}` }),
   });
   if (!qqRes.ok) {
     const body = await qqRes.text().catch(() => '');
@@ -908,5 +948,6 @@ export function registerBridgePlatformAdapters(
   }
 }
 
-// Backward-compatible export during transition
+// Backward-compatible exports during transition
 export const registerAllPlatformSenders = registerBridgePlatformAdapters;
+export const markdownToTelegramHtml = markdownToTelegramMarkdownV2;

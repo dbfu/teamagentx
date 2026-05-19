@@ -6,7 +6,7 @@ import {
   registerBridgePlatformAdapters,
   markdownToDingTalkMarkdown,
   markdownToFeishuCard,
-  markdownToTelegramHtml,
+  markdownToTelegramMarkdownV2,
   markdownToWecomMarkdown,
   markdownToQQPlainText,
   resolveFeishuReceiveIdType,
@@ -80,33 +80,33 @@ test('registerBridgePlatformAdapters registers every adapter sender', () => {
 
 // ─── Telegram MarkdownV2 formatting tests ───
 
-test('markdownToTelegramHtml converts bold to MarkdownV2 style', () => {
-  const result = markdownToTelegramHtml('Hello **world**!');
+test('markdownToTelegramMarkdownV2 converts bold to MarkdownV2 style', () => {
+  const result = markdownToTelegramMarkdownV2('Hello **world**!');
   assert.ok(result.includes('*world*'), `expected *world* in: ${result}`);
   assert.ok(!result.includes('<b>'), `should not emit HTML tags: ${result}`);
 });
 
-test('markdownToTelegramHtml keeps fenced code blocks in MarkdownV2 style', () => {
-  const result = markdownToTelegramHtml('```js\nconsole.log("hi")\n```');
+test('markdownToTelegramMarkdownV2 keeps fenced code blocks in MarkdownV2 style', () => {
+  const result = markdownToTelegramMarkdownV2('```js\nconsole.log("hi")\n```');
   assert.ok(result.includes('```js'), `expected fenced code block in: ${result}`);
   assert.ok(result.includes('console.log("hi")'), `expected code content in: ${result}`);
   assert.ok(!result.includes('<pre><code'), `should not emit HTML code tags: ${result}`);
 });
 
-test('markdownToTelegramHtml keeps inline code in MarkdownV2 style', () => {
-  const result = markdownToTelegramHtml('Use `npm install` to install');
+test('markdownToTelegramMarkdownV2 keeps inline code in MarkdownV2 style', () => {
+  const result = markdownToTelegramMarkdownV2('Use `npm install` to install');
   assert.ok(result.includes('`npm install`'), `expected inline code in: ${result}`);
   assert.ok(!result.includes('<code>'), `should not emit HTML inline code tags: ${result}`);
 });
 
-test('markdownToTelegramHtml keeps links in MarkdownV2 style', () => {
-  const result = markdownToTelegramHtml('[click here](https://example.com)');
+test('markdownToTelegramMarkdownV2 keeps links in MarkdownV2 style', () => {
+  const result = markdownToTelegramMarkdownV2('[click here](https://example.com)');
   assert.ok(result.includes('[click here](https://example.com)'), `expected Markdown link in: ${result}`);
   assert.ok(!result.includes('<a href='), `should not emit HTML anchors: ${result}`);
 });
 
-test('markdownToTelegramHtml escapes MarkdownV2 special characters in plain text', () => {
-  const result = markdownToTelegramHtml('a_b [x] (y) - z!');
+test('markdownToTelegramMarkdownV2 escapes MarkdownV2 special characters in plain text', () => {
+  const result = markdownToTelegramMarkdownV2('a_b [x] (y) - z!');
   assert.ok(result.includes('a\\_b'), `expected escaped underscore in: ${result}`);
   assert.ok(result.includes('\\[x\\]'), `expected escaped brackets in: ${result}`);
   assert.ok(result.includes('\\(y\\)'), `expected escaped parentheses in: ${result}`);
@@ -122,10 +122,7 @@ test('markdownToFeishuCard renders assistant name through card markdown', () => 
   assert.deepEqual(result.elements, [
     {
       tag: 'div',
-      text: {
-        tag: 'lark_md',
-        content: "🤖 <font color='blue'>**claude**</font> 消息",
-      },
+      text: { tag: 'lark_md', content: "🤖 <font color='blue'>**claude**</font> 消息" },
     },
     {
       tag: 'markdown',
@@ -141,10 +138,7 @@ test('markdownToFeishuCard renders room user messages without bot icon', () => {
   assert.deepEqual(result.elements, [
     {
       tag: 'div',
-      text: {
-        tag: 'lark_md',
-        content: "<font color='green'>**admin**</font> 消息",
-      },
+      text: { tag: 'lark_md', content: "<font color='green'>**admin**</font> 消息" },
     },
     {
       tag: 'markdown',
@@ -161,121 +155,46 @@ test('resolveFeishuReceiveIdType uses chat_id for non-oc ids', () => {
   assert.equal(resolveFeishuReceiveIdType('chat_default_chat'), 'chat_id');
 });
 
-// ─── Telegram HTML fallback test ───
-
-test('telegramSend falls back to plain text when MarkdownV2 parse fails', async () => {
-  // We test the adapter's sendMessage by supplying a mock prisma bridgeBot lookup
-  // and a mock fetch that returns 400 "can't parse entities" for HTML mode,
-  // then 200 for plain text fallback.
-  const sentRequests: Array<{ url: string; body: Record<string, unknown> }> = [];
-
-  const restore = mockFetch((url, init) => {
-    const body = init?.body ? JSON.parse(init.body as string) as Record<string, unknown> : {};
-    sentRequests.push({ url, body });
-
-    if (url.includes('/sendMessage')) {
-      if (body['parse_mode'] === 'MarkdownV2') {
-        // Simulate Telegram MarkdownV2 parse failure
-        return textResponse("Bad Request: can't parse entities", 400);
-      }
-      // Plain text fallback succeeds
-      return jsonResponse({ ok: true, result: { message_id: 1 } });
-    }
-    return jsonResponse({ ok: true });
-  });
-
-  // Temporarily monkey-patch prisma module used by platform-senders
-  // by importing platform-senders at module level and patching the prisma import.
-  // Since we can't intercept ESM prisma easily in node:test, test markdownToTelegramHtml
-  // and the fetch logic directly through the exported adapter using a minimal prisma stub.
-  // This test verifies the fallback path sends plain text without parse_mode.
-
-  try {
-    // The fallback should have been called: one HTML attempt → 400 → one plain text attempt
-    // We only verify the fetch mock pattern by calling a standalone path through the logic.
-    // Direct unit test of the HTML→plain fallback fetch sequence:
-    const htmlUrl = 'https://api.telegram.org/botFAKE_TOKEN/sendMessage';
-    const chatId = '999';
-    const agentName = 'TestBot';
-    const text = 'hello world';
-
-    // Simulate what telegramSend does internally for a single chunk:
-    const res = await globalThis.fetch(htmlUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text: '*test*', parse_mode: 'MarkdownV2' }),
-    });
-    assert.equal(res.status, 400, 'MarkdownV2 send should return 400');
-    const errBody = await res.text();
-    assert.ok(errBody.includes("can't parse entities"), 'error should mention parse failure');
-
-    // Now the fallback:
-    const fallback = await globalThis.fetch(htmlUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text: `[${agentName}] ${text}`.slice(0, 4096) }),
-    });
-    assert.equal(fallback.status, 200, 'plain text fallback should succeed');
-    assert.equal(sentRequests.length, 2, 'should have made exactly 2 fetch calls');
-    assert.ok(!sentRequests[1]?.body['parse_mode'], 'fallback should not set parse_mode');
-  } finally {
-    restore();
-  }
-});
-
 // ─── markdownToFeishuCard: 飞书格式规范化 ───
 
-test('markdownToFeishuCard preserves supported h1 and h2 headings', () => {
-  const result = markdownToFeishuCard('bot', '# 一级标题\n## 二级标题') as {
-    elements: Array<{ tag: string; text?: { tag: string; content: string }; content?: string }>;
-  };
-  const content = result.elements[1]?.content ?? '';
-  assert.match(content, /^# 一级标题/m);
-  assert.match(content, /^## 二级标题/m);
-});
+// Helper: extract body content after the header line in single-element Feishu cards
+function feishuBody(result: unknown): string {
+  return (result as { elements: Array<{ content?: string }> }).elements[1]?.content ?? '';
+}
 
-test('markdownToFeishuCard degrades unsupported deeper headings to bold text', () => {
-  const result = markdownToFeishuCard('bot', '### 三级标题\n#### 四级标题') as {
-    elements: Array<{ tag: string; text?: { tag: string; content: string }; content?: string }>;
-  };
-  const content = result.elements[1]?.content ?? '';
+test('markdownToFeishuCard degrades all headings to bold text (lark_md does not render # in practice)', () => {
+  const result = markdownToFeishuCard('bot', '# 一级标题\n## 二级标题\n### 三级标题');
+  const content = feishuBody(result);
+  assert.match(content, /^\*\*一级标题\*\*$/m);
+  assert.match(content, /^\*\*二级标题\*\*$/m);
   assert.match(content, /^\*\*三级标题\*\*$/m);
-  assert.match(content, /^\*\*四级标题\*\*$/m);
 });
 
 test('markdownToFeishuCard preserves supported emphasis syntax', () => {
-  const result = markdownToFeishuCard('bot', '这是 ~~删除~~ 的内容') as {
-    elements: Array<{ tag: string; text?: { tag: string; content: string }; content?: string }>;
-  };
-  const content = result.elements[1]?.content ?? '';
+  const result = markdownToFeishuCard('bot', '这是 ~~删除~~ 的内容');
+  const content = feishuBody(result);
   assert.ok(content.includes('~~删除~~'), `删除线语法应原样保留给飞书渲染: ${content}`);
 });
 
 test('markdownToFeishuCard converts task lists to checkbox symbols', () => {
-  const result = markdownToFeishuCard('bot', '- [x] 已完成\n- [ ] 未完成') as {
-    elements: Array<{ tag: string; text?: { tag: string; content: string }; content?: string }>;
-  };
-  const content = result.elements[1]?.content ?? '';
+  const result = markdownToFeishuCard('bot', '- [x] 已完成\n- [ ] 未完成');
+  const content = feishuBody(result);
   assert.match(content, /☑ 已完成/);
   assert.match(content, /☐ 未完成/);
 });
 
 test('markdownToFeishuCard converts table to plain text', () => {
   const md = '| 名称 | 价格 |\n|------|------|\n| 苹果 | 3元 |\n| 香蕉 | 2元 |';
-  const result = markdownToFeishuCard('bot', md) as {
-    elements: Array<{ tag: string; text?: { tag: string; content: string }; content?: string }>;
-  };
-  const content = result.elements[1]?.content ?? '';
+  const result = markdownToFeishuCard('bot', md);
+  const content = feishuBody(result);
   assert.ok(!content.includes('|---'), `分隔行应被去除: ${content}`);
   assert.ok(content.includes('名称: 苹果'), `数据应转为 key:value: ${content}`);
 });
 
 test('markdownToFeishuCard preserves fenced code blocks with language tag', () => {
   const md = '```python\nprint("hello")\n```';
-  const result = markdownToFeishuCard('bot', md) as {
-    elements: Array<{ tag: string; text?: { tag: string; content: string }; content?: string }>;
-  };
-  const content = result.elements[1]?.content ?? '';
+  const result = markdownToFeishuCard('bot', md);
+  const content = feishuBody(result);
   assert.ok(content.includes('```python'), `应保留语言标记: ${content}`);
   assert.ok(content.includes('print("hello")'), `代码内容应保留: ${content}`);
   assert.ok(content.includes('```'), `代码围栏应保留: ${content}`);
@@ -283,29 +202,24 @@ test('markdownToFeishuCard preserves fenced code blocks with language tag', () =
 
 test('markdownToFeishuCard degrades markdown images to links to avoid image_key card failures', () => {
   const md = '![示例图片](https://via.placeholder.com/150)';
-  const result = markdownToFeishuCard('bot', md) as {
-    elements: Array<{ tag: string; text?: { tag: string; content: string }; content?: string }>;
-  };
-  const content = result.elements[1]?.content ?? '';
+  const result = markdownToFeishuCard('bot', md);
+  const content = feishuBody(result);
   assert.equal(content, '[示例图片](https://via.placeholder.com/150)');
 });
 
-test('markdownToFeishuCard preserves supported hr and quote syntax', () => {
+test('markdownToFeishuCard strips blockquote prefix (JSON 1.0 does not support blockquotes) but preserves content and hr', () => {
   const md = '> 这是引用\n\n---';
-  const result = markdownToFeishuCard('bot', md) as {
-    elements: Array<{ tag: string; text?: { tag: string; content: string }; content?: string }>;
-  };
-  const content = result.elements[1]?.content ?? '';
-  assert.match(content, /^> 这是引用/m);
+  const result = markdownToFeishuCard('bot', md);
+  const content = feishuBody(result);
+  assert.ok(!content.includes('> 这是引用'), `> 前缀应被去掉: ${content}`);
+  assert.ok(content.includes('这是引用'), `引用内容应保留: ${content}`);
   assert.match(content, /^---$/m);
 });
 
 test('markdownToFeishuCard flattens nested bullet lists because Feishu does not support indentation', () => {
   const md = '- 项目一\n  - 子项目 1\n    - 子项目 2';
-  const result = markdownToFeishuCard('bot', md) as {
-    elements: Array<{ tag: string; text?: { tag: string; content: string }; content?: string }>;
-  };
-  const content = result.elements[1]?.content ?? '';
+  const result = markdownToFeishuCard('bot', md);
+  const content = feishuBody(result);
   assert.equal(content, '- 项目一\n- 子项目 1\n- 子项目 2');
 });
 

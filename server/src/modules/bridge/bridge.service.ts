@@ -475,16 +475,6 @@ export const bridgeService = {
 
     const text = `[群聊·${senderName}] ${content}`;
     await Promise.all(targets.map(async ({ bot, source }) => {
-      if (bot.platform === 'feishu') {
-        console.log(`[Bridge/flow][syncRoomMessage->feishu] ${JSON.stringify({
-          chatRoomId,
-          botId: bot.id,
-          externalId: source.externalId,
-          replyTarget: source.replyTarget,
-          senderName,
-          textPreview: text.slice(0, 120),
-        })}`);
-      }
       const sender = platformSenders.get(bot.platform);
       if (!sender) return;
       await sender(bot.id, source.replyTarget, text, senderName);
@@ -528,16 +518,6 @@ export const bridgeService = {
     if (targets.length === 0) return;
 
     await Promise.all(targets.map(async ({ bot, source }) => {
-      if (bot.platform === 'feishu') {
-        console.log(`[Bridge/flow][sendAgentResponse->feishu] ${JSON.stringify({
-          chatRoomId,
-          botId: bot.id,
-          externalId: source.externalId,
-          replyTarget: source.replyTarget,
-          agentName,
-          textPreview: content.slice(0, 120),
-        })}`);
-      }
       const sender = platformSenders.get(bot.platform);
       if (!sender) return;
 
