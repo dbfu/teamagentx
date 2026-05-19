@@ -3,6 +3,7 @@ import { useTheme } from '@/components/theme-provider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { acpToolsApi, type AcpToolInfo } from '@/lib/agent-api';
 import { authApi } from '@/lib/auth-api';
+import { TERMINAL_OPEN_OPTIONS, type TerminalOpenTarget } from '@/lib/open-targets';
 import { openExternalUrl, TEAMAGENTX_DOCS_URL, TEAMAGENTX_WEBSITE_URL } from '@/lib/site-links';
 import { cn } from '@/lib/utils';
 import { useAuthStore, useUIStore } from '@/stores';
@@ -120,7 +121,7 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
   const navigate = useNavigate()
   const { theme, setTheme, brandTheme, setBrandTheme } = useTheme()
   const { user, token, logout, setUser } = useAuthStore()
-  const { soundEnabled, setSoundEnabled } = useUIStore()
+  const { soundEnabled, setSoundEnabled, terminalOpenTarget, setTerminalOpenTarget } = useUIStore()
   const [username, setUsername] = useState(user?.username || '')
   const [selectedAvatar, setSelectedAvatar] = useState(user?.avatar || '0')
   const [isUpdating, setIsUpdating] = useState(false)
@@ -537,6 +538,32 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
             收到助手回复时播放提示音
           </p>
         </div>
+
+        {/* 终端设置 */}
+        {window.electronAPI?.isElectron && window.electronAPI.platform === 'darwin' && (
+          <div className="mb-6 rounded-xl border border-border bg-card p-4">
+            <h2 className="mb-4 text-sm font-medium text-muted-foreground">终端</h2>
+            <label className="mb-1.5 block text-sm font-medium text-foreground">打开工作目录时使用</label>
+            <Select
+              value={terminalOpenTarget}
+              onValueChange={(value) => setTerminalOpenTarget(value as TerminalOpenTarget)}
+            >
+              <SelectTrigger className="w-full rounded-lg border-border bg-background">
+                <SelectValue placeholder="选择终端" />
+              </SelectTrigger>
+              <SelectContent>
+                {TERMINAL_OPEN_OPTIONS.map((option) => (
+                  <SelectItem key={option.target} value={option.target}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="mt-2 text-xs text-muted-foreground">
+              在群工作目录菜单选择“终端”时会使用这个应用打开。
+            </p>
+          </div>
+        )}
 
         {/* SDK 管理 */}
         {window.electronAPI?.isElectron && (

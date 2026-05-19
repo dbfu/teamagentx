@@ -29,8 +29,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getOpenTargetIcons: () => ipcRenderer.invoke('get-open-target-icons'),
   openFolder: (
     path: string,
-    target: 'system' | 'terminal' | 'vscode' | 'cursor' | 'trae' | 'trae-cn' = 'system'
-  ) => ipcRenderer.invoke('open-folder', { path, target }),
+    target: 'system' | 'terminal' | 'vscode' | 'cursor' | 'trae' | 'trae-cn' = 'system',
+    terminalTarget: 'terminal-app' | 'iterm2' | 'alacritty' | 'kitty' | 'ghostty' | 'wezterm' | 'kaku' = 'terminal-app'
+  ) => ipcRenderer.invoke('open-folder', { path, target, terminalTarget }),
   selectFolder: () => ipcRenderer.invoke('select-folder'),
   // 使用默认浏览器打开外部链接
   openExternal: (url: string) => ipcRenderer.invoke('open-external', url),

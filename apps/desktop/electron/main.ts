@@ -142,6 +142,7 @@ function findLocalIp(interfaces: NodeJS.Dict<os.NetworkInterfaceInfo[]>): string
 
 type FolderOpenTarget = 'system' | 'terminal' | 'vscode' | 'cursor' | 'trae' | 'trae-cn';
 type EditorOpenTarget = Exclude<FolderOpenTarget, 'system' | 'terminal'>;
+type TerminalOpenTarget = 'terminal-app' | 'iterm2' | 'alacritty' | 'kitty' | 'ghostty' | 'wezterm' | 'kaku';
 
 type UpdateInfo = {
   version: string;
@@ -170,6 +171,16 @@ const EDITOR_APP_NAMES: Record<EditorOpenTarget, string> = {
   cursor: 'Cursor',
   trae: 'Trae',
   'trae-cn': 'Trae CN',
+};
+
+const TERMINAL_APP_NAMES: Record<TerminalOpenTarget, string> = {
+  'terminal-app': 'Terminal.app',
+  iterm2: 'iTerm2',
+  alacritty: 'Alacritty',
+  kitty: 'Kitty',
+  ghostty: 'Ghostty',
+  wezterm: 'WezTerm',
+  kaku: 'Kaku',
 };
 
 // macOS app paths
@@ -248,19 +259,125 @@ function openFolderInApp(folderPath: string, appName: string): Promise<void> {
   });
 }
 
-function openFolderInTerminal(folderPath: string): Promise<void> {
+function execFilePromise(command: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
-    if (process.platform === 'darwin') {
-      execFile('open', ['-a', 'Terminal', folderPath], (error, _stdout, stderr) => {
-        if (error) {
-          reject(new Error(stderr || error.message));
-          return;
-        }
-        resolve();
-      });
+    execFile(command, args, (error, _stdout, stderr) => {
+      if (error) {
+        reject(new Error(stderr || error.message));
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function escapeAppleScriptString(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function runAppleScript(lines: string[]): Promise<void> {
+  return execFilePromise('osascript', lines.flatMap((line) => ['-e', line]));
+}
+
+function openTerminalAppAtFolder(folderPath: string): Promise<void> {
+  const cdCommand = escapeAppleScriptString(`cd ${shellQuote(folderPath)}`);
+  return runAppleScript([
+    'tell application "Terminal"',
+    `do script "${cdCommand}"`,
+    'activate',
+    'end tell',
+  ]);
+}
+
+async function openITermAtFolder(folderPath: string): Promise<void> {
+  const cdCommand = escapeAppleScriptString(`cd ${shellQuote(folderPath)}`);
+  const errors: string[] = [];
+
+  for (const appName of ['iTerm2', 'iTerm']) {
+    try {
+      await runAppleScript([
+        `tell application "${appName}"`,
+        'activate',
+        'set newWindow to (create window with default profile)',
+        'tell current session of newWindow',
+        `write text "${cdCommand}"`,
+        'end tell',
+        'end tell',
+      ]);
+      return;
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  throw new Error(errors[0] || `${TERMINAL_APP_NAMES.iterm2} not found`);
+}
+
+function getDarwinTerminalOpenCandidates(
+  terminalTarget: TerminalOpenTarget,
+  folderPath: string,
+): { appName: string; args: string[] }[] {
+  switch (terminalTarget) {
+    case 'terminal-app':
+      return [{ appName: 'Terminal', args: [folderPath] }];
+    case 'iterm2':
+      return [
+        { appName: 'iTerm', args: [folderPath] },
+        { appName: 'iTerm2', args: [folderPath] },
+      ];
+    case 'alacritty':
+      return [{ appName: 'Alacritty', args: ['--args', '--working-directory', folderPath] }];
+    case 'kitty':
+      return [
+        { appName: 'kitty', args: ['--args', '--directory', folderPath] },
+        { appName: 'Kitty', args: ['--args', '--directory', folderPath] },
+      ];
+    case 'ghostty':
+      return [{ appName: 'Ghostty', args: ['--args', `--working-directory=${folderPath}`] }];
+    case 'wezterm':
+      return [{ appName: 'WezTerm', args: ['--args', 'start', '--cwd', folderPath] }];
+    case 'kaku':
+      return [{ appName: 'Kaku', args: [folderPath] }];
+    default:
+      return [{ appName: 'Terminal', args: [folderPath] }];
+  }
+}
+
+async function openFolderInTerminal(
+  folderPath: string,
+  terminalTarget: TerminalOpenTarget = 'terminal-app',
+): Promise<void> {
+  if (process.platform === 'darwin') {
+    if (terminalTarget === 'terminal-app') {
+      await openTerminalAppAtFolder(folderPath);
       return;
     }
 
+    if (terminalTarget === 'iterm2') {
+      await openITermAtFolder(folderPath);
+      return;
+    }
+
+    const candidates = getDarwinTerminalOpenCandidates(terminalTarget, folderPath);
+    const errors: string[] = [];
+
+    for (const candidate of candidates) {
+      try {
+        await execFilePromise('open', ['-n', '-a', candidate.appName, ...candidate.args]);
+        return;
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : String(error));
+      }
+    }
+
+    throw new Error(errors[0] || `${TERMINAL_APP_NAMES[terminalTarget]} not found`);
+  }
+
+  return new Promise((resolve, reject) => {
     if (process.platform === 'win32') {
       const child = spawn('cmd.exe', ['/c', 'start', '', 'cmd.exe', '/K', 'cd', '/d', folderPath], {
         detached: true,
@@ -1802,9 +1919,10 @@ app.whenReady().then(async () => {
   });
 
   // 打开本地目录
-  ipcMain.handle('open-folder', async (_event, payload: { path: string; target?: FolderOpenTarget } | string) => {
+  ipcMain.handle('open-folder', async (_event, payload: { path: string; target?: FolderOpenTarget; terminalTarget?: TerminalOpenTarget } | string) => {
     const folderPath = typeof payload === 'string' ? payload : payload.path;
     const target = typeof payload === 'string' ? 'system' : (payload.target || 'system');
+    const terminalTarget = typeof payload === 'string' ? 'terminal-app' : (payload.terminalTarget || 'terminal-app');
     const resolvedPath = resolveFolderPath(folderPath);
 
     try {
@@ -1819,7 +1937,7 @@ app.whenReady().then(async () => {
           return { success: false, error: errorMessage };
         }
       } else if (target === 'terminal') {
-        await openFolderInTerminal(resolvedPath);
+        await openFolderInTerminal(resolvedPath, terminalTarget);
       } else {
         const appPath = resolveExistingAppPath(getAppCandidates(target));
         if (!appPath) {
