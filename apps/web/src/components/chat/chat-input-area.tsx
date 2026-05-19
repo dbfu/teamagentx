@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils'
-import { Image, Loader2, Mic, Send, Square } from 'lucide-react'
+import { Image, Loader2, Maximize2, Mic, Minimize2, Send, Square } from 'lucide-react'
 import { MentionInput } from './mention-input'
 import { ImagePreviewList, PendingImage } from './image-preview-list'
 import { useRef, useState, useEffect, DragEvent, ChangeEvent, ClipboardEvent, memo } from 'react'
@@ -8,6 +8,7 @@ import { useIsMobile } from '@/hooks/use-mobile'
 import { toast } from 'sonner'
 import { getApiBaseUrl } from '@/lib/config'
 import { llmProviderApi } from '@/lib/llm-provider-api'
+import { isLargeInputContent } from './chat-input-collapse'
 
 interface MentionAgent {
   id: string
@@ -49,6 +50,7 @@ export const ChatInputArea = memo(function ChatInputArea({
   const [isProcessing, setIsProcessing] = useState(false)
   const [recordingSeconds, setRecordingSeconds] = useState(0)
   const [hasSttProvider, setHasSttProvider] = useState<boolean | null>(null)
+  const [isInputExpanded, setIsInputExpanded] = useState(false)
   const isMountedRef = useRef(true)   // #31: 组件挂载状态跟踪
   const isMobile = useIsMobile()
 
@@ -148,6 +150,13 @@ export const ChatInputArea = memo(function ChatInputArea({
 
   const canSend = inputValue.trim() || pendingImages.some(img => img.uploadedData && !img.error)
   const hasUploadingImages = pendingImages.some(img => img.uploading)
+  const hasLargeInputContent = isLargeInputContent(inputValue)
+
+  useEffect(() => {
+    if (!inputValue) {
+      setIsInputExpanded(false)
+    }
+  }, [inputValue])
 
   const handleAudioButtonClick = async () => {
     // 停止录音
@@ -276,18 +285,53 @@ export const ChatInputArea = memo(function ChatInputArea({
         </div>
       )}
 
-      <div className="flex items-center gap-2 rounded-lg border border-border px-3 py-2">
+      <div
+        className={cn(
+          "flex gap-2 rounded-lg border border-border px-3 py-2 transition-shadow",
+          isInputExpanded ? "items-end" : "items-center",
+          hasLargeInputContent && !isInputExpanded && "shadow-[inset_0_-10px_14px_-16px_rgba(15,23,42,0.5)]"
+        )}
+      >
         <MentionInput
           value={inputValue}
           onChange={setInputValue}
           onKeyDown={handleKeyDown}
           placeholder={`发送至${chatRoomName}`}
           agents={mentionAgents}
-          className="flex-1 min-w-0"
+          className={cn(
+            "flex-1 min-w-0",
+            isInputExpanded && (
+              isMobile
+                ? "[&_[contenteditable=true]]:!min-h-32 [&_[contenteditable=true]]:!max-h-[42vh]"
+                : "[&_[contenteditable=true]]:!min-h-36 [&_[contenteditable=true]]:!max-h-[48vh]"
+            )
+          )}
           onMentionClick={onMentionClick}
         />
 
         <div className="flex items-center gap-1 shrink-0">
+          <button
+            type="button"
+            className={cn(
+              "rounded transition-colors touch-manipulation",
+              isMobile ? "p-2.5" : "p-1.5",
+              isInputExpanded
+                ? "text-blue-500 hover:bg-blue-500/10 active:bg-blue-500/20"
+                : "text-muted-foreground hover:text-foreground hover:bg-accent"
+            )}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => setIsInputExpanded((expanded) => !expanded)}
+            title={isInputExpanded ? '收起输入区' : '展开输入区'}
+            aria-label={isInputExpanded ? '收起输入区' : '展开输入区'}
+            aria-pressed={isInputExpanded}
+          >
+            {isInputExpanded ? (
+              <Minimize2 className="size-4" />
+            ) : (
+              <Maximize2 className="size-4" />
+            )}
+          </button>
+
           {hasSttProvider === true && (
             <>
               {isRecording && (
