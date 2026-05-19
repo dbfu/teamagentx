@@ -36,6 +36,10 @@ if [ "$MODE" = "electron" ]; then
   kill_port 11053
   kill_port 5173
 
+  # 杀掉持有单实例锁的旧 Electron 进程，否则新实例会因 requestSingleInstanceLock() 返回 false 而立即退出
+  pkill -f "Electron.*apps/desktop" 2>/dev/null || true
+  sleep 0.5
+
   echo "Building embedded server for Electron..."
   cd "$SCRIPT_DIR/apps/desktop" && pnpm dev:full
 else

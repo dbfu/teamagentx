@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import prisma from '../../lib/prisma.js';
 import { bridgeService, setBridgeInboundMessageBroadcaster } from './bridge.service.js';
+import { registerBridgePlatformAdapters } from './platform-senders.js';
 
 const originalFetch = globalThis.fetch;
 
@@ -349,6 +350,67 @@ test('syncRoomMessage can use configured default external conversation without i
       agentName: '群成员A',
     },
   ]);
+});
+
+test('syncRoomMessage sends Feishu interactive card to chat_id full flow', async () => {
+  const fetchCalls: Array<{ url: string; body: Record<string, unknown> }> = [];
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    const body = init?.body ? JSON.parse(init.body as string) as Record<string, unknown> : {};
+    fetchCalls.push({ url, body });
+
+    if (url.includes('tenant_access_token')) {
+      return new Response(JSON.stringify({ code: 0, tenant_access_token: 'tenant-token', expire: 7200 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (url.includes('/open-apis/im/v1/messages')) {
+      return new Response(JSON.stringify({ code: 0, data: { message_id: 'om_test_message' } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+
+  await prisma.chatRoom.create({
+    data: {
+      id: 'bridge-service-room',
+      name: 'Bridge Service Room',
+      updatedAt: new Date(),
+    },
+  });
+
+  const feishuBot = await bridgeService.createBot({
+    platform: 'feishu',
+    name: 'Feishu Bridge Bot',
+    config: {
+      appId: 'feishu-app-id',
+      appSecret: 'feishu-secret',
+      defaultExternalId: 'oc_default_chat',
+    },
+  });
+  await bridgeService.bindBot(feishuBot.id, 'bridge-service-room');
+  registerBridgePlatformAdapters();
+
+  await bridgeService.syncRoomMessage('bridge-service-room', '群成员A', '**主动推送** 这条消息');
+
+  const messageCall = fetchCalls.find((call) => call.url.includes('/open-apis/im/v1/messages'));
+  assert.ok(messageCall, 'should send outbound Feishu message');
+  assert.match(messageCall.url, /receive_id_type=chat_id/, `expected chat_id URL: ${messageCall.url}`);
+  assert.equal(messageCall.body.msg_type, 'interactive');
+  const card = JSON.parse(String(messageCall.body.content)) as {
+    elements: Array<{ tag?: string; text?: { tag?: string; content?: string }; content?: string }>;
+  };
+  assert.equal(card.elements[0]?.text?.tag, 'lark_md');
+  assert.equal(card.elements[1]?.tag, 'markdown');
+  assert.match(card.elements[1]?.content ?? '', /\*\*主动推送\*\*/);
 });
 
 test('syncRoomMessage restores latest external conversation from bridge events after restart', async () => {
