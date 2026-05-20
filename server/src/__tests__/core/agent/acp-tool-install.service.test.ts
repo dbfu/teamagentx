@@ -1,8 +1,10 @@
 import { afterEach, describe, test } from 'node:test';
 import assert from 'node:assert';
 import {
+  createAcpToolInstallChildEnv,
   createAcpToolInstallPlan,
   getAcpToolInstallRegistries,
+  resolveBundledNpmCli,
 } from '../../../core/agent/acp-tool-install.service.js';
 
 const originalRegistries = process.env.ACP_TOOL_INSTALL_REGISTRIES;
@@ -53,5 +55,30 @@ describe('ACP Tool Install Service', () => {
       'https://registry.npmjs.org',
       'https://registry.npmmirror.com',
     ]);
+  });
+
+  test('forces child output without color and preserves existing environment', () => {
+    const env = createAcpToolInstallChildEnv({
+      PATH: '/usr/local/bin',
+      ELECTRON_RUN_AS_NODE: 'existing',
+    }, false);
+
+    assert.strictEqual(env.PATH, '/usr/local/bin');
+    assert.strictEqual(env.FORCE_COLOR, '0');
+    assert.strictEqual(env.ELECTRON_RUN_AS_NODE, 'existing');
+  });
+
+  test('runs Electron helper child processes as Node in packaged desktop runtime', () => {
+    const env = createAcpToolInstallChildEnv({}, true);
+
+    assert.strictEqual(env.FORCE_COLOR, '0');
+    assert.strictEqual(env.ELECTRON_RUN_AS_NODE, '1');
+  });
+
+  test('resolves bundled npm cli when the server package includes npm', () => {
+    const npmCli = resolveBundledNpmCli();
+
+    assert.ok(npmCli, 'expected bundled npm cli to be resolvable');
+    assert.ok(npmCli.endsWith('npm-cli.js'));
   });
 });
