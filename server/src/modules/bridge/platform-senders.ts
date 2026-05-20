@@ -951,3 +951,28 @@ export function registerBridgePlatformAdapters(
 // Backward-compatible exports during transition
 export const registerAllPlatformSenders = registerBridgePlatformAdapters;
 export const markdownToTelegramHtml = markdownToTelegramMarkdownV2;
+
+const TELEGRAM_BOT_COMMANDS = [
+  { command: 'help', description: '查看帮助和可用助手列表' },
+  { command: 'at', description: '触发指定助手：/at 助手名 [消息]' },
+  { command: 'clear', description: '清空助手上下文记忆' },
+];
+
+export async function registerTelegramCommands(botToken: string): Promise<void> {
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${encodeURIComponent(botToken)}/setMyCommands`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ commands: TELEGRAM_BOT_COMMANDS, scope: { type: 'all_group_chats' } }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      console.warn(`[Bridge/telegram] setMyCommands 失败 ${res.status}: ${body.slice(0, 200)}`);
+    } else {
+      console.info('[Bridge/telegram] setMyCommands 注册成功');
+    }
+  } catch (err) {
+    console.warn('[Bridge/telegram] setMyCommands 调用失败:', err instanceof Error ? err.message : err);
+  }
+}

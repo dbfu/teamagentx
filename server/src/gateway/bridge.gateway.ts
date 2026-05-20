@@ -25,6 +25,8 @@ import {
 } from '../modules/bridge/bridge-bot-store.js';
 import { syncBridgeBotRuntime } from '../modules/bridge/bridge-runtime-sync.js';
 import { registerTelegramPolling } from '../modules/bridge/telegram-polling-registry.js';
+import { detectBridgeCommand, handleHelpCommand, handleClearCommand, handleAtCommand } from '../modules/bridge/bridge-commands.js';
+import { registerTelegramCommands } from '../modules/bridge/platform-senders.js';
 
 // 入站消息去重 Set，防止 webhook 重投导致重复处理
 const processedMessages = new Set<string>();
@@ -125,6 +127,25 @@ async function handleTelegramMessage(
 
   const content = telegramAdapter.normalizeText(msg.text);
   if (!content) return;
+
+  const bridgeBot = await getBridgeBotById(botId);
+  if (!bridgeBot?.chatRoomId || !bridgeBot.enabled) return;
+
+  const cmd = detectBridgeCommand(content);
+  if (cmd) {
+    const ctx = { chatRoomId: bridgeBot.chatRoomId, botId, externalId, platform: 'telegram' as const };
+    if (cmd.type === 'help') {
+      await handleHelpCommand(ctx);
+    } else if (cmd.type === 'clear') {
+      await handleClearCommand(ctx);
+    } else if (cmd.type === 'at') {
+      const transformed = await handleAtCommand(ctx, cmd.agentName, cmd.content);
+      if (transformed) {
+        await bridgeService.receiveBridgeMessage({ botId, platform: 'telegram', externalId, senderName, content: transformed });
+      }
+    }
+    return;
+  }
 
   await bridgeService.receiveBridgeMessage({
     botId,
@@ -356,6 +377,33 @@ async function handleWebhookByAdapter(
     return { statusCode: 200, body: adapter.okResponse };
   }
 
+  const cmd = detectBridgeCommand(parsed.text);
+  if (cmd) {
+    const ctx = {
+      chatRoomId: bridgeBot.chatRoomId,
+      botId: bridgeBot.id,
+      externalId: parsed.externalId,
+      platform: adapter.platform,
+    };
+    if (cmd.type === 'help') {
+      await handleHelpCommand(ctx);
+    } else if (cmd.type === 'clear') {
+      await handleClearCommand(ctx);
+    } else if (cmd.type === 'at') {
+      const transformed = await handleAtCommand(ctx, cmd.agentName, cmd.content);
+      if (transformed) {
+        await bridgeService.receiveBridgeMessage({
+          botId: bridgeBot.id,
+          platform: adapter.platform,
+          externalId: parsed.externalId,
+          senderName: parsed.senderName,
+          content: transformed,
+        });
+      }
+    }
+    return { statusCode: 200, body: adapter.okResponse };
+  }
+
   await bridgeService.receiveBridgeMessage({
     botId: bridgeBot.id,
     platform: adapter.platform,
@@ -501,6 +549,10 @@ export async function bridgeGateway(app: FastifyInstance) {
       }
       const bot = await bridgeService.createBot({ ...body, ownerId: user.id });
       await syncBridgeBotRuntime(bot.id, app.log);
+      if (bot.platform === 'telegram') {
+        const botToken = resolveStoredBridgeBotToken(bot);
+        if (botToken) registerTelegramCommands(botToken).catch(() => {});
+      }
       return reply.status(201).send({ success: true, data: maskBridgeBot(bot) });
     } catch (err) {
       app.log.error({ err }, '[Bridge] 创建机器人实例失败');
@@ -531,6 +583,10 @@ export async function bridgeGateway(app: FastifyInstance) {
       };
       const bot = await bridgeService.updateBot(id, body);
       await syncBridgeBotRuntime(bot.id, app.log);
+      if (bot.platform === 'telegram') {
+        const botToken = resolveStoredBridgeBotToken(bot);
+        if (botToken) registerTelegramCommands(botToken).catch(() => {});
+      }
       return reply.send({ success: true, data: maskBridgeBot(bot) });
     } catch (err) {
       app.log.error({ err }, '[Bridge] 更新机器人实例失败');

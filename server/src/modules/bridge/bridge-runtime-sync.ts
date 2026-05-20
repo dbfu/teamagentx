@@ -3,6 +3,7 @@ import { parseStoredBridgeConfig, resolveStoredBridgeBotToken } from './bridge-p
 import { startFeishuWSClient, stopFeishuWSClient } from './feishu-ws-client.js';
 import { startDingtalkStreamClient, stopDingtalkStreamClient } from './dingtalk-stream-client.js';
 import { getTelegramPolling } from './telegram-polling-registry.js';
+import { registerTelegramCommands } from './platform-senders.js';
 
 type BridgeLogger = {
   info: (...args: unknown[]) => void;
@@ -42,6 +43,7 @@ export async function syncBridgeBotRuntime(botId: string, log: BridgeLogger): Pr
       // ignore delete webhook failure and keep polling fallback
     }
     getTelegramPolling()?.start(botId, token, log);
+    registerTelegramCommands(token).catch(() => {});
     return;
   }
 

@@ -3,7 +3,6 @@ import { Server } from 'socket.io';
 import { messageService } from '../modules/message/message.service.js';
 import { executionRecordService } from '../modules/execution-record/execution-record.service.js';
 import { checkpointService } from '../modules/checkpoint/checkpoint.service.js';
-import { taskQueueService } from '../modules/task-queue/task-queue.service.js';
 import { agentMemoryService } from '../modules/agent-memory/agent-memory.service.js';
 import { abortControllers, processingMap } from '../core/agent/agent-handler/cache.js';
 import {
@@ -17,6 +16,7 @@ import {
 } from '../core/agent/agent-handler/index.js';
 import { chatRoomService } from '../modules/chatroom/chatroom.service.js';
 import { todoService } from '../modules/todo/todo.service.js';
+import { clearChatRoom } from '../modules/chatroom/chatroom-clear.js';
 import { formatBridgeConversationSender } from '../modules/bridge/bridge-platform-display.js';
 import prisma from '../lib/prisma.js';
 
@@ -400,7 +400,6 @@ export async function messageGateway(app: FastifyInstance) {
         abortedCount++;
       }
     }
-    // 清理群聊的 processing 状态
     for (const [key] of processingMap) {
       if (key.startsWith(`${chatRoomId}_`)) {
         processingMap.delete(key);
@@ -410,25 +409,10 @@ export async function messageGateway(app: FastifyInstance) {
       console.log(`[MessageGateway] 已中止群聊 ${chatRoomId} 中 ${abortedCount} 个正在执行的任务`);
     }
 
-    const affectedAgentIds = new Set<string>();
-    const existingBoardTasks = await taskQueueService.getChatRoomBoardTasks(chatRoomId);
-    existingBoardTasks.forEach(task => affectedAgentIds.add(task.agentId));
+    // 2. 数据清空
+    const { affectedAgentIds, affectedUserIds } = await clearChatRoom(chatRoomId);
 
-    // 2. 删除群聊的所有待处理任务
-    await taskQueueService.deleteByChatRoomId(chatRoomId);
-
-    // 2.5. 删除群聊的所有待办事项，并通知受影响用户
-    const affectedTodos = await prisma.todo.findMany({
-      where: { chatRoomId },
-      select: { ownerUserId: true },
-    });
-    const affectedUserIds = [...new Set(affectedTodos.map(t => t.ownerUserId).filter((id) => id !== null) as string[])];
-    await todoService.deleteByChatRoomId(chatRoomId);
-
-    // 2.6. 删除群聊的所有执行记录
-    await executionRecordService.deleteByChatRoomId(chatRoomId);
-
-    // 通知受影响用户更新待办列表
+    // 3. Socket 通知
     const io = (app as any).io as Server | undefined;
     for (const userId of affectedUserIds) {
       const user = await prisma.user.findUnique({ where: { id: userId }, select: { socketId: true } });
@@ -437,69 +421,11 @@ export async function messageGateway(app: FastifyInstance) {
         io.to(user.socketId).emit('todo:list', { todos: remainingTodos });
       }
     }
-
-    // 3. 同时清空群聊中所有助手的上下文
-    try {
-      // 获取群聊中的所有助手
-      const chatRoomAgents = await prisma.chatRoomAgent.findMany({
-        where: { chatRoomId },
-        include: {
-          agent: { select: { id: true, name: true, type: true, acpTool: true } },
-        },
-      });
-
-      // 为每个助手清空上下文
-      for (const chatRoomAgent of chatRoomAgents) {
-        if (!chatRoomAgent.agent) continue;
-        affectedAgentIds.add(chatRoomAgent.agent.id);
-
-        // 清空长期记忆摘要
-        await agentMemoryService.clear(chatRoomId, chatRoomAgent.agent.id);
-
-        if (chatRoomAgent.agent.type === 'builtin') {
-          await checkpointService.clearChatRoomAgentContext(
-            chatRoomId,
-            chatRoomAgent.agent.name
-          );
-        } else if (chatRoomAgent.agent.type === 'acp') {
-          // 清理 executor 缓存中的 executor（如果有）
-          for (const [cacheKey, executor] of executorCache.entries()) {
-            if (cacheKey.startsWith(`${chatRoomId}_`) && cacheKey.includes(`_${chatRoomAgent.agent.name}`)) {
-              try {
-                await executor.cleanup?.();
-              } catch (cleanupError) {
-                console.warn(`[MessageGateway] 清理 ACP executor 失败: ${cacheKey}`, cleanupError);
-              }
-            }
-          }
-          // 清理文件系统上下文（无论 executor 是否在缓存中）
-          const acpTool = (chatRoomAgent.agent as any).acpTool;
-          if (acpTool === 'codex') {
-            clearCodexSdkFileSystemContext(chatRoomAgent.agent.id, chatRoomId);
-          } else {
-            // 默认使用 Claude SDK 清理（包括 acpTool 为 null 或 'claude'）
-            clearClaudeSdkFileSystemContext(chatRoomAgent.agent.id, chatRoomId);
-          }
-        }
-
-        clearExecutorCache(chatRoomAgent.agent.name, chatRoomId);
-        await chatRoomService.updateLastInjectedMessageId(chatRoomId, chatRoomAgent.agent.id, null);
-      }
-
-      console.log(`[MessageGateway] 已清空群聊 ${chatRoomId} 的所有助手上下文`);
-    } catch (error) {
-      console.error(`[MessageGateway] 清空助手上下文失败:`, error);
-      // 即使清空上下文失败，消息已清空，仍返回成功
-    }
-
     for (const agentId of affectedAgentIds) {
       broadcastAgentTaskQueue(chatRoomId, agentId, []);
     }
     io?.to(chatRoomId).emit('agent:inactive-tasks', { chatRoomId, tasks: [] });
     await broadcastAgentStatus(chatRoomId);
-
-    // 4. 清空群聊消息
-    await messageService.deleteByChatRoomId(chatRoomId);
 
     return reply.send({ success: true });
   });
