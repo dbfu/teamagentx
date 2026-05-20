@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getServerUrl: () => ipcRenderer.invoke('get-server-url'),
   getMobileWebUrl: () => ipcRenderer.invoke('get-mobile-web-url'),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  getOpenAtLoginSettings: () => ipcRenderer.invoke('app:get-open-at-login-settings'),
+  setOpenAtLogin: (enabled: boolean) => ipcRenderer.invoke('app:set-open-at-login', enabled),
   checkForUpdates: () => ipcRenderer.invoke('update:check'),
   downloadUpdate: (update: {
     version: string;

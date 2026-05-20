@@ -7,6 +7,16 @@ declare global {
     getServerUrl: () => Promise<string | null>;
     getMobileWebUrl: () => Promise<string | null>;
     getAppVersion: () => Promise<string>;
+    getOpenAtLoginSettings: () => Promise<{
+      success: boolean;
+      data?: OpenAtLoginSettings;
+      error?: string;
+    }>;
+    setOpenAtLogin: (enabled: boolean) => Promise<{
+      success: boolean;
+      data?: OpenAtLoginSettings;
+      error?: string;
+    }>;
     checkForUpdates: () => Promise<{
       success: boolean;
       data?: { hasUpdate: boolean; currentVersion: string; update: UpdateInfo | null; noUrlConfigured?: boolean };
@@ -54,6 +64,15 @@ declare global {
     bytes: number;
     totalBytes: number | null;
     message: string;
+  }
+
+  interface OpenAtLoginSettings {
+    supported: boolean;
+    openAtLogin: boolean;
+    wasOpenedAtLogin: boolean;
+    wasOpenedAsHidden: boolean;
+    executableWillLaunchAtLogin?: boolean;
+    status?: 'not-registered' | 'enabled' | 'requires-approval' | 'not-found';
   }
 
   interface UpdateInfo {

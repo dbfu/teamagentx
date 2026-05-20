@@ -78,6 +78,7 @@ function emitRuntimeProgress(progress: RuntimeProgress): void {
 
 const MOBILE_WEB_PORT = 11054;
 const MOBILE_WEB_HOST = '0.0.0.0';
+const START_AT_LOGIN_ARG = '--teamagentx-start-at-login';
 // 由 vite.config.ts 的 define 在构建时注入，值来自 apps/desktop/.env 的 VITE_UPDATE_CHECK_URL。
 // 配置方法：在 apps/desktop/.env 中设置 VITE_UPDATE_CHECK_URL=https://yoursite.com/update.json
 declare const __UPDATE_CHECK_URL__: string;
@@ -165,6 +166,84 @@ type DownloadProgress = {
   transferred: number;
   total: number | null;
 };
+
+type LoginItemStatus = {
+  supported: boolean;
+  openAtLogin: boolean;
+  wasOpenedAtLogin: boolean;
+  wasOpenedAsHidden: boolean;
+  executableWillLaunchAtLogin?: boolean;
+  status?: Electron.LoginItemSettings['status'];
+};
+
+function isLoginItemSupported(): boolean {
+  return process.platform === 'darwin' || process.platform === 'win32';
+}
+
+function getLoginItemArgs(): string[] {
+  const args = [START_AT_LOGIN_ARG];
+  if (process.defaultApp) {
+    return [app.getAppPath(), ...args];
+  }
+  return args;
+}
+
+function getLoginItemOptions(): Electron.LoginItemSettingsOptions | undefined {
+  if (process.platform !== 'win32') return undefined;
+  return {
+    path: process.execPath,
+    args: getLoginItemArgs(),
+  };
+}
+
+function getLoginItemStatus(): LoginItemStatus {
+  if (!isLoginItemSupported()) {
+    return {
+      supported: false,
+      openAtLogin: false,
+      wasOpenedAtLogin: false,
+      wasOpenedAsHidden: false,
+    };
+  }
+
+  const settings = app.getLoginItemSettings(getLoginItemOptions());
+  return {
+    supported: true,
+    openAtLogin: settings.openAtLogin,
+    wasOpenedAtLogin: settings.wasOpenedAtLogin,
+    wasOpenedAsHidden: settings.wasOpenedAsHidden,
+    executableWillLaunchAtLogin: settings.executableWillLaunchAtLogin,
+    status: settings.status,
+  };
+}
+
+function setOpenAtLogin(openAtLogin: boolean): LoginItemStatus {
+  if (!isLoginItemSupported()) {
+    throw new Error('当前系统暂不支持开机自启设置');
+  }
+
+  const settings: Electron.Settings = { openAtLogin };
+  if (process.platform === 'darwin') {
+    settings.openAsHidden = openAtLogin;
+  } else if (process.platform === 'win32') {
+    settings.path = process.execPath;
+    settings.args = getLoginItemArgs();
+  }
+
+  app.setLoginItemSettings(settings);
+  return getLoginItemStatus();
+}
+
+function shouldStartHiddenAtLogin(): boolean {
+  if (process.argv.includes(START_AT_LOGIN_ARG)) return true;
+  if (process.platform !== 'darwin') return false;
+
+  try {
+    return app.getLoginItemSettings().wasOpenedAsHidden;
+  } catch {
+    return false;
+  }
+}
 
 const EDITOR_APP_NAMES: Record<EditorOpenTarget, string> = {
   vscode: 'Visual Studio Code',
@@ -1780,10 +1859,13 @@ function createWindow() {
   }
 
   mainWindow = new BrowserWindow(windowOptions);
+  const showOnReady = !shouldStartHiddenAtLogin();
 
   // 等渲染器第一帧画完再显示窗口，避免白屏闪烁
   mainWindow.once('ready-to-show', () => {
-    mainWindow?.show();
+    if (showOnReady) {
+      mainWindow?.show();
+    }
   });
 
   applyDefaultZoom(mainWindow);
@@ -1849,6 +1931,22 @@ app.whenReady().then(async () => {
   // 获取应用版本号
   ipcMain.handle('get-app-version', () => {
     return app.getVersion();
+  });
+
+  ipcMain.handle('app:get-open-at-login-settings', () => {
+    try {
+      return { success: true, data: getLoginItemStatus() };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('app:set-open-at-login', (_event, enabled: boolean) => {
+    try {
+      return { success: true, data: setOpenAtLogin(Boolean(enabled)) };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
   });
 
   ipcMain.handle('update:check', async () => {

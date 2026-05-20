@@ -1,13 +1,14 @@
 import { UserAvatar, UserAvatarSelector } from '@/components/chat/user-avatar';
 import { useTheme } from '@/components/theme-provider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { acpToolsApi, type AcpToolInfo } from '@/lib/agent-api';
 import { authApi } from '@/lib/auth-api';
 import { TERMINAL_OPEN_OPTIONS, type TerminalOpenTarget } from '@/lib/open-targets';
 import { openExternalUrl, TEAMAGENTX_DOCS_URL, TEAMAGENTX_WEBSITE_URL } from '@/lib/site-links';
 import { cn } from '@/lib/utils';
 import { useAuthStore, useUIStore } from '@/stores';
-import { BookOpenText, Check, Download, ExternalLink, Globe2, Loader2, LogOut, Monitor, Moon, Palette, RefreshCw, Settings, Smartphone, Sun, Terminal, Volume2, VolumeX, X } from 'lucide-react';
+import { BookOpenText, Check, Download, ExternalLink, Globe2, Loader2, LogOut, Monitor, Moon, Palette, Power, RefreshCw, Settings, Smartphone, Sun, Terminal, Volume2, VolumeX, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -138,6 +139,9 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
   const [loadingAcpTools, setLoadingAcpTools] = useState(false)
   const [installingToolId, setInstallingToolId] = useState<string | null>(null)
   const [installLog, setInstallLog] = useState<Record<string, string>>({})
+  const [openAtLogin, setOpenAtLogin] = useState(false)
+  const [openAtLoginSupported, setOpenAtLoginSupported] = useState(true)
+  const [savingOpenAtLogin, setSavingOpenAtLogin] = useState(false)
 
   const handleUpdateProfile = async () => {
     if (!token || !user) return
@@ -326,6 +330,52 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
       refreshAcpTools()
     }
   }, [])
+
+  useEffect(() => {
+    if (!window.electronAPI?.isElectron || !window.electronAPI.getOpenAtLoginSettings) return
+
+    window.electronAPI.getOpenAtLoginSettings()
+      .then((result) => {
+        if (!result.success || !result.data) {
+          setOpenAtLoginSupported(false)
+          return
+        }
+        setOpenAtLoginSupported(result.data.supported)
+        setOpenAtLogin(result.data.openAtLogin)
+      })
+      .catch(() => {
+        setOpenAtLoginSupported(false)
+      })
+  }, [])
+
+  const handleOpenAtLoginChange = async (checked: boolean) => {
+    const api = window.electronAPI
+    if (!api?.isElectron || !api.setOpenAtLogin) {
+      toast.error('仅桌面客户端支持开机自启')
+      return
+    }
+
+    const previous = openAtLogin
+    setOpenAtLogin(checked)
+    setSavingOpenAtLogin(true)
+    try {
+      const result = await api.setOpenAtLogin(checked)
+      if (!result.success || !result.data) {
+        setOpenAtLogin(previous)
+        toast.error(result.error || '开机自启设置失败')
+        return
+      }
+
+      setOpenAtLoginSupported(result.data.supported)
+      setOpenAtLogin(result.data.openAtLogin)
+      toast.success(result.data.openAtLogin ? '已开启开机自启' : '已关闭开机自启')
+    } catch (error: any) {
+      setOpenAtLogin(previous)
+      toast.error(error?.message || '开机自启设置失败')
+    } finally {
+      setSavingOpenAtLogin(false)
+    }
+  }
 
   const handleInstallAcpSdk = async (toolId: string) => {
     setInstallingToolId(toolId)
@@ -538,6 +588,40 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
             收到助手回复时播放提示音
           </p>
         </div>
+
+        {/* 客户端设置 */}
+        {window.electronAPI?.isElectron && (
+          <div className="mb-6 rounded-xl border border-border bg-card p-4">
+            <div className="mb-4 flex items-center gap-2">
+              <Power className="size-4 text-primary" />
+              <h2 className="text-sm font-medium text-muted-foreground">客户端</h2>
+            </div>
+
+            <div className="flex items-center justify-between gap-4 rounded-lg border border-border bg-background px-3 py-3">
+              <div>
+                <div className="text-sm font-medium text-foreground">开机自动启动</div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  开启后登录系统时自动启动 TeamAgentX
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                {savingOpenAtLogin && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
+                <Switch
+                  checked={openAtLogin}
+                  disabled={!openAtLoginSupported || savingOpenAtLogin}
+                  onCheckedChange={handleOpenAtLoginChange}
+                  aria-label="开机自动启动"
+                />
+              </div>
+            </div>
+
+            {!openAtLoginSupported && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                当前系统暂不支持在客户端内设置开机自启。
+              </p>
+            )}
+          </div>
+        )}
 
         {/* 终端设置 */}
         {window.electronAPI?.isElectron && window.electronAPI.platform === 'darwin' && (
