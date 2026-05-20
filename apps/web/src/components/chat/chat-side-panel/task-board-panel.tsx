@@ -57,9 +57,9 @@ const columns: BoardColumnConfig[] = [
   },
   {
     key: 'pending',
-    title: '待办',
+    title: '待处理',
     icon: Clock3,
-    emptyText: '暂无待办任务',
+    emptyText: '暂无待处理任务',
     tone: 'text-orange-600',
     badgeClassName: 'bg-orange-50 text-orange-600 dark:bg-orange-950/30 dark:text-orange-400',
   },

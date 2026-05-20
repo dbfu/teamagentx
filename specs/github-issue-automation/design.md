@@ -437,8 +437,8 @@ server/src/
 你可以使用的工具：
 - sync_issues: 同步远程 Issues
 - analyze_issue: 分析 Issue 并生成处理建议
-- assign_todo: 将 Todo 分配给指定 Agent
-- update_todo_status: 更新 Todo 状态
+- assign_issue_task: 将 Issue 任务分配给指定 Agent
+- update_issue_task_status: 更新 Issue 任务状态
 - list_available_agents: 列出群内可用的开发助手
 
 分析 Issue 时请考虑：
@@ -478,17 +478,17 @@ GET    /api/projects                  → 列出所有项目
 GET    /api/projects/:id              → 获取项目详情（含仓库信息 + 群聊信息）
 DELETE /api/projects/:id              → 删除项目（可选是否删除本地仓库）
 POST   /api/projects/:id/sync         → 手动触发 Issues 同步
-GET    /api/projects/:id/board        → 获取看板数据（按状态分组的 Todos）
+GET    /api/projects/:id/board        → 获取看板数据（按状态分组的 Issue 任务）
 ```
 
 ### 5.4 Issue 任务操作
 
 ```
-PUT    /api/todos/:id/assign          → 分配 Agent 给 Issue 任务
-PUT    /api/todos/:id/automation      → 修改自动化等级
-POST   /api/todos/:id/execute         → 手动触发执行
-POST   /api/todos/:id/pause           → 暂停执行
-POST   /api/todos/:id/resume          → 恢复执行
+PUT    /api/issue-tasks/:id/assign    → 分配 Agent 给 Issue 任务
+PUT    /api/issue-tasks/:id/automation → 修改自动化等级
+POST   /api/issue-tasks/:id/execute   → 手动触发执行
+POST   /api/issue-tasks/:id/pause     → 暂停执行
+POST   /api/issue-tasks/:id/resume    → 恢复执行
 ```
 
 ### 5.5 Socket.io 新增事件
@@ -496,8 +496,8 @@ POST   /api/todos/:id/resume          → 恢复执行
 ```
 // 项目相关
 project:synced              → Issues 同步完成通知
-project:todo:created        → 新 Issue 同步为 Todo
-project:todo:stage-changed  → 任务执行阶段变更
+project:issue-task:created        → 新 Issue 同步为任务
+project:issue-task:stage-changed  → 任务执行阶段变更
 
 // 看板相关
 board:updated               → 看板数据更新（拖拽等操作）
