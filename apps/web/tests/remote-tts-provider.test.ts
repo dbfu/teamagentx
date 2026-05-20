@@ -1,6 +1,7 @@
 import { afterEach, describe, test } from 'node:test'
 import assert from 'node:assert'
 import { createRemoteTtsSpeechProvider, stopRemoteTtsPlayback } from '../src/speech/providers/remote-tts-provider.ts'
+import { buildTtsCacheKey, roomTtsPrefetchCache } from '../src/speech/tts-prefetch-cache.ts'
 
 const originalFetch = globalThis.fetch
 const originalURL = globalThis.URL
@@ -10,6 +11,7 @@ afterEach(() => {
   globalThis.fetch = originalFetch
   globalThis.URL = originalURL
   globalThis.Audio = originalAudio
+  roomTtsPrefetchCache.deleteRoom('room-cache-stop')
 })
 
 describe('remote-tts speech provider', () => {
@@ -136,10 +138,96 @@ describe('remote-tts speech provider', () => {
     await new Promise((resolve) => setTimeout(resolve, 20))
     stopRemoteTtsPlayback()
 
-    const result = await playback
-    assert.strictEqual(result.kind, 'audio')
+    await assert.rejects(playback, (error: unknown) => {
+      assert.ok(error instanceof Error)
+      assert.strictEqual(error.message, '播放已取消')
+      assert.strictEqual((error as Error & { cancelled?: boolean }).cancelled, true)
+      return true
+    })
     assert.strictEqual(paused, true)
     assert.strictEqual(revokedUrl, 'blob:remote-tts-stop')
+  })
+
+  test('缓存音频在暂停后才完成时不应自动开始播放', async () => {
+    let resolveCachedAudio: ((audio: { blob: Blob; mimeType: string }) => void) | null = null
+    let audioCreated = false
+
+    globalThis.fetch = async () => {
+      throw new Error('不应走网络请求')
+    }
+
+    globalThis.URL = {
+      createObjectURL() {
+        return 'blob:remote-tts-cached'
+      },
+      revokeObjectURL() {},
+    } as typeof URL
+
+    class FakeAudio {
+      onended: (() => void) | null = null
+      onerror: (() => void) | null = null
+
+      constructor(_src: string) {
+        audioCreated = true
+      }
+
+      async play() {
+        this.onended?.()
+      }
+
+      pause() {}
+      load() {}
+    }
+
+    globalThis.Audio = FakeAudio as unknown as typeof Audio
+
+    const provider = createRemoteTtsSpeechProvider({
+      getBaseUrl: async () => 'http://127.0.0.1:3001',
+    })
+
+    const cacheKey = buildTtsCacheKey({
+      provider: 'openai-compatible-tts',
+      model: null,
+      voice: null,
+      speed: 1.3,
+      format: null,
+      vendorOptions: null,
+      text: '缓存取消测试',
+    })
+
+    roomTtsPrefetchCache.forRoom('room-cache-stop').set(
+      cacheKey,
+      new Promise((resolve) => {
+        resolveCachedAudio = resolve
+      }),
+    )
+
+    const playback = provider.synthesize?.({
+      type: 'tts',
+      profile: {
+        provider: 'openai-compatible-tts',
+      },
+      input: {
+        text: '缓存取消测试',
+      },
+      context: {
+        chatRoomId: 'room-cache-stop',
+      },
+    }) ?? Promise.reject(new Error('provider missing'))
+
+    stopRemoteTtsPlayback()
+    resolveCachedAudio?.({
+      blob: new Blob([new Uint8Array([1, 2, 3])], { type: 'audio/mpeg' }),
+      mimeType: 'audio/mpeg',
+    })
+
+    await assert.rejects(playback, (error: unknown) => {
+      assert.ok(error instanceof Error)
+      assert.strictEqual(error.message, '播放已取消')
+      assert.strictEqual((error as Error & { cancelled?: boolean }).cancelled, true)
+      return true
+    })
+    assert.strictEqual(audioCreated, false)
   })
 
   test('服务端返回非 2xx 时应抛错', async () => {

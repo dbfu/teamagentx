@@ -6,6 +6,13 @@ import type { SpeechArtifact, SpeechSession, SpeechTask } from '../modules/speec
 import { deserializeAgentSpeechConfig } from '../modules/speech/speech-config.js';
 import { authService } from '../modules/auth/auth.service.js';
 import { fetchTtsApiResponse } from '../modules/speech/providers/remote-tts.provider.js';
+import {
+  buildSpeechVoiceCatalog,
+  getBrowserLocalVoiceSnapshot,
+  VOICE_PROVIDER_METADATA,
+  upsertBrowserLocalVoiceSnapshot,
+} from '../modules/speech/voice-catalog.js';
+import { llmProviderService } from '../modules/llm-provider/llm-provider.service.js';
 
 type SpeechGatewayDependencies = {
   execute: (task: SpeechTask) => Promise<SpeechArtifact | SpeechSession>;
@@ -14,33 +21,40 @@ type SpeechGatewayDependencies = {
   ) => Promise<{ response: Response; mimeType: string; model: string; voice: string }>;
 };
 
+function getBrowserClientId(request: FastifyRequest): string | null {
+  const headerValue = request.headers['x-browser-client-id'];
+  if (typeof headerValue !== 'string') return null;
+  const trimmed = headerValue.trim();
+  return trimmed || null;
+}
+
 export function createSpeechGateway(dependencies: SpeechGatewayDependencies = {
   execute: (task) => serverSpeechService.execute(task),
   fetchTtsStream: (task) => fetchTtsApiResponse(task),
 }) {
   const fetchTtsStream = dependencies.fetchTtsStream ?? ((task) => fetchTtsApiResponse(task));
   return async function speechGateway(app: FastifyInstance) {
-    async function requireAuth(request: FastifyRequest, reply: FastifyReply): Promise<boolean> {
+    async function requireAuth(request: FastifyRequest, reply: FastifyReply) {
       const authHeader = request.headers.authorization;
       const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
       if (!token) {
         reply.code(401).send({ success: false, error: 'Unauthorized' });
-        return false;
+        return null;
       }
       const user = await authService.getUserFromToken(token);
       if (!user) {
         reply.code(401).send({ success: false, error: 'Unauthorized' });
-        return false;
+        return null;
       }
-      return true;
+      return user;
     }
 
     app.post<{ Body: SpeechTask<{ text: string }> }>(
       '/speech/tts',
       {
         preHandler: async (request, reply) => {
-          const ok = await requireAuth(request, reply);
-          if (!ok) return; // #28: Fastify v5 preHandler 不需要 return reply
+          const user = await requireAuth(request, reply);
+          if (!user) return; // #28: Fastify v5 preHandler 不需要 return reply
         },
         schema: {
           body: {
@@ -117,8 +131,8 @@ export function createSpeechGateway(dependencies: SpeechGatewayDependencies = {
       '/speech/tts/stream',
       {
         preHandler: async (request, reply) => {
-          const ok = await requireAuth(request, reply)
-          if (!ok) return
+          const user = await requireAuth(request, reply)
+          if (!user) return
         },
         schema: {
           body: {
@@ -179,8 +193,8 @@ export function createSpeechGateway(dependencies: SpeechGatewayDependencies = {
       '/speech/stt',
       {
         preHandler: async (request, reply) => {
-          const ok = await requireAuth(request, reply);
-          if (!ok) return; // #28: Fastify v5 preHandler 不需要 return reply
+          const user = await requireAuth(request, reply);
+          if (!user) return; // #28: Fastify v5 preHandler 不需要 return reply
         },
       },
       async (request, reply) => {
@@ -263,13 +277,85 @@ export function createSpeechGateway(dependencies: SpeechGatewayDependencies = {
         return { text: result.text ?? '', provider: result.provider };
       },
     );
+    app.get(
+      '/speech/catalog',
+      {
+        preHandler: async (request, reply) => {
+          const user = await requireAuth(request, reply);
+          if (!user) return;
+          (request as FastifyRequest & { authUser?: typeof user }).authUser = user;
+        },
+        schema: {
+          description: '获取统一语音目录，包含浏览器本地音色快照与远程 TTS 供应商音色列表',
+          tags: ['Speech'],
+        },
+      },
+      async (request, reply) => {
+        const authUser = (request as FastifyRequest & { authUser?: { id: string } }).authUser;
+        const browserClientId = getBrowserClientId(request);
+        const audioProviders = await llmProviderService.findActive('audio');
+        const catalog = buildSpeechVoiceCatalog({
+          audioProviders,
+          browserLocalSnapshot: authUser && browserClientId
+            ? getBrowserLocalVoiceSnapshot(authUser.id, browserClientId)
+            : null,
+        });
+        return reply.send({ success: true, data: catalog });
+      },
+    );
+    app.post<{ Body: { voices: Array<{ id: string; name: string; lang: string; voiceURI: string; default: boolean }> } }>(
+      '/speech/catalog/browser-local',
+      {
+        preHandler: async (request, reply) => {
+          const user = await requireAuth(request, reply);
+          if (!user) return;
+          (request as FastifyRequest & { authUser?: typeof user }).authUser = user;
+        },
+        schema: {
+          description: '上报当前浏览器运行时可用的本地音色列表，供助手管理查询和配置使用',
+          tags: ['Speech'],
+          body: {
+            type: 'object',
+            required: ['voices'],
+            properties: {
+              voices: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  required: ['id', 'name', 'lang', 'voiceURI', 'default'],
+                  properties: {
+                    id: { type: 'string' },
+                    name: { type: 'string' },
+                    lang: { type: 'string' },
+                    voiceURI: { type: 'string' },
+                    default: { type: 'boolean' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      async (request, reply) => {
+        const authUser = (request as FastifyRequest & { authUser?: { id: string } }).authUser;
+        const browserClientId = getBrowserClientId(request);
+        if (!authUser) {
+          return reply.code(401).send({ success: false, error: 'Unauthorized' });
+        }
+        if (!browserClientId) {
+          return reply.code(400).send({ success: false, error: '缺少浏览器客户端标识' });
+        }
+        const snapshot = upsertBrowserLocalVoiceSnapshot(authUser.id, browserClientId, request.body.voices ?? []);
+        return reply.send({ success: true, data: snapshot });
+      },
+    );
     // #43: 返回支持的语音供应商元数据（前端 voice-provider-metadata.ts 的服务端 source of truth）
     app.get(
       '/speech/providers',
       {
         preHandler: async (request, reply) => {
-          const ok = await requireAuth(request, reply);
-          if (!ok) return;
+          const user = await requireAuth(request, reply);
+          if (!user) return;
         },
         schema: {
           description: '获取已知语音供应商的模型和音色元数据列表',
@@ -298,66 +384,7 @@ export function createSpeechGateway(dependencies: SpeechGatewayDependencies = {
         },
       },
       async (_request, reply) => {
-        // 静态元数据，与前端 voice-provider-metadata.ts 保持同步。
-        // 新增供应商时只需在此处添加一个条目。
-        const providers = [
-          {
-            urlPattern: 'siliconflow',
-            label: 'SiliconFlow',
-            ttsModels: ['FunAudioLLM/CosyVoice2-0.5B'],
-            sttModels: ['FunAudioLLM/SenseVoiceSmall'],
-            voices: {
-              'FunAudioLLM/CosyVoice2-0.5B': [
-                { id: 'FunAudioLLM/CosyVoice2-0.5B:anna', label: 'Anna（沉稳女声）' },
-                { id: 'FunAudioLLM/CosyVoice2-0.5B:bella', label: 'Bella（热情女声）' },
-                { id: 'FunAudioLLM/CosyVoice2-0.5B:claire', label: 'Claire（温柔女声）' },
-                { id: 'FunAudioLLM/CosyVoice2-0.5B:diana', label: 'Diana（活泼女声）' },
-                { id: 'FunAudioLLM/CosyVoice2-0.5B:alex', label: 'Alex（沉稳男声）' },
-                { id: 'FunAudioLLM/CosyVoice2-0.5B:benjamin', label: 'Benjamin（低沉男声）' },
-                { id: 'FunAudioLLM/CosyVoice2-0.5B:charles', label: 'Charles（磁性男声）' },
-                { id: 'FunAudioLLM/CosyVoice2-0.5B:david', label: 'David（明快男声）' },
-              ],
-            },
-          },
-          {
-            urlPattern: 'api.openai.com',
-            label: 'OpenAI',
-            ttsModels: ['tts-1', 'tts-1-hd', 'gpt-4o-mini-tts'],
-            sttModels: ['whisper-1'],
-            voices: {
-              'tts-1': [
-                { id: 'alloy', label: 'Alloy（中性）' },
-                { id: 'echo', label: 'Echo（男声）' },
-                { id: 'fable', label: 'Fable（英式男声）' },
-                { id: 'onyx', label: 'Onyx（低沉男声）' },
-                { id: 'nova', label: 'Nova（女声）' },
-                { id: 'shimmer', label: 'Shimmer（轻柔女声）' },
-              ],
-              'tts-1-hd': [
-                { id: 'alloy', label: 'Alloy（中性）' },
-                { id: 'echo', label: 'Echo（男声）' },
-                { id: 'fable', label: 'Fable（英式男声）' },
-                { id: 'onyx', label: 'Onyx（低沉男声）' },
-                { id: 'nova', label: 'Nova（女声）' },
-                { id: 'shimmer', label: 'Shimmer（轻柔女声）' },
-              ],
-              'gpt-4o-mini-tts': [
-                { id: 'alloy', label: 'Alloy' },
-                { id: 'echo', label: 'Echo' },
-                { id: 'fable', label: 'Fable' },
-                { id: 'onyx', label: 'Onyx' },
-                { id: 'nova', label: 'Nova' },
-                { id: 'shimmer', label: 'Shimmer' },
-                { id: 'ash', label: 'Ash' },
-                { id: 'ballad', label: 'Ballad' },
-                { id: 'coral', label: 'Coral' },
-                { id: 'sage', label: 'Sage' },
-                { id: 'verse', label: 'Verse' },
-              ],
-            },
-          },
-        ];
-        return reply.send({ success: true, data: providers });
+        return reply.send({ success: true, data: VOICE_PROVIDER_METADATA });
       },
     );
   };

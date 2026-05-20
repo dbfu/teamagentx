@@ -28,6 +28,7 @@ export function setBroadcastCronTriggerMessageFn(fn: (chatRoomId: string, taskNa
 
 class CronSchedulerService {
   private jobs: Map<string, ScheduledJob> = new Map();
+  private executingTaskIds: Set<string> = new Set();
   private intervalCheckTimer: NodeJS.Timeout | null = null;
   private isRunning: boolean = false;
 
@@ -183,12 +184,20 @@ class CronSchedulerService {
 
   // 执行任务（直接发送消息到群里）
   async executeTask(task: CronTaskWithRelations): Promise<void> {
+    // 内存锁：防止同一任务被并发触发（cron 回调与 checkPendingTasks 竞争）
+    if (this.executingTaskIds.has(task.id)) {
+      console.log(`[CronScheduler] Task ${task.name} is already executing (in-memory lock), skipping`);
+      return;
+    }
+    this.executingTaskIds.add(task.id);
+
     console.log(`[CronScheduler] Executing task: ${task.name} (${task.id})`);
 
     // 检查是否已经在运行
     const currentTask = await cronTaskService.findById(task.id);
     if (!currentTask || currentTask.state === CronTaskState.running) {
       console.log(`[CronScheduler] Task ${task.name} is already running or not found`);
+      this.executingTaskIds.delete(task.id);
       return;
     }
 
@@ -295,6 +304,8 @@ class CronSchedulerService {
           errorMessage
         );
       }
+    } finally {
+      this.executingTaskIds.delete(task.id);
     }
   }
 
@@ -324,15 +335,18 @@ class CronSchedulerService {
     const pendingTasks = await cronTaskService.getPendingTasks();
 
     for (const task of pendingTasks) {
+      const isScheduled = this.jobs.has(task.id);
+
       // 检查是否已调度
-      if (!this.jobs.has(task.id)) {
+      if (!isScheduled) {
         console.log(`[CronScheduler] Found unscheduled pending task: ${task.name}`);
         await this.scheduleTask(task);
       }
 
-      // 如果 nextRunAt 已过期且任务不在运行，立即执行
-      if (task.nextRunAt && task.nextRunAt <= new Date() && task.state !== CronTaskState.running) {
-        console.log(`[CronScheduler] Found overdue task: ${task.name}`);
+      // 补跑遗漏任务：只针对未被调度（服务器宕机期间遗漏）的任务
+      // 已在 this.jobs 里的任务由 cron 回调自己触发，不在这里重复执行
+      if (!isScheduled && task.nextRunAt && task.nextRunAt <= new Date() && task.state !== CronTaskState.running) {
+        console.log(`[CronScheduler] Found overdue unscheduled task: ${task.name}`);
         await this.executeTask(task);
       }
     }

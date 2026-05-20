@@ -497,6 +497,9 @@ export function ChatMessagesList({
 
     if (toSpeak.length === 0) return
 
+    // 已有语音正在播放时，只预热缓存，不入队打断
+    if (isSpeakingRef.current) return
+
     for (const message of toSpeak) {
       const agent = agentsList.find((item) => item.id === message.agentId)
       const agentConfig = agent?.speechConfig

@@ -17,6 +17,9 @@ import {
   SPEECH_PRESETS,
   type SpeechPresetId,
 } from '../../../modules/speech/speech-presets.js';
+import {
+  buildSpeechVoiceCatalog,
+} from '../../../modules/speech/voice-catalog.js';
 
 // 助手生成助手的专用 ID
 export const AGENT_CREATOR_AGENT_ID = '29ffb519-82d2-4c32-8bc8-0b8d814a4eee';
@@ -439,6 +442,52 @@ export const listVoicePresetsTool = tool(
   },
 );
 
+export const listVoiceCatalogTool = tool(
+  async () => {
+    const audioProviders = await llmProviderService.findActive('audio');
+    const catalog = buildSpeechVoiceCatalog({
+      audioProviders,
+      browserLocalSnapshot: null,
+    });
+
+    const localSection = [
+      '本地音色（browser-local）',
+      '- 本地音色与当前浏览器/设备绑定，助手管理工具不会跨用户或跨设备读取具体列表。',
+      '- 如需查看本机真实可用音色，请在当前客户端打开助手详情页语音设置，或调用当前登录客户端对应的 /speech/catalog。',
+      '- 未拿到当前客户端本地音色 ID 时，配置 browser-local 请优先使用 voice=null，避免猜测音色名称。',
+    ].join('\n');
+
+    const remoteSection = catalog.remoteProviders.length > 0
+      ? catalog.remoteProviders.map((provider) => {
+          const modelLines = provider.models.map((model) => {
+            const voiceLines = model.voices.length > 0
+              ? model.voices.map((voice) => `    - ${voice.id} | ${voice.label}`).join('\n')
+              : '    - 未提供静态音色列表，可手动填写 profile.voice';
+            return `  模型: ${model.id}\n${voiceLines}`;
+          }).join('\n');
+
+          return [
+            `供应商ID: ${provider.llmProviderId}`,
+            `名称: ${provider.llmProviderName}`,
+            `类型: ${provider.providerLabel}`,
+            `API: ${provider.apiUrl || '未配置'}`,
+            '配置要点:',
+            '  profile.provider = openai-compatible-tts',
+            `  profile.vendorOptions.llmProviderId = ${provider.llmProviderId}`,
+            modelLines,
+          ].join('\n');
+        }).join('\n\n')
+      : '暂无可用远程 TTS 供应商。请先在模型管理中配置 audio 类型且 audioUsage 为 tts/both 的 openai 协议模型。';
+
+    return `${localSection}\n\n远程音色目录\n${remoteSection}`;
+  },
+  {
+    name: 'list_voice_catalog',
+    description: '列出当前可配置的完整语音目录，包含最近一次客户端上报的本地 browser-local 音色，以及所有可用远程 TTS 供应商的 providerId、模型和音色列表。配置助手语音前优先使用此工具。',
+    schema: z.object({}),
+  },
+);
+
 // 更新助手工具
 export const updateAgentTool = tool(
   async ({
@@ -620,6 +669,7 @@ export const agentCreatorTools = [
   listAgentsTool,
   listCategoriesTool,
   listVoicePresetsTool,
+  listVoiceCatalogTool,
   updateAgentTool,
   updateAgentsTool,
   listLlmProvidersTool,
