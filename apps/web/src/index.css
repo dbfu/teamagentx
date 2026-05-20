@@ -360,7 +360,7 @@
 
 @theme inline {
   --font-sans: 'Geist', 'Geist Fallback';
-  --font-mono: 'Geist Mono', 'Geist Mono Fallback';
+  --font-mono: 'Geist Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -563,6 +563,7 @@
 }
 
 .prose code {
+  font-family: var(--font-mono);
   color: #7c3aed;
   background-color: #f5f3ff;
   padding: 0.125rem 0.25rem;
@@ -576,6 +577,7 @@
 }
 
 .prose pre {
+  font-family: var(--font-mono);
   background-color: #f3f4f6;
   padding: 0.5rem;
   border-radius: 0.25rem;
@@ -587,6 +589,7 @@
 }
 
 .prose pre code {
+  font-family: inherit;
   background-color: transparent;
   padding: 0;
 }
