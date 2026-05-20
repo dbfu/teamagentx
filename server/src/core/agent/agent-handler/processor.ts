@@ -5,9 +5,6 @@ import { executionRecordService, type ExecutionEvent } from '../../../modules/ex
 import { recoveryService } from '../../../modules/recovery/recovery.service.js';
 import { stopTypingLoop } from '../../../modules/bridge/typing-loop.js';
 import { messageService } from '../../../modules/message/message.service.js';
-import { chatRoomService } from '../../../modules/chatroom/chatroom.service.js';
-import { userService } from '../../../modules/user/user.service.js';
-import { todoService } from '../../../modules/todo/todo.service.js';
 import { agentService } from '../agent.service.js';
 import {
   processingMap,
@@ -24,7 +21,6 @@ import {
   globalEmitThinking,
   globalEmitStatus,
   globalBroadcastTaskQueue,
-  globalEmitTodoCreated,
   broadcastAgentStatus,
   broadcastAgentTaskQueue,
 } from './status.js';
@@ -181,59 +177,6 @@ export async function processQueue(chatRoomId: string, agentId: string) {
                 agentId: task.agentId,
                 agentName: task.agentName,
               });
-            }
-
-            // 检查是否需要创建待办（助手 @群主）
-            try {
-              const chatRoom = await chatRoomService.findById(chatRoomId);
-              if (chatRoom?.ownerId) {
-                const ownerUser = await userService.findById(chatRoom.ownerId);
-                if (ownerUser) {
-                  // 检查消息内容是否 @群主
-                  const mentionRegex = new RegExp(`(?:^|\\s|[*_>#\\-])@${ownerUser.username}(?=\\s|$)`);
-                  if (mentionRegex.test(content)) {
-                    // 检查是否已存在该消息的待办（避免重复创建）
-                    const existingTodo = await todoService.getByMessageId(aiMessage.id);
-                    if (!existingTodo) {
-                      // 创建待办
-                      const todo = await todoService.create({
-                        chatRoomId,
-                        messageId: aiMessage.id,
-                        triggerAgentId: task.agentId,
-                        ownerUserId: chatRoom.ownerId,
-                        contentSummary: content.slice(0, 100),
-                      });
-
-                      // 广播待办创建事件给群主
-                      if (globalEmitTodoCreated) {
-                        globalEmitTodoCreated({
-                          id: todo.id,
-                          chatRoomId,
-                          messageId: aiMessage.id,
-                          triggerAgentId: task.agentId,
-                          triggerAgentName: task.agentName,
-                          ownerUserId: chatRoom.ownerId,
-                          contentSummary: content.slice(0, 100),
-                          chatRoomName: chatRoom.name,
-                          status: 'pending',
-                          createdAt: todo.createdAt,
-                        }, chatRoom.ownerId);
-                      }
-
-                      debugLog('todoCreated', {
-                        chatRoomId,
-                        messageId: aiMessage.id,
-                        todoId: todo.id,
-                        ownerUserId: chatRoom.ownerId,
-                        ownerUsername: ownerUser.username,
-                      });
-                    }
-                  }
-                }
-              }
-            } catch (todoError) {
-              console.error('Failed to check/create todo:', todoError);
-              // 待办创建失败不影响消息发送
             }
 
             // 更新恢复服务状态（Agent 发送了消息）

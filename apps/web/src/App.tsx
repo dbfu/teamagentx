@@ -33,7 +33,6 @@ import { isElectron, waitForServer } from './lib/config'
 import { ChatRoom } from './lib/agent-api'
 import { useAuthStore, useChatRoomStore, useSocketStore, useUIStore } from './stores'
 import { useChatStore } from './stores/chat-store'
-import { TodoData } from './stores/socket-store'
 
 function formatRuntimeBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
@@ -355,7 +354,7 @@ function AppContent() {
   const updateUnreadCount = useChatStore((s) => s.updateUnreadCount)
   const executingChatRooms = useChatStore((s) => s.executingChatRooms)
   const setScrollToMessageId = useChatStore((s) => s.setScrollToMessageId)
-  const { isConnected, onUnreadUpdate, requestUnreadCounts, requestTodos, onTodoList, onTodoCreated, onTodoUpdated, onMessage, onChatRoomCreated, onAgentsUpdated, onAgentStatus, user: socketUser } = useSocketStore()
+  const { isConnected, onUnreadUpdate, requestUnreadCounts, onMessage, onChatRoomCreated, onAgentsUpdated, onAgentStatus, user: socketUser } = useSocketStore()
   const { user } = useAuthStore()
   const visibleChatRoomId = useMemo(() => {
     if (isMobile) {
@@ -531,10 +530,9 @@ function AppContent() {
   useEffect(() => {
     if (isConnected) {
       requestUnreadCounts()
-      requestTodos()
       updateManager.checkForUpdates({ silent: true, reason: 'socket-connected' })
     }
-  }, [isConnected, requestUnreadCounts, requestTodos])
+  }, [isConnected, requestUnreadCounts])
 
   // Electron 运行中低频补充检查更新：窗口聚焦、页面可见、网络恢复。
   useEffect(() => {
@@ -562,34 +560,6 @@ function AppContent() {
       document.removeEventListener('visibilitychange', checkOnVisibilityChange)
     }
   }, [])
-
-  // 监听待办事件
-  useEffect(() => {
-    if (!isConnected) return
-
-    const unsubList = onTodoList((data) => {
-      useSocketStore.setState({ todos: data.todos })
-    })
-
-    const unsubCreated = onTodoCreated((todo: TodoData) => {
-      const currentTodos = useSocketStore.getState().todos
-      // 避免重复添加
-      if (!currentTodos.some((t) => t.id === todo.id)) {
-        useSocketStore.setState({ todos: [todo, ...currentTodos] })
-      }
-    })
-
-    const unsubUpdated = onTodoUpdated((data) => {
-      const currentTodos = useSocketStore.getState().todos
-      useSocketStore.setState({ todos: currentTodos.filter((t) => t.id !== data.todoId) })
-    })
-
-    return () => {
-      unsubList()
-      unsubCreated()
-      unsubUpdated()
-    }
-  }, [isConnected, onTodoList, onTodoCreated, onTodoUpdated])
 
   // 计算总未读数
   const totalUnreadCount = Object.values(unreadCounts).reduce((sum, count) => sum + count, 0)

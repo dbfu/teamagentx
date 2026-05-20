@@ -58,21 +58,6 @@ export function setupAIHandlers(
     agentId: string,
     tasks: { id: string; messageId: string; messageContent: string; status: string; createdAt: string }[],
   ) => void,
-  emitTodoCreated: (
-    todo: {
-      id: string;
-      chatRoomId: string;
-      messageId: string;
-      triggerAgentId: string;
-      triggerAgentName: string;
-      ownerUserId: string;
-      contentSummary: string;
-      chatRoomName: string;
-      status: string;
-      createdAt: Date;
-    },
-    ownerUserId: string,
-  ) => void,
   emitChatRoomCreated: (chatRoom: any) => void,
   emitAgentsUpdated: (chatRoomId: string) => void,
 ) {
@@ -86,7 +71,6 @@ export function setupAIHandlers(
     emitThinking,
     emitStatus,
     broadcastTaskQueue,
-    emitTodoCreated,
     emitChatRoomCreated,
     emitAgentsUpdated,
   });

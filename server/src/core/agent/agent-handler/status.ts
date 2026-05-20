@@ -53,22 +53,6 @@ export function setGlobalEmitReceivedMessage(fn: (message: any, chatRoomId: stri
   globalEmitReceivedMessage = fn;
 }
 
-// 广播待办创建的回调
-export let globalEmitTodoCreated:
-  | ((todo: {
-      id: string;
-      chatRoomId: string;
-      messageId: string;
-      triggerAgentId: string;
-      triggerAgentName: string;
-      ownerUserId: string;
-      contentSummary: string;
-      chatRoomName: string;
-      status: string;
-      createdAt: Date;
-    }, ownerUserId: string) => void)
-  | null = null;
-
 // 设置全局回调
 export function setGlobalCallbacks(callbacks: {
   emit: (msg: any, chatRoomId: string) => Promise<void> | void;
@@ -79,7 +63,6 @@ export function setGlobalCallbacks(callbacks: {
   emitThinking: (data: { messageId: string; agentId: string; agentName: string; thinking: string }, chatRoomId: string) => void;
   emitStatus: (data: { chatRoomId: string; statuses: Record<string, AgentStatus>; queueCounts?: Record<string, number> }, chatRoomId2: string) => void;
   broadcastTaskQueue: (chatRoomId: string, agentId: string, tasks: { id: string; messageId: string; messageContent: string; status: string; createdAt: string }[]) => void;
-  emitTodoCreated: (todo: any, ownerUserId: string) => void;
   emitChatRoomCreated: (chatRoom: any) => void;
   emitAgentsUpdated: (chatRoomId: string) => void;
 }) {
@@ -91,7 +74,6 @@ export function setGlobalCallbacks(callbacks: {
   globalEmitThinking = callbacks.emitThinking;
   globalEmitStatus = callbacks.emitStatus;
   globalBroadcastTaskQueue = callbacks.broadcastTaskQueue;
-  globalEmitTodoCreated = callbacks.emitTodoCreated;
   globalEmitChatRoomCreated = callbacks.emitChatRoomCreated;
   globalEmitAgentsUpdated = callbacks.emitAgentsUpdated;
 }

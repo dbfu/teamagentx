@@ -1,5 +1,4 @@
 import { FastifyInstance, FastifyReply } from 'fastify';
-import { Server } from 'socket.io';
 import { messageService } from '../modules/message/message.service.js';
 import { executionRecordService } from '../modules/execution-record/execution-record.service.js';
 import { checkpointService } from '../modules/checkpoint/checkpoint.service.js';
@@ -16,7 +15,6 @@ import {
   clearCodexSdkFileSystemContext,
 } from '../core/agent/agent-handler/index.js';
 import { chatRoomService } from '../modules/chatroom/chatroom.service.js';
-import { todoService } from '../modules/todo/todo.service.js';
 import { formatBridgeConversationSender } from '../modules/bridge/bridge-platform-display.js';
 import prisma from '../lib/prisma.js';
 
@@ -417,26 +415,10 @@ export async function messageGateway(app: FastifyInstance) {
     // 2. 删除群聊的所有待处理任务
     await taskQueueService.deleteByChatRoomId(chatRoomId);
 
-    // 2.5. 删除群聊的所有待办事项，并通知受影响用户
-    const affectedTodos = await prisma.todo.findMany({
-      where: { chatRoomId },
-      select: { ownerUserId: true },
-    });
-    const affectedUserIds = [...new Set(affectedTodos.map(t => t.ownerUserId).filter((id) => id !== null) as string[])];
-    await todoService.deleteByChatRoomId(chatRoomId);
-
-    // 2.6. 删除群聊的所有执行记录
+    // 2.5. 删除群聊的所有执行记录
     await executionRecordService.deleteByChatRoomId(chatRoomId);
 
-    // 通知受影响用户更新待办列表
-    const io = (app as any).io as Server | undefined;
-    for (const userId of affectedUserIds) {
-      const user = await prisma.user.findUnique({ where: { id: userId }, select: { socketId: true } });
-      if (user?.socketId && io) {
-        const remainingTodos = await todoService.getByOwnerUserId(userId, 'pending');
-        io.to(user.socketId).emit('todo:list', { todos: remainingTodos });
-      }
-    }
+    const io = (app as any).io as { to: (room: string) => { emit: (event: string, payload: unknown) => void } } | undefined;
 
     // 3. 同时清空群聊中所有助手的上下文
     try {

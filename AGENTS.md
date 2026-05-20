@@ -100,7 +100,7 @@ sqlite3 "/Users/fudebao/Library/Application Support/@teamagentx/desktop/teamagen
 
 ### Real-Time Communication
 - Socket.io with JWT authentication.
-- Main room events include `message`, `agent:typing`, `agent:stream`, `agent:thinking`, `agent:tool_call`, `agent:done`, `agent:status`, `agent:task-queue`, `agent:task-cancelled`, `agent:task-resumed`, `unread:update`, `todo:created`, and `todo:updated`.
+- Main room events include `message`, `agent:typing`, `agent:stream`, `agent:thinking`, `agent:tool_call`, `agent:done`, `agent:status`, `agent:task-queue`, `agent:task-cancelled`, `agent:task-resumed`, and `unread:update`.
 - Rooms are scoped by `chatRoomId`; user-specific pushes use `user:<userId>` rooms.
 
 ### Database Models
@@ -116,7 +116,7 @@ sqlite3 "/Users/fudebao/Library/Application Support/@teamagentx/desktop/teamagen
 - `QuickChatSession` - Quick-chat session directories and lifecycle
 - `CronTask` / `CronTaskExecution` - Room-level scheduled task definitions and execution records
 - `BackgroundTask` - Long-running shell command tracking
-- `Todo` - Todos created when assistants mention the room owner
+- `Todo` - Legacy todo schema retained for existing data; runtime todo creation and socket events are currently removed
 - `User` - User accounts, auth, room ownership, unread tracking
 
 ### Frontend Patterns
