@@ -12,10 +12,26 @@ type ActiveRemotePlayback = {
   stop: () => void
 }
 
+type CancelledPlaybackError = Error & {
+  cancelled: true
+}
+
+function createCancelledPlaybackError(): CancelledPlaybackError {
+  return Object.assign(new Error('播放已取消'), { cancelled: true as const })
+}
+
 // 用闭包封装 active controller，避免模块级裸变量的并发竞态
 const playbackManager = (() => {
   let active: ActiveRemotePlayback | null = null
+  let requestId = 0
   return {
+    createRequest() {
+      requestId += 1
+      return requestId
+    },
+    isCurrentRequest(nextRequestId: number) {
+      return requestId === nextRequestId
+    },
     set(controller: ActiveRemotePlayback) {
       // 设置新 controller 之前先同步 stop 旧的，保证顺序
       if (active && active !== controller) {
@@ -31,6 +47,7 @@ const playbackManager = (() => {
       if (active === controller) active = null
     },
     stopAll() {
+      requestId += 1
       const current = active
       active = null
       if (current) {
@@ -48,8 +65,14 @@ export function stopRemoteTtsPlayback(): void {
   playbackManager.stopAll()
 }
 
-async function playAudioUrl(audioUrl: string): Promise<void> {
-  playbackManager.stopAll()
+function ensureCurrentRequest(nextRequestId: number): void {
+  if (!playbackManager.isCurrentRequest(nextRequestId)) {
+    throw createCancelledPlaybackError()
+  }
+}
+
+async function playAudioUrl(audioUrl: string, nextRequestId: number): Promise<void> {
+  ensureCurrentRequest(nextRequestId)
   const audio = new Audio(audioUrl)
   let revoked = false
   const revokeOnce = () => {
@@ -103,10 +126,11 @@ async function playAudioUrl(audioUrl: string): Promise<void> {
         // #17: stop 走 reject（标记为 cancelled），让调用方知道播放被中断
         finished = true
         cleanup()
-        reject(Object.assign(new Error('播放已取消'), { cancelled: true }))
+        reject(createCancelledPlaybackError())
       },
     }
 
+    ensureCurrentRequest(nextRequestId)
     playbackManager.set(controller)
     audio.onended = () => finish()
     audio.onerror = () => fail()
@@ -129,6 +153,7 @@ export function createRemoteTtsSpeechProvider(
       taskTypes: ['tts'],
     },
     async synthesize(task) {
+      const currentRequestId = playbackManager.createRequest()
       const text = String((task.input as { text?: string }).text || '').trim()
 
       // 缓存命中：跳过远程请求直接播放
@@ -148,7 +173,7 @@ export function createRemoteTtsSpeechProvider(
           try {
             const { blob, mimeType } = await cached
             const audioUrl = URL.createObjectURL(blob)
-            await playAudioUrl(audioUrl)
+            await playAudioUrl(audioUrl, currentRequestId)
             return {
               kind: 'audio',
               provider: providerId,
@@ -181,7 +206,7 @@ export function createRemoteTtsSpeechProvider(
       const mimeType = contentType.split(';')[0].trim()
       const blob = new Blob([await response.arrayBuffer()], { type: mimeType })
       const audioUrl = URL.createObjectURL(blob)
-      await playAudioUrl(audioUrl)
+      await playAudioUrl(audioUrl, currentRequestId)
       return {
         kind: 'audio',
         provider: providerId,

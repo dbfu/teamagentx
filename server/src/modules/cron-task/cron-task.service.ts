@@ -1,5 +1,6 @@
 import prisma from '../../lib/prisma.js';
 import { ScheduleType, CronTaskState } from '@prisma/client';
+import { Cron } from 'croner';
 
 export interface CreateCronTaskData {
   chatRoomId: string;
@@ -258,11 +259,17 @@ export const cronTaskService = {
     const now = new Date();
 
     switch (scheduleType) {
-      case ScheduleType.cron:
+      case ScheduleType.cron: {
         if (!cronExpression) return null;
-        // 使用 croner 计算下次执行时间（简化处理，实际由调度器完成）
-        // 这里返回一个估算值
-        return this.estimateNextCronRun(cronExpression, now);
+        // 用 croner 计算，覆盖步长(*/N)、列表(1,2)、范围(1-5)等所有 cron 语法
+        try {
+          const next = new Cron(cronExpression, { timezone: 'Asia/Shanghai' }).nextRun();
+          if (next instanceof Date && !isNaN(next.getTime())) return next;
+        } catch (err) {
+          console.warn(`[cronTaskService] 无效 cron 表达式 "${cronExpression}":`, err);
+        }
+        return null;
+      }
 
       case ScheduleType.interval:
         if (!intervalMinutes) return null;
@@ -275,47 +282,5 @@ export const cronTaskService = {
       default:
         return null;
     }
-  },
-
-  // 估算 cron 下次执行时间（简化版本）
-  estimateNextCronRun(cronExpression: string, from: Date): Date {
-    // 简化处理：解析常见 cron 表达式
-    // 格式：minute hour day month weekday
-    const parts = cronExpression.split(' ');
-    if (parts.length !== 5) {
-      // 无法解析，默认返回 1 小时后
-      return new Date(from.getTime() + 60 * 60 * 1000);
-    }
-
-    const [minute, hour, day, month, weekday] = parts;
-
-    // 处理通配符和固定值
-    const targetMinute = minute === '*' ? from.getMinutes() : parseInt(minute, 10);
-    let targetHour = hour === '*' ? from.getHours() : parseInt(hour, 10);
-
-    // 如果当前时间已经过了目标时间，推到下一个周期
-    const target = new Date(from);
-    target.setMinutes(targetMinute);
-    target.setSeconds(0);
-    target.setMilliseconds(0);
-
-    if (hour !== '*') {
-      target.setHours(targetHour);
-      if (target <= from) {
-        // 如果是每小时执行，加一小时
-        if (minute !== '*') {
-          target.setHours(targetHour + 24);
-        } else {
-          target.setHours(targetHour + 1);
-        }
-      }
-    } else {
-      // 每小时执行
-      if (target <= from) {
-        target.setHours(target.getHours() + 1);
-      }
-    }
-
-    return target;
   },
 };

@@ -15,13 +15,39 @@ import {
   type AgentVoicePresetId,
 } from '@/lib/agent-speech'
 import { getVoiceOptions, type VoiceOption, type VoiceProviderMeta } from '@/lib/voice-provider-metadata'
-import { speakText } from '@/lib/browser-speech'
+import { filterRemoteTtsProviders } from '@/lib/voice-catalog-client'
+import { getBrowserSpeechVoices, speakText, type BrowserSpeechVoiceOption } from '@/lib/browser-speech'
 import { cn } from '@/lib/utils'
 import { getApiBaseUrl } from '@/lib/config'
 
 interface AssistantVoiceTabProps {
   agent: Agent
   onUpdate?: (agent?: Agent) => void | Promise<void>
+}
+
+type RemoteCatalogEntry = {
+  llmProviderId: string
+  llmProviderName: string
+  apiUrl: string | null
+  providerLabel: string
+  models: Array<{
+    id: string
+    voices: VoiceOption[]
+  }>
+}
+
+const BROWSER_CLIENT_ID_STORAGE_KEY = 'teamagentx_browser_client_id'
+
+function getBrowserClientId(): string {
+  if (typeof window === 'undefined') return 'server'
+  const existing = window.localStorage.getItem(BROWSER_CLIENT_ID_STORAGE_KEY)
+  if (existing) return existing
+
+  const nextId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `browser-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  window.localStorage.setItem(BROWSER_CLIENT_ID_STORAGE_KEY, nextId)
+  return nextId
 }
 
 export function AssistantVoiceTab({ agent, onUpdate }: AssistantVoiceTabProps) {
@@ -32,8 +58,10 @@ export function AssistantVoiceTab({ agent, onUpdate }: AssistantVoiceTabProps) {
     inferVoicePresetId(toVoicePanelConfig(agent.speechConfig || createDefaultAgentSpeechConfig())),
   )
   const [audioProviders, setAudioProviders] = useState<LlmProvider[]>([])
+  const [localVoices, setLocalVoices] = useState<BrowserSpeechVoiceOption[]>([])
   // 从服务端获取的供应商元数据（含 voices），静态文件作 fallback
   const [serverMeta, setServerMeta] = useState<VoiceProviderMeta[]>([])
+  const [remoteCatalog, setRemoteCatalog] = useState<RemoteCatalogEntry[]>([])
   const [isPreviewing, setIsPreviewing] = useState(false)
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -45,6 +73,48 @@ export function AssistantVoiceTab({ agent, onUpdate }: AssistantVoiceTabProps) {
   // #32: 用 ref 存储 onUpdate 回调，避免自动保存 effect 依赖 onUpdate 引用导致 timer 永重置
   const onUpdateRef = useRef(onUpdate)
   useEffect(() => { onUpdateRef.current = onUpdate }, [onUpdate])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const syncBrowserLocalVoices = async () => {
+      const voices = getBrowserSpeechVoices()
+      if (cancelled) return
+      setLocalVoices(voices)
+
+      if (voices.length === 0) return
+
+      try {
+        const baseUrl = await getApiBaseUrl()
+        const token = localStorage.getItem('auth_token') ?? ''
+        const browserClientId = getBrowserClientId()
+        await fetch(`${baseUrl}/speech/catalog/browser-local`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            'X-Browser-Client-Id': browserClientId,
+          },
+          body: JSON.stringify({ voices }),
+        })
+      } catch {
+        // 静默失败，不阻塞本地配置
+      }
+    }
+
+    void syncBrowserLocalVoices()
+
+    const speechSynthesisRef = typeof window !== 'undefined' ? window.speechSynthesis : null
+    const handleVoicesChanged = () => {
+      void syncBrowserLocalVoices()
+    }
+    speechSynthesisRef?.addEventListener?.('voiceschanged', handleVoicesChanged)
+
+    return () => {
+      cancelled = true
+      speechSynthesisRef?.removeEventListener?.('voiceschanged', handleVoicesChanged)
+    }
+  }, [])
 
   useEffect(() => {
     llmProviderApi.getAll().then((res) => {
@@ -61,6 +131,7 @@ export function AssistantVoiceTab({ agent, onUpdate }: AssistantVoiceTabProps) {
       try {
         const baseUrl = await getApiBaseUrl()
         const token = localStorage.getItem('auth_token') ?? ''
+        const browserClientId = getBrowserClientId()
         const res = await fetch(`${baseUrl}/speech/providers`, {
           headers: { Authorization: `Bearer ${token}` },
         })
@@ -68,6 +139,23 @@ export function AssistantVoiceTab({ agent, onUpdate }: AssistantVoiceTabProps) {
         const json = await res.json() as { success: boolean; data: VoiceProviderMeta[] }
         if (json.success && Array.isArray(json.data) && !cancelled) {
           setServerMeta(json.data)
+        }
+
+        const catalogRes = await fetch(`${baseUrl}/speech/catalog`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'X-Browser-Client-Id': browserClientId,
+          },
+        })
+        if (!catalogRes.ok || cancelled) return
+        const catalogJson = await catalogRes.json() as {
+          success: boolean
+          data?: {
+            remoteProviders?: RemoteCatalogEntry[]
+          }
+        }
+        if (catalogJson.success && catalogJson.data?.remoteProviders && !cancelled) {
+          setRemoteCatalog(catalogJson.data.remoteProviders)
         }
       } catch {
         // 静默降级到静态 voice-provider-metadata.ts
@@ -78,8 +166,8 @@ export function AssistantVoiceTab({ agent, onUpdate }: AssistantVoiceTabProps) {
 
   // TTS 供应商（用途为 tts 或 both）
   const ttsProviders = useMemo(
-    () => audioProviders.filter((p) => p.audioUsage === 'tts' || p.audioUsage === 'both'),
-    [audioProviders],
+    () => filterRemoteTtsProviders(audioProviders, remoteCatalog),
+    [audioProviders, remoteCatalog],
   )
 
   // 当前选中的 TTS provider 对象
@@ -88,11 +176,27 @@ export function AssistantVoiceTab({ agent, onUpdate }: AssistantVoiceTabProps) {
     [ttsProviders, voiceConfig.ttsProviderId],
   )
 
+  const remoteModelOptions = useMemo((): string[] => {
+    if (!selectedTtsProvider) return []
+    const remoteEntry = remoteCatalog.find((item) => item.llmProviderId === selectedTtsProvider.id)
+    if (remoteEntry) return remoteEntry.models.map((item) => item.id)
+
+    const url = selectedTtsProvider.apiUrl?.toLowerCase() ?? ''
+    const meta = serverMeta.find((item) => url.includes(item.urlPattern))
+    return Array.from(new Set([
+      selectedTtsProvider.model,
+      ...(meta?.ttsModels ?? []),
+    ].filter((value): value is string => !!value)))
+  }, [remoteCatalog, selectedTtsProvider, serverMeta])
+
   // 根据选中 TTS provider 的模型获取音色列表（优先服务端元数据，fallback 静态文件）
   const voiceOptions = useMemo((): VoiceOption[] | null => {
     if (!selectedTtsProvider) return null
+    const remoteEntry = remoteCatalog.find((item) => item.llmProviderId === selectedTtsProvider.id)
+    const model = voiceConfig.model ?? selectedTtsProvider.model
+    const modelEntry = remoteEntry?.models.find((item) => item.id === model)
+    if (modelEntry) return modelEntry.voices
     const url = selectedTtsProvider.apiUrl?.toLowerCase() ?? ''
-    const model = selectedTtsProvider.model
     // 优先用服务端动态数据
     if (serverMeta.length > 0) {
       const meta = serverMeta.find((m) => url.includes(m.urlPattern))
@@ -100,7 +204,7 @@ export function AssistantVoiceTab({ agent, onUpdate }: AssistantVoiceTabProps) {
     }
     // fallback 到静态文件
     return getVoiceOptions(selectedTtsProvider.apiUrl, model)
-  }, [selectedTtsProvider, serverMeta])
+  }, [remoteCatalog, selectedTtsProvider, serverMeta, voiceConfig.model])
 
   useEffect(() => {
     const incoming = toVoicePanelConfig(agent.speechConfig || createDefaultAgentSpeechConfig())
@@ -134,11 +238,14 @@ export function AssistantVoiceTab({ agent, onUpdate }: AssistantVoiceTabProps) {
   const handleTtsProviderSelect = (providerId: string) => {
     const p = ttsProviders.find((x) => x.id === providerId)
     if (!p) return
+    const remoteEntry = remoteCatalog.find((item) => item.llmProviderId === providerId)
     const url = p.apiUrl?.toLowerCase() ?? ''
     const serverProviderMeta = serverMeta.find((m) => url.includes(m.urlPattern))
-    const firstModel = serverProviderMeta?.ttsModels[0] ?? p.model ?? null
+    const firstModel = remoteEntry?.models[0]?.id ?? serverProviderMeta?.ttsModels[0] ?? p.model ?? null
     const voices = firstModel
-      ? (serverProviderMeta?.voices?.[firstModel] ?? getVoiceOptions(p.apiUrl, firstModel))
+      ? (remoteEntry?.models.find((item) => item.id === firstModel)?.voices
+        ?? serverProviderMeta?.voices?.[firstModel]
+        ?? getVoiceOptions(p.apiUrl, firstModel))
       : null
     setVoiceConfig((prev) => ({
       ...prev,
@@ -385,6 +492,32 @@ export function AssistantVoiceTab({ agent, onUpdate }: AssistantVoiceTabProps) {
                   </select>
                 </div>
 
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-foreground">模型</label>
+                  <select
+                    value={voiceConfig.model ?? ''}
+                    disabled={!voiceConfig.enabled || remoteModelOptions.length === 0}
+                    onChange={(e) => {
+                      const nextModel = e.target.value || null
+                      const nextVoices = remoteCatalog
+                        .find((item) => item.llmProviderId === voiceConfig.ttsProviderId)
+                        ?.models.find((item) => item.id === nextModel)
+                        ?.voices
+                        ?? (selectedTtsProvider ? getVoiceOptions(selectedTtsProvider.apiUrl, nextModel) : null)
+                      setVoiceConfig((prev) => ({
+                        ...prev,
+                        model: nextModel,
+                        voiceId: nextVoices?.[0]?.id ?? null,
+                      }))
+                    }}
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none disabled:opacity-60"
+                  >
+                    {remoteModelOptions.map((modelId) => (
+                      <option key={modelId} value={modelId}>{modelId}</option>
+                    ))}
+                  </select>
+                </div>
+
                 {/* 音色选择 */}
                 <div>
                   <label className="mb-1.5 block text-sm font-medium text-foreground">音色</label>
@@ -446,6 +579,33 @@ export function AssistantVoiceTab({ agent, onUpdate }: AssistantVoiceTabProps) {
                       </button>
                     )
                   })}
+                </div>
+                <div className="mt-4">
+                  <label className="mb-1.5 block text-sm font-medium text-foreground">本地音色</label>
+                  {localVoices.length > 0 ? (
+                    <select
+                      value={voiceConfig.voiceId ?? ''}
+                      disabled={!voiceConfig.enabled}
+                      onChange={(e) => setVoiceConfig((prev) => ({ ...prev, voiceId: e.target.value || null }))}
+                      className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none disabled:opacity-60"
+                    >
+                      <option value="">系统默认音色</option>
+                      {localVoices.map((voice) => (
+                        <option key={voice.id} value={voice.id}>
+                          {voice.name} {voice.lang ? `(${voice.lang})` : ''}{voice.default ? ' · 默认' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      disabled={!voiceConfig.enabled}
+                      value={voiceConfig.voiceId ?? ''}
+                      onChange={(e) => setVoiceConfig((prev) => ({ ...prev, voiceId: e.target.value || null }))}
+                      placeholder="未检测到本地音色时可手动填写，留空使用系统默认"
+                      className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none disabled:opacity-60"
+                    />
+                  )}
                 </div>
               </div>
             )}

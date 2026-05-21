@@ -7,6 +7,7 @@ import { useChatRoomStore } from './chat-room-store'
 import type { ToolCall, StreamEvent, AgentStatus } from './socket-store'
 import { PendingImage } from '@/components/chat/image-preview-list'
 import { compressImage, fileToBase64, createPreviewUrl, revokePreviewUrl, getImageDimensions, isValidImageType, isValidImageSize } from '@/lib/image-utils'
+import { isActivelyViewingChatRoom } from '@/lib/chat-room-presence'
 import { toast } from 'sonner'
 
 // 兼容 Android WebView 的 UUID 生成函数
@@ -895,6 +896,29 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     loadAllAgents()
   }, [chatRoom?.id, loadAllAgents])
 
+  const hasWindowFocusRef = useRef(
+    typeof document !== 'undefined' && typeof document.hasFocus === 'function'
+      ? document.hasFocus()
+      : true,
+  )
+
+  useEffect(() => {
+    const handleFocus = () => {
+      hasWindowFocusRef.current = true
+    }
+    const handleBlur = () => {
+      hasWindowFocusRef.current = false
+    }
+
+    window.addEventListener('focus', handleFocus)
+    window.addEventListener('blur', handleBlur)
+
+    return () => {
+      window.removeEventListener('focus', handleFocus)
+      window.removeEventListener('blur', handleBlur)
+    }
+  }, [])
+
   // 监听新消息
   useEffect(() => {
     // 等待 socket 连接后再设置监听器
@@ -904,8 +928,14 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
       // 只有当前群聊的消息才添加到消息列表
       if (chatRoomId && msg.chatRoomId === chatRoomId) {
         handleNewMessage(msg)
-        // 用户在当前群聊中收到消息，自动标记为已读
-        markChatRoomRead(chatRoomId)
+        if (isActivelyViewingChatRoom({
+          isSelected: true,
+          isDocumentVisible: !document.hidden,
+          hasWindowFocus: hasWindowFocusRef.current,
+        })) {
+          // 用户正在前台查看当前群聊时，收到消息才自动标记为已读
+          markChatRoomRead(chatRoomId)
+        }
       }
     })
     return unsubscribe

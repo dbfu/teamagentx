@@ -65,7 +65,20 @@ export function CreateCronTaskModal({
     initialData?.scheduledAt ? new Date(initialData.scheduledAt).toISOString().slice(0, 16) : ''
   );
   const [payload, setPayload] = useState(initialData?.payload || '');
-  const [agentIds, setAgentIds] = useState<string[]>(initialData?.agentIds || []);
+  const [agentIds, setAgentIds] = useState<string[]>(() => {
+    const raw = initialData?.agentIds;
+    if (Array.isArray(raw)) return raw;
+    // 兼容旧接口返回 JSON 字符串的情况
+    if (typeof raw === 'string') {
+      try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  });
   const [enabled, setEnabled] = useState(initialData?.enabled ?? true);
   const [maxRetries, setMaxRetries] = useState(initialData?.maxRetries || 3);
 
@@ -197,31 +210,37 @@ export function CreateCronTaskModal({
                 <label className="mb-1.5 block text-sm font-medium text-foreground">
                   Cron 表达式 <span className="text-red-500">*</span>
                 </label>
-                <Select
-                  value={cronExpression}
-                  onValueChange={setCronExpression}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="选择预设或输入自定义表达式" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {cronPresets.map((preset) => (
-                      <SelectItem key={preset.value} value={preset.value}>
-                        {preset.label} ({preset.value})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
                 <input
                   type="text"
                   value={cronExpression}
                   onChange={(e) => setCronExpression(e.target.value)}
-                  placeholder="自定义 cron 表达式"
-                  className="mt-2 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+                  placeholder="例如：0 9 * * *"
+                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm font-mono text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+                  required
                 />
                 <p className="mt-1 text-xs text-muted-foreground">
                   格式：分钟 小时 日 月 星期（如 "0 9 * * *" 表示每天9点）
                 </p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {cronPresets.map((preset) => {
+                    const active = preset.value === cronExpression;
+                    return (
+                      <button
+                        key={preset.value}
+                        type="button"
+                        onClick={() => setCronExpression(preset.value)}
+                        className={cn(
+                          'rounded-full border px-2.5 py-1 text-xs transition-colors',
+                          active
+                            ? 'border-primary bg-primary/10 text-primary'
+                            : 'border-border text-muted-foreground hover:bg-accent'
+                        )}
+                      >
+                        {preset.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             )}
 

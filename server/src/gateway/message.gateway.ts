@@ -2,7 +2,6 @@ import { FastifyInstance, FastifyReply } from 'fastify';
 import { messageService } from '../modules/message/message.service.js';
 import { executionRecordService } from '../modules/execution-record/execution-record.service.js';
 import { checkpointService } from '../modules/checkpoint/checkpoint.service.js';
-import { taskQueueService } from '../modules/task-queue/task-queue.service.js';
 import { agentMemoryService } from '../modules/agent-memory/agent-memory.service.js';
 import { abortControllers, processingMap } from '../core/agent/agent-handler/cache.js';
 import {
@@ -432,7 +431,6 @@ export async function messageGateway(app: FastifyInstance) {
         abortedCount++;
       }
     }
-    // 清理群聊的 processing 状态
     for (const [key] of processingMap) {
       if (key.startsWith(`${chatRoomId}_`)) {
         processingMap.delete(key);
@@ -441,10 +439,6 @@ export async function messageGateway(app: FastifyInstance) {
     if (abortedCount > 0) {
       console.log(`[MessageGateway] 已中止群聊 ${chatRoomId} 中 ${abortedCount} 个正在执行的任务`);
     }
-
-    const affectedAgentIds = new Set<string>();
-    const existingBoardTasks = await taskQueueService.getChatRoomBoardTasks(chatRoomId);
-    existingBoardTasks.forEach(task => affectedAgentIds.add(task.agentId));
 
     // 2. 删除群聊的所有待处理任务
     await taskQueueService.deleteByChatRoomId(chatRoomId);
@@ -455,6 +449,7 @@ export async function messageGateway(app: FastifyInstance) {
     const io = (app as any).io as { to: (room: string) => { emit: (event: string, payload: unknown) => void } } | undefined;
 
     // 3. 同时清空群聊中所有助手的上下文
+    const affectedAgentIds = new Set<string>();
     try {
       // 获取群聊中的所有助手
       const chatRoomAgents = await prisma.chatRoomAgent.findMany({
@@ -513,9 +508,6 @@ export async function messageGateway(app: FastifyInstance) {
     }
     io?.to(chatRoomId).emit('agent:inactive-tasks', { chatRoomId, tasks: [] });
     await broadcastAgentStatus(chatRoomId);
-
-    // 4. 清空群聊消息
-    await messageService.deleteByChatRoomId(chatRoomId);
 
     return reply.send({ success: true });
   });

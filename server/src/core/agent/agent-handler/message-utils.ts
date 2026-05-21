@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { messageService } from '../../../modules/message/message.service.js';
 import type { Message } from '../../../types/message.js';
-import { globalEmit, globalEmitReceivedMessage } from './status.js';
+import { globalEmit } from './status.js';
 import { debugLog } from './debug.js';
 
 // 构建 AI 消息对象
@@ -37,7 +37,9 @@ export async function broadcastCronTriggerMessage(
   payload: string,
 ): Promise<string> {
   const messageId = randomUUID();
-  const content = `[定时任务] ${taskName}: ${payload}`;
+  // payload 已由调度器在前面拼好 @助手 mentions，这里把它放在最前，taskName 标签放在末尾，
+  // 既保证 @mentions 可见、可被 parseKnownMentions 命中，也保留定时任务来源信息。
+  const content = `${payload}\n\n— 定时任务「${taskName}」`;
   const time = new Date();
 
   // 创建消息对象
@@ -69,14 +71,9 @@ export async function broadcastCronTriggerMessage(
     isHuman: true,
   });
 
-  // 广播消息到 socket 客户端
+  // 广播消息到 socket 客户端，globalEmit 内部已触发 receivedMessage，无需再次调用
   if (globalEmit) {
     await globalEmit(message, chatRoomId);
-  }
-
-  // 触发 agent 处理（与普通用户消息一致）
-  if (globalEmitReceivedMessage) {
-    globalEmitReceivedMessage(message, chatRoomId);
   }
 
   debugLog('cronTriggerMessage', {

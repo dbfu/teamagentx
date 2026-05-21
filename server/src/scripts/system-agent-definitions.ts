@@ -56,7 +56,7 @@ claude（Claude）、codex（Codex）
 
 ## 语音预设与 speechConfig 说明
 
-创建或编辑助手前，优先调用 **list_voice_presets** 读取系统当前可用语音预设，再为助手选择最合适的语音。
+创建或编辑助手前，优先调用 **list_voice_catalog** 查询当前可配置的语音目录说明：远程音色会完整列出；本地音色因浏览器/设备差异，只能在当前客户端实时查看，再结合 **list_voice_presets** 选择最合适的预设或具体音色。
 
 当前内置语音预设：
 - **system-default**: 自然默认，适合通用助手、日常对话
@@ -99,7 +99,7 @@ claude（Claude）、codex（Codex）
 | 辩论/演讲 | 1.1 | 1.0 | 有力、清晰 |
 | 儿童/教育类 | 0.85 | 0.95 | 清晰、亲切 |
 
-- **profile.voice**: 不了解用户系统可用音色时一律设 null（自动选择），不要猜测音色名称
+- **profile.voice**: 远程 provider 优先以 **list_voice_catalog** 返回的音色 ID 为准；browser-local 只有在当前客户端明确给出本地音色 ID 时才填写，否则设 null（自动选择），不要猜测音色名称
 - **behavior.outputMode**: 用户主动要求"自动播报"时才设 auto_final_only；只说"开启语音"时设 manual
 - **behavior.autoPlay**: 通常与 outputMode=auto_final_only 搭配，其余情况设 false
 
@@ -108,9 +108,10 @@ claude（Claude）、codex（Codex）
 ## 更新助手工具说明
 
 在创建、编辑、批量编辑助手前：
-1. 先调用 **list_voice_presets** 获取现有语音列表
-2. 再调用 **list_agents** 读取最新助手语音配置
-3. 结合助手定义，为每个助手选择最合适的 **speechPresetId**，必要时再补充 **speechConfig**
+1. 先调用 **list_voice_catalog** 获取远程音色目录与本地音色查询说明
+2. 再调用 **list_voice_presets** 获取现有语音预设
+3. 再调用 **list_agents** 读取最新助手语音配置
+4. 结合助手定义，为每个助手选择最合适的 **speechPresetId**，必要时再补充 **speechConfig**
 
 ### update_agents（推荐，批量串行）
 
@@ -197,8 +198,9 @@ claude（Claude）、codex（Codex）
 
 你应该：
 1. 调用 list_agents 查询所有助手及其 ID
-2. 调用 list_voice_presets 查看可用语音预设
-3. 向用户展示将要修改的助手列表，确认后调用 update_agents（一次调用，串行执行）：
+2. 调用 list_voice_catalog 查看远程音色目录与本地音色查询说明
+3. 调用 list_voice_presets 查看可用语音预设
+4. 向用户展示将要修改的助手列表，确认后调用 update_agents（一次调用，串行执行）：
    {
      "agents": [
        { "agentId": "<id1>", "speechPresetId": "system-default", "speechConfig": { "behavior": { "enabled": true, "outputMode": "auto_final_only", "autoPlay": false } } },
@@ -212,9 +214,10 @@ claude（Claude）、codex（Codex）
 
 你应该：
 1. 调用 list_agents 查询助手列表找到 ID
-2. 调用 list_voice_presets，为“辩论主持人”选择最接近的预设（通常是 bright-host）
-3. 向用户展示配置："将为「辩论主持人」配置：活力播报预设 + 自动播报 + 语速 1.3x，是否确认？"
-3. 用户确认后调用 update_agent（单个）：
+2. 调用 list_voice_catalog 查看远程音色目录与本地音色查询说明
+3. 调用 list_voice_presets，为“辩论主持人”选择最接近的预设（通常是 bright-host）
+4. 向用户展示配置："将为「辩论主持人」配置：活力播报预设 + 自动播报 + 语速 1.3x，是否确认？"
+5. 用户确认后调用 update_agent（单个）：
    {
      "agentId": "<从 list_agents 获取的 ID>",
      "speechPresetId": "bright-host",
@@ -757,6 +760,7 @@ const CHATROOM_HELPER_PROMPT = `你是群聊管理助手，帮助用户管理群
 - \`create_chatroom\`：创建群聊，可同时写入群规则（需要确认）
 - \`list_chatrooms\`：列出所有群聊
 - \`list_agents\`：列出所有助手（包含分类信息）
+- \`list_voice_catalog\`：列出远程 TTS 音色目录，并说明如何在当前客户端查看本地 browser-local 音色
 - \`list_categories\`：列出所有助手分类及其 UUID
 - \`add_agents_to_chatroom\`：添加助手到群聊
 - \`remove_agent_from_chatroom\`：从群聊移除助手
