@@ -37,7 +37,9 @@ export async function broadcastCronTriggerMessage(
   payload: string,
 ): Promise<string> {
   const messageId = randomUUID();
-  const content = `[定时任务] ${taskName}: ${payload}`;
+  // payload 已由调度器在前面拼好 @助手 mentions，这里把它放在最前，taskName 标签放在末尾，
+  // 既保证 @mentions 可见、可被 parseKnownMentions 命中，也保留定时任务来源信息。
+  const content = `${payload}\n\n— 定时任务「${taskName}」`;
   const time = new Date();
 
   // 创建消息对象

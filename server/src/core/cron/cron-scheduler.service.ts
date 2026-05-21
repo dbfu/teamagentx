@@ -211,39 +211,43 @@ class CronSchedulerService {
     });
 
     try {
-      // 解析 agentIds，构建带 @助手 的消息内容
-      let finalPayload = task.payload;
-      const agentIdsRaw = task.agentIds || '[]';
-      const agentIds: string[] = JSON.parse(agentIdsRaw);
-
-      if (agentIds.length > 0) {
-        // 获取群聊中的助手列表
-        const chatRoomAgents = await prisma.chatRoomAgent.findMany({
-          where: { chatRoomId: task.chatRoomId },
-          include: {
-            agent: { select: { id: true, name: true } },
-          },
-        });
-
-        let mentionPrefix = '';
-
-        if (agentIds.includes('*')) {
-          // "所有助手" - @ 群聊中的所有助手（排除系统内置助手）
-          const allAgentNames = chatRoomAgents
-            .filter(a => a.agent && !SYSTEM_BUILTIN_AGENT_IDS.includes(a.agent.id))
-            .map(a => a.agent!.name);
-          mentionPrefix = allAgentNames.map(name => `@${name}`).join(' ') + ' ';
-        } else {
-          // 指定助手 - 只 @ 选中的助手
-          const selectedAgents = chatRoomAgents
-            .filter(a => a.agent && agentIds.includes(a.agent.id))
-            .map(a => a.agent!.name);
-          mentionPrefix = selectedAgents.map(name => `@${name}`).join(' ') + ' ';
-        }
-
-        // 在 payload 前面添加 @助手名
-        finalPayload = mentionPrefix + task.payload;
+      // 解析 agentIds，解析出实际要 @ 的助手名
+      let agentIds: string[] = [];
+      try {
+        const parsed = JSON.parse(task.agentIds || '[]');
+        if (Array.isArray(parsed)) agentIds = parsed.filter((v): v is string => typeof v === 'string');
+      } catch (e) {
+        console.warn(`[CronScheduler] Task ${task.name} agentIds parse failed:`, task.agentIds);
       }
+
+      const chatRoomAgents = await prisma.chatRoomAgent.findMany({
+        where: { chatRoomId: task.chatRoomId },
+        include: { agent: { select: { id: true, name: true } } },
+      });
+      const roomAgents = chatRoomAgents
+        .filter(a => a.agent && !SYSTEM_BUILTIN_AGENT_IDS.includes(a.agent.id))
+        .map(a => a.agent!);
+
+      let mentionNames: string[] = [];
+      if (agentIds.includes('*')) {
+        mentionNames = roomAgents.map(a => a.name);
+      } else if (agentIds.length > 0) {
+        mentionNames = roomAgents.filter(a => agentIds.includes(a.id)).map(a => a.name);
+        if (mentionNames.length === 0) {
+          // 选了助手但都不在房间里（被移除等），降级 @ 所有非系统助手，避免任务静默失败
+          console.warn(
+            `[CronScheduler] Task ${task.name} selected agentIds ${JSON.stringify(agentIds)} 在房间 ${task.chatRoomId} 中无匹配助手，降级 @ 全部房间助手`,
+          );
+          mentionNames = roomAgents.map(a => a.name);
+        }
+      }
+
+      const mentionPrefix = mentionNames.length > 0 ? mentionNames.map(n => `@${n}`).join(' ') + ' ' : '';
+      const finalPayload = mentionPrefix + task.payload;
+
+      console.log(
+        `[CronScheduler] Task ${task.name} broadcasting with mentions [${mentionNames.join(', ')}]`,
+      );
 
       // 广播定时任务触发消息到群里（消息内容包含 @助手 标记）
       if (broadcastCronTriggerMessageFn) {

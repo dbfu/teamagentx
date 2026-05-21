@@ -15,7 +15,7 @@ const cronTaskSchema = {
     intervalMinutes: { type: 'integer', nullable: true },
     scheduledAt: { type: 'string', nullable: true },
     payload: { type: 'string' },
-    agentIds: { type: 'string', nullable: true }, // JSON 数组字符串
+    agentIds: { type: 'array', items: { type: 'string' }, nullable: true }, // 助手 ID 数组，["*"] 表示所有助手
     enabled: { type: 'boolean' },
     maxRetries: { type: 'integer' },
     retryCount: { type: 'integer' },
@@ -82,6 +82,20 @@ interface EnableBody {
   enabled: boolean;
 }
 
+function parseAgentIds(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function serializeTask<T extends { agentIds: string | null }>(task: T): Omit<T, 'agentIds'> & { agentIds: string[] } {
+  return { ...task, agentIds: parseAgentIds(task.agentIds) };
+}
+
 export async function cronTaskGateway(app: FastifyInstance) {
   // 获取群聊的定时任务列表
   app.get<{ Params: { chatRoomId: string } }>('/chatrooms/:chatRoomId/cron-tasks', {
@@ -107,7 +121,7 @@ export async function cronTaskGateway(app: FastifyInstance) {
   }, async (request, reply) => {
     const { chatRoomId } = request.params;
     const tasks = await cronTaskService.findByChatRoom(chatRoomId);
-    return reply.send({ success: true, data: tasks });
+    return reply.send({ success: true, data: tasks.map(serializeTask) });
   });
 
   // 创建定时任务
@@ -188,7 +202,7 @@ export async function cronTaskGateway(app: FastifyInstance) {
       await cronSchedulerService.reloadTask(task.id);
     }
 
-    return reply.send({ success: true, data: task });
+    return reply.send({ success: true, data: serializeTask(task) });
   });
 
   // 获取单个定时任务
@@ -225,7 +239,7 @@ export async function cronTaskGateway(app: FastifyInstance) {
       return reply.code(404).send({ success: false, error: '定时任务不存在' });
     }
 
-    return reply.send({ success: true, data: task });
+    return reply.send({ success: true, data: serializeTask(task) });
   });
 
   // 更新定时任务
@@ -282,7 +296,7 @@ export async function cronTaskGateway(app: FastifyInstance) {
     // 重新调度任务
     await cronSchedulerService.reloadTask(taskId);
 
-    return reply.send({ success: true, data: task });
+    return reply.send({ success: true, data: serializeTask(task) });
   });
 
   // 启用/禁用定时任务
@@ -327,7 +341,7 @@ export async function cronTaskGateway(app: FastifyInstance) {
     // 重新调度任务
     await cronSchedulerService.reloadTask(taskId);
 
-    return reply.send({ success: true, data: task });
+    return reply.send({ success: true, data: serializeTask(task) });
   });
 
   // 删除定时任务
