@@ -4,7 +4,6 @@ import { agentMemoryService } from '../agent-memory/agent-memory.service.js';
 import { checkpointService } from '../checkpoint/checkpoint.service.js';
 import { taskQueueService } from '../task-queue/task-queue.service.js';
 import { executionRecordService } from '../execution-record/execution-record.service.js';
-import { todoService } from '../todo/todo.service.js';
 import { chatRoomService } from '../chatroom/chatroom.service.js';
 import {
   clearExecutorCache,
@@ -28,7 +27,7 @@ export async function clearChatRoom(chatRoomId: string): Promise<ClearChatRoomRe
   // 删除 task queue
   await taskQueueService.deleteByChatRoomId(chatRoomId);
 
-  // 删除 todos
+  // 删除遗留 todo 数据。todo runtime 已移除，这里直接用 Prisma 避免恢复 todo service。
   const affectedTodos = await prisma.todo.findMany({
     where: { chatRoomId },
     select: { ownerUserId: true },
@@ -36,7 +35,7 @@ export async function clearChatRoom(chatRoomId: string): Promise<ClearChatRoomRe
   const affectedUserIds = [...new Set(
     affectedTodos.map(t => t.ownerUserId).filter((id): id is string => id !== null),
   )];
-  await todoService.deleteByChatRoomId(chatRoomId);
+  await prisma.todo.deleteMany({ where: { chatRoomId } });
 
   // 删除执行记录
   await executionRecordService.deleteByChatRoomId(chatRoomId);
