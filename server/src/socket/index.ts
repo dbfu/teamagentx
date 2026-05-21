@@ -549,6 +549,7 @@ export function setupSocket(io: Server) {
               messageId: task.messageId,
               agentId: task.agentId,
               agentName: task.agentName,
+              status: task.status === 'executing' ? 'executing' : 'pending',
             });
 
             // 发送缓存的流式事件

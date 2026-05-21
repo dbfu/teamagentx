@@ -2,7 +2,7 @@ import { Message } from '@/lib/agent-api'
 import { tokenUsageApi } from '@/lib/token-usage-api'
 import { cn, formatDateTime } from '@/lib/utils'
 import { copyToClipboard } from '@/lib/copy-utils'
-import { Bot, CheckSquare, MessageSquareMore, Info, Copy, XCircle, Trash2, Volume2, ChevronDown, ChevronUp } from 'lucide-react'
+import { Bot, CheckSquare, MessageSquareMore, Info, Copy, XCircle, Trash2, Volume2, ChevronDown, ChevronUp, Clock } from 'lucide-react'
 import { memo, useState, useCallback, useMemo } from 'react'
 import { toast } from 'sonner'
 import { ImageViewerModal } from './image-viewer-modal'
@@ -478,18 +478,27 @@ export const ChatMessage = memo(function ChatMessage({ message, isRight, replyTo
             )
           }
 
+          const isPending = agent.status === 'pending'
           return (
             <div
               key={agent.agentId}
-              className="inline-flex cursor-pointer items-center gap-1 rounded-full bg-primary/5 px-2 py-0.5 text-xs text-primary hover:bg-primary/10"
+              className={cn(
+                "inline-flex cursor-pointer items-center gap-1 rounded-full px-2 py-0.5 text-xs",
+                isPending
+                  ? "bg-muted text-muted-foreground hover:bg-accent"
+                  : "bg-primary/5 text-primary hover:bg-primary/10"
+              )}
               onClick={() => onTypingAgentClick?.(message.id, agent.agentId, agent.agentName)}
             >
-              <span className="flex items-center h-5 justify-center font-bold leading-none">
-                <span className="animate-[dot-appear_1.5s_infinite] -translate-y-0.5">.</span>
-                <span className="animate-[dot-appear_1.5s_0.3s_infinite] -translate-y-0.5">.</span>
-                <span className="animate-[dot-appear_1.5s_0.6s_infinite] -translate-y-0.5">.</span>
-              </span>
-              <span>{agent.agentName} 执行中</span>
+              {isPending && <Clock className="size-3" />}
+              {!isPending && (
+                <span className="flex items-center h-5 justify-center font-bold leading-none">
+                  <span className="animate-[dot-appear_1.5s_infinite] -translate-y-0.5">.</span>
+                  <span className="animate-[dot-appear_1.5s_0.3s_infinite] -translate-y-0.5">.</span>
+                  <span className="animate-[dot-appear_1.5s_0.6s_infinite] -translate-y-0.5">.</span>
+                </span>
+              )}
+              <span>{agent.agentName} {isPending ? '等待执行' : '执行中'}</span>
             </div>
           )
         })}

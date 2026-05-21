@@ -1,6 +1,7 @@
 import { Message } from '@/lib/agent-api'
 import { formatDateTime } from '@/lib/utils'
 import { AgentAvatarImage } from '@/lib/agent-avatars'
+import { UserAvatar } from '../user-avatar'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw'
@@ -89,9 +90,10 @@ export function ReplyDetailPanel({ selectedReplyMessage, replies, mentionAgents 
       <div className="rounded-lg bg-primary/5 p-3">
         <div className="flex items-start gap-3">
           {selectedReplyMessage.isHuman ? (
-            <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-linear-to-br from-green-400 to-green-600 text-sm text-white">
-              {originalSenderName.slice(0, 2)}
-            </div>
+            <UserAvatar
+              avatar={selectedReplyMessage.user?.avatar ?? selectedReplyMessage.avatar}
+              size="md"
+            />
           ) : (
             <AgentAvatarImage
               avatar={selectedReplyMessage.avatar ?? selectedReplyMessage.agent?.avatar ?? null}
@@ -133,9 +135,10 @@ export function ReplyDetailPanel({ selectedReplyMessage, replies, mentionAgents 
             return (
               <div key={reply.id} className="flex items-start gap-3">
                 {reply.isHuman ? (
-                  <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-linear-to-br from-green-400 to-green-600 text-sm text-white">
-                    {replySenderName.slice(0, 2)}
-                  </div>
+                  <UserAvatar
+                    avatar={reply.user?.avatar ?? reply.avatar}
+                    size="md"
+                  />
                 ) : (
                   <AgentAvatarImage
                     avatar={reply.avatar ?? reply.agent?.avatar ?? null}

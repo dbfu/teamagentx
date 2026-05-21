@@ -146,6 +146,7 @@ export interface AgentResumeData {
   messageId: string
   agentId: string
   agentName: string
+  status?: 'pending' | 'executing'
 }
 
 // 缓存的流式事件数据类型

@@ -1059,8 +1059,17 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
 
       const newTypingAgents = new Map(typingAgents)
       const existing = newTypingAgents.get(data.messageId) ?? []
-      if (!existing.some(a => a.agentId === data.agentId)) {
-        newTypingAgents.set(data.messageId, [...existing, { agentId: data.agentId, agentName: data.agentName }])
+      const existingIndex = existing.findIndex(a => a.agentId === data.agentId)
+      if (existingIndex >= 0) {
+        const updated = [...existing]
+        updated[existingIndex] = {
+          ...updated[existingIndex],
+          agentName: data.agentName,
+          status: data.status ?? updated[existingIndex].status,
+        }
+        newTypingAgents.set(data.messageId, updated)
+      } else {
+        newTypingAgents.set(data.messageId, [...existing, { agentId: data.agentId, agentName: data.agentName, status: data.status }])
       }
 
       const newCompletedAgents = new Set(completedAgents)
