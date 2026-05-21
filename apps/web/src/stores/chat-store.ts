@@ -812,8 +812,6 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
   const addMessage = useChatStore((s) => s.addMessage)
   const getAvailableAgents = useChatStore((s) => s.getAvailableAgents)
   const getMentionAgents = useChatStore((s) => s.getMentionAgents)
-  const getReplyCounts = useChatStore((s) => s.getReplyCounts)
-  const findReplyTo = useChatStore((s) => s.findReplyTo)
   const getReplies = useChatStore((s) => s.getReplies)
   const setSelectedReplyMessage = useChatStore((s) => s.setSelectedReplyMessage)
   const setAgentStatuses = useChatStore((s) => s.setAgentStatuses)
@@ -1420,8 +1418,6 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     () => getMentionAgents(chatRoomAgents),
     [getMentionAgents, chatRoomAgents]
   )
-  const replyCounts = useMemo(() => getReplyCounts(), [messages, getReplyCounts])
-
   // 处理函数
   const handleSend = useCallback(() => {
     // 直接从 store 获取最新值，避免闭包延迟问题
@@ -1760,8 +1756,6 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     handleTypingAgentClick,
     handleReplyClick,
     handleExecutionDetailClick,
-    findReplyTo,
-    replyCounts,
     getReplies,
     messagesEndRef,
     loadDebugInfo: loadDebugInfoWrapper,

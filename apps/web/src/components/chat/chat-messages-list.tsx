@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
+import { memo, useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { Message } from '@/lib/agent-api'
 import { ChatMessage } from './chat-message'
-import type { StreamEvent } from '@/stores/socket-store'
 import { useChatStore } from '@/stores/chat-store'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { cn } from '@/lib/utils'
@@ -34,10 +33,7 @@ interface ChatMessagesListProps {
   hasOlderMessages: boolean
   messagesEndRef: React.RefObject<HTMLDivElement | null>
   typingAgents: Map<string, { agentId: string; agentName: string; status?: 'pending' | 'executing' | 'cancelled' }[]>
-  streamEvents: Map<string, StreamEvent[]>
   mentionAgents: MentionAgent[]
-  replyCounts: Map<string, number>
-  findReplyTo: (replyMessageId: string | null) => Message | undefined
   onAgentAvatarClick: (agentId: string, agentName: string) => void
   onTypingAgentClick: (messageId: string, agentId: string, agentName: string) => void
   onMentionClick: (agentId: string, agentName: string) => void
@@ -50,6 +46,135 @@ interface ChatMessagesListProps {
   currentUser?: CurrentUser
 }
 
+interface MessageRowProps {
+  chatRoomId: string
+  message: Message
+  isMultiSelectMode: boolean
+  isSelected: boolean
+  replyTo?: Message | null
+  replyCount: number
+  typingAgents?: { agentId: string; agentName: string; status?: 'pending' | 'executing' | 'cancelled' }[]
+  mentionAgents: MentionAgent[]
+  currentUser?: CurrentUser
+  hasBeenPlayed: boolean
+  onSetMessageRef: (messageId: string, element: HTMLDivElement | null) => void
+  onMarkVoiceMessagesPlayed: (chatRoomId: string, messageIds: string[]) => void
+  onStopSpeak: (messageId: string) => void
+  onAgentAvatarClick: (agentId: string, agentName: string) => void
+  onTypingAgentClick: (messageId: string, agentId: string, agentName: string) => void
+  onMentionClick: (agentId: string, agentName: string) => void
+  onReplyClick: (messageId: string) => void
+  onExecutionDetailClick?: (messageId: string, executionRecordId: string) => void
+  onMentionAgent?: (agentId: string, agentName: string) => void
+  onDeleteMessage?: (messageId: string) => Promise<void> | void
+  onStartMultiSelect: (messageId: string) => void
+  onToggleSelection: (messageId: string) => void
+}
+
+const MessageRow = memo(function MessageRow({
+  chatRoomId,
+  message,
+  isMultiSelectMode,
+  isSelected,
+  replyTo,
+  replyCount,
+  typingAgents,
+  mentionAgents,
+  currentUser,
+  hasBeenPlayed,
+  onSetMessageRef,
+  onMarkVoiceMessagesPlayed,
+  onStopSpeak,
+  onAgentAvatarClick,
+  onTypingAgentClick,
+  onMentionClick,
+  onReplyClick,
+  onExecutionDetailClick,
+  onMentionAgent,
+  onDeleteMessage,
+  onStartMultiSelect,
+  onToggleSelection,
+}: MessageRowProps) {
+  const handleRowClick = useCallback(() => {
+    if (isMultiSelectMode) onToggleSelection(message.id)
+  }, [isMultiSelectMode, message.id, onToggleSelection])
+
+  const handleOverlayClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    onToggleSelection(message.id)
+  }, [message.id, onToggleSelection])
+
+  const handleOverlayKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    event.stopPropagation()
+    onToggleSelection(message.id)
+  }, [message.id, onToggleSelection])
+
+  const handleMarkPlayed = useCallback(() => {
+    onMarkVoiceMessagesPlayed(chatRoomId, [message.id])
+  }, [chatRoomId, message.id, onMarkVoiceMessagesPlayed])
+
+  const setRowRef = useCallback((element: HTMLDivElement | null) => {
+    onSetMessageRef(message.id, element)
+  }, [message.id, onSetMessageRef])
+
+  return (
+    <div
+      data-message-id={message.id}
+      onClick={handleRowClick}
+      className={cn(
+        "relative transition-colors",
+        isMultiSelectMode && "cursor-pointer",
+        isSelected && "bg-blue-50/70 dark:bg-blue-950/20"
+      )}
+      ref={setRowRef}
+    >
+      {isMultiSelectMode && (
+        <div
+          role="button"
+          tabIndex={0}
+          data-message-row-select-overlay
+          aria-pressed={isSelected}
+          aria-label={isSelected ? '取消选择消息' : '选择消息'}
+          className="absolute inset-0 z-20 cursor-pointer"
+          onClick={handleOverlayClick}
+          onKeyDown={handleOverlayKeyDown}
+        />
+      )}
+      <ChatMessage
+        message={message}
+        isRight={message.isHuman}
+        replyTo={replyTo}
+        replyCount={replyCount}
+        typingAgents={typingAgents}
+        mentionAgents={mentionAgents}
+        currentUser={currentUser}
+        hasBeenPlayed={hasBeenPlayed}
+        onMarkPlayed={handleMarkPlayed}
+        onStopSpeak={onStopSpeak}
+        onAgentAvatarClick={onAgentAvatarClick}
+        onTypingAgentClick={onTypingAgentClick}
+        onMentionClick={onMentionClick}
+        onReplyClick={onReplyClick}
+        onExecutionDetailClick={onExecutionDetailClick}
+        onMentionAgent={onMentionAgent}
+        onDeleteMessage={onDeleteMessage}
+        onStartMultiSelect={onStartMultiSelect}
+        onToggleSelection={onToggleSelection}
+        selectionMode={isMultiSelectMode}
+        isSelected={isSelected}
+      />
+      {isMultiSelectMode && (
+        <div className="pointer-events-none absolute left-3 top-4 z-30 flex size-5 items-center justify-center rounded-full border border-blue-500 bg-background text-blue-500 shadow-sm">
+          {isSelected && <Check className="size-3.5" />}
+        </div>
+      )}
+    </div>
+  )
+})
+
 export function ChatMessagesList({
   chatRoomId,
   messages,
@@ -58,10 +183,7 @@ export function ChatMessagesList({
   hasOlderMessages,
   messagesEndRef,
   typingAgents,
-  streamEvents,
   mentionAgents,
-  replyCounts,
-  findReplyTo,
   onAgentAvatarClick,
   onTypingAgentClick,
   onMentionClick,
@@ -110,6 +232,21 @@ export function ChatMessagesList({
   playedIdsRef.current = playedIds
   const allAgentsRef = useRef(allAgents)
   allAgentsRef.current = allAgents
+  const messageById = useMemo(
+    () => new Map(messages.map((message) => [message.id, message])),
+    [messages],
+  )
+  const messageByIdRef = useRef(messageById)
+  messageByIdRef.current = messageById
+  const replyCountsByMessageId = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const message of messages) {
+      if (message.replyMessageId) {
+        counts.set(message.replyMessageId, (counts.get(message.replyMessageId) ?? 0) + 1)
+      }
+    }
+    return counts
+  }, [messages])
 
   // 是否在底部附近（距离底部 100px 以内算"在底部"）
   const [isNearBottom, setIsNearBottom] = useState(true)
@@ -158,6 +295,33 @@ export function ChatMessagesList({
       return next
     })
   }, [])
+
+  const handleSetMessageRef = useCallback((messageId: string, element: HTMLDivElement | null) => {
+    if (element) {
+      messageRefs.current.set(messageId, element)
+    } else {
+      messageRefs.current.delete(messageId)
+    }
+  }, [])
+
+  const handleDeleteMessage = useCallback(async (messageId: string) => {
+    await onDeleteMessage?.(messageId)
+    const msg = messageByIdRef.current.get(messageId)
+    if (!msg || msg.isHuman || !msg.agentId) return
+    const agent = allAgentsRef.current.find((item) => item.id === msg.agentId)
+    const voiceConfig = agent?.speechConfig ? toVoicePanelConfig(agent.speechConfig) : null
+    if (!voiceConfig?.enabled || voiceConfig.provider !== 'openai-compatible-tts') return
+    const text = normalizeSpeechText(msg.content)
+    if (!text || text.length > PREWARM_MAX_TEXT_LENGTH) return
+    deleteTtsCache(chatRoomId, buildTtsCacheKey({
+      provider: voiceConfig.provider,
+      model: voiceConfig.model ?? null,
+      voice: voiceConfig.voiceId ?? null,
+      speed: voiceConfig.speed ?? 1.3,
+      format: voiceConfig.format ?? null,
+      text,
+    }))
+  }, [chatRoomId, onDeleteMessage])
 
   const handleDeleteSelected = useCallback(async () => {
     if (!onDeleteMessages || selectedMessageIds.size === 0) return
@@ -255,10 +419,25 @@ export function ChatMessagesList({
 
   // 滚动到底部
   const scrollToBottom = useCallback(() => {
-    if (containerRef.current) {
-      containerRef.current.scrollTop = containerRef.current.scrollHeight
+    const alignToBottom = () => {
+      const container = containerRef.current
+      if (!container) return
+      messagesEndRef.current?.scrollIntoView({ block: 'end' })
+      container.scrollTop = container.scrollHeight
     }
-  }, [])
+
+    alignToBottom()
+
+    let frame = 0
+    const tick = () => {
+      alignToBottom()
+      frame += 1
+      if (frame < 3) {
+        requestAnimationFrame(tick)
+      }
+    }
+    requestAnimationFrame(tick)
+  }, [messagesEndRef])
 
   // 处理消息定位
   useEffect(() => {
@@ -633,93 +812,31 @@ export function ChatMessagesList({
               </div>
             )}
             {messages.map((message) => (
-              <div
+              <MessageRow
                 key={message.id}
-                data-message-id={message.id}
-                onClick={() => {
-                  if (isMultiSelectMode) toggleMessageSelection(message.id)
-                }}
-                className={cn(
-                  "relative transition-colors",
-                  isMultiSelectMode && "cursor-pointer",
-                  selectedMessageIds.has(message.id) && "bg-blue-50/70 dark:bg-blue-950/20"
-                )}
-                ref={(el) => {
-                  if (el) {
-                    messageRefs.current.set(message.id, el)
-                  } else {
-                    messageRefs.current.delete(message.id)
-                  }
-                }}
-              >
-                {isMultiSelectMode && (
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    data-message-row-select-overlay
-                    aria-pressed={selectedMessageIds.has(message.id)}
-                    aria-label={selectedMessageIds.has(message.id) ? '取消选择消息' : '选择消息'}
-                    className="absolute inset-0 z-20 cursor-pointer"
-                    onClick={(e) => {
-                      e.preventDefault()
-                      e.stopPropagation()
-                      toggleMessageSelection(message.id)
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key !== 'Enter' && e.key !== ' ') return
-                      e.preventDefault()
-                      e.stopPropagation()
-                      toggleMessageSelection(message.id)
-                    }}
-                  />
-                )}
-                <ChatMessage
-                  message={message}
-                  isRight={message.isHuman}
-                  replyTo={findReplyTo(message.replyMessageId)}
-                  replyCount={replyCounts.get(message.id) ?? 0}
-                  typingAgents={typingAgents.get(message.id)}
-                  streamEvents={streamEvents}
-                  mentionAgents={mentionAgents}
-                  currentUser={currentUser}
-                  hasBeenPlayed={playedIds.has(message.id)}
-                  onMarkPlayed={() => markVoiceMessagesPlayed(chatRoomId, [message.id])}
-                  onStopSpeak={stopCurrentPlaybackSession}
-                  onAgentAvatarClick={onAgentAvatarClick}
-                  onTypingAgentClick={onTypingAgentClick}
-                  onMentionClick={onMentionClick}
-                  onReplyClick={onReplyClick}
-                  onExecutionDetailClick={onExecutionDetailClick}
-                  onMentionAgent={onMentionAgent}
-                  onDeleteMessage={async (messageId) => {
-                    await onDeleteMessage?.(messageId)
-                    const msg = messages.find((m) => m.id === messageId)
-                    if (!msg || msg.isHuman || !msg.agentId) return
-                    const agent = allAgentsRef.current.find((a) => a.id === msg.agentId)
-                    const vc = agent?.speechConfig ? toVoicePanelConfig(agent.speechConfig) : null
-                    if (!vc?.enabled || vc.provider !== 'openai-compatible-tts') return
-                    const text = normalizeSpeechText(msg.content)
-                    if (!text || text.length > PREWARM_MAX_TEXT_LENGTH) return
-                    deleteTtsCache(chatRoomId, buildTtsCacheKey({
-                      provider: vc.provider,
-                      model: vc.model ?? null,
-                      voice: vc.voiceId ?? null,
-                      speed: vc.speed ?? 1.3,
-                      format: vc.format ?? null,
-                      text,
-                    }))
-                  }}
-                  onStartMultiSelect={startMultiSelect}
-                  onToggleSelection={toggleMessageSelection}
-                  selectionMode={isMultiSelectMode}
-                  isSelected={selectedMessageIds.has(message.id)}
-                />
-                {isMultiSelectMode && (
-                  <div className="pointer-events-none absolute left-3 top-4 z-30 flex size-5 items-center justify-center rounded-full border border-blue-500 bg-background text-blue-500 shadow-sm">
-                    {selectedMessageIds.has(message.id) && <Check className="size-3.5" />}
-                  </div>
-                )}
-              </div>
+                chatRoomId={chatRoomId}
+                message={message}
+                isMultiSelectMode={isMultiSelectMode}
+                isSelected={selectedMessageIds.has(message.id)}
+                replyTo={message.replyMessageId ? messageById.get(message.replyMessageId) : null}
+                replyCount={replyCountsByMessageId.get(message.id) ?? 0}
+                typingAgents={typingAgents.get(message.id)}
+                mentionAgents={mentionAgents}
+                currentUser={currentUser}
+                hasBeenPlayed={playedIds.has(message.id)}
+                onSetMessageRef={handleSetMessageRef}
+                onMarkVoiceMessagesPlayed={markVoiceMessagesPlayed}
+                onStopSpeak={stopCurrentPlaybackSession}
+                onAgentAvatarClick={onAgentAvatarClick}
+                onTypingAgentClick={onTypingAgentClick}
+                onMentionClick={onMentionClick}
+                onReplyClick={onReplyClick}
+                onExecutionDetailClick={onExecutionDetailClick}
+                onMentionAgent={onMentionAgent}
+                onDeleteMessage={handleDeleteMessage}
+                onStartMultiSelect={startMultiSelect}
+                onToggleSelection={toggleMessageSelection}
+              />
             ))}
           </>
         )}

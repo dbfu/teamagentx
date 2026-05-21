@@ -5,20 +5,15 @@
  * 以便 ReactMarkdown 的自定义组件可以识别并渲染为高亮元素。
  *
  * 前面可以是：空格、字符串开头、或 markdown 特殊字符（*、_、>、-、#、`）
- * 后面必须是：空格或字符串结尾（严格边界，与后端规则一致）
+ * 后面必须是：空格、字符串结尾、常见标点，或不属于名称的连字符
  */
 
 import { visit } from 'unist-util-visit'
 
-// 匹配 @助手名 的正则（支持中文、英文、数字、下划线、连字符）
-// 名称可以包含连字符，但不能以连字符开头或结尾
-// 使用非贪婪匹配 +? 防止过度匹配
-// 使用 lookbehind (?<=) 确保名称不以 - 结尾
-// 特殊处理连字符：只有当连字符后面没有名称字符时，才作为边界
-const MENTION_REGEX = /(@[\u4e00-\u9fa5a-zA-Z0-9_][\u4e00-\u9fa5a-zA-Z0-9_-]*?)(?<=[\u4e00-\u9fa5a-zA-Z0-9_])(?=\s|$|[*_>#`!?.,:;！？。，；：]|-(?![\u4e00-\u9fa5a-zA-Z0-9_]))/g
-
 // 允许出现在 @ 前面的 markdown 特殊字符
 const MARKDOWN_SPECIAL_CHARS = '*_>#`-'
+const END_BOUNDARY_CHARS = '*_>#`!?.,:;！？。，；：'
+const NAME_CHARS_PATTERN = '[\\u4e00-\\u9fa5a-zA-Z0-9_]'
 
 // 用于识别我们插入的 mention span 的唯一标记
 export const MENTION_MARKER_CLASS = 'teamagentx-mention-highlight'
@@ -31,6 +26,19 @@ interface MentionAgent {
 interface Options {
   mentionAgents: MentionAgent[]
   onMentionClick?: (agentId: string, agentName: string) => void
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
 }
 
 /**
@@ -49,7 +57,19 @@ export function remarkMentions(opts: Options) {
     agentMap.set(agent.name, agent)
   }
 
+  const mentionPattern = Array.from(agentMap.keys())
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length)
+    .map(escapeRegExp)
+    .join('|')
+
+  const mentionRegex = mentionPattern
+    ? new RegExp(`@(${mentionPattern})(?=\\s|$|[${END_BOUNDARY_CHARS}]|-(?!${NAME_CHARS_PATTERN}))`, 'g')
+    : null
+
   return (tree: any, file: any) => {
+    if (!mentionRegex) return
+
     // 获取原始 markdown 文本（file.value 或 file.contents）
     const originalText: string = file?.value ?? file?.contents ?? ''
 
@@ -65,13 +85,13 @@ export function remarkMentions(opts: Options) {
       let hasMention = false
 
       // 重置正则
-      MENTION_REGEX.lastIndex = 0
+      mentionRegex.lastIndex = 0
 
       let match
-      while ((match = MENTION_REGEX.exec(content)) !== null) {
-        const mentionText = match[1] // @助手名
+      while ((match = mentionRegex.exec(content)) !== null) {
+        const mentionText = match[0] // @助手名
         const matchIndex = match.index
-        const agentName = mentionText.slice(1) // 去掉 @
+        const agentName = match[1] // 去掉 @
 
         // 检查 agent 是否有效
         const agent = agentMap.get(agentName)
@@ -117,7 +137,7 @@ export function remarkMentions(opts: Options) {
         // 添加 mention HTML
         fragments.push({
           type: 'html',
-          value: `<span class="${MENTION_MARKER_CLASS}" data-agent-id="${agent.id}" data-agent-name="${agentName}">${mentionText}</span>`,
+          value: `<span class="${MENTION_MARKER_CLASS}" data-agent-id="${escapeHtml(agent.id)}" data-agent-name="${escapeHtml(agentName)}">${escapeHtml(mentionText)}</span>`,
         })
 
         lastIndex = matchIndex + mentionText.length

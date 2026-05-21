@@ -71,8 +71,6 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
     handleTypingAgentClick,
     handleReplyClick,
     handleExecutionDetailClick,
-    findReplyTo,
-    replyCounts,
     messagesEndRef,
     loadExecutionRecords,
     contextLoading,
@@ -240,10 +238,7 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
               hasOlderMessages={hasOlderMessages}
               messagesEndRef={messagesEndRef}
               typingAgents={typingAgents}
-              streamEvents={streamEvents}
               mentionAgents={mentionAgents}
-              replyCounts={replyCounts}
-              findReplyTo={findReplyTo}
               onAgentAvatarClick={handleAgentAvatarClick}
               onTypingAgentClick={handleTypingAgentClick}
               onMentionClick={handleAgentAvatarClick}

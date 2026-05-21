@@ -3,11 +3,10 @@ import { tokenUsageApi } from '@/lib/token-usage-api'
 import { cn, formatDateTime } from '@/lib/utils'
 import { copyToClipboard } from '@/lib/copy-utils'
 import { Bot, CheckSquare, MessageSquareMore, Info, Copy, XCircle, Trash2, Volume2, ChevronDown, ChevronUp } from 'lucide-react'
-import { useState, useCallback, useMemo } from 'react'
+import { memo, useState, useCallback, useMemo } from 'react'
 import { toast } from 'sonner'
 import { ImageViewerModal } from './image-viewer-modal'
 import { AudioMessagePlayer } from './audio-message-player'
-import type { StreamEvent } from '@/stores/socket-store'
 import { AgentAvatar } from './agent-avatar'
 import { UserAvatar } from './user-avatar'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -56,10 +55,23 @@ type CurrentUser = {
 
 const LARGE_MESSAGE_CHAR_THRESHOLD = 1200
 const LARGE_MESSAGE_LINE_THRESHOLD = 18
+const COLLAPSED_PREVIEW_CHAR_LIMIT = 1200
+const COLLAPSED_PREVIEW_LINE_LIMIT = 18
 
 function isLargeMessageContent(content: string): boolean {
   if (content.length > LARGE_MESSAGE_CHAR_THRESHOLD) return true
   return content.split(/\r\n|\r|\n/).length > LARGE_MESSAGE_LINE_THRESHOLD
+}
+
+function getCollapsedPreviewContent(content: string): string {
+  const limitedByChars = content.length > COLLAPSED_PREVIEW_CHAR_LIMIT
+    ? content.slice(0, COLLAPSED_PREVIEW_CHAR_LIMIT)
+    : content
+  const lines = limitedByChars.split(/\r\n|\r|\n/)
+  const limitedByLines = lines.length > COLLAPSED_PREVIEW_LINE_LIMIT
+    ? lines.slice(0, COLLAPSED_PREVIEW_LINE_LIMIT).join('\n')
+    : limitedByChars
+  return limitedByLines.length < content.length ? `${limitedByLines.trimEnd()}\n\n...` : limitedByLines
 }
 
 interface ChatMessageProps {
@@ -71,7 +83,6 @@ interface ChatMessageProps {
   typingAgents?: TypingAgent[]
   mentionAgents?: MentionAgent[]
   currentUser?: CurrentUser
-  streamEvents?: Map<string, StreamEvent[]>
   hasBeenPlayed?: boolean
   onMarkPlayed?: () => void
   onAgentAvatarClick?: (agentId: string, agentName: string) => void
@@ -89,12 +100,11 @@ interface ChatMessageProps {
   onStopSpeak?: (messageId: string) => void
 }
 
-export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechButton = true, typingAgents, mentionAgents, currentUser, hasBeenPlayed, onMarkPlayed, onAgentAvatarClick, onTypingAgentClick, onMentionClick, onReplyClick, onExecutionDetailClick, onMentionAgent, onDeleteMessage, onStartMultiSelect, onToggleSelection, selectionMode, isSelected, disableContentCollapse = false, onStopSpeak }: ChatMessageProps) {
+export const ChatMessage = memo(function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechButton = true, typingAgents, mentionAgents, currentUser, hasBeenPlayed, onMarkPlayed, onAgentAvatarClick, onTypingAgentClick, onMentionClick, onReplyClick, onExecutionDetailClick, onMentionAgent, onDeleteMessage, onStartMultiSelect, onToggleSelection, selectionMode, isSelected, disableContentCollapse = false, onStopSpeak }: ChatMessageProps) {
   const isMobile = useIsMobile()
   const allAgents = useChatStore((s) => s.allAgents)
-  const playingVoiceMessageId = useChatStore((s) => s.playingVoiceMessageId)
+  const isCurrentlyPlaying = useChatStore((s) => s.playingVoiceMessageId === message.id)
   const setPlayingVoiceMessageId = useChatStore((s) => s.setPlayingVoiceMessageId)
-  const isCurrentlyPlaying = playingVoiceMessageId === message.id
   const senderName = message.isHuman
     ? (message.user?.username ?? '用户')
     : (message.agent?.name ?? '助手')
@@ -635,6 +645,7 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
   const renderMessageBody = (bodyClassName: string) => {
     const shouldCollapse = !disableContentCollapse && isLargeMessageContent(message.content)
     const isCollapsed = shouldCollapse && !isContentExpanded
+    const visibleContent = isCollapsed ? getCollapsedPreviewContent(message.content) : message.content
 
     return (
       <div className="relative overflow-hidden">
@@ -646,7 +657,7 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
                 isCollapsed && (isMobile ? "max-h-[300px] overflow-hidden" : "max-h-[420px] overflow-hidden")
               )}
             >
-              {renderContent(message.content)}
+              {renderContent(visibleContent)}
             </div>
           )}
           {!shouldHideContent && shouldCollapse && !isCollapsed && (
@@ -828,4 +839,4 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
       )}
     </>
   )
-}
+})
