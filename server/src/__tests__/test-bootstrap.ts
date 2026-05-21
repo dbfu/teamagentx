@@ -8,8 +8,10 @@ const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const serverRoot = path.resolve(currentDir, '../..');
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-server-tests-'));
 const databasePath = path.join(tempRoot, 'test.db');
+const sharedSkillsPath = path.join(tempRoot, 'shared-skills');
 
 process.env.DATABASE_URL = `file:${databasePath}`;
+process.env.TEAMAGENTX_SHARED_SKILLS_DIR = sharedSkillsPath;
 
 const cleanup = () => {
   fs.rmSync(tempRoot, { recursive: true, force: true });

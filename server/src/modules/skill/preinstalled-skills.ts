@@ -21,6 +21,11 @@ export const NEW_AGENT_DEFAULT_SKILLS = [
 ] as const;
 
 export function getSharedSkillsDir(): string {
+  const overrideDir = process.env.TEAMAGENTX_SHARED_SKILLS_DIR?.trim();
+  if (overrideDir) {
+    return overrideDir;
+  }
+
   return path.join(os.homedir(), '.teamagentx', 'skills');
 }
 

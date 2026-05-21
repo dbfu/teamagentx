@@ -8,7 +8,10 @@ export const BRIDGE_PLATFORM_DISPLAY_NAMES: Record<Platform, string> = {
   qq: 'QQ',
 };
 
-export function formatBridgeConversationSender(platform: string, externalId: string): string {
+export function formatBridgeConversationSender(platform: string, externalId: string, senderName?: string): string {
   const platformName = BRIDGE_PLATFORM_DISPLAY_NAMES[platform as Platform] ?? platform;
+  if (senderName && senderName.trim()) {
+    return `${platformName}·${senderName.trim()}`;
+  }
   return `${platformName}:${externalId}`;
 }

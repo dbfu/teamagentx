@@ -230,6 +230,147 @@ export interface AddAgentToChatRoomRequest {
   injectGroupHistory?: boolean
 }
 
+export interface TemplateCapabilityDescriptor {
+  agentRef: string
+  capabilityType: 'text' | 'image' | 'audio'
+  required: boolean
+  tool: string | null
+  providerProtocol: 'anthropic' | 'openai' | 'custom' | null
+  modelType: 'text' | 'image' | 'audio'
+}
+
+export interface TemplateSkillFile {
+  path: string
+  content: string
+}
+
+export interface TemplateSkillPackage {
+  slug: string
+  name: string
+  description: string
+  files: TemplateSkillFile[]
+  origin: Record<string, unknown> | null
+}
+
+export interface TemplateSkillUsage {
+  agentId: string
+  slug: string
+}
+
+export interface DegradedTemplateSkill {
+  slug: string
+  reason: string
+}
+
+export interface TemplatePackageManifest {
+  schemaVersion: '1.0'
+  templateId: string
+  version: string
+  title: string
+  summary?: string | null
+  source: {
+    type: 'local' | 'market'
+    author?: string | null
+    channel?: string | null
+  }
+  contents: {
+    group: boolean
+    agents: number
+    categories: number
+    skills: number
+    cronTasks: number
+  }
+}
+
+export interface TemplatePackageSnapshot {
+  room: {
+    name: string
+    description: string | null
+    rules: string | null
+    defaultAgentId: string | null
+    agentTriggerMode: 'auto' | 'manual'
+  }
+  agents: Array<{
+    id: string
+    name: string
+    prompt: string
+    type: string
+    acpTool: string | null
+    categoryId?: string | null
+    workDir: string | null
+    proxyConfig: string | null
+    codexModel: string | null
+    claudeModel: string | null
+    llmProviderId: string | null
+    speechConfig: Record<string, unknown> | null
+    capabilities: Array<{
+      capabilityType: 'image' | 'audio'
+      enabled: boolean
+      llmProviderId: string | null
+      modelType: 'image' | 'audio'
+    }>
+  }>
+  categories: Array<{
+    id: string
+    name: string
+    description: string | null
+    sortOrder: number
+  }>
+  cronTasks: Array<{
+    id: string
+    name: string
+    payload: string
+  }>
+}
+
+export interface TemplatePackageExportPayload {
+  manifest: TemplatePackageManifest
+  snapshot: TemplatePackageSnapshot
+  capabilityDescriptors: TemplateCapabilityDescriptor[]
+  skills: TemplateSkillPackage[]
+  skillUsages: TemplateSkillUsage[]
+  degradedSkills: DegradedTemplateSkill[]
+}
+
+export interface TemplatePreviewSummary {
+  groupName: string
+  agents: number
+  categories: number
+  skills: number
+  cronTasks: number
+}
+
+export interface TemplatePreviewResult {
+  manifest: TemplatePackageManifest
+  summary: TemplatePreviewSummary
+  conflicts: {
+    duplicateTemplate: boolean
+    allowedActions?: Array<'cancel' | 'create_copy' | 'rename_copy'>
+    suggestedGroupName: string
+  }
+  compatibility: {
+    resolved: Array<{
+      agentRef: string
+      capabilityType: 'text' | 'image' | 'audio'
+      providerId: string
+      providerName: string
+    }>
+    unresolved: Array<{
+      agentRef: string
+      capabilityType: 'text' | 'image' | 'audio'
+      status: 'requires_user_selection' | 'unsupported_but_importable'
+    }>
+  }
+}
+
+export interface TemplateImportResult {
+  chatRoomId: string
+  finalGroupName: string
+  importedAgents: number
+  unresolvedCount: number
+  importedSkills: number
+}
+
 interface ApiResponse<T> {
   success: boolean
   data?: T
@@ -452,6 +593,47 @@ export const chatRoomApi = {
   async unpin(chatRoomId: string): Promise<ApiResponse<ChatRoom>> {
     return request<ChatRoom>(`/chatrooms/${chatRoomId}/unpin`, {
       method: 'PATCH',
+    })
+  },
+}
+
+export const templatePackageApi = {
+  async export(input: {
+    chatRoomId: string
+    packageTitle?: string
+    packageSummary?: string
+    includeSkills?: boolean
+    includeCronTasks?: boolean
+  }): Promise<ApiResponse<TemplatePackageExportPayload>> {
+    return request<TemplatePackageExportPayload>('/template-packages/export', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+  },
+
+  async preview(input: {
+    manifest: TemplatePackageManifest
+    desiredGroupName: string
+    capabilityDescriptors?: TemplateCapabilityDescriptor[]
+  }): Promise<ApiResponse<TemplatePreviewResult>> {
+    return request<TemplatePreviewResult>('/template-packages/preview', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+  },
+
+  async import(input: {
+    manifest: TemplatePackageManifest
+    snapshot: TemplatePackageSnapshot
+    skills?: TemplateSkillPackage[]
+    skillUsages?: TemplateSkillUsage[]
+    capabilityDescriptors?: TemplateCapabilityDescriptor[]
+    desiredGroupName: string
+    duplicateAction: 'cancel' | 'create_copy' | 'rename_copy'
+  }): Promise<ApiResponse<TemplateImportResult>> {
+    return request<TemplateImportResult>('/template-packages/import', {
+      method: 'POST',
+      body: JSON.stringify(input),
     })
   },
 }

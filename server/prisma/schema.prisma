@@ -406,6 +406,39 @@ model CronTaskExecution {
   @@index([cronTaskId, triggeredAt])
 }
 
+model TemplatePackage {
+  id                String   @id @default(uuid())
+  templateId        String
+  version           String
+  title             String
+  summary           String?
+  sourceType        String
+  sourceLabel       String?
+  manifestJson      String
+  compatibilityJson String?
+  createdBy         String?
+  createdAt         DateTime @default(now())
+
+  @@index([templateId, version])
+}
+
+// chatRoomId 故意不加外键约束，以便群组删除后保留历史导入记录供审计
+model TemplateImportRecord {
+  id              String   @id @default(uuid())
+  templateId      String
+  version         String
+  chatRoomId      String
+  importedBy      String?
+  importAction    String
+  sourceLabel     String?
+  unresolvedCount Int      @default(0)
+  metadataJson    String?
+  importedAt      DateTime @default(now())
+
+  @@index([templateId, version])
+  @@index([chatRoomId])
+}
+
 // 消息附件（图片等）
 model Attachment {
   id        String         @id @default(uuid())

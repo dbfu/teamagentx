@@ -15,6 +15,7 @@ import {
 } from '../core/agent/agent-handler/index.js';
 import { chatRoomService } from '../modules/chatroom/chatroom.service.js';
 import { formatBridgeConversationSender } from '../modules/bridge/bridge-platform-display.js';
+import { taskQueueService } from '../modules/task-queue/task-queue.service.js';
 import prisma from '../lib/prisma.js';
 
 const messageSchema = {
@@ -79,6 +80,7 @@ async function applyBridgeMessageSenders<T extends MessageListItem>(messages: T[
       messageId: true,
       platform: true,
       externalId: true,
+      agentName: true,
     },
   });
   if (bridgeEvents.length === 0) return messages;
@@ -97,7 +99,7 @@ async function applyBridgeMessageSenders<T extends MessageListItem>(messages: T[
       user: {
         id: `bridge:${bridgeEvent.platform}:${bridgeEvent.externalId}`,
         socketId: '',
-        username: formatBridgeConversationSender(bridgeEvent.platform, bridgeEvent.externalId),
+        username: formatBridgeConversationSender(bridgeEvent.platform, bridgeEvent.externalId, bridgeEvent.agentName ?? undefined),
       },
     };
   }) as T[];

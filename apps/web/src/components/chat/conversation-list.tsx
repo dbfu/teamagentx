@@ -3,9 +3,11 @@ import { ChatRoom, chatRoomApi } from '@/lib/agent-api'
 import { AgentAvatarImage } from '@/lib/agent-avatars'
 import { GroupAvatarImage } from '@/lib/group-avatars'
 import { cn, formatDateTime } from '@/lib/utils'
-import { Copy, Loader2, MessageSquare, Pin, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { Copy, Import, Loader2, MessageSquare, Pin, Plus, RefreshCw, Trash2, Upload } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
+import { GroupTemplateExportModal } from './group-template-export-modal'
+import { GroupTemplateImportModal } from './group-template-import-modal'
 
 interface ConversationListProps {
   chatRooms: ChatRoom[]
@@ -31,6 +33,9 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
   const [deleting, setDeleting] = useState(false)
   // 删除确认对话框状态
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [showImportModal, setShowImportModal] = useState(false)
+  const [showExportModal, setShowExportModal] = useState(false)
+  const [exportTargetRoom, setExportTargetRoom] = useState<ChatRoom | null>(null)
 
   // 格式化未读数显示
   const formatUnreadCount = (count: number) => {
@@ -135,6 +140,7 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
   }
 
   return (
+    <>
     <div className={cn("flex h-full select-none flex-col bg-background overflow-x-hidden", isMobile ? "w-full border-0" : "w-72 shrink-0 border-r border-border")}>
       {/* Header - 支持拖动 */}
       {!isMobile && (
@@ -147,6 +153,17 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
             <span className="text-xl font-semibold text-foreground">消息</span>
           </div>
           <div className="flex items-center gap-1">
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                setShowImportModal(true)
+              }}
+              className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              title="导入模板包"
+              style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+            >
+              <Import className="size-4" />
+            </button>
               {onCreateChatRoom && (
                 <button
                   onClick={(e) => {
@@ -353,6 +370,17 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
               复制群聊
             </button>
             <button
+              onClick={() => {
+                setExportTargetRoom(contextMenu.room)
+                setShowExportModal(true)
+                handleCloseContextMenu()
+              }}
+              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-popover-foreground hover:bg-accent"
+            >
+              <Upload className="size-4" />
+              导出模板包
+            </button>
+            <button
               onClick={handleDeleteClick}
               className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
             >
@@ -391,5 +419,25 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
         </>
       )}
     </div>
+    <GroupTemplateImportModal
+      isOpen={showImportModal}
+      onClose={() => setShowImportModal(false)}
+      onImported={async (chatRoomId) => {
+        setShowImportModal(false)
+        onRefresh?.()
+        onSelect(chatRoomId)
+      }}
+    />
+    {exportTargetRoom && (
+      <GroupTemplateExportModal
+        isOpen={showExportModal}
+        chatRoom={exportTargetRoom}
+        onClose={() => {
+          setShowExportModal(false)
+          setExportTargetRoom(null)
+        }}
+      />
+    )}
+    </>
   )
 }

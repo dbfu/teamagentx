@@ -29,4 +29,7 @@ export const config = {
     edgeTtsBinary: process.env.EDGE_TTS_BINARY || 'edge-tts',
     edgeTtsDefaultVoice: process.env.EDGE_TTS_DEFAULT_VOICE || 'zh-CN-XiaoxiaoNeural',
   },
+  // TEAMAGENTX_SHARED_SKILLS_DIR: 覆盖模板包技能的共享目录（默认 ~/.teamagentx/skills），
+  // 测试时通过 test-bootstrap.ts 设置为临时目录
+  sharedSkillsDir: process.env.TEAMAGENTX_SHARED_SKILLS_DIR || '',
 };

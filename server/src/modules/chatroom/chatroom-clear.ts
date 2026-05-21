@@ -4,7 +4,6 @@ import { agentMemoryService } from '../agent-memory/agent-memory.service.js';
 import { checkpointService } from '../checkpoint/checkpoint.service.js';
 import { taskQueueService } from '../task-queue/task-queue.service.js';
 import { executionRecordService } from '../execution-record/execution-record.service.js';
-import { todoService } from '../todo/todo.service.js';
 import { chatRoomService } from '../chatroom/chatroom.service.js';
 import {
   clearExecutorCache,
@@ -36,7 +35,7 @@ export async function clearChatRoom(chatRoomId: string): Promise<ClearChatRoomRe
   const affectedUserIds = [...new Set(
     affectedTodos.map(t => t.ownerUserId).filter((id): id is string => id !== null),
   )];
-  await todoService.deleteByChatRoomId(chatRoomId);
+  await prisma.todo.deleteMany({ where: { chatRoomId } });
 
   // 删除执行记录
   await executionRecordService.deleteByChatRoomId(chatRoomId);
