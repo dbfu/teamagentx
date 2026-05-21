@@ -30,6 +30,8 @@ interface ChatMessagesListProps {
   chatRoomId: string  // 群聊 ID，用于保存滚动位置
   messages: Message[]
   loading: boolean
+  loadingOlderMessages: boolean
+  hasOlderMessages: boolean
   messagesEndRef: React.RefObject<HTMLDivElement | null>
   typingAgents: Map<string, { agentId: string; agentName: string; status?: 'pending' | 'executing' | 'cancelled' }[]>
   streamEvents: Map<string, StreamEvent[]>
@@ -44,6 +46,7 @@ interface ChatMessagesListProps {
   onMentionAgent?: (agentId: string, agentName: string) => void
   onDeleteMessage?: (messageId: string) => Promise<void> | void
   onDeleteMessages?: (messageIds: string[]) => Promise<void> | void
+  onLoadOlderMessages?: () => Promise<void> | void
   currentUser?: CurrentUser
 }
 
@@ -51,6 +54,8 @@ export function ChatMessagesList({
   chatRoomId,
   messages,
   loading,
+  loadingOlderMessages,
+  hasOlderMessages,
   messagesEndRef,
   typingAgents,
   streamEvents,
@@ -65,6 +70,7 @@ export function ChatMessagesList({
   onMentionAgent,
   onDeleteMessage,
   onDeleteMessages,
+  onLoadOlderMessages,
   currentUser,
 }: ChatMessagesListProps) {
   const isMobile = useIsMobile()
@@ -115,6 +121,7 @@ export function ChatMessagesList({
   const [deletingSelected, setDeletingSelected] = useState(false)
   // 上一次消息数量，用于检测新消息
   const prevMessageCountRef = useRef(messages.length)
+  const prevLastMessageIdRef = useRef(messages[messages.length - 1]?.id ?? null)
   // 记录上一次的群聊 ID，用于检测群聊切换
   const prevChatRoomIdRef = useRef(chatRoomId)
   // 是否已完成初始滚动位置恢复（切换群聊时重置）
@@ -125,6 +132,8 @@ export function ChatMessagesList({
   const initialMessageIdsRef = useRef<Set<string>>(new Set())
   const initialCapturedRef = useRef(false)
   const recentlyStoppedVoiceMessageIdsRef = useRef<Map<string, number>>(new Map())
+  const prependScrollHeightRef = useRef<number | null>(null)
+  const hasUserScrollIntentRef = useRef(false)
 
   const selectedCount = selectedMessageIds.size
 
@@ -176,8 +185,47 @@ export function ChatMessagesList({
     return true
   }, [])
 
+  const tryLoadOlderMessages = useCallback(() => {
+    const container = containerRef.current
+    if (
+      container
+      && container.scrollTop < 80
+      && hasUserScrollIntentRef.current
+      && hasOlderMessages
+      && !loading
+      && !loadingOlderMessages
+      && messages.length > 0
+    ) {
+      prependScrollHeightRef.current = container.scrollHeight
+      void onLoadOlderMessages?.()
+    }
+  }, [hasOlderMessages, loading, loadingOlderMessages, messages.length, onLoadOlderMessages])
+
+  const markUserScrollIntent = useCallback(() => {
+    hasUserScrollIntentRef.current = true
+  }, [])
+
+  const handleWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+    markUserScrollIntent()
+    if (event.deltaY < 0) {
+      tryLoadOlderMessages()
+    }
+  }, [markUserScrollIntent, tryLoadOlderMessages])
+
+  const handleTouchStart = useCallback(() => {
+    markUserScrollIntent()
+  }, [markUserScrollIntent])
+
+  const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (['ArrowUp', 'PageUp', 'Home'].includes(event.key) || (event.key === ' ' && event.shiftKey)) {
+      markUserScrollIntent()
+      tryLoadOlderMessages()
+    }
+  }, [markUserScrollIntent, tryLoadOlderMessages])
+
   // 滚动事件处理
   const handleScroll = useCallback(() => {
+    tryLoadOlderMessages()
     const nearBottom = checkIsNearBottom()
     setIsNearBottom(nearBottom)
 
@@ -185,7 +233,25 @@ export function ChatMessagesList({
     if (nearBottom && showNewMessageHint) {
       setShowNewMessageHint(false)
     }
-  }, [checkIsNearBottom, showNewMessageHint])
+  }, [checkIsNearBottom, showNewMessageHint, tryLoadOlderMessages])
+
+  useEffect(() => {
+    if (loadingOlderMessages || prependScrollHeightRef.current === null) return
+
+    const previousScrollHeight = prependScrollHeightRef.current
+    const animationFrame = requestAnimationFrame(() => {
+      const container = containerRef.current
+      if (!container) return
+
+      const heightDelta = container.scrollHeight - previousScrollHeight
+      if (heightDelta > 0) {
+        container.scrollTop += heightDelta
+      }
+      prependScrollHeightRef.current = null
+    })
+
+    return () => cancelAnimationFrame(animationFrame)
+  }, [loadingOlderMessages, messages.length])
 
   // 滚动到底部
   const scrollToBottom = useCallback(() => {
@@ -226,8 +292,12 @@ export function ChatMessagesList({
 
   // 检测新消息
   useEffect(() => {
-    const hasNewMessages = messages.length > prevMessageCountRef.current
+    const previousMessageCount = prevMessageCountRef.current
+    const previousLastMessageId = prevLastMessageIdRef.current
+    const currentLastMessageId = messages[messages.length - 1]?.id ?? null
+    const hasNewMessages = messages.length > previousMessageCount && currentLastMessageId !== previousLastMessageId
     prevMessageCountRef.current = messages.length
+    prevLastMessageIdRef.current = currentLastMessageId
 
     if (hasNewMessages) {
       if (isNearBottom) {
@@ -255,6 +325,10 @@ export function ChatMessagesList({
       initialMessageIdsRef.current = new Set()
       initialCapturedRef.current = false
       recentlyStoppedVoiceMessageIdsRef.current.clear()
+      hasUserScrollIntentRef.current = false
+      prependScrollHeightRef.current = null
+      prevMessageCountRef.current = messages.length
+      prevLastMessageIdRef.current = messages[messages.length - 1]?.id ?? null
       // 重置底部状态
       setIsNearBottom(true)
       setShowNewMessageHint(false)
@@ -528,9 +602,14 @@ export function ChatMessagesList({
       <div
         ref={containerRef}
         onScroll={handleScroll}
+        onWheel={handleWheel}
+        onPointerDown={markUserScrollIntent}
+        onTouchStart={handleTouchStart}
+        onKeyDown={handleKeyDown}
+        tabIndex={0}
         style={{ scrollbarGutter: 'stable' }}
         className={cn(
-          messages.length === 0 ? 'relative flex-1' : 'scrollbar-hover relative flex-1 overflow-y-auto py-4',
+          messages.length === 0 ? 'relative flex-1 focus:outline-none' : 'scrollbar-hover relative flex-1 overflow-y-auto py-4 focus:outline-none',
           isMobile && 'min-h-0'
         )}
       >
@@ -543,95 +622,103 @@ export function ChatMessagesList({
             暂无消息
           </div>
         ) : (
-          messages.map((message) => (
-            <div
-              key={message.id}
-              data-message-id={message.id}
-              onClick={() => {
-                if (isMultiSelectMode) toggleMessageSelection(message.id)
-              }}
-              className={cn(
-                "relative transition-colors",
-                isMultiSelectMode && "cursor-pointer",
-                selectedMessageIds.has(message.id) && "bg-blue-50/70 dark:bg-blue-950/20"
-              )}
-              ref={(el) => {
-                if (el) {
-                  messageRefs.current.set(message.id, el)
-                } else {
-                  messageRefs.current.delete(message.id)
-                }
-              }}
-            >
-              {isMultiSelectMode && (
-                <div
-                  role="button"
-                  tabIndex={0}
-                  data-message-row-select-overlay
-                  aria-pressed={selectedMessageIds.has(message.id)}
-                  aria-label={selectedMessageIds.has(message.id) ? '取消选择消息' : '选择消息'}
-                  className="absolute inset-0 z-20 cursor-pointer"
-                  onClick={(e) => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    toggleMessageSelection(message.id)
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key !== 'Enter' && e.key !== ' ') return
-                    e.preventDefault()
-                    e.stopPropagation()
-                    toggleMessageSelection(message.id)
-                  }}
-                />
-              )}
-              <ChatMessage
-                message={message}
-                isRight={message.isHuman}
-                replyTo={findReplyTo(message.replyMessageId)}
-                replyCount={replyCounts.get(message.id) ?? 0}
-                typingAgents={typingAgents.get(message.id)}
-                streamEvents={streamEvents}
-                mentionAgents={mentionAgents}
-                currentUser={currentUser}
-                hasBeenPlayed={playedIds.has(message.id)}
-                onMarkPlayed={() => markVoiceMessagesPlayed(chatRoomId, [message.id])}
-                onStopSpeak={stopCurrentPlaybackSession}
-                onAgentAvatarClick={onAgentAvatarClick}
-                onTypingAgentClick={onTypingAgentClick}
-                onMentionClick={onMentionClick}
-                onReplyClick={onReplyClick}
-                onExecutionDetailClick={onExecutionDetailClick}
-                onMentionAgent={onMentionAgent}
-                onDeleteMessage={async (messageId) => {
-                  await onDeleteMessage?.(messageId)
-                  const msg = messages.find((m) => m.id === messageId)
-                  if (!msg || msg.isHuman || !msg.agentId) return
-                  const agent = allAgentsRef.current.find((a) => a.id === msg.agentId)
-                  const vc = agent?.speechConfig ? toVoicePanelConfig(agent.speechConfig) : null
-                  if (!vc?.enabled || vc.provider !== 'openai-compatible-tts') return
-                  const text = normalizeSpeechText(msg.content)
-                  if (!text || text.length > PREWARM_MAX_TEXT_LENGTH) return
-                  deleteTtsCache(chatRoomId, buildTtsCacheKey({
-                    provider: vc.provider,
-                    model: vc.model ?? null,
-                    voice: vc.voiceId ?? null,
-                    speed: vc.speed ?? 1.3,
-                    format: vc.format ?? null,
-                    text,
-                  }))
+          <>
+            {loadingOlderMessages && (
+              <div className="flex items-center justify-center gap-2 py-2 text-xs text-muted-foreground">
+                <Loader2 className="size-3.5 animate-spin" />
+                <span>加载历史消息...</span>
+              </div>
+            )}
+            {messages.map((message) => (
+              <div
+                key={message.id}
+                data-message-id={message.id}
+                onClick={() => {
+                  if (isMultiSelectMode) toggleMessageSelection(message.id)
                 }}
-                onStartMultiSelect={startMultiSelect}
-                onToggleSelection={toggleMessageSelection}
-                selectionMode={isMultiSelectMode}
-                isSelected={selectedMessageIds.has(message.id)}
-              />
-              {isMultiSelectMode && (
-                <div className="pointer-events-none absolute left-3 top-4 z-30 flex size-5 items-center justify-center rounded-full border border-blue-500 bg-background text-blue-500 shadow-sm">
-                  {selectedMessageIds.has(message.id) && <Check className="size-3.5" />}
-                </div>
-              )}
-            </div>
-          ))
+                className={cn(
+                  "relative transition-colors",
+                  isMultiSelectMode && "cursor-pointer",
+                  selectedMessageIds.has(message.id) && "bg-blue-50/70 dark:bg-blue-950/20"
+                )}
+                ref={(el) => {
+                  if (el) {
+                    messageRefs.current.set(message.id, el)
+                  } else {
+                    messageRefs.current.delete(message.id)
+                  }
+                }}
+              >
+                {isMultiSelectMode && (
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    data-message-row-select-overlay
+                    aria-pressed={selectedMessageIds.has(message.id)}
+                    aria-label={selectedMessageIds.has(message.id) ? '取消选择消息' : '选择消息'}
+                    className="absolute inset-0 z-20 cursor-pointer"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      toggleMessageSelection(message.id)
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter' && e.key !== ' ') return
+                      e.preventDefault()
+                      e.stopPropagation()
+                      toggleMessageSelection(message.id)
+                    }}
+                  />
+                )}
+                <ChatMessage
+                  message={message}
+                  isRight={message.isHuman}
+                  replyTo={findReplyTo(message.replyMessageId)}
+                  replyCount={replyCounts.get(message.id) ?? 0}
+                  typingAgents={typingAgents.get(message.id)}
+                  streamEvents={streamEvents}
+                  mentionAgents={mentionAgents}
+                  currentUser={currentUser}
+                  hasBeenPlayed={playedIds.has(message.id)}
+                  onMarkPlayed={() => markVoiceMessagesPlayed(chatRoomId, [message.id])}
+                  onStopSpeak={stopCurrentPlaybackSession}
+                  onAgentAvatarClick={onAgentAvatarClick}
+                  onTypingAgentClick={onTypingAgentClick}
+                  onMentionClick={onMentionClick}
+                  onReplyClick={onReplyClick}
+                  onExecutionDetailClick={onExecutionDetailClick}
+                  onMentionAgent={onMentionAgent}
+                  onDeleteMessage={async (messageId) => {
+                    await onDeleteMessage?.(messageId)
+                    const msg = messages.find((m) => m.id === messageId)
+                    if (!msg || msg.isHuman || !msg.agentId) return
+                    const agent = allAgentsRef.current.find((a) => a.id === msg.agentId)
+                    const vc = agent?.speechConfig ? toVoicePanelConfig(agent.speechConfig) : null
+                    if (!vc?.enabled || vc.provider !== 'openai-compatible-tts') return
+                    const text = normalizeSpeechText(msg.content)
+                    if (!text || text.length > PREWARM_MAX_TEXT_LENGTH) return
+                    deleteTtsCache(chatRoomId, buildTtsCacheKey({
+                      provider: vc.provider,
+                      model: vc.model ?? null,
+                      voice: vc.voiceId ?? null,
+                      speed: vc.speed ?? 1.3,
+                      format: vc.format ?? null,
+                      text,
+                    }))
+                  }}
+                  onStartMultiSelect={startMultiSelect}
+                  onToggleSelection={toggleMessageSelection}
+                  selectionMode={isMultiSelectMode}
+                  isSelected={selectedMessageIds.has(message.id)}
+                />
+                {isMultiSelectMode && (
+                  <div className="pointer-events-none absolute left-3 top-4 z-30 flex size-5 items-center justify-center rounded-full border border-blue-500 bg-background text-blue-500 shadow-sm">
+                    {selectedMessageIds.has(message.id) && <Check className="size-3.5" />}
+                  </div>
+                )}
+              </div>
+            ))}
+          </>
         )}
         <div ref={messagesEndRef} className="h-1" />
       </div>
