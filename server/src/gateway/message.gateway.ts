@@ -2,6 +2,7 @@ import { FastifyInstance, FastifyReply } from 'fastify';
 import { messageService } from '../modules/message/message.service.js';
 import { executionRecordService } from '../modules/execution-record/execution-record.service.js';
 import { checkpointService } from '../modules/checkpoint/checkpoint.service.js';
+import { taskQueueService } from '../modules/task-queue/task-queue.service.js';
 import { agentMemoryService } from '../modules/agent-memory/agent-memory.service.js';
 import { abortControllers, processingMap } from '../core/agent/agent-handler/cache.js';
 import {
@@ -60,9 +61,18 @@ const messageSchema = {
 
 interface MessageQuery {
   chatRoomId?: string;
+  beforeMessageId?: string;
+  take?: number;
 }
 
 type MessageListItem = Awaited<ReturnType<typeof messageService.findMany>>[number];
+const DEFAULT_MESSAGE_PAGE_SIZE = 100;
+const MAX_MESSAGE_PAGE_SIZE = 100;
+
+function normalizeMessagePageSize(value?: number) {
+  if (!value || !Number.isFinite(value)) return DEFAULT_MESSAGE_PAGE_SIZE;
+  return Math.min(Math.max(Math.floor(value), 1), MAX_MESSAGE_PAGE_SIZE);
+}
 
 async function applyBridgeMessageSenders<T extends MessageListItem>(messages: T[]): Promise<T[]> {
   const messageIds = messages
@@ -115,6 +125,8 @@ export async function messageGateway(app: FastifyInstance) {
         type: 'object',
         properties: {
           chatRoomId: { type: 'string', description: 'Filter by chatRoom ID' },
+          beforeMessageId: { type: 'string', description: 'Load messages older than this message ID' },
+          take: { type: 'integer', minimum: 1, maximum: MAX_MESSAGE_PAGE_SIZE, description: 'Page size' },
         },
       },
       response: {
@@ -123,19 +135,42 @@ export async function messageGateway(app: FastifyInstance) {
           properties: {
             success: { type: 'boolean' },
             data: { type: 'array', items: messageSchema },
+            pagination: {
+              type: 'object',
+              properties: {
+                hasMore: { type: 'boolean' },
+                limit: { type: 'integer' },
+                beforeMessageId: { type: 'string', nullable: true },
+              },
+            },
           },
         },
       },
     },
   }, async (request, reply) => {
-    const { chatRoomId } = request.query;
+    const { chatRoomId, beforeMessageId } = request.query;
+    const take = normalizeMessagePageSize(request.query.take);
 
     if (chatRoomId) {
-      const messages = await messageService.findByChatRoomId(chatRoomId, { take: 100 });
-      return reply.send({ success: true, data: await applyBridgeMessageSenders(messages) });
+      const messages = await messageService.findByChatRoomId(chatRoomId, {
+        take: take + 1,
+        order: 'desc',
+        beforeMessageId,
+      });
+      const hasMore = messages.length > take;
+      const page = (hasMore ? messages.slice(0, take) : messages).reverse();
+      return reply.send({
+        success: true,
+        data: await applyBridgeMessageSenders(page),
+        pagination: {
+          hasMore,
+          limit: take,
+          beforeMessageId: page[0]?.id ?? null,
+        },
+      });
     }
 
-    const messages = await messageService.findMany({ take: 100 });
+    const messages = await messageService.findMany({ take });
     return reply.send({ success: true, data: await applyBridgeMessageSenders(messages) });
   });
 

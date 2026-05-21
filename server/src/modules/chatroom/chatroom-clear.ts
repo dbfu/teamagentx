@@ -27,7 +27,7 @@ export async function clearChatRoom(chatRoomId: string): Promise<ClearChatRoomRe
   // 删除 task queue
   await taskQueueService.deleteByChatRoomId(chatRoomId);
 
-  // 删除 todos
+  // 删除遗留 todo 数据。todo runtime 已移除，这里直接用 Prisma 避免恢复 todo service。
   const affectedTodos = await prisma.todo.findMany({
     where: { chatRoomId },
     select: { ownerUserId: true },

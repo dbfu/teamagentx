@@ -122,6 +122,8 @@ interface ChatStore {
   messages: Message[]
   inputValue: string
   loading: boolean
+  loadingOlderMessages: boolean
+  hasOlderMessages: boolean
   allAgents: Agent[]
 
   // 面板状态
@@ -195,6 +197,8 @@ interface ChatStore {
   setExecutionRecords: (records: ExecutionRecord[]) => void
   setRecordsLoading: (loading: boolean) => void
   setLoading: (loading: boolean) => void
+  setLoadingOlderMessages: (loading: boolean) => void
+  setHasOlderMessages: (hasMore: boolean) => void
   setAllAgents: (agents: Agent[]) => void
   setTypingAgents: (agents: Map<string, { agentId: string; agentName: string; status?: 'pending' | 'executing' | 'cancelled' }[]>) => void
   setStreamingContent: (content: Map<string, string>) => void
@@ -221,6 +225,7 @@ interface ChatStore {
   markVoiceMessagesHandled: (chatRoomId: string, messageIds: string[]) => void
   markVoiceMessagesPlayed: (chatRoomId: string, messageIds: string[]) => void
   loadMessages: (chatRoomId: string) => Promise<void>
+  loadOlderMessages: (chatRoomId: string) => Promise<void>
   loadAllAgents: () => Promise<void>
   loadDebugInfo: (chatRoomId: string, agentName: string) => Promise<void>
   loadExecutionRecords: (chatRoomId: string, agentId: string) => Promise<void>
@@ -271,6 +276,8 @@ export const useChatStore = create<ChatStore>()(
   messages: [],
   inputValue: '',
   loading: false,
+  loadingOlderMessages: false,
+  hasOlderMessages: true,
   allAgents: [],
 
   // 面板状态
@@ -342,6 +349,8 @@ export const useChatStore = create<ChatStore>()(
   setExecutionRecords: (records) => set({ executionRecords: records }),
   setRecordsLoading: (loading) => set({ recordsLoading: loading }),
   setLoading: (loading) => set({ loading: loading }),
+  setLoadingOlderMessages: (loading) => set({ loadingOlderMessages: loading }),
+  setHasOlderMessages: (hasMore) => set({ hasOlderMessages: hasMore }),
   setAllAgents: (agents) => set({ allAgents: agents }),
   setTypingAgents: (agents) => set({ typingAgents: agents }),
   setStreamingContent: (content) => set({ streamingContent: content }),
@@ -418,14 +427,44 @@ export const useChatStore = create<ChatStore>()(
 
   // API calls
   loadMessages: async (chatRoomId) => {
-    set({ loading: true })
+    set({ loading: true, loadingOlderMessages: false, hasOlderMessages: true })
     try {
       const response = await messageApi.getAll(chatRoomId)
       if (response.success && response.data) {
-        set({ messages: response.data })
+        set({
+          messages: response.data,
+          hasOlderMessages: response.pagination?.hasMore ?? response.data.length >= 100,
+        })
       }
     } finally {
       set({ loading: false })
+    }
+  },
+
+  loadOlderMessages: async (chatRoomId) => {
+    const { messages, loading, loadingOlderMessages, hasOlderMessages } = get()
+    if (loading || loadingOlderMessages || !hasOlderMessages || messages.length === 0) return
+
+    const beforeMessageId = messages[0].id
+    set({ loadingOlderMessages: true })
+    try {
+      const response = await messageApi.getAll(chatRoomId, { beforeMessageId })
+      if (response.success && response.data) {
+        set((state) => {
+          if (state.messages[0]?.id !== beforeMessageId) {
+            return state
+          }
+
+          const existingIds = new Set(state.messages.map((message) => message.id))
+          const olderMessages = response.data!.filter((message) => !existingIds.has(message.id))
+          return {
+            messages: [...olderMessages, ...state.messages],
+            hasOlderMessages: response.pagination?.hasMore ?? response.data!.length >= 100,
+          }
+        })
+      }
+    } finally {
+      set({ loadingOlderMessages: false })
     }
   },
 
@@ -720,6 +759,8 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
   const messages = useChatStore((s) => s.messages)
   const inputValue = useChatStore((s) => s.inputValue)
   const loading = useChatStore((s) => s.loading)
+  const loadingOlderMessages = useChatStore((s) => s.loadingOlderMessages)
+  const hasOlderMessages = useChatStore((s) => s.hasOlderMessages)
   const allAgents = useChatStore((s) => s.allAgents)
   const sidePanelMode = useChatStore((s) => s.sidePanelMode)
   const debugInfo = useChatStore((s) => s.debugInfo)
@@ -763,6 +804,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
   const setStreamingContent = useChatStore((s) => s.setStreamingContent)
   const setStreamEvents = useChatStore((s) => s.setStreamEvents)
   const loadMessages = useChatStore((s) => s.loadMessages)
+  const loadOlderMessages = useChatStore((s) => s.loadOlderMessages)
   const loadAllAgents = useChatStore((s) => s.loadAllAgents)
   const loadDebugInfo = useChatStore((s) => s.loadDebugInfo)
   const loadExecutionRecords = useChatStore((s) => s.loadExecutionRecords)
@@ -770,8 +812,6 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
   const addMessage = useChatStore((s) => s.addMessage)
   const getAvailableAgents = useChatStore((s) => s.getAvailableAgents)
   const getMentionAgents = useChatStore((s) => s.getMentionAgents)
-  const getReplyCounts = useChatStore((s) => s.getReplyCounts)
-  const findReplyTo = useChatStore((s) => s.findReplyTo)
   const getReplies = useChatStore((s) => s.getReplies)
   const setSelectedReplyMessage = useChatStore((s) => s.setSelectedReplyMessage)
   const setAgentStatuses = useChatStore((s) => s.setAgentStatuses)
@@ -1378,10 +1418,8 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     () => getMentionAgents(chatRoomAgents),
     [getMentionAgents, chatRoomAgents]
   )
-  const replyCounts = useMemo(() => getReplyCounts(), [messages, getReplyCounts])
-
   // 处理函数
-  const handleSend = useCallback(() => {
+  const handleSend = useCallback(async () => {
     // 直接从 store 获取最新值，避免闭包延迟问题
     const { inputValue: currentInputValue, pendingImages: currentPendingImages } = useChatStore.getState()
 
@@ -1394,6 +1432,20 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
 
     // 必须有内容或图片才能发送
     if (!trimmedInput && uploadedImages.length === 0) return
+
+    const isRoomNewCommand =
+      trimmedInput.toLowerCase() === '/new' &&
+      uploadedImages.length === 0 &&
+      getMentionedAgentNames(trimmedInput).length === 0
+    if (isRoomNewCommand) {
+      await clearMessages(chatRoom.id)
+      setInputValue('')
+      useChatStore.getState().setForceScrollToBottom(true)
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur()
+      }
+      return
+    }
 
     if (
       !chatRoom.isQuickChatRoom &&
@@ -1450,7 +1502,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     if (document.activeElement instanceof HTMLElement) {
       document.activeElement.blur()
     }
-  }, [allAgents, chatRoom, sendMessage, setInputValue])
+  }, [allAgents, chatRoom, clearMessages, sendMessage, setInputValue])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     // 中文输入过程中不响应回车（检测 nativeEvent.isComposing）
@@ -1541,6 +1593,11 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     if (!chatRoom || !selectedRoomAgent?.chatRoomAgentId) return
     await loadContextInfo(chatRoom.id, selectedRoomAgent.chatRoomAgentId)
   }, [chatRoom, selectedRoomAgent, loadContextInfo])
+
+  const loadOlderMessagesWrapper = useCallback(async () => {
+    if (!chatRoom) return
+    await loadOlderMessages(chatRoom.id)
+  }, [chatRoom, loadOlderMessages])
 
   // 从 ExecutionRecord 恢复 streamEvents（用于页面刷新后恢复流式输出面板数据）
   const restoreStreamEventsFromRecord = useCallback(async (agentId: string) => {
@@ -1670,6 +1727,8 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     setInputValue,
     messages,
     loading,
+    loadingOlderMessages,
+    hasOlderMessages,
     typingAgents,
     streamingContent,
     streamingThinking,
@@ -1700,6 +1759,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     streamEvents,
     agentStatuses,
     executingChatRooms,
+    loadOlderMessages: loadOlderMessagesWrapper,
     handleSend,
     handleKeyDown,
     handleAddAgents,
@@ -1710,8 +1770,6 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     handleTypingAgentClick,
     handleReplyClick,
     handleExecutionDetailClick,
-    findReplyTo,
-    replyCounts,
     getReplies,
     messagesEndRef,
     loadDebugInfo: loadDebugInfoWrapper,

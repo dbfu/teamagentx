@@ -29,11 +29,30 @@ interface MentionData {
   end: number
 }
 
+interface SlashCommand {
+  command: string
+  title: string
+  description: string
+}
+
 // 撤销历史栈
 interface HistoryEntry {
   value: string
   cursorOffset: number
 }
+
+const SLASH_COMMANDS: SlashCommand[] = [
+  {
+    command: '/new',
+    title: '新会话',
+    description: '清除上下文并创建新的助手会话',
+  },
+  {
+    command: '/clear',
+    title: '清空上下文',
+    description: '清除当前助手的上下文记忆',
+  },
+]
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\\/]/g, '\\$&')
@@ -52,10 +71,16 @@ export function MentionInput({
   const [mentionQuery, setMentionQuery] = useState('')
   const [mentionLeft, setMentionLeft] = useState(0)
   const [selectedIndex, setSelectedIndex] = useState(0)
+  const [showSlashCommands, setShowSlashCommands] = useState(false)
+  const [slashQuery, setSlashQuery] = useState('')
+  const [slashLeft, setSlashLeft] = useState(0)
+  const [selectedCommandIndex, setSelectedCommandIndex] = useState(0)
   const editorRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const selectedItemRef = useRef<HTMLDivElement>(null)
+  const commandDropdownRef = useRef<HTMLDivElement>(null)
+  const selectedCommandRef = useRef<HTMLDivElement>(null)
   const isComposingRef = useRef(false)
 
   // 撤销历史栈
@@ -292,9 +317,24 @@ export function MentionInput({
     }
   }, [selectedIndex])
 
+  useEffect(() => {
+    if (selectedCommandRef.current && commandDropdownRef.current) {
+      selectedCommandRef.current.scrollIntoView({ block: 'nearest' })
+    }
+  }, [selectedCommandIndex])
+
   // 过滤助手列表
   const filteredAgents = agents
     .filter(a => !mentionQuery || a.name.toLowerCase().includes(mentionQuery.toLowerCase()))
+
+  const filteredCommands = SLASH_COMMANDS.filter((item) => {
+    const query = slashQuery.toLowerCase()
+    return (
+      !query ||
+      item.command.slice(1).toLowerCase().includes(query) ||
+      item.title.toLowerCase().includes(query)
+    )
+  })
 
   // 获取纯文本内容（正确处理 contentEditable 中的换行符）
   // contentEditable 中浏览器通常使用 <div> 或 <br> 表示换行
@@ -435,6 +475,43 @@ export function MentionInput({
       }
     }, 0)
   }, [mentionQuery, onChange, getPlainText, pushHistory, renderEditorContent])
+
+  const handleSelectSlashCommand = useCallback((item: SlashCommand) => {
+    if (!editorRef.current) return
+
+    const plainText = getPlainText()
+    const selection = window.getSelection()
+    const cursorOffset = selection?.rangeCount
+      ? (() => {
+          const range = selection.getRangeAt(0)
+          const preRange = document.createRange()
+          preRange.selectNodeContents(editorRef.current!)
+          preRange.setEnd(range.startContainer, range.startOffset)
+          return preRange.toString().length
+        })()
+      : plainText.length
+
+    const slashPos = plainText.lastIndexOf('/', cursorOffset)
+    const before = slashPos >= 0 ? plainText.slice(0, slashPos) : ''
+    const after = slashPos >= 0 ? plainText.slice(slashPos + 1 + slashQuery.length) : ''
+    const needsTrailingSpace = after.length > 0 && !after.startsWith(' ')
+    const inserted = `${item.command}${after.length === 0 || needsTrailingSpace ? ' ' : ''}`
+    const newText = before + inserted + after
+    const newCursorPos = before.length + inserted.length
+
+    pushHistory(newText, newCursorPos)
+    onChange(newText)
+    setShowSlashCommands(false)
+    setSlashQuery('')
+    setSelectedCommandIndex(0)
+
+    setTimeout(() => {
+      if (editorRef.current) {
+        editorRef.current.focus()
+        renderEditorContent(newText, newCursorPos)
+      }
+    }, 0)
+  }, [getPlainText, onChange, pushHistory, renderEditorContent, slashQuery])
 
   // 删除整个 mention
   const deleteMention = useCallback((mentionId: string) => {
@@ -579,6 +656,29 @@ export function MentionInput({
       }
     }
 
+    // 处理 slash command 选择下拉框
+    if (showSlashCommands && filteredCommands.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setSelectedCommandIndex(prev => Math.min(prev + 1, filteredCommands.length - 1))
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setSelectedCommandIndex(prev => Math.max(prev - 1, 0))
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        handleSelectSlashCommand(filteredCommands[selectedCommandIndex])
+        return
+      }
+      if (e.key === 'Escape') {
+        setShowSlashCommands(false)
+        return
+      }
+    }
+
     // 处理 mention 选择下拉框
     if (showMentions && filteredAgents.length > 0) {
       if (e.key === 'ArrowDown') {
@@ -603,7 +703,7 @@ export function MentionInput({
     }
 
     onKeyDown?.(e)
-  }, [mentions, showMentions, filteredAgents, selectedIndex, handleSelectMention, onKeyDown, deleteMention, undo, redo, renderEditorContent])
+  }, [mentions, showSlashCommands, filteredCommands, selectedCommandIndex, handleSelectSlashCommand, showMentions, filteredAgents, selectedIndex, handleSelectMention, onKeyDown, deleteMention, undo, redo, renderEditorContent])
 
   // 输入事件处理
   const handleInput = useCallback(() => {
@@ -622,6 +722,25 @@ export function MentionInput({
         })()
       : plainText.length
 
+    const lastSlashIndex = plainText.lastIndexOf('/', cursorOffset)
+    if (lastSlashIndex !== -1) {
+      const query = plainText.slice(lastSlashIndex + 1, cursorOffset)
+      const previousChar = lastSlashIndex > 0 ? plainText[lastSlashIndex - 1] : ''
+      const startsCommand = lastSlashIndex === 0 || /\s/.test(previousChar)
+      if (startsCommand && !query.includes(' ') && !query.includes('\n')) {
+        const left = getCaretCoordinates()
+        setSlashLeft(left)
+        setShowSlashCommands(true)
+        setSlashQuery(query)
+        setSelectedCommandIndex(0)
+        setShowMentions(false)
+      } else {
+        setShowSlashCommands(false)
+      }
+    } else {
+      setShowSlashCommands(false)
+    }
+
     const lastAtIndex = plainText.lastIndexOf('@', cursorOffset)
     if (lastAtIndex !== -1) {
       const query = plainText.slice(lastAtIndex + 1, cursorOffset)
@@ -631,6 +750,7 @@ export function MentionInput({
         setShowMentions(true)
         setMentionQuery(query)
         setSelectedIndex(0)
+        setShowSlashCommands(false)
       } else {
         setShowMentions(false)
       }
@@ -676,6 +796,7 @@ export function MentionInput({
     const handleClickOutside = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setShowMentions(false)
+        setShowSlashCommands(false)
       }
     }
     document.addEventListener('click', handleClickOutside)
@@ -719,6 +840,36 @@ export function MentionInput({
               <AgentAvatarImage avatar={agent.avatar ?? null} className="size-6" />
               <span className="text-sm">{agent.name}</span>
               <Bot className="ml-auto size-3 text-primary" />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Slash command suggestions */}
+      {showSlashCommands && filteredCommands.length > 0 && (
+        <div
+          ref={commandDropdownRef}
+          className="absolute bottom-full z-20 mb-1 max-h-72 w-72 overflow-y-auto rounded-lg border border-border bg-popover shadow-lg animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-2 duration-200"
+          style={{ left: `${slashLeft}px` }}
+        >
+          {filteredCommands.map((item, index) => (
+            <div
+              key={item.command}
+              ref={index === selectedCommandIndex ? selectedCommandRef : null}
+              className={cn(
+                'flex cursor-pointer items-start gap-3 px-3 py-2.5 first:rounded-t-lg last:rounded-b-lg hover:bg-blue-500/5',
+                index === selectedCommandIndex && 'bg-blue-500/5'
+              )}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleSelectSlashCommand(item)}
+            >
+              <span className="mt-0.5 inline-flex w-16 shrink-0 justify-center rounded-md bg-blue-500/10 px-1.5 py-0.5 font-mono text-xs font-medium text-blue-600">
+                {item.command}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium text-foreground">{item.title}</span>
+                <span className="block truncate text-xs text-muted-foreground">{item.description}</span>
+              </span>
             </div>
           ))}
         </div>

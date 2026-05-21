@@ -377,6 +377,16 @@ interface ApiResponse<T> {
   error?: string
 }
 
+interface MessagePagination {
+  hasMore: boolean
+  limit: number
+  beforeMessageId: string | null
+}
+
+interface MessageListResponse extends ApiResponse<Message[]> {
+  pagination?: MessagePagination
+}
+
 async function request<T>(
   endpoint: string,
   options?: RequestInit
@@ -848,8 +858,20 @@ export interface ExecutionRecord {
 
 export const messageApi = {
   // 获取消息列表
-  async getAll(chatRoomId?: string): Promise<ApiResponse<Message[]>> {
-    const url = chatRoomId ? `/messages?chatRoomId=${chatRoomId}` : '/messages'
+  async getAll(chatRoomId?: string, options?: { beforeMessageId?: string; take?: number }): Promise<MessageListResponse> {
+    if (!chatRoomId) {
+      return request<Message[]>('/messages')
+    }
+
+    const params = new URLSearchParams({ chatRoomId })
+    if (options?.beforeMessageId) {
+      params.set('beforeMessageId', options.beforeMessageId)
+    }
+    if (options?.take) {
+      params.set('take', String(options.take))
+    }
+
+    const url = `/messages?${params.toString()}`
     return request<Message[]>(url)
   },
 

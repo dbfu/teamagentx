@@ -52,6 +52,85 @@ describe('Message Gateway API', () => {
       assert.ok(Array.isArray(body.data));
     });
 
+    test('群聊消息超过 100 条时应该返回最新 100 条并保持正序', async () => {
+      const chatRoomId = randomUUID();
+      const baseTime = Date.parse('2026-05-21T00:00:00.000Z');
+      const messageIds = Array.from({ length: 105 }, (_, index) => `${chatRoomId}-${index}`);
+
+      await prisma.chatRoom.create({
+        data: {
+          id: chatRoomId,
+          name: 'Long Room',
+          updatedAt: new Date(),
+        },
+      });
+      await prisma.message.createMany({
+        data: messageIds.map((id, index) => ({
+          id,
+          type: 'MESSAGE',
+          content: `message ${index}`,
+          chatRoomId,
+          isHuman: true,
+          time: new Date(baseTime + index * 1000),
+          updatedAt: new Date(),
+        })),
+      });
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/messages?chatRoomId=${chatRoomId}`,
+      });
+
+      assert.strictEqual(response.statusCode, 200);
+
+      const body = response.json();
+      assert.strictEqual(body.success, true);
+      assert.strictEqual(body.data.length, 100);
+      assert.strictEqual(body.data[0].id, messageIds[5]);
+      assert.strictEqual(body.data[99].id, messageIds[104]);
+      assert.strictEqual(body.pagination.hasMore, true);
+      assert.strictEqual(body.pagination.beforeMessageId, messageIds[5]);
+    });
+
+    test('应该通过 beforeMessageId 分页加载更早的群聊消息', async () => {
+      const chatRoomId = randomUUID();
+      const baseTime = Date.parse('2026-05-21T01:00:00.000Z');
+      const messageIds = Array.from({ length: 105 }, (_, index) => `${chatRoomId}-older-${index}`);
+
+      await prisma.chatRoom.create({
+        data: {
+          id: chatRoomId,
+          name: 'Paged Room',
+          updatedAt: new Date(),
+        },
+      });
+      await prisma.message.createMany({
+        data: messageIds.map((id, index) => ({
+          id,
+          type: 'MESSAGE',
+          content: `message ${index}`,
+          chatRoomId,
+          isHuman: true,
+          time: new Date(baseTime + index * 1000),
+          updatedAt: new Date(),
+        })),
+      });
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/messages?chatRoomId=${chatRoomId}&beforeMessageId=${messageIds[5]}`,
+      });
+
+      assert.strictEqual(response.statusCode, 200);
+
+      const body = response.json();
+      assert.strictEqual(body.success, true);
+      assert.strictEqual(body.data.length, 5);
+      assert.deepStrictEqual(body.data.map((message: { id: string }) => message.id), messageIds.slice(0, 5));
+      assert.strictEqual(body.pagination.hasMore, false);
+      assert.strictEqual(body.pagination.beforeMessageId, messageIds[0]);
+    });
+
     test('应该为刷新后的各平台桥接入站消息补充一致的平台用户名', async () => {
       const chatRoomId = randomUUID();
       const bridgeCases = [

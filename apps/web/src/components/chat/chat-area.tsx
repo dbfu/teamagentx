@@ -32,6 +32,8 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
     setInputValue,
     messages,
     loading,
+    loadingOlderMessages,
+    hasOlderMessages,
     typingAgents,
     streamEvents,
     completedAgents,
@@ -69,8 +71,6 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
     handleTypingAgentClick,
     handleReplyClick,
     handleExecutionDetailClick,
-    findReplyTo,
-    replyCounts,
     messagesEndRef,
     loadExecutionRecords,
     contextLoading,
@@ -81,6 +81,7 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
     handleImageSelect,
     removePendingImage,
     restoreStreamEventsFromRecord,
+    loadOlderMessages,
   } = useChatAreaStore(chatRoom, onChatRoomChange)
 
   const activeTaskAgentIds = useMemo(() => {
@@ -233,12 +234,11 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
               chatRoomId={chatRoom.id}
               messages={messages}
               loading={loading}
+              loadingOlderMessages={loadingOlderMessages}
+              hasOlderMessages={hasOlderMessages}
               messagesEndRef={messagesEndRef}
               typingAgents={typingAgents}
-              streamEvents={streamEvents}
               mentionAgents={mentionAgents}
-              replyCounts={replyCounts}
-              findReplyTo={findReplyTo}
               onAgentAvatarClick={handleAgentAvatarClick}
               onTypingAgentClick={handleTypingAgentClick}
               onMentionClick={handleAgentAvatarClick}
@@ -247,6 +247,7 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
               onMentionAgent={handleMentionAgent}
               onDeleteMessage={deleteMessage}
               onDeleteMessages={deleteMessages}
+              onLoadOlderMessages={loadOlderMessages}
               currentUser={currentUser}
             />
 

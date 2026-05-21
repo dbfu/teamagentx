@@ -44,25 +44,28 @@ function getTodoStatusIcon(status: string): { icon: React.ReactNode; color: stri
 
 // 时间指示器组件
 function TimeIndicator({ event, isCompleted }: { event: StreamEvent; isCompleted?: boolean }) {
-  const [, setTick] = useState(0) // 用于触发重新渲染
+  const isFinal = Boolean(isCompleted || event.endTime)
+  const [now, setNow] = useState(() => Date.now())
 
   // 正在执行的事件需要定时更新持续时间
   useEffect(() => {
-    if (isCompleted || event.endTime) return // 已完成，不需要定时更新
+    if (isFinal) return // 已完成，不需要定时更新
 
     const timer = setInterval(() => {
-      setTick(t => t + 1)
+      setNow(Date.now())
     }, 1000) // 每秒更新一次
 
     return () => clearInterval(timer)
-  }, [isCompleted, event.endTime])
+  }, [isFinal])
+
+  const durationEndTime = event.endTime ?? (isFinal ? undefined : now)
 
   return (
     <div className="flex items-center gap-1 text-muted-foreground whitespace-nowrap ml-auto">
       <Clock className="size-3" />
       <span>{formatStartTime(event.timestamp)}</span>
       <span className="text-muted-foreground/50">·</span>
-      <span className={isCompleted ? 'text-green-500' : ''}>{formatDuration(event.timestamp, event.endTime)}</span>
+      <span className={isCompleted ? 'text-green-500' : ''}>{formatDuration(event.timestamp, durationEndTime)}</span>
     </div>
   )
 }

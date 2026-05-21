@@ -103,11 +103,33 @@ export const messageService = {
     });
   },
 
-  async findByChatRoomId(chatRoomId: string, options?: { take?: number; order?: 'asc' | 'desc' }) {
+  async findByChatRoomId(chatRoomId: string, options?: { take?: number; order?: 'asc' | 'desc'; beforeMessageId?: string }) {
+    const beforeMessage = options?.beforeMessageId
+      ? await prisma.message.findUnique({
+          where: { id: options.beforeMessageId },
+          select: { id: true, chatRoomId: true, time: true },
+        })
+      : null;
+
+    if (options?.beforeMessageId && (!beforeMessage || beforeMessage.chatRoomId !== chatRoomId)) {
+      return [];
+    }
+
+    const order = options?.order ?? 'asc';
     return prisma.message.findMany({
-      where: { chatRoomId },
+      where: {
+        chatRoomId,
+        ...(beforeMessage
+          ? {
+              OR: [
+                { time: { lt: beforeMessage.time } },
+                { time: beforeMessage.time, id: { lt: beforeMessage.id } },
+              ],
+            }
+          : {}),
+      },
       include: { user: true, agent: true, attachments: true },
-      orderBy: { time: options?.order ?? 'asc' },
+      orderBy: [{ time: order }, { id: order }],
       take: options?.take ?? 100,
     });
   },
