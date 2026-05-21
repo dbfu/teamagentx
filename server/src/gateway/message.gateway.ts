@@ -16,7 +16,6 @@ import {
 } from '../core/agent/agent-handler/index.js';
 import { chatRoomService } from '../modules/chatroom/chatroom.service.js';
 import { formatBridgeConversationSender } from '../modules/bridge/bridge-platform-display.js';
-import { taskQueueService } from '../modules/task-queue/task-queue.service.js';
 import prisma from '../lib/prisma.js';
 
 const messageSchema = {
