@@ -2,6 +2,7 @@ import { FastifyInstance, FastifyReply } from 'fastify';
 import { messageService } from '../modules/message/message.service.js';
 import { executionRecordService } from '../modules/execution-record/execution-record.service.js';
 import { checkpointService } from '../modules/checkpoint/checkpoint.service.js';
+import { taskQueueService } from '../modules/task-queue/task-queue.service.js';
 import { agentMemoryService } from '../modules/agent-memory/agent-memory.service.js';
 import { abortControllers, processingMap } from '../core/agent/agent-handler/cache.js';
 import {

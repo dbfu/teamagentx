@@ -1423,7 +1423,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
   const replyCounts = useMemo(() => getReplyCounts(), [messages, getReplyCounts])
 
   // 处理函数
-  const handleSend = useCallback(() => {
+  const handleSend = useCallback(async () => {
     // 直接从 store 获取最新值，避免闭包延迟问题
     const { inputValue: currentInputValue, pendingImages: currentPendingImages } = useChatStore.getState()
 
@@ -1436,6 +1436,20 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
 
     // 必须有内容或图片才能发送
     if (!trimmedInput && uploadedImages.length === 0) return
+
+    const isRoomNewCommand =
+      trimmedInput.toLowerCase() === '/new' &&
+      uploadedImages.length === 0 &&
+      getMentionedAgentNames(trimmedInput).length === 0
+    if (isRoomNewCommand) {
+      await clearMessages(chatRoom.id)
+      setInputValue('')
+      useChatStore.getState().setForceScrollToBottom(true)
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur()
+      }
+      return
+    }
 
     if (
       !chatRoom.isQuickChatRoom &&
@@ -1492,7 +1506,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     if (document.activeElement instanceof HTMLElement) {
       document.activeElement.blur()
     }
-  }, [allAgents, chatRoom, sendMessage, setInputValue])
+  }, [allAgents, chatRoom, clearMessages, sendMessage, setInputValue])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     // 中文输入过程中不响应回车（检测 nativeEvent.isComposing）
