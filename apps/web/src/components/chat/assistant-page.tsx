@@ -29,10 +29,6 @@ import {
   Search,
   Plus,
   Bot,
-  Folder,
-  FolderOpen,
-  ChevronDown,
-  ChevronRight,
   Trash2,
   FolderPlus,
   RefreshCw,
@@ -46,6 +42,7 @@ import { CreateAssistantModal } from './create-assistant-modal'
 import { EditAssistantModal } from './edit-assistant-modal'
 import { InstallSkillModal } from './install-skill-modal'
 import { CreateCategoryModal } from './create-category-modal'
+import { CategoryToggleButton } from './category-toggle-button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { QuickChatStartDialog } from './quick-chat-start-dialog'
 import { AgentCard } from './agent-card'
@@ -1014,16 +1011,6 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
                     <div className="mb-6">
                       {/* Category header */}
                       <div className="group mb-3 flex items-center gap-2">
-                        {expandedCategories.has(categoryGroup.category.id) ? (
-                          <ChevronDown className="size-4 text-muted-foreground" />
-                        ) : (
-                          <ChevronRight className="size-4 text-muted-foreground" />
-                        )}
-                        {expandedCategories.has(categoryGroup.category.id) ? (
-                          <FolderOpen className="size-4 text-primary" />
-                        ) : (
-                          <Folder className="size-4 text-muted-foreground" />
-                        )}
                         {/* 分类名称 - 支持编辑 */}
                         {editingCategoryId === categoryGroup.category.id ? (
                           <div className="flex items-center gap-1">
@@ -1056,13 +1043,13 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
                           </div>
                         ) : (
                           <>
-                            <button
+                            <CategoryToggleButton
+                              expanded={expandedCategories.has(categoryGroup.category.id)}
+                              label={categoryGroup.category.name}
+                              count={categoryGroup.agents.length}
                               onClick={() => toggleCategoryExpansion(categoryGroup.category.id)}
-                              className="flex items-center gap-1 text-sm font-medium text-foreground hover:text-foreground/80"
-                            >
-                              <span>{categoryGroup.category.name}</span>
-                              <span className="text-muted-foreground">({categoryGroup.agents.length})</span>
-                            </button>
+                              className="gap-1"
+                            />
                             {/* 移动端隐藏添加助手按钮 */}
                             {!isMobile && categoryGroup.category.id !== SYSTEM_CATEGORY_ID && (
                               <button
@@ -1146,23 +1133,12 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
                   >
                     <div className="mb-6">
                       <div className="flex items-center gap-2 mb-3">
-                        <button
+                        <CategoryToggleButton
+                          expanded={expandedCategories.has('__uncategorized__')}
+                          label="未分类"
+                          count={filteredGroupedData.uncategorized.length}
                           onClick={() => toggleCategoryExpansion('__uncategorized__')}
-                          className="flex items-center gap-2 text-sm font-medium text-foreground hover:text-foreground/80"
-                        >
-                          {expandedCategories.has('__uncategorized__') ? (
-                            <ChevronDown className="size-4" />
-                          ) : (
-                            <ChevronRight className="size-4" />
-                          )}
-                          {expandedCategories.has('__uncategorized__') ? (
-                            <FolderOpen className="size-4 text-primary" />
-                          ) : (
-                            <Folder className="size-4 text-muted-foreground" />
-                          )}
-                          <span>未分类</span>
-                          <span className="text-muted-foreground">({filteredGroupedData.uncategorized.length})</span>
-                        </button>
+                        />
                         {/* 移动端隐藏添加助手按钮 */}
                         {!isMobile && (
                           <button
@@ -1222,23 +1198,13 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
                     isSystemCategory={true}
                   >
                     <div className="mb-6">
-                      <button
+                      <CategoryToggleButton
+                        expanded={expandedCategories.has(filteredGroupedData.systemCategory.category.id)}
+                        label={filteredGroupedData.systemCategory.category.name}
+                        count={filteredGroupedData.systemCategory.agents.length}
                         onClick={() => toggleCategoryExpansion(filteredGroupedData.systemCategory!.category.id)}
-                        className="flex items-center gap-2 mb-3 text-sm font-medium text-foreground hover:text-foreground/80"
-                      >
-                        {expandedCategories.has(filteredGroupedData.systemCategory.category.id) ? (
-                          <ChevronDown className="size-4" />
-                        ) : (
-                          <ChevronRight className="size-4" />
-                        )}
-                        {expandedCategories.has(filteredGroupedData.systemCategory.category.id) ? (
-                          <FolderOpen className="size-4 text-primary" />
-                        ) : (
-                          <Folder className="size-4 text-muted-foreground" />
-                        )}
-                        <span>{filteredGroupedData.systemCategory.category.name}</span>
-                        <span className="text-muted-foreground">({filteredGroupedData.systemCategory.agents.length})</span>
-                      </button>
+                        className="mb-3"
+                      />
                       {expandedCategories.has(filteredGroupedData.systemCategory.category.id) && filteredGroupedData.systemCategory.agents.length > 0 && (
                         <div className={cn("gap-3", isMobile ? "grid grid-cols-3" : "grid grid-cols-6")}>
                           {filteredGroupedData.systemCategory.agents.map((assistant) => (
