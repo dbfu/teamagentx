@@ -1,11 +1,17 @@
 import { z } from 'zod';
+import * as fs from 'fs';
+import * as path from 'path';
 import { createSystemTool as tool } from './system-tool.js';
 import { agentService } from '../../../core/agent/agent.service.js';
 import { categoryService } from '../../../modules/category/category.service.js';
 import { llmProviderService } from '../../../modules/llm-provider/llm-provider.service.js';
-import { installDefaultSkillsForNewAgent } from '../../../modules/skill/preinstalled-skills.js';
+import {
+  getSharedSkillsDir,
+  installDefaultSkillsForNewAgent,
+} from '../../../modules/skill/preinstalled-skills.js';
+import { skillInstallService } from '../../../modules/skill/skill-install.service.js';
 import { installSkillFromSourceTool } from './skills-helper.tools.js';
-import { getChatHistoryTool } from './skill-manager.tools.js';
+import { getChatHistoryTool, listSharedSkillsTool } from './skill-manager.tools.js';
 import {
   deserializeAgentSpeechConfig,
   normalizeAgentSpeechConfig,
@@ -24,7 +30,7 @@ import {
 // 助手生成助手的专用 ID
 export const AGENT_CREATOR_AGENT_ID = '29ffb519-82d2-4c32-8bc8-0b8d814a4eee';
 
-// ACP 工具枚举
+// 本地 Agent 工具枚举
 export const ACP_TOOL_VALUES = [
   'claude',
   'codex',
@@ -46,6 +52,14 @@ type AgentConfig = {
   categoryId?: string;
   speechPresetId?: SpeechPresetId;
   speechConfig?: AgentSpeechConfig;
+  autoInstallSkillNames?: string[];
+};
+
+type SkillSummary = {
+  slug: string;
+  name: string;
+  description: string;
+  sourceDir: string;
 };
 
 function normalizeAgentTypeConfig(config: Pick<AgentConfig, 'type' | 'acpTool'>): {
@@ -57,6 +71,119 @@ function normalizeAgentTypeConfig(config: Pick<AgentConfig, 'type' | 'acpTool'>)
     type,
     acpTool: type === 'acp' ? (config.acpTool || 'claude') : undefined,
   };
+}
+
+function parseSkillMetadata(skillMdPath: string): { name?: string; description?: string } {
+  try {
+    const content = fs.readFileSync(skillMdPath, 'utf-8');
+    const frontmatter = content.match(/^---\n([\s\S]*?)\n---/);
+    if (!frontmatter) return {};
+
+    const metadata: { name?: string; description?: string } = {};
+    const lines = frontmatter[1].split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const match = lines[i].match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
+      if (!match) continue;
+
+      const key = match[1];
+      const rawValue = match[2].trim();
+      if (key !== 'name' && key !== 'description') continue;
+
+      if (rawValue === '|' || rawValue === '>' || rawValue === '|-' || rawValue === '>-') {
+        const parts: string[] = [];
+        for (let j = i + 1; j < lines.length; j++) {
+          if (lines[j].match(/^\s/) && lines[j].trim() !== '') {
+            parts.push(lines[j].trim());
+          } else {
+            break;
+          }
+        }
+        metadata[key] = parts.join(' ').trim();
+      } else {
+        metadata[key] = rawValue.replace(/^['"]|['"]$/g, '');
+      }
+    }
+
+    return metadata;
+  } catch {
+    return {};
+  }
+}
+
+function listSharedSkillSummaries(): SkillSummary[] {
+  const sharedSkillsDir = getSharedSkillsDir();
+  if (!fs.existsSync(sharedSkillsDir)) return [];
+
+  const entries = fs.readdirSync(sharedSkillsDir, { withFileTypes: true });
+  const summaries: SkillSummary[] = [];
+
+  for (const entry of entries) {
+    if (entry.name.startsWith('.')) continue;
+    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+
+    const sourceDir = path.join(sharedSkillsDir, entry.name);
+    const skillMdPath = path.join(sourceDir, 'SKILL.md');
+    if (!fs.existsSync(skillMdPath)) continue;
+
+    const metadata = parseSkillMetadata(skillMdPath);
+    if (!metadata.name || !metadata.description) continue;
+
+    summaries.push({
+      slug: entry.name,
+      name: metadata.name,
+      description: metadata.description,
+      sourceDir,
+    });
+  }
+
+  return summaries;
+}
+
+async function installModelSelectedSkills(
+  agent: { id: string; name: string; type: 'builtin' | 'acp'; workDir: string | null },
+  skillNames: string[] | undefined,
+): Promise<{ installed: string[]; skipped: string[] }> {
+  const requestedSkillNames = Array.from(new Set((skillNames || []).map((name) => name.trim()).filter(Boolean)));
+  if (requestedSkillNames.length === 0) {
+    return { installed: [], skipped: [] };
+  }
+
+  const sharedSkills = listSharedSkillSummaries();
+  const skillByName = new Map<string, SkillSummary>();
+  for (const skill of sharedSkills) {
+    skillByName.set(skill.slug.toLowerCase(), skill);
+    skillByName.set(skill.name.toLowerCase(), skill);
+  }
+
+  const targetSkillsDir = skillInstallService.getAgentSkillsDir(agent);
+  const installedSkills: string[] = [];
+  const skippedSkills: string[] = [];
+  fs.mkdirSync(targetSkillsDir, { recursive: true });
+
+  for (const skillName of requestedSkillNames) {
+    const skill = skillByName.get(skillName.toLowerCase());
+    if (!skill) {
+      skippedSkills.push(skillName);
+      continue;
+    }
+
+    const targetSymlink = path.join(targetSkillsDir, skill.slug);
+    if (fs.existsSync(targetSymlink)) {
+      installedSkills.push(skill.slug);
+      continue;
+    }
+
+    try {
+      fs.symlinkSync(skill.sourceDir, targetSymlink, 'dir');
+      installedSkills.push(skill.slug);
+      console.log(`[agent-creator] 已根据模型选择为「${agent.name}」安装技能: ${skill.slug}`);
+    } catch (error) {
+      skippedSkills.push(skillName);
+      console.warn(`[agent-creator] 为「${agent.name}」安装模型选择的技能失败: ${skill.slug}`, error);
+    }
+  }
+
+  return { installed: installedSkills, skipped: skippedSkills };
 }
 
 const speechPresetIdSchema = z
@@ -107,6 +234,7 @@ export const createAgentTool = tool(
     categoryId,
     speechPresetId,
     speechConfig,
+    autoInstallSkillNames,
   }: AgentConfig) => {
     try {
       const normalizedType = normalizeAgentTypeConfig({ type, acpTool });
@@ -135,6 +263,7 @@ export const createAgentTool = tool(
         }),
       });
       const installedDefaultSkills = await installDefaultSkillsForNewAgent(agent);
+      const selectedSkillsResult = await installModelSelectedSkills(agent, autoInstallSkillNames);
 
       return JSON.stringify({
         success: true,
@@ -145,6 +274,8 @@ export const createAgentTool = tool(
           type: agent.type,
         },
         installedDefaultSkills,
+        modelSelectedSkills: selectedSkillsResult.installed,
+        skippedModelSelectedSkills: selectedSkillsResult.skipped,
         message: `成功创建助手 "${name}"。用户可以在群聊中通过 @${name} 来使用它。`,
       });
     } catch (error) {
@@ -170,15 +301,19 @@ export const createAgentTool = tool(
         .enum(['builtin', 'acp'])
         .optional()
         .describe('助手类型，默认 acp'),
-      acpTool: z.enum(ACP_TOOL_VALUES).optional().describe('ACP 工具名称（type=acp 时默认 claude）'),
+      acpTool: z.enum(ACP_TOOL_VALUES).optional().describe('本地 Agent 工具名称（type=acp 时默认 claude）'),
       workDir: z.string().optional().describe('工作目录路径，可选'),
       llmProviderId: z
         .string()
         .optional()
-        .describe('LLM供应商ID，可选；ACP 仅支持 claude/anthropic 和 codex/openai'),
+        .describe('LLM供应商ID，可选；本地 Agent 仅支持 claude/anthropic 和 codex/openai'),
       categoryId: z.string().optional().describe('分类ID，可选'),
       speechPresetId: speechPresetIdSchema,
       speechConfig: speechConfigSchema,
+      autoInstallSkillNames: z
+        .array(z.string())
+        .optional()
+        .describe('由模型根据 list_shared_skills 返回的共享技能列表自行选择要安装的技能名称或目录名。不要猜测；没有合适技能时传空数组或省略。'),
     }),
   },
 );
@@ -198,6 +333,8 @@ export const createAgentsTool = tool(
       success: boolean;
       agent?: { id: string; name: string; description: string; type: string };
       installedDefaultSkills?: string[];
+      modelSelectedSkills?: string[];
+      skippedModelSelectedSkills?: string[];
       error?: string;
     }> = [];
 
@@ -238,6 +375,7 @@ export const createAgentsTool = tool(
           }),
         });
         const installedDefaultSkills = await installDefaultSkillsForNewAgent(agent);
+        const selectedSkillsResult = await installModelSelectedSkills(agent, config.autoInstallSkillNames);
 
         results.push({
           name: config.name,
@@ -249,6 +387,8 @@ export const createAgentsTool = tool(
             type: agent.type,
           },
           installedDefaultSkills,
+          modelSelectedSkills: selectedSkillsResult.installed,
+          skippedModelSelectedSkills: selectedSkillsResult.skipped,
         });
         successCount++;
       } catch (error) {
@@ -280,15 +420,19 @@ export const createAgentsTool = tool(
             avatar: z.string().optional().describe('头像图标名称'),
             avatarColor: z.string().optional().describe('头像背景颜色'),
             type: z.enum(['builtin', 'acp']).optional().describe('助手类型，默认 acp'),
-            acpTool: z.enum(ACP_TOOL_VALUES).optional().describe('ACP 工具名称（type=acp 时默认 claude）'),
+            acpTool: z.enum(ACP_TOOL_VALUES).optional().describe('本地 Agent 工具名称（type=acp 时默认 claude）'),
             workDir: z.string().optional().describe('工作目录路径'),
             llmProviderId: z
               .string()
               .optional()
-              .describe('LLM供应商ID；ACP 仅支持 claude/anthropic 和 codex/openai'),
+              .describe('LLM供应商ID；本地 Agent 仅支持 claude/anthropic 和 codex/openai'),
             categoryId: z.string().optional().describe('分类ID'),
             speechPresetId: speechPresetIdSchema,
             speechConfig: speechConfigSchema,
+            autoInstallSkillNames: z
+              .array(z.string())
+              .optional()
+              .describe('由模型根据 list_shared_skills 返回的共享技能列表自行选择要安装的技能名称或目录名。不要猜测；没有合适技能时传空数组或省略。'),
           }),
         )
         .describe('助手配置数组'),
@@ -670,6 +814,7 @@ export const agentCreatorTools = [
   listCategoriesTool,
   listVoicePresetsTool,
   listVoiceCatalogTool,
+  listSharedSkillsTool,
   updateAgentTool,
   updateAgentsTool,
   listLlmProvidersTool,

@@ -1,8 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import * as fs from 'fs';
+import * as path from 'path';
 
 import prisma from '../../../lib/prisma.js';
 import { agentCreatorTools } from './agent-creator.tools.js';
+import { getSharedSkillsDir } from '../../../modules/skill/preinstalled-skills.js';
+import { skillInstallService } from '../../../modules/skill/skill-install.service.js';
 import {
   clearBrowserLocalVoiceSnapshots,
   upsertBrowserLocalVoiceSnapshot,
@@ -12,6 +16,16 @@ function getTool(name: string): { name: string; invoke: (input: Record<string, u
   const tool = agentCreatorTools.find((item) => item.name === name);
   assert.ok(tool, `missing tool ${name}`);
   return tool as unknown as { name: string; invoke: (input: Record<string, unknown>) => Promise<unknown> };
+}
+
+function writeSharedSkill(slug: string, name: string, description: string): void {
+  const skillDir = path.join(getSharedSkillsDir(), slug);
+  fs.mkdirSync(skillDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(skillDir, 'SKILL.md'),
+    `---\nname: ${name}\ndescription: ${description}\n---\n\n# ${name}\n\nBody should not be used for matching.\n`,
+    'utf-8',
+  );
 }
 
 test.beforeEach(async () => {
@@ -115,4 +129,68 @@ test('list_voice_catalog returns browser-local and remote voice catalog', async 
   assert.match(text, /profile\.provider = openai-compatible-tts/);
   assert.match(text, /gpt-4o-mini-tts/);
   assert.match(text, /alloy/);
+});
+
+test('create_agent installs shared skills selected by the model', async () => {
+  writeSharedSkill(
+    'web-qa',
+    'web-qa',
+    'Automates web testing, browser interactions, screenshots, and form checks.',
+  );
+  writeSharedSkill(
+    'image-pipeline',
+    'image-pipeline',
+    'Generates reusable image files through image generation APIs.',
+  );
+
+  const result = await getTool('create_agent').invoke({
+    name: 'Agent Creator Tool Test Web QA',
+    description: 'Handles web testing and screenshot verification for frontend QA.',
+    prompt: 'You verify frontend behavior.',
+    type: 'acp',
+    acpTool: 'claude',
+    autoInstallSkillNames: ['web-qa'],
+  });
+  const parsed = JSON.parse(String(result));
+
+  assert.equal(parsed.success, true);
+  assert.deepEqual(parsed.modelSelectedSkills, ['web-qa']);
+  assert.deepEqual(parsed.skippedModelSelectedSkills, []);
+
+  const skillsDir = skillInstallService.getAgentSkillsDir({
+    id: parsed.agent.id,
+    type: 'acp',
+    workDir: null,
+  });
+
+  assert.equal(fs.existsSync(path.join(skillsDir, 'web-qa', 'SKILL.md')), true);
+  assert.equal(fs.existsSync(path.join(skillsDir, 'image-pipeline', 'SKILL.md')), false);
+});
+
+test('create_agent does not install shared skills unless the model selects them', async () => {
+  writeSharedSkill(
+    'browser-audit',
+    'browser-audit',
+    'Audits browser workflows and screenshot based frontend behavior.',
+  );
+
+  const result = await getTool('create_agent').invoke({
+    name: 'Agent Creator Tool Test No Skill Selection',
+    description: 'Handles browser audit workflows.',
+    prompt: 'You audit frontend behavior.',
+    type: 'acp',
+    acpTool: 'claude',
+  });
+  const parsed = JSON.parse(String(result));
+
+  assert.equal(parsed.success, true);
+  assert.deepEqual(parsed.modelSelectedSkills, []);
+
+  const skillsDir = skillInstallService.getAgentSkillsDir({
+    id: parsed.agent.id,
+    type: 'acp',
+    workDir: null,
+  });
+
+  assert.equal(fs.existsSync(path.join(skillsDir, 'browser-audit', 'SKILL.md')), false);
 });

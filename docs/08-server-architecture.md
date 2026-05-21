@@ -27,9 +27,8 @@ server/src/
 │   │   ├── executor.factory.ts   # 执行器工厂
 │   │   ├── executor.interface.ts # IAgentExecutor 接口
 │   │   ├── langchain.executor.ts # builtin 执行器
-│   │   ├── claude-sdk.executor.ts # ACP Claude 执行器
-│   │   ├── codex-sdk.executor.ts  # ACP Codex 执行器
-│   │   ├── acp.executor.ts       # 通用 ACP 执行器
+│   │   ├── claude-sdk.executor.ts # Claude Agent SDK 执行器
+│   │   ├── codex-sdk.executor.ts  # Codex SDK 执行器
 │   │   ├── model.factory.ts      # LangChain ChatModel 工厂
 │   │   ├── skill-instructions.ts # Skill 加载与注入
 │   │   ├── agent-long-term-memory.ts # 长期记忆摘要
@@ -105,29 +104,19 @@ createApp()
 
 | 执行器类 | 触发条件 | 特点 |
 |---------|---------|------|
-| `LangChainAgentExecutor` | `agent.type = 'builtin'` | LangChain ReAct，内置工具，libsql checkpointer 持久化上下文 |
 | `ClaudeAgentSdkExecutor` | `agent.type = 'acp'` + `acpTool = 'claude'` | Claude Agent SDK，流式 thinking |
 | `CodexSdkExecutor` | `agent.type = 'acp'` + `acpTool = 'codex'` | OpenAI Codex SDK |
-| `AcpExecutor` | `agent.type = 'acp'` + 其他 `acpTool` | 通用 ACP stdio 协议（pi/gemini/cursor/copilot/droid 等） |
 
 ### 3.2 执行器工厂
 
-`executor.factory.ts` 的 `createExecutor(options)` 根据 `agent.type` 和 `acpTool` 分发：
+`executor.factory.ts` 的 `createExecutor(options)` 根据 `agent.type` 和 `acpTool` 分发。当前本地 Agent 路径只支持 Claude 和 Codex：
 
 ```
 agent.type === 'acp'
   acpTool === 'claude'  → ClaudeAgentSdkExecutor
   acpTool === 'codex'   → CodexSdkExecutor
-  其他                  → AcpExecutor（通用命令行）
-agent.type === 'builtin' → LangChainAgentExecutor
+agent.type === 'builtin' → ClaudeAgentSdkExecutor（兼容旧内置助手）
 ```
-
-ACP 工具命令映射（`ACP_TOOL_COMMANDS`）：
-- `pi` → `npx pi-acp@^0.0.22`
-- `openclaw` → `openclaw acp --verbose --session agent:main:main`
-- `gemini` → `gemini --acp`
-- `cursor` → `cursor-agent acp`
-- 等等
 
 ### 3.3 执行器缓存
 

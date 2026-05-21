@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// ACP 工具定义
+// Local agent tool definitions. Only Claude and Codex are currently supported.
 export const ACP_TOOLS = [
   {
     id: 'claude',
@@ -17,21 +17,7 @@ export const ACP_TOOLS = [
     description: 'OpenAI Codex SDK',
     checkCommand: 'codex --version',
   },
-  { id: 'cursor', name: 'Cursor', description: 'Cursor Agent', checkCommand: 'cursor-agent --version' },
-  { id: 'copilot', name: 'Copilot', description: 'GitHub Copilot CLI', checkCommand: 'copilot --version' },
-  { id: 'gemini', name: 'Gemini', description: 'Google Gemini CLI', checkCommand: 'gemini --version' },
-  { id: 'kimi', name: 'Kimi', description: 'Moonshot Kimi CLI', checkCommand: 'kimi --version' },
-  { id: 'qwen', name: 'Qwen', description: 'Alibaba Qwen CLI', checkCommand: 'qwen --version' },
-  { id: 'pi', name: 'Pi', description: 'Inflection Pi CLI', checkCommand: 'pi --version' },
-  { id: 'droid', name: 'Droid', description: 'Factory Droid', checkCommand: 'droid --version' },
-  { id: 'openclaw', name: 'OpenClaw', description: 'OpenClaw Agent', checkCommand: 'openclaw --version' },
-  { id: 'kilocode', name: 'KiloCode', description: 'KiloCode CLI', checkCommand: 'kilocode --version' },
-  { id: 'kiro', name: 'Kiro', description: 'Kiro CLI', checkCommand: 'kiro-cli --version' },
-  { id: 'opencode', name: 'OpenCode', description: 'OpenCode CLI', checkCommand: 'opencode --version' },
-  { id: 'iflow', name: 'iFlow', description: 'iFlow Agent', checkCommand: 'iflow --version' },
 ] as const;
-
-const VISIBLE_ACP_TOOL_IDS = new Set(['claude', 'codex']);
 
 const TOOL_PACKAGES: Record<string, string> = {
   claude: '@anthropic-ai/claude-code',
@@ -266,10 +252,10 @@ function checkAppLocalSdkInstalled(toolId: string): { installed: boolean; versio
 }
 
 /**
- * 检测所有可见 ACP/SDK 工具的安装状态
+ * 检测所有支持的本地 Agent 工具安装状态。
  */
 export function checkAllAcpTools(): AcpToolInfo[] {
-  return ACP_TOOLS.filter((tool) => VISIBLE_ACP_TOOL_IDS.has(tool.id)).map(tool => {
+  return ACP_TOOLS.map(tool => {
     const checkCmd = 'checkCommand' in tool ? tool.checkCommand : undefined;
 
     if (!checkCmd) {
@@ -305,7 +291,7 @@ export function checkAllAcpTools(): AcpToolInfo[] {
 }
 
 /**
- * 获取已安装的 ACP 工具 ID 列表
+ * 获取已安装的本地 Agent 工具 ID 列表
  */
 export function getInstalledAcpToolIds(): string[] {
   return checkAllAcpTools()

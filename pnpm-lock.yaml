@@ -360,9 +360,6 @@ importers:
       '@prisma/client':
         specifier: ^7.5.0
         version: 7.8.0(prisma@7.8.0(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(typescript@5.9.3)
-      acpx:
-        specifier: ^0.5.3
-        version: 0.5.3
       bcryptjs:
         specifier: ^3.0.3
         version: 3.0.3
@@ -2910,11 +2907,6 @@ packages:
   accepts@2.0.0:
     resolution: {integrity: sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng==}
     engines: {node: '>= 0.6'}
-
-  acpx@0.5.3:
-    resolution: {integrity: sha512-LNKc9gWlRztWKtQ3jr4g/kzlL9HU/5Wor79mromg/zRV5vE2FOdU+8VtW8ZypIMLzxLx2ATN6A4S1Dr97DM2QQ==}
-    engines: {node: '>=22.12.0'}
-    hasBin: true
 
   agent-base@7.1.4:
     resolution: {integrity: sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ==}
@@ -8627,18 +8619,6 @@ snapshots:
     dependencies:
       mime-types: 3.0.2
       negotiator: 1.0.0
-
-  acpx@0.5.3:
-    dependencies:
-      '@agentclientprotocol/sdk': 0.17.1(zod@4.4.3)
-      commander: 14.0.3
-      skillflag: 0.1.4
-      tsx: 4.21.0
-      zod: 4.4.3
-    transitivePeerDependencies:
-      - bare-abort-controller
-      - bare-buffer
-      - react-native-b4a
 
   agent-base@7.1.4: {}
 

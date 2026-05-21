@@ -38,8 +38,7 @@
 | Anthropic 协议 | ✅ | 原生支持 Claude 系列 |
 | OpenAI 兼容协议 | ✅ | 覆盖 OpenAI、DeepSeek、Kimi、阿里云百炼等 |
 | 自定义 endpoint | ✅ | `api_url` + `api_key` 自由配置 |
-| 本地 Agent | ✅ | "使用本地 Agent 配置" —— 复用本机 Claude Code / 同类 CLI 的 key |
-| ACP 工具协议 | 🟡 | 部分支持，"该 ACP 工具暂不支持自定义 LLM 供应商" |
+| 本地 Agent | ✅ | "使用本地 Agent 配置" —— 复用本机 Claude Code / Codex 配置 |
 
 ### 1.3 智能配置（亮点）
 

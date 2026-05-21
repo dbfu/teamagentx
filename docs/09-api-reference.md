@@ -24,7 +24,7 @@
 | GET | `/agents` | 所有助手列表 |
 | GET | `/agents/active` | 所有活跃助手 |
 | GET | `/agents/grouped` | 按分类分组的助手列表 |
-| GET | `/acp-tools` | 支持的 ACP/SDK 工具列表及安装状态 |
+| GET | `/acp-tools` | 支持的本地 Agent 工具列表及安装状态（Claude / Codex） |
 | GET | `/agents/:id` | 单个助手详情 |
 | POST | `/agents` | 创建助手 |
 | PUT | `/agents/:id` | 更新助手 |

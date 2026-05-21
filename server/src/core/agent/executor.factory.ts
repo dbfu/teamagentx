@@ -1,29 +1,7 @@
 import type { Agent, LlmProvider } from '@prisma/client';
 import type { IAgentExecutor, ChatRoomAgentInfo } from './executor.interface.js';
-import { AcpExecutor } from './acp.executor.js';
 import { ClaudeAgentSdkExecutor } from './claude-sdk.executor.js';
 import { CodexSdkExecutor } from './codex-sdk.executor.js';
-
-// ACP 工具命令映射（来自 acpx AGENT_REGISTRY）
-const ACP_TOOL_COMMANDS: Record<string, string | undefined> = {
-  pi: 'npx pi-acp@^0.0.22',
-  openclaw: 'openclaw acp --verbose --session agent:main:main',
-  gemini: 'gemini --acp',
-  cursor: 'cursor-agent acp',
-  copilot: 'copilot --acp --stdio',
-  droid: 'droid exec --output-format acp',
-  iflow: 'iflow --experimental-acp',
-  kilocode: 'npx -y @kilocode/cli acp',
-  kimi: 'kimi acp',
-  kiro: 'kiro-cli acp',
-  opencode: 'npx -y opencode-ai acp',
-  qwen: 'qwen --acp',
-};
-
-// 获取 ACP 工具命令
-function getAcpToolCommand(tool: string): string {
-  return ACP_TOOL_COMMANDS[tool] || tool;
-}
 
 export interface CreateExecutorOptions {
   agent: Agent;
@@ -82,23 +60,7 @@ export function createExecutor(options: CreateExecutorOptions): IAgentExecutor {
           agent.codexModel,
         );
       }
-      const agentCommand = getAcpToolCommand(acpTool);
-      return new AcpExecutor(
-        agent.name,
-        agent.prompt,
-        chatRoomId,
-        agent.workDir,  // 使用通用 workDir
-        injectGroupHistory,
-        agent.id,
-        acpTool,
-        agentCommand,
-        sessionDir,
-        customWorkDir,
-        lastInjectedMessageId,  // 传递上次注入位置
-        chatRoomAgents,  // 传递群内助手列表
-        llmProvider,
-        null,
-      );
+      throw new Error(`Unsupported agent tool: ${acpTool}`);
 
     case 'builtin':
     default:
