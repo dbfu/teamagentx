@@ -894,6 +894,12 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     loadAllAgents()
   }, [chatRoom?.id, loadAllAgents])
 
+  // 每次打开添加助手弹窗时刷新助手列表，避免使用进入群聊时缓存的旧列表
+  useEffect(() => {
+    if (!showAddAgent) return
+    loadAllAgents()
+  }, [showAddAgent, loadAllAgents])
+
   const hasWindowFocusRef = useRef(
     typeof document !== 'undefined' && typeof document.hasFocus === 'function'
       ? document.hasFocus()
