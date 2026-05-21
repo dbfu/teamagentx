@@ -403,7 +403,7 @@ export const bridgeService = {
     );
 
     const prefixedContent = params.content;
-    const displaySenderName = formatBridgeConversationSender(params.platform, params.externalId);
+    const displaySenderName = formatBridgeConversationSender(params.platform, params.externalId, params.senderName);
 
     const finalContent = prefixedContent;
 
@@ -444,6 +444,7 @@ export const bridgeService = {
       messageId: msgId,
       dedupeKey: params.dedupeKey ?? null,
       contentPreview: finalContent.slice(0, 280),
+      agentName: params.senderName || null,
     }).catch((error) => console.error('[Bridge] 写入 inbound success 事件失败:', error));
 
     return { messageId: msgId, chatRoomId, channelId: binding.id };
