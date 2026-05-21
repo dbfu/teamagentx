@@ -202,20 +202,6 @@ interface InactiveTasksData {
   }[]
 }
 
-// Todo 数据类型
-export interface TodoData {
-  id: string
-  chatRoomId: string
-  messageId: string
-  triggerAgentId: string
-  triggerAgentName: string
-  ownerUserId: string
-  contentSummary: string
-  chatRoomName: string
-  status: string
-  createdAt: string | Date
-}
-
 // 群聊创建事件数据类型
 export interface ChatRoomCreatedData {
   chatRoom: {
@@ -237,7 +223,6 @@ interface SocketStore {
   username: string | null
   user: JoinedResponse['user'] | null
   currentChatRoomId: string | null
-  todos: TodoData[]  // 待办列表
 
   // Actions
   connect: (token: string) => Promise<void>
@@ -278,14 +263,6 @@ interface SocketStore {
   onUnreadUpdate: (callback: (data: UnreadUpdateData) => void) => () => void
   requestUnreadCounts: () => void
 
-  // Todo 相关方法
-  requestTodos: () => void
-  onTodoList: (callback: (data: { todos: TodoData[] }) => void) => () => void
-  onTodoCreated: (callback: (todo: TodoData) => void) => () => void
-  completeTodo: (todoId: string) => void
-  dismissTodo: (todoId: string) => void
-  onTodoUpdated: (callback: (data: { todoId: string; status: string }) => void) => () => void
-
   // 内部方法：处理 socket 事件并更新 chat-store
   _handleAgentTyping: (data: AgentTypingData) => void
   _handleAgentDone: (data: AgentDoneData) => void
@@ -300,7 +277,6 @@ export const useSocketStore = create<SocketStore>((set, get) => ({
   username: null,
   user: null,
   currentChatRoomId: null,
-  todos: [],
 
   connect: async (token: string) => {
     const baseUrl = await getApiBaseUrl()
@@ -709,43 +685,4 @@ export const useSocketStore = create<SocketStore>((set, get) => ({
     useChatStore.setState({ toolCalls: newToolCalls })
   },
 
-  // Todo 相关方法
-  requestTodos: () => {
-    const socket = get().socket
-    if (!socket) return
-    socket.emit('todo:request')
-  },
-
-  onTodoList: (callback) => {
-    const socket = get().socket
-    if (!socket) return () => {}
-    socket.on('todo:list', callback)
-    return () => socket?.off('todo:list', callback)
-  },
-
-  onTodoCreated: (callback) => {
-    const socket = get().socket
-    if (!socket) return () => {}
-    socket.on('todo:created', callback)
-    return () => socket?.off('todo:created', callback)
-  },
-
-  completeTodo: (todoId: string) => {
-    const socket = get().socket
-    if (!socket) return
-    socket.emit('todo:complete', { todoId })
-  },
-
-  dismissTodo: (todoId: string) => {
-    const socket = get().socket
-    if (!socket) return
-    socket.emit('todo:dismiss', { todoId })
-  },
-
-  onTodoUpdated: (callback) => {
-    const socket = get().socket
-    if (!socket) return () => {}
-    socket.on('todo:updated', callback)
-    return () => socket?.off('todo:updated', callback)
-  },
 }))

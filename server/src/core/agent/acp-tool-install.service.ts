@@ -1,7 +1,10 @@
 import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import { createRequire } from 'module';
 import { config } from '../../config/index.js';
+
+const requireFromHere = createRequire(import.meta.url);
 
 export const ACP_TOOL_PACKAGES: Record<string, string> = {
   claude: '@anthropic-ai/claude-code',
@@ -62,17 +65,81 @@ export function createAcpToolInstallPlan(toolId: string): AcpToolInstallPlan {
   };
 }
 
+export function createAcpToolInstallChildEnv(
+  baseEnv: NodeJS.ProcessEnv = process.env,
+  isElectronRuntime: boolean = Boolean(process.versions.electron),
+): NodeJS.ProcessEnv {
+  return {
+    ...baseEnv,
+    FORCE_COLOR: '0',
+    ...(isElectronRuntime ? { ELECTRON_RUN_AS_NODE: '1' } : {}),
+  };
+}
+
+export function resolveBundledNpmCli(): string | undefined {
+  try {
+    const packageJsonPath = requireFromHere.resolve('npm/package.json');
+    const resolved = path.join(path.dirname(packageJsonPath), 'bin', 'npm-cli.js');
+    return fs.existsSync(resolved) ? resolved : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function spawnAcpToolInstall(toolId: string) {
   const { packageName, registries, toolsDir } = createAcpToolInstallPlan(toolId);
   fs.mkdirSync(toolsDir, { recursive: true });
+  const bundledNpmCli = resolveBundledNpmCli();
 
   const installerScript = `
 const { spawn } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 
 const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const packageName = process.argv[1];
 const toolsDir = process.argv[2];
 const registries = JSON.parse(process.argv[3]);
+const bundledNpmCli = process.argv[4] || '';
+
+function quotePosix(value) {
+  return "'" + String(value).replace(/'/g, "'\\\\''") + "'";
+}
+
+function ensureNodeShim() {
+  const shimDir = path.join(toolsDir, '.teamagentx-node-bin');
+  fs.mkdirSync(shimDir, { recursive: true });
+
+  if (process.platform === 'win32') {
+    const shimPath = path.join(shimDir, 'node.cmd');
+    fs.writeFileSync(
+      shimPath,
+      '@echo off\\r\\nset ELECTRON_RUN_AS_NODE=1\\r\\n"' + process.execPath + '" %*\\r\\n',
+      'utf8',
+    );
+    return shimDir;
+  }
+
+  const shimPath = path.join(shimDir, 'node');
+  fs.writeFileSync(
+    shimPath,
+    '#!/bin/sh\\nexport ELECTRON_RUN_AS_NODE=1\\nexec ' + quotePosix(process.execPath) + ' "$@"\\n',
+    'utf8',
+  );
+  fs.chmodSync(shimPath, 0o755);
+  return shimDir;
+}
+
+const pathSeparator = process.platform === 'win32' ? ';' : ':';
+const nodeShimDir = ensureNodeShim();
+const childEnv = {
+  ...process.env,
+  FORCE_COLOR: '0',
+  PATH: [nodeShimDir, process.env.PATH || ''].filter(Boolean).join(pathSeparator),
+};
+if (bundledNpmCli) {
+  childEnv.ELECTRON_RUN_AS_NODE = '1';
+}
 
 function runAttempt(index) {
   const registry = registries[index];
@@ -82,12 +149,15 @@ function runAttempt(index) {
   }
 
   process.stdout.write(\`\\n[TeamAgentX] 正在安装 \${packageName}（源 \${index + 1}/\${registries.length}）：\${registry}\\n\`);
+  if (bundledNpmCli) {
+    process.stdout.write(\`[TeamAgentX] 使用内置 npm：\${bundledNpmCli}\\n\`);
+  }
 
   const child = spawn(
-    npmCmd,
-    ['install', '--prefix', toolsDir, packageName, '--force', '--registry', registry],
+    bundledNpmCli ? process.execPath : npmCmd,
+    [...(bundledNpmCli ? [bundledNpmCli] : []), 'install', '--prefix', toolsDir, packageName, '--force', '--registry', registry],
     {
-      env: { ...process.env, FORCE_COLOR: '0' },
+      env: childEnv,
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   );
@@ -126,8 +196,8 @@ function runAttempt(index) {
 runAttempt(0);
 `;
 
-  const child = spawn(process.execPath, ['-e', installerScript, packageName, toolsDir, JSON.stringify(registries)], {
-    env: { ...process.env, FORCE_COLOR: '0' },
+  const child = spawn(process.execPath, ['-e', installerScript, packageName, toolsDir, JSON.stringify(registries), bundledNpmCli || ''], {
+    env: createAcpToolInstallChildEnv(),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 

@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import * as React from 'react'
 import type { ToastActionElement, ToastProps } from '@/components/ui/toast'
+import { DEFAULT_TERMINAL_OPEN_TARGET, type TerminalOpenTarget } from '@/lib/open-targets'
 
 const TOAST_LIMIT = 1
 const TOAST_REMOVE_DELAY = 5000 // 5 seconds
@@ -24,6 +25,9 @@ interface UIStore {
   // 提示音设置
   soundEnabled: boolean
 
+  // 终端打开方式
+  terminalOpenTarget: TerminalOpenTarget
+
   // Actions
   addToast: (toast: Omit<ToasterToast, 'id'>) => { id: string; dismiss: () => void; update: (props: ToasterToast) => void }
   updateToast: (toast: Partial<ToasterToast> & { id: string }) => void
@@ -32,6 +36,7 @@ interface UIStore {
   setShowLogin: (show: boolean) => void
   setShowRegister: (show: boolean) => void
   setSoundEnabled: (enabled: boolean) => void
+  setTerminalOpenTarget: (target: TerminalOpenTarget) => void
 }
 
 // Toast ID 生成器
@@ -64,6 +69,7 @@ export const useUIStore = create<UIStore>()(
       showLogin: false,
       showRegister: false,
       soundEnabled: true, // 默认开启提示音
+      terminalOpenTarget: DEFAULT_TERMINAL_OPEN_TARGET,
 
       addToast: (toastProps) => {
         const id = genId()
@@ -135,10 +141,14 @@ export const useUIStore = create<UIStore>()(
       setShowLogin: (show) => set({ showLogin: show }),
       setShowRegister: (show) => set({ showRegister: show }),
       setSoundEnabled: (enabled) => set({ soundEnabled: enabled }),
+      setTerminalOpenTarget: (target) => set({ terminalOpenTarget: target }),
     }),
     {
       name: 'ui-settings',
-      partialize: (state) => ({ soundEnabled: state.soundEnabled }), // 只持久化提示音设置
+      partialize: (state) => ({
+        soundEnabled: state.soundEnabled,
+        terminalOpenTarget: state.terminalOpenTarget,
+      }),
     }
   )
 )

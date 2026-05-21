@@ -17,7 +17,6 @@ import { chatRoomService } from '../modules/chatroom/chatroom.service.js';
 import { messageService } from '../modules/message/message.service.js';
 import { userService } from '../modules/user/user.service.js';
 import { taskQueueService } from '../modules/task-queue/task-queue.service.js';
-import { todoService } from '../modules/todo/todo.service.js';
 import { bridgeService, setBridgeInboundMessageBroadcaster } from '../modules/bridge/bridge.service.js';
 import { startTypingLoop, stopTypingLoop } from '../modules/bridge/typing-loop.js';
 import { Message, Attachment } from '../types/message.js';
@@ -138,32 +137,6 @@ export function setupSocket(io: Server) {
     io.to(chatRoomId).emit('agent:task-queue', { chatRoomId, agentId, tasks });
   };
 
-  // Broadcast todo created event to owner user
-  const emitTodoCreated = (
-    todo: {
-      id: string;
-      chatRoomId: string;
-      messageId: string;
-      triggerAgentId: string;
-      triggerAgentName: string;
-      ownerUserId: string;
-      contentSummary: string;
-      chatRoomName: string;
-      status: string;
-      createdAt: Date;
-    },
-    ownerUserId: string,
-  ) => {
-    // 找到群主的 socket，发送待办创建通知
-    authService.findById(ownerUserId).then(user => {
-      if (user?.socketId) {
-        io.to(user.socketId).emit('todo:created', todo);
-      }
-    }).catch(err => {
-      console.error('Failed to emit todo:created:', err);
-    });
-  };
-
   const emitChatRoomCreated = (chatRoom: any) => {
     io.emit('chatroom:created', { chatRoom });
   };
@@ -199,7 +172,7 @@ export function setupSocket(io: Server) {
     }
   }
 
-  setupAIHandlers(emit, emitTyping, emitDone, emitStream, emitToolCall, emitThinking, emitStatus, broadcastTaskQueue, emitTodoCreated, emitChatRoomCreated, emitAgentsUpdated);
+  setupAIHandlers(emit, emitTyping, emitDone, emitStream, emitToolCall, emitThinking, emitStatus, broadcastTaskQueue, emitChatRoomCreated, emitAgentsUpdated);
 
   // Socket authentication middleware
   io.use(async (socket: AuthenticatedSocket, next) => {
@@ -797,69 +770,6 @@ export function setupSocket(io: Server) {
       } catch (error) {
         console.error('Error getting unread counts:', error);
         socket.emit('error', { message: 'Failed to get unread counts' });
-      }
-    });
-
-    // Todo: Request all todos for the current user
-    socket.on('todo:request', async () => {
-      try {
-        const user = socket.data.user;
-        if (!user) {
-          socket.emit('error', { message: 'User not authenticated' });
-          return;
-        }
-
-        const todos = await todoService.getByOwnerUserId(user.id, 'pending');
-        socket.emit('todo:list', { todos });
-      } catch (error) {
-        console.error('Error getting todos:', error);
-        socket.emit('error', { message: 'Failed to get todos' });
-      }
-    });
-
-    // Todo: Complete a todo
-    socket.on('todo:complete', async (data: { todoId: string }) => {
-      try {
-        const user = socket.data.user;
-        if (!user) {
-          socket.emit('error', { message: 'User not authenticated' });
-          return;
-        }
-
-        const todo = await todoService.getById(data.todoId);
-        if (!todo || todo.ownerUserId !== user.id) {
-          socket.emit('error', { message: '待办不存在或无权限' });
-          return;
-        }
-
-        await todoService.complete(data.todoId);
-        socket.emit('todo:updated', { todoId: data.todoId, status: 'completed' });
-      } catch (error) {
-        console.error('Error completing todo:', error);
-        socket.emit('error', { message: 'Failed to complete todo' });
-      }
-    });
-
-    // Todo: Dismiss a todo
-    socket.on('todo:dismiss', async (data: { todoId: string }) => {
-      try {
-        const user = socket.data.user;
-        if (!user) {
-          socket.emit('error', { message: 'User not authenticated' });
-          return;
-        }
-
-        const todo = await todoService.getById(data.todoId);
-        if (!todo || todo.ownerUserId !== user.id) {
-          socket.emit('error', { message: '待办不存在或无权限' });
-          return;
-        }
-
-        await todoService.dismiss(data.todoId);
-        socket.emit('todo:updated', { todoId: data.todoId, status: 'dismissed' });
-      } catch (error) {
-        console.error('Error dismissing todo:', error);
-        socket.emit('error', { message: 'Failed to dismiss todo' });
       }
     });
 

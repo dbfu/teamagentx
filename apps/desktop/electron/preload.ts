@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getServerUrl: () => ipcRenderer.invoke('get-server-url'),
   getMobileWebUrl: () => ipcRenderer.invoke('get-mobile-web-url'),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  getOpenAtLoginSettings: () => ipcRenderer.invoke('app:get-open-at-login-settings'),
+  setOpenAtLogin: (enabled: boolean) => ipcRenderer.invoke('app:set-open-at-login', enabled),
   checkForUpdates: () => ipcRenderer.invoke('update:check'),
   downloadUpdate: (update: {
     version: string;
@@ -29,8 +31,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getOpenTargetIcons: () => ipcRenderer.invoke('get-open-target-icons'),
   openFolder: (
     path: string,
-    target: 'system' | 'terminal' | 'vscode' | 'cursor' | 'trae' | 'trae-cn' = 'system'
-  ) => ipcRenderer.invoke('open-folder', { path, target }),
+    target: 'system' | 'terminal' | 'vscode' | 'cursor' | 'trae' | 'trae-cn' = 'system',
+    terminalTarget: 'terminal-app' | 'iterm2' | 'alacritty' | 'kitty' | 'ghostty' | 'wezterm' | 'kaku' = 'terminal-app'
+  ) => ipcRenderer.invoke('open-folder', { path, target, terminalTarget }),
   selectFolder: () => ipcRenderer.invoke('select-folder'),
   // 使用默认浏览器打开外部链接
   openExternal: (url: string) => ipcRenderer.invoke('open-external', url),

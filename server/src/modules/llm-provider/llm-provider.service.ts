@@ -71,6 +71,96 @@ const PARSE_CONFIG_PROMPT = `你是一个模型配置解析助手。用户会提
 
 请只返回 JSON，不要包含其他解释文字。`;
 
+function stringOrNull(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function normalizeApiProtocol(value: unknown): 'anthropic' | 'openai' | null {
+  if (value !== 'anthropic' && value !== 'openai') return null;
+  return value;
+}
+
+function normalizeParsedModelConfig(value: unknown): ParsedModelConfig {
+  const record = value && typeof value === 'object'
+    ? value as Record<string, unknown>
+    : {};
+
+  return {
+    name: stringOrNull(record.name),
+    apiUrl: stringOrNull(record.apiUrl),
+    apiKey: stringOrNull(record.apiKey),
+    model: stringOrNull(record.model),
+    apiProtocol: normalizeApiProtocol(record.apiProtocol),
+  };
+}
+
+function extractJsonCandidate(content: string): string {
+  const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (jsonMatch) return jsonMatch[1].trim();
+
+  const start = content.indexOf('{');
+  const end = content.lastIndexOf('}');
+  if (start >= 0 && end > start) return content.slice(start, end + 1).trim();
+
+  return content.trim();
+}
+
+function parseKeyValueConfig(content: string): ParsedModelConfig {
+  const result: ParsedModelConfig = {
+    name: null,
+    apiUrl: null,
+    apiKey: null,
+    model: null,
+    apiProtocol: null,
+  };
+
+  const aliases: Record<string, keyof ParsedModelConfig> = {
+    name: 'name',
+    '模型配置名称': 'name',
+    '配置名称': 'name',
+    apiUrl: 'apiUrl',
+    api_url: 'apiUrl',
+    url: 'apiUrl',
+    '端点': 'apiUrl',
+    '接口地址': 'apiUrl',
+    apiKey: 'apiKey',
+    api_key: 'apiKey',
+    key: 'apiKey',
+    '密钥': 'apiKey',
+    model: 'model',
+    '模型': 'model',
+    apiProtocol: 'apiProtocol',
+    api_protocol: 'apiProtocol',
+    protocol: 'apiProtocol',
+    '协议': 'apiProtocol',
+  };
+
+  for (const line of content.split(/\r?\n/)) {
+    const match = line.match(/^\s*["']?([^"':：=]+)["']?\s*[:：=]\s*(.*?)\s*,?\s*$/);
+    if (!match) continue;
+
+    const key = aliases[match[1].trim()];
+    if (!key) continue;
+
+    const value = match[2].trim().replace(/^["']|["']$/g, '');
+    if (key === 'apiProtocol') {
+      result.apiProtocol = normalizeApiProtocol(value);
+    } else {
+      result[key] = stringOrNull(value);
+    }
+  }
+
+  return result;
+}
+
+export function parseAiConfigResponse(content: string): ParsedModelConfig {
+  try {
+    return normalizeParsedModelConfig(JSON.parse(extractJsonCandidate(content)));
+  } catch {
+    return parseKeyValueConfig(content);
+  }
+}
+
 export const llmProviderService = {
   async create(data: CreateLlmProviderInput): Promise<LlmProvider> {
     const modelType = data.modelType || 'text';
@@ -259,24 +349,7 @@ export const llmProviderService = {
         { role: 'user', content: description },
       ]);
 
-      // 解析 AI 返回的 JSON
-      // 尝试提取 JSON（可能被 markdown 包裹）
-      let jsonStr = content;
-      const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
-      if (jsonMatch) {
-        jsonStr = jsonMatch[1];
-      }
-
-      const parsed = JSON.parse(jsonStr.trim());
-
-      // 所有字段都可以为 null，用户可以在表单里手动补充
-      return {
-        name: parsed.name ?? null,
-        apiUrl: parsed.apiUrl ?? null,
-        apiKey: parsed.apiKey ?? null,
-        model: parsed.model ?? null,
-        apiProtocol: parsed.apiProtocol ?? null,
-      };
+      return parseAiConfigResponse(content);
     } catch (error) {
       console.error('Parse config error:', error);
       // 解析失败时返回空配置，让用户在表单里手动填写

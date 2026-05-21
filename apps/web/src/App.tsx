@@ -1,6 +1,6 @@
 import { ArrowLeft, ChevronLeft, ClipboardList, Eraser, Loader2, MoreVertical, RefreshCw, Square } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Route, Routes, useNavigate, useSearchParams, useParams } from 'react-router-dom'
+import { Route, Routes, useLocation, useNavigate, useSearchParams, useParams } from 'react-router-dom'
 import { LoginModal } from './components/auth/login-modal'
 import { RegisterModal } from './components/auth/register-modal'
 import { AssistantDetailPage } from './components/chat/assistant-detail'
@@ -33,7 +33,6 @@ import { isElectron, waitForServer } from './lib/config'
 import { ChatRoom } from './lib/agent-api'
 import { useAuthStore, useChatRoomStore, useSocketStore, useUIStore } from './stores'
 import { useChatStore } from './stores/chat-store'
-import { TodoData } from './stores/socket-store'
 
 function formatRuntimeBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
@@ -341,6 +340,7 @@ function DesktopMessagePage({
 
 function AppContent() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
   const isMobile = useIsMobile()
   const chatRooms = useChatRoomStore((s) => s.chatRooms)
@@ -354,8 +354,16 @@ function AppContent() {
   const updateUnreadCount = useChatStore((s) => s.updateUnreadCount)
   const executingChatRooms = useChatStore((s) => s.executingChatRooms)
   const setScrollToMessageId = useChatStore((s) => s.setScrollToMessageId)
-  const { isConnected, onUnreadUpdate, requestUnreadCounts, requestTodos, onTodoList, onTodoCreated, onTodoUpdated, onMessage, onChatRoomCreated, onAgentsUpdated, user: socketUser } = useSocketStore()
+  const { isConnected, onUnreadUpdate, requestUnreadCounts, onMessage, onChatRoomCreated, onAgentsUpdated, onAgentStatus, user: socketUser } = useSocketStore()
   const { user } = useAuthStore()
+  const visibleChatRoomId = useMemo(() => {
+    if (isMobile) {
+      const match = location.pathname.match(/^\/chat\/([^/]+)$/)
+      return match ? decodeURIComponent(match[1]) : null
+    }
+
+    return location.pathname === '/' ? selectedRoomId : null
+  }, [isMobile, location.pathname, selectedRoomId])
 
   // 刷新状态
   const [isRefreshing, setIsRefreshing] = useState(false)
@@ -446,6 +454,29 @@ function AppContent() {
     return unsubscribe
   }, [isConnected, onAgentsUpdated, loadChatRooms])
 
+  // 全局维护群聊执行中状态。聊天区未挂载时也要能停止群头像 loading。
+  useEffect(() => {
+    if (!isConnected) return
+
+    const unsubscribe = onAgentStatus((data) => {
+      const hasExecutingAgent = Object.values(data.statuses).some(
+        status => status === 'executing' || status === 'busy'
+      )
+
+      useChatStore.setState((state) => {
+        const nextExecutingRooms = new Set(state.executingChatRooms)
+        if (hasExecutingAgent) {
+          nextExecutingRooms.add(data.chatRoomId)
+        } else {
+          nextExecutingRooms.delete(data.chatRoomId)
+        }
+        return { executingChatRooms: nextExecutingRooms }
+      })
+    })
+
+    return unsubscribe
+  }, [isConnected, onAgentStatus])
+
   // 处理 URL 参数中的 room 参数
   useEffect(() => {
     const roomId = searchParams.get('room')
@@ -472,10 +503,13 @@ function AppContent() {
     const unsubscribe = onUnreadUpdate((data) => {
       if (data.unreadCounts) {
         // 批量更新所有未读数
-        setUnreadCounts(data.unreadCounts)
+        setUnreadCounts(visibleChatRoomId
+          ? { ...data.unreadCounts, [visibleChatRoomId]: 0 }
+          : data.unreadCounts
+        )
       } else if (data.chatRoomId && data.count !== undefined) {
-        // 如果是当前选中的群聊，不显示未读数
-        if (data.chatRoomId === selectedRoomId) {
+        // 只有当前真正显示的聊天窗口才自动清零；停留在助手/模型等页面时仍显示未读。
+        if (data.chatRoomId === visibleChatRoomId) {
           updateUnreadCount(data.chatRoomId, 0)
         } else {
           updateUnreadCount(data.chatRoomId, data.count)
@@ -483,7 +517,7 @@ function AppContent() {
       }
     })
     return unsubscribe
-  }, [isConnected, onUnreadUpdate, setUnreadCounts, updateUnreadCount, selectedRoomId])
+  }, [isConnected, onUnreadUpdate, setUnreadCounts, updateUnreadCount, visibleChatRoomId])
 
   // 切换群聊时重新请求未读数
   useEffect(() => {
@@ -496,10 +530,9 @@ function AppContent() {
   useEffect(() => {
     if (isConnected) {
       requestUnreadCounts()
-      requestTodos()
       updateManager.checkForUpdates({ silent: true, reason: 'socket-connected' })
     }
-  }, [isConnected, requestUnreadCounts, requestTodos])
+  }, [isConnected, requestUnreadCounts])
 
   // Electron 运行中低频补充检查更新：窗口聚焦、页面可见、网络恢复。
   useEffect(() => {
@@ -527,34 +560,6 @@ function AppContent() {
       document.removeEventListener('visibilitychange', checkOnVisibilityChange)
     }
   }, [])
-
-  // 监听待办事件
-  useEffect(() => {
-    if (!isConnected) return
-
-    const unsubList = onTodoList((data) => {
-      useSocketStore.setState({ todos: data.todos })
-    })
-
-    const unsubCreated = onTodoCreated((todo: TodoData) => {
-      const currentTodos = useSocketStore.getState().todos
-      // 避免重复添加
-      if (!currentTodos.some((t) => t.id === todo.id)) {
-        useSocketStore.setState({ todos: [todo, ...currentTodos] })
-      }
-    })
-
-    const unsubUpdated = onTodoUpdated((data) => {
-      const currentTodos = useSocketStore.getState().todos
-      useSocketStore.setState({ todos: currentTodos.filter((t) => t.id !== data.todoId) })
-    })
-
-    return () => {
-      unsubList()
-      unsubCreated()
-      unsubUpdated()
-    }
-  }, [isConnected, onTodoList, onTodoCreated, onTodoUpdated])
 
   // 计算总未读数
   const totalUnreadCount = Object.values(unreadCounts).reduce((sum, count) => sum + count, 0)

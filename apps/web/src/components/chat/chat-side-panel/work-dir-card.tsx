@@ -1,17 +1,9 @@
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { FOLDER_OPEN_OPTIONS, type FolderOpenTarget } from '@/lib/open-targets'
 import { Check, ChevronDown, Copy, FolderOpen, Loader2, Pencil, Terminal, X } from 'lucide-react'
 import { isElectron } from '@/lib/config'
 
-export type FolderOpenTarget = 'system' | 'terminal' | 'vscode' | 'cursor' | 'trae' | 'trae-cn'
-
-export const FOLDER_OPEN_OPTIONS: { target: FolderOpenTarget; label: string }[] = [
-  { target: 'system', label: '系统文件夹' },
-  { target: 'terminal', label: '终端' },
-  { target: 'vscode', label: 'VS Code' },
-  { target: 'cursor', label: 'Cursor' },
-  { target: 'trae', label: 'Trae' },
-  { target: 'trae-cn', label: 'Trae CN' },
-]
+export { FOLDER_OPEN_OPTIONS, type FolderOpenTarget } from '@/lib/open-targets'
 
 function getIconPath(target: Exclude<FolderOpenTarget, 'system' | 'terminal'>): string {
   const basePath = isElectron() ? './open-target-icons' : '/open-target-icons'

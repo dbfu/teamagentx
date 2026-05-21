@@ -28,7 +28,7 @@ function formatDuration(timestamp: number, endTime?: number): string {
   return `${minutes}m${seconds}s`
 }
 
-// Todo 任务状态图标和颜色
+// 内部任务清单状态图标和颜色
 function getTodoStatusIcon(status: string): { icon: React.ReactNode; color: string; label: string } {
   switch (status) {
     case 'completed':
@@ -36,7 +36,7 @@ function getTodoStatusIcon(status: string): { icon: React.ReactNode; color: stri
     case 'in_progress':
       return { icon: <Loader2 className="size-3.5 animate-spin" />, color: 'text-blue-500', label: '进行中' }
     case 'pending':
-      return { icon: <div className="size-3.5 rounded-full border-2 border-muted-foreground/40" />, color: 'text-muted-foreground', label: '待办' }
+      return { icon: <div className="size-3.5 rounded-full border-2 border-muted-foreground/40" />, color: 'text-muted-foreground', label: '待处理' }
     default:
       return { icon: <div className="size-3.5 rounded-full border-2 border-muted-foreground/40" />, color: 'text-muted-foreground', label: status }
   }
@@ -266,6 +266,9 @@ export function StreamPanel({
                 const { icon, color, label } = getTodoStatusIcon(todo.status)
                 return (
                   <div key={idx} data-todo-index={idx} className={cn('flex items-center gap-2 py-0.5', color)}>
+                    <span className="w-5 shrink-0 text-right text-xs font-medium tabular-nums opacity-70">
+                      {idx + 1}.
+                    </span>
                     {icon}
                     <span className="flex-1 text-sm truncate">{todo.content}</span>
                     <span className="text-xs opacity-60 shrink-0">{label}</span>

@@ -57,7 +57,6 @@ server/src/
 │   ├── recovery/           # 启动时任务恢复
 │   ├── skill/              # Skill 安装/CRUD
 │   ├── task-queue/         # TaskQueue 入队/出队
-│   ├── todo/               # Todo CRUD
 │   ├── token-usage/        # Token 用量统计
 │   ├── upload/             # 图片上传
 │   └── user/               # User CRUD
@@ -200,8 +199,6 @@ processor.ts 处理队列
 | `agent:task-cancelled` | `{agentId, agentName, taskId}` | 任务被取消 |
 | `agent:task-resumed` | `{agentId, agentName, taskId}` | 任务恢复执行 |
 | `unread:update` | `{chatRoomId, count}` | 未读数更新（用户房间） |
-| `todo:created` | `{id, chatRoomId, triggerAgentName, contentSummary, ...}` | 待办创建（用户房间） |
-| `todo:updated` | `{id, status, ...}` | 待办状态变更 |
 
 ### 4.2 客户端 → 服务端
 

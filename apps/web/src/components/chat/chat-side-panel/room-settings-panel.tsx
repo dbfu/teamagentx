@@ -4,6 +4,7 @@ import { ChatRoom, chatRoomApi } from '@/lib/agent-api'
 import { bridgeApi, BridgeBot } from '@/lib/bridge-api'
 import { groupAvatarOptions, GroupAvatarImage, normalizeGroupAvatarIndex } from '@/lib/group-avatars'
 import { cn } from '@/lib/utils'
+import { useUIStore } from '@/stores'
 import { Bot, Eraser, Pencil, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
@@ -45,6 +46,7 @@ export function RoomSettingsPanel({
   const [editingWorkDir, setEditingWorkDir] = useState(false)
   const [workDirDraft, setWorkDirDraft] = useState(chatRoom.workDir || '')
   const [openingFolder, setOpeningFolder] = useState(false)
+  const terminalOpenTarget = useUIStore((state) => state.terminalOpenTarget)
   const nameInputRef = useRef<HTMLInputElement>(null)
   const descInputRef = useRef<HTMLInputElement>(null)
   const rulesInputRef = useRef<HTMLTextAreaElement>(null)
@@ -167,7 +169,7 @@ export function RoomSettingsPanel({
     if (!window.electronAPI?.isElectron || !displayWorkDir) return
     setOpeningFolder(true)
     try {
-      const result = await window.electronAPI.openFolder(displayWorkDir, target)
+      const result = await window.electronAPI.openFolder(displayWorkDir, target, terminalOpenTarget)
       if (!result?.success) {
         toast.error(result?.error || '打开目录失败')
       }

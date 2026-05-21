@@ -2,7 +2,7 @@ import { afterEach, describe, test } from 'node:test';
 import assert from 'node:assert';
 import type { LlmProvider } from '@prisma/client';
 import prisma from '../../../lib/prisma.js';
-import { llmProviderService } from '../../../modules/llm-provider/llm-provider.service.js';
+import { llmProviderService, parseAiConfigResponse } from '../../../modules/llm-provider/llm-provider.service.js';
 
 const originalCount = prisma.llmProvider.count;
 const originalUpdateMany = prisma.llmProvider.updateMany;
@@ -84,5 +84,43 @@ describe('llmProviderService audio defaults', () => {
       llmProviderService.setDefault('tts-only'),
       /仅支持将 STT 或 TTS \+ STT 语音模型设为默认 STT/,
     );
+  });
+});
+
+describe('parseAiConfigResponse', () => {
+  test('应从带说明文字的 JSON 中保留可解析字段', () => {
+    const result = parseAiConfigResponse(`解析结果如下：
+{
+  "name": "byteplan-glm-token11",
+  "apiUrl": "https://coding.dashscope.aliyuncs.com/apps/anthropic",
+  "apiKey": "sk-test-key",
+  "model": "glm-5",
+  "apiProtocol": null
+}
+请确认`);
+
+    assert.deepStrictEqual(result, {
+      name: 'byteplan-glm-token11',
+      apiUrl: 'https://coding.dashscope.aliyuncs.com/apps/anthropic',
+      apiKey: 'sk-test-key',
+      model: 'glm-5',
+      apiProtocol: null,
+    });
+  });
+
+  test('JSON 解析失败时应从 AI 的 key-value 输出中保留部分字段', () => {
+    const result = parseAiConfigResponse(`name: byteplan-glm-token11
+apiUrl: https://coding.dashscope.aliyuncs.com/apps/anthropic
+apiKey: sk-test-key
+model: glm-5
+apiProtocol: anthropic`);
+
+    assert.deepStrictEqual(result, {
+      name: 'byteplan-glm-token11',
+      apiUrl: 'https://coding.dashscope.aliyuncs.com/apps/anthropic',
+      apiKey: 'sk-test-key',
+      model: 'glm-5',
+      apiProtocol: 'anthropic',
+    });
   });
 });

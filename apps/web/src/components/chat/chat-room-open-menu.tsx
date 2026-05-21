@@ -6,6 +6,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { ChatRoom } from '@/lib/agent-api'
+import { useUIStore } from '@/stores'
 import { FolderOpen } from 'lucide-react'
 import { toast } from 'sonner'
 import { FOLDER_OPEN_OPTIONS, FolderOpenTargetIcon, type FolderOpenTarget } from './chat-side-panel/work-dir-card'
@@ -20,6 +21,8 @@ interface ChatRoomOpenMenuProps {
 }
 
 export function ChatRoomOpenMenu({ chatRoom, isElectron }: ChatRoomOpenMenuProps) {
+  const terminalOpenTarget = useUIStore((state) => state.terminalOpenTarget)
+
   const handleOpenFolder = async (target: FolderOpenTarget) => {
     if (!isElectron || !window.electronAPI?.openFolder) {
       // Web 环境下复制路径到剪贴板
@@ -33,7 +36,7 @@ export function ChatRoomOpenMenu({ chatRoom, isElectron }: ChatRoomOpenMenuProps
     }
 
     try {
-      const result = await window.electronAPI.openFolder(getRoomWorkDir(chatRoom), target)
+      const result = await window.electronAPI.openFolder(getRoomWorkDir(chatRoom), target, terminalOpenTarget)
       if (!result?.success) {
         toast.error(result?.error || '打开目录失败')
       }

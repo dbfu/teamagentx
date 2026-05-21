@@ -131,7 +131,7 @@ model Agent {
   messages          Message[]
   roomMemories      AgentRoomMemory[]
   quickChatSessions QuickChatSession[] // 快速对话会话
-  triggeredTodos    Todo[] // 该助手触发的待办
+  triggeredTodos    Todo[] // 旧待办数据关系（运行时待办功能已移除）
   externalChannels  ExternalChannel[] // 作为默认助手的外部频道
   platformConfigs   PlatformConfig[]  // 作为平台全局默认助手
   bridgeBots        BridgeBot[]       // 外部平台机器人实例
@@ -185,7 +185,7 @@ model ChatRoom {
   agentMemories     AgentRoomMemory[]
   quickChatSessions QuickChatSession[] // 快速对话会话
   cronTasks         CronTask[] // 定时任务
-  todos             Todo[] // 群聊中的待办
+  todos             Todo[] // 旧待办数据关系（运行时待办功能已移除）
   externalChannels  ExternalChannel[] // 关联的外部平台频道
   platformConfigs   PlatformConfig[] // 直接绑定到该群聊的平台机器人
   bridgeBots        BridgeBot[] // 直接绑定到该群聊的机器人实例
@@ -240,7 +240,7 @@ model Message {
   user              User?             @relation(fields: [userId], references: [id])
   executionRecord   ExecutionRecord?  @relation(fields: [executionRecordId], references: [id], onDelete: SetNull)
   attachments       Attachment[] // 消息附件（图片等）
-  todo              Todo? // 如果这条消息创建了待办
+  todo              Todo? // 旧待办数据关系（运行时待办功能已移除）
   coveredMemories   AgentRoomMemory[] @relation("AgentRoomMemoryCoveredMessage")
 
   @@index([time])
@@ -442,7 +442,7 @@ model User {
   ownedChatRooms ChatRoom[]
   chatRoomAgents ChatRoomAgent[]
   messages       Message[]
-  todos          Todo[] // 该用户作为群主的待办
+  todos          Todo[] // 旧待办数据关系（运行时待办功能已移除）
   bridgeBots     BridgeBot[]
 
   @@index([username])
@@ -486,14 +486,14 @@ model BackgroundTask {
   @@index([startedAt])
 }
 
-// 待办事项（助手 @群主 时创建）
+// 旧待办事项数据表（运行时待办功能已移除，暂保留表结构避免破坏历史数据）
 model Todo {
   id             String     @id @default(uuid())
   chatRoomId     String
-  messageId      String     @unique // 触发待办的助手消息 ID（一条消息最多触发一个待办）
+  messageId      String     @unique // 旧触发消息 ID（一条消息最多关联一个旧待办）
   triggerAgentId String
   ownerUserId    String? // 群主用户 ID（可为空）
-  contentSummary String // 待办内容摘要
+  contentSummary String // 旧待办内容摘要
   status         TodoStatus @default(pending)
   completedAt    DateTime?
   createdAt      DateTime   @default(now())

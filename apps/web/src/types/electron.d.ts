@@ -7,6 +7,16 @@ declare global {
     getServerUrl: () => Promise<string | null>;
     getMobileWebUrl: () => Promise<string | null>;
     getAppVersion: () => Promise<string>;
+    getOpenAtLoginSettings: () => Promise<{
+      success: boolean;
+      data?: OpenAtLoginSettings;
+      error?: string;
+    }>;
+    setOpenAtLogin: (enabled: boolean) => Promise<{
+      success: boolean;
+      data?: OpenAtLoginSettings;
+      error?: string;
+    }>;
     checkForUpdates: () => Promise<{
       success: boolean;
       data?: { hasUpdate: boolean; currentVersion: string; update: UpdateInfo | null; noUrlConfigured?: boolean };
@@ -19,7 +29,8 @@ declare global {
     getOpenTargetIcons: () => Promise<Partial<Record<'vscode' | 'cursor' | 'trae' | 'trae-cn', string | null>>>;
     openFolder: (
       path: string,
-      target?: 'system' | 'terminal' | 'vscode' | 'cursor' | 'trae' | 'trae-cn'
+      target?: 'system' | 'terminal' | 'vscode' | 'cursor' | 'trae' | 'trae-cn',
+      terminalTarget?: 'terminal-app' | 'iterm2' | 'alacritty' | 'kitty' | 'ghostty' | 'wezterm' | 'kaku'
     ) => Promise<{ success: boolean; error?: string }>;
     selectFolder: () => Promise<{ success: boolean; path: string | null }>;
     openExternal: (url: string) => Promise<{ success: boolean; error?: string }>;
@@ -53,6 +64,15 @@ declare global {
     bytes: number;
     totalBytes: number | null;
     message: string;
+  }
+
+  interface OpenAtLoginSettings {
+    supported: boolean;
+    openAtLogin: boolean;
+    wasOpenedAtLogin: boolean;
+    wasOpenedAsHidden: boolean;
+    executableWillLaunchAtLogin?: boolean;
+    status?: 'not-registered' | 'enabled' | 'requires-approval' | 'not-found';
   }
 
   interface UpdateInfo {

@@ -1,7 +1,6 @@
 
 import { CreateAssistantModal } from '@/components/chat/create-assistant-modal'
 import { CreateGroupModal } from '@/components/chat/create-group-modal'
-import { TodoModal } from '@/components/chat/todo-modal'
 import { UserAvatar } from '@/components/chat/user-avatar'
 import { useTheme } from '@/components/theme-provider'
 import {
@@ -17,8 +16,7 @@ import { updateManager } from '@/lib/update-manager'
 import { cn } from '@/lib/utils'
 import { useAuthStore, useSocketStore } from '@/stores'
 import { useChatStore } from '@/stores/chat-store'
-import { TodoData } from '@/stores/socket-store'
-import { BookOpenText, Bot, Check, CircleArrowUp, Cpu, Globe, ListTodo, MessageSquare, Monitor, Moon, Package, Palette, Plus, Sun, Users } from 'lucide-react'
+import { BookOpenText, Bot, Check, CircleArrowUp, Cpu, Globe, MessageSquare, Monitor, Moon, Package, Palette, Plus, Sun, Users } from 'lucide-react'
 import { useState, useSyncExternalStore } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -33,9 +31,8 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
   const location = useLocation()
   const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false)
   const [isCreateAssistantOpen, setIsCreateAssistantOpen] = useState(false)
-  const [isTodoModalOpen, setIsTodoModalOpen] = useState(false)
   const { user } = useAuthStore()
-  const { user: socketUser, todos } = useSocketStore()
+  const { user: socketUser } = useSocketStore()
   const { theme, setTheme, brandTheme, setBrandTheme } = useTheme()
   const setSidePanelMode = useChatStore((s) => s.setSidePanelMode)
   const updateState = useSyncExternalStore(
@@ -56,9 +53,6 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
             ? 'integration'
             : 'message'
   const currentUser = user || socketUser
-
-  // 待办数量
-  const todoCount = todos.filter(t => t.status === 'pending').length
 
   // 检测是否在 Electron 环境中
   const isElectron = window.electronAPI?.isElectron ?? false
@@ -261,24 +255,6 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
           <span className="text-xs">频道</span>
         </button>
 
-        {/* 待办按钮 */}
-        <button
-          onClick={() => setIsTodoModalOpen(true)}
-          className={cn(
-            'relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
-            'text-muted-foreground hover:bg-sidebar-accent'
-          )}
-          style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
-        >
-          <ListTodo className="size-5" />
-          <span className="text-xs">待办</span>
-          {todoCount > 0 && (
-            <span className="absolute right-1 top-1 flex size-4 items-center justify-center rounded-full bg-orange-500 text-[10px] text-white">
-              {todoCount > 99 ? '99' : todoCount}
-            </span>
-          )}
-        </button>
-
         {/* 中间空白区域 - 可拖拽 */}
       </div>
 
@@ -377,13 +353,6 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
       onSubmit={handleCreateAssistant}
     />
 
-    <TodoModal
-      isOpen={isTodoModalOpen}
-      onClose={() => setIsTodoModalOpen(false)}
-      onTodoClick={(todo: TodoData) => {
-        navigate(`/?room=${todo.chatRoomId}&msg=${todo.messageId}`)
-      }}
-    />
     </>
   )
 }

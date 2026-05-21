@@ -40,8 +40,10 @@ run_step() {
   "$@"
 }
 
-if ! command -v pnpm >/dev/null 2>&1; then
-  log_error "pnpm is not installed. Please install pnpm first."
+PNPM_CMD="npx pnpm@10.24.0"
+
+if ! command -v npx >/dev/null 2>&1; then
+  log_error "npx is not installed. Please install Node.js/npm first."
   exit 1
 fi
 
@@ -61,40 +63,40 @@ run_step "Step 0/6: Cleaning build outputs..." bash -c "
 
 run_step "Step 1/6: Building server..." bash -c "
   cd '$SCRIPT_DIR/server'
-  pnpm db:generate
-  pnpm build
-  pnpm prebuild:electron
+  $PNPM_CMD db:generate
+  $PNPM_CMD build
+  $PNPM_CMD prebuild:electron
 "
 
 run_step "Step 2/6: Deploying server production dependencies..." bash -c "
   cd '$SCRIPT_DIR'
-  pnpm --filter=server deploy server/node_modules-prod --prod --frozen-lockfile --force
+  $PNPM_CMD --filter=server deploy server/node_modules-prod --prod --frozen-lockfile --force
   cd '$SCRIPT_DIR/server'
-  pnpm verify:electron-deps
-  pnpm sync:prisma:prod
+  $PNPM_CMD verify:electron-deps
+  $PNPM_CMD sync:prisma:prod
 "
 
 run_step "Step 3/6: Building Electron renderer/main/preload..." bash -c "
   cd '$SCRIPT_DIR/apps/desktop'
-  pnpm typecheck
-  pnpm exec tsc -p ../web/tsconfig.json
+  $PNPM_CMD typecheck
+  $PNPM_CMD exec tsc -p ../web/tsconfig.json
   cd '$SCRIPT_DIR/apps/web'
-  pnpm exec vite --config ../desktop/vite.config.ts --mode electron build
+  $PNPM_CMD exec vite --config ../desktop/vite.config.ts --mode electron build
 "
 
 run_step "Step 4/6: Packaging Windows x64 NSIS installer..." bash -c "
   cd '$SCRIPT_DIR/apps/desktop'
-  pnpm exec electron-builder --win nsis --x64
+  $PNPM_CMD exec electron-builder --win nsis --x64
 "
 
 run_step "Step 5/6: Packaging macOS Apple Silicon DMG..." bash -c "
   cd '$SCRIPT_DIR/apps/desktop'
-  pnpm exec electron-builder --mac dmg --arm64
+  $PNPM_CMD exec electron-builder --mac dmg --arm64
 "
 
 run_step "Step 6/6: Packaging macOS Intel DMG..." bash -c "
   cd '$SCRIPT_DIR/apps/desktop'
-  pnpm exec electron-builder --mac dmg --x64
+  $PNPM_CMD exec electron-builder --mac dmg --x64
 "
 
 echo ""

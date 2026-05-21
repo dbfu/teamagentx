@@ -603,55 +603,62 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
     )
   }
 
-  const renderCollapsibleContent = () => {
-    if (shouldHideContent) return null
+  const renderContentToggleButton = (isCollapsed: boolean) => (
+    <button
+      type="button"
+      className={cn(
+        "inline-flex items-center gap-1.5 text-xs text-blue-500 transition-colors hover:text-blue-600",
+        isCollapsed
+          ? "h-24 w-full justify-center rounded-b-lg border-0 bg-gradient-to-t from-background via-background/95 to-transparent pt-12 pb-2 shadow-none hover:from-blue-50 hover:via-blue-50/95 dark:hover:from-blue-950/90 dark:hover:via-blue-950/60"
+          : "rounded-full border border-gray-200 bg-background px-3 py-1.5 shadow-sm hover:bg-blue-50 dark:border-border dark:hover:bg-blue-950/30"
+      )}
+      onClick={(event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        setIsContentExpanded((expanded) => !expanded)
+      }}
+    >
+      {isCollapsed ? (
+        <>
+          <ChevronDown className="size-3.5" />
+          <span>展开完整内容</span>
+        </>
+      ) : (
+        <>
+          <ChevronUp className="size-3.5" />
+          <span>收起内容</span>
+        </>
+      )}
+    </button>
+  )
 
+  const renderMessageBody = (bodyClassName: string) => {
     const shouldCollapse = !disableContentCollapse && isLargeMessageContent(message.content)
     const isCollapsed = shouldCollapse && !isContentExpanded
 
     return (
-      <div
-        className={cn(
-          "relative",
-          isCollapsed && (isMobile ? "max-h-[300px] overflow-hidden" : "max-h-[420px] overflow-hidden")
-        )}
-      >
-        {renderContent(message.content)}
-        {shouldCollapse && (
-          <div
-            className={cn(
-              "flex justify-center",
-              isCollapsed
-                ? "absolute inset-x-0 bottom-0"
-                : "mt-2 border-t border-border/60 pt-2"
-            )}
-          >
-            <button
-              type="button"
+      <div className="relative overflow-hidden">
+        <div className={bodyClassName}>
+          {renderAttachments()}
+          {!shouldHideContent && (
+            <div
               className={cn(
-                "inline-flex items-center gap-1.5 text-xs text-blue-500 transition-colors hover:text-blue-600",
-                isCollapsed
-                  ? "h-24 w-full justify-center rounded-b-lg border-0 bg-gradient-to-t from-background via-background/95 to-transparent pt-12 pb-2 shadow-none hover:from-blue-50 hover:via-blue-50/95 dark:hover:from-blue-950/90 dark:hover:via-blue-950/60"
-                  : "rounded-full border border-gray-200 bg-background px-3 py-1.5 shadow-sm hover:bg-blue-50 dark:border-border dark:hover:bg-blue-950/30"
+                isCollapsed && (isMobile ? "max-h-[300px] overflow-hidden" : "max-h-[420px] overflow-hidden")
               )}
-              onClick={(event) => {
-                event.preventDefault()
-                event.stopPropagation()
-                setIsContentExpanded((expanded) => !expanded)
-              }}
             >
-              {isCollapsed ? (
-                <>
-                  <ChevronDown className="size-3.5" />
-                  <span>展开完整内容</span>
-                </>
-              ) : (
-                <>
-                  <ChevronUp className="size-3.5" />
-                  <span>收起内容</span>
-                </>
-              )}
-            </button>
+              {renderContent(message.content)}
+            </div>
+          )}
+          {!shouldHideContent && shouldCollapse && !isCollapsed && (
+            <div className="mt-2 flex justify-center border-t border-border/60 pt-2">
+              {renderContentToggleButton(false)}
+            </div>
+          )}
+        </div>
+
+        {!shouldHideContent && shouldCollapse && isCollapsed && (
+          <div className="absolute inset-x-0 bottom-0 flex justify-center">
+            {renderContentToggleButton(true)}
           </div>
         )}
       </div>
@@ -679,10 +686,10 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
               {renderReplyPreview()}
               <div
                 className={cn(
-                  "text-foreground overflow-x-auto cursor-text w-fit max-w-full",
+                  "text-foreground cursor-text w-fit max-w-full overflow-hidden",
                   isAudioOnly
                     ? ""
-                    : "rounded-lg bg-primary/15 px-4 py-2 border border-primary/20 dark:bg-primary/20 dark:border-primary/30",
+                    : "rounded-lg bg-primary/15 border border-primary/20 dark:bg-primary/20 dark:border-primary/30",
                   isMobile ? "select-none" : "select-text",
                   selectionMode && "cursor-pointer select-none",
                   isSelected && "ring-2 ring-blue-500 ring-offset-2 ring-offset-background"
@@ -691,8 +698,7 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
                 onTouchStart={handleTouchStart}
                 onTouchEnd={handleTouchEnd}
               >
-                {renderAttachments()}
-                {renderCollapsibleContent()}
+                {renderMessageBody(isAudioOnly ? "" : "px-4 py-2")}
               </div>
               <div className="flex items-center gap-2">
                 {renderTypingAgents()}
@@ -777,10 +783,10 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
             {renderReplyPreview()}
             <div
               className={cn(
-                "text-foreground overflow-x-auto cursor-text max-w-full",
+                "text-foreground cursor-text max-w-full overflow-hidden",
                 isAudioOnly
                   ? ""
-                  : "rounded-lg bg-muted/50 px-4 py-3 border border-border/50 dark:bg-muted/40 dark:border-border",
+                  : "rounded-lg bg-muted/50 border border-border/50 dark:bg-muted/40 dark:border-border",
                 isMobile ? "select-none" : "select-text",
                 selectionMode && "cursor-pointer select-none",
                 isSelected && "ring-2 ring-blue-500 ring-offset-2 ring-offset-background"
@@ -789,8 +795,7 @@ export function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechB
               onTouchStart={handleTouchStart}
               onTouchEnd={handleTouchEnd}
             >
-              {renderAttachments()}
-              {renderCollapsibleContent()}
+              {renderMessageBody(isAudioOnly ? "" : "px-4 py-3")}
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               {renderTypingAgents()}

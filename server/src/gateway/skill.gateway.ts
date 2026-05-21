@@ -114,7 +114,27 @@ function linkSharedSkillToAgent(
     }
   }
 
-  fs.symlinkSync(sharedSkill.sourceDir, targetPath, 'dir');
+  try {
+    fs.symlinkSync(
+      sharedSkill.sourceDir,
+      targetPath,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+  } catch (error) {
+    if (process.platform !== 'win32') {
+      throw error;
+    }
+
+    fs.rmSync(targetPath, { recursive: true, force: true });
+    fs.cpSync(sharedSkill.sourceDir, targetPath, {
+      recursive: true,
+      dereference: true,
+      filter: (src) => {
+        const relative = path.relative(sharedSkill.sourceDir, src);
+        return !relative.startsWith('.git');
+      },
+    });
+  }
   return targetPath;
 }
 

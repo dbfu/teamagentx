@@ -55,6 +55,7 @@
     "jsonwebtoken": "^9.0.3",
     "libsql": "^0.5.28",
     "node-fetch": "^3.3.2",
+    "npm": "^11.14.1",
     "openai": "^6.37.0",
     "promise-limit": "^2.7.0",
     "skillflag": "^0.1.4",
