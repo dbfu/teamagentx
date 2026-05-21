@@ -264,6 +264,10 @@ export function ChatMessagesList({
     }
     return counts
   }, [messages])
+  const messagesBelongToCurrentRoom = useMemo(
+    () => messages.length === 0 || messages.every((message) => message.chatRoomId === chatRoomId),
+    [chatRoomId, messages],
+  )
 
   // 是否在底部附近（距离底部 100px 以内算"在底部"）
   const [isNearBottom, setIsNearBottom] = useState(true)
@@ -543,9 +547,15 @@ export function ChatMessagesList({
 
   // 检测新消息
   useEffect(() => {
+    const currentLastMessageId = messages[messages.length - 1]?.id ?? null
+    if (!messagesBelongToCurrentRoom || !hasRestoredPositionRef.current) {
+      prevMessageCountRef.current = messages.length
+      prevLastMessageIdRef.current = currentLastMessageId
+      return
+    }
+
     const previousMessageCount = prevMessageCountRef.current
     const previousLastMessageId = prevLastMessageIdRef.current
-    const currentLastMessageId = messages[messages.length - 1]?.id ?? null
     const hasNewMessages = messages.length > previousMessageCount && currentLastMessageId !== previousLastMessageId
     prevMessageCountRef.current = messages.length
     prevLastMessageIdRef.current = currentLastMessageId
@@ -559,14 +569,14 @@ export function ChatMessagesList({
         setShowNewMessageHint(true)
       }
     }
-  }, [messages, isNearBottom, scrollToBottom])
+  }, [messages, messagesBelongToCurrentRoom, isNearBottom, scrollToBottom])
 
   // typingAgents 变化时，如果在底部也滚动
   useEffect(() => {
-    if (isNearBottom && typingAgents.size > 0) {
+    if (messagesBelongToCurrentRoom && hasRestoredPositionRef.current && isNearBottom && typingAgents.size > 0) {
       scrollToBottom()
     }
-  }, [typingAgents, isNearBottom, scrollToBottom])
+  }, [typingAgents, messagesBelongToCurrentRoom, isNearBottom, scrollToBottom])
 
   // 检测群聊切换，重置恢复标记
   useEffect(() => {
@@ -603,7 +613,7 @@ export function ChatMessagesList({
 
   // 消息加载完成后恢复上次滚动位置（只在切换群聊后的首次加载时执行）
   useEffect(() => {
-    if (!loading && messages.length > 0 && containerRef.current && !hasRestoredPositionRef.current) {
+    if (!loading && messages.length > 0 && messagesBelongToCurrentRoom && containerRef.current && !hasRestoredPositionRef.current) {
       hasRestoredPositionRef.current = true
       const savedPosition = getScrollPosition(chatRoomId)
       if (savedPosition !== null) {
@@ -614,19 +624,19 @@ export function ChatMessagesList({
         scrollToBottom()
       }
     }
-  }, [loading, chatRoomId, getScrollPosition, messages.length, rowVirtualizer, scrollToBottom])
+  }, [loading, chatRoomId, getScrollPosition, messages.length, messagesBelongToCurrentRoom, rowVirtualizer, scrollToBottom])
 
   // 捕获进入房间时的初始消息 ID，这些消息不走自动播放
   useEffect(() => {
-    if (!loading && !initialCapturedRef.current && messages.length > 0) {
+    if (!loading && messagesBelongToCurrentRoom && !initialCapturedRef.current && messages.length > 0) {
       initialCapturedRef.current = true
       for (const m of messages) initialMessageIdsRef.current.add(m.id)
     }
-  }, [loading, chatRoomId, messages])
+  }, [loading, chatRoomId, messages, messagesBelongToCurrentRoom])
 
   // 进入群聊时先从 IDB 加载缓存，再批量预热未缓存的旧消息（每个 room 只触发一次）
   useEffect(() => {
-    if (loading || messages.length === 0 || allAgents.length === 0) return
+    if (loading || !messagesBelongToCurrentRoom || messages.length === 0 || allAgents.length === 0) return
     if (prewarmDoneRoomsRef.current.has(chatRoomId)) return
     prewarmDoneRoomsRef.current.add(chatRoomId)
     const agents = allAgents
@@ -650,7 +660,7 @@ export function ChatMessagesList({
         })
       }
     })()
-  }, [chatRoomId, loading, messages, allAgents])
+  }, [chatRoomId, loading, messages, messagesBelongToCurrentRoom, allAgents])
 
   // 切换房间时取消正在播报的语音（已播 ID 保留，不清空）
   useEffect(() => {

@@ -1879,11 +1879,44 @@ function createWindow() {
     return { action: 'deny' };
   });
 
+  let pendingFullScreenClose = false;
+  let fullScreenCloseFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+
   mainWindow.on('close', (event) => {
     if (isQuitting) return;
 
     event.preventDefault();
-    mainWindow?.hide();
+
+    const window = mainWindow;
+    if (!window) return;
+
+    if (process.platform === 'darwin' && window.isFullScreen()) {
+      if (pendingFullScreenClose) return;
+
+      pendingFullScreenClose = true;
+
+      const hideAfterLeavingFullScreen = () => {
+        window.removeListener('leave-full-screen', hideAfterLeavingFullScreen);
+
+        if (fullScreenCloseFallbackTimer) {
+          clearTimeout(fullScreenCloseFallbackTimer);
+          fullScreenCloseFallbackTimer = null;
+        }
+
+        pendingFullScreenClose = false;
+
+        if (mainWindow === window && !window.isDestroyed()) {
+          window.hide();
+        }
+      };
+
+      window.once('leave-full-screen', hideAfterLeavingFullScreen);
+      fullScreenCloseFallbackTimer = setTimeout(hideAfterLeavingFullScreen, 900);
+      window.setFullScreen(false);
+      return;
+    }
+
+    window.hide();
   });
 
   if (!app.isPackaged) {
