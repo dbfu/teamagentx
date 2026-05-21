@@ -1,4 +1,5 @@
-import { memo, useEffect, useRef, useState, useCallback, useMemo } from 'react'
+import { memo, useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { Message } from '@/lib/agent-api'
 import { ChatMessage } from './chat-message'
 import { useChatStore } from '@/stores/chat-store'
@@ -175,6 +176,18 @@ const MessageRow = memo(function MessageRow({
   )
 })
 
+function estimateMessageHeight(message?: Message): number {
+  if (!message) return 128
+
+  const textLength = message.content.length
+  const lineCount = message.content.split(/\r\n|\r|\n/).length
+  const attachmentCount = message.attachments?.length ?? 0
+  const textHeight = Math.min(420, Math.max(28, Math.ceil(textLength / 52) * 18 + lineCount * 6))
+  const attachmentHeight = attachmentCount > 0 ? Math.min(280, attachmentCount * 96) : 0
+
+  return 72 + textHeight + attachmentHeight
+}
+
 export function ChatMessagesList({
   chatRoomId,
   messages,
@@ -236,6 +249,10 @@ export function ChatMessagesList({
     () => new Map(messages.map((message) => [message.id, message])),
     [messages],
   )
+  const messageIndexById = useMemo(
+    () => new Map(messages.map((message, index) => [message.id, index])),
+    [messages],
+  )
   const messageByIdRef = useRef(messageById)
   messageByIdRef.current = messageById
   const replyCountsByMessageId = useMemo(() => {
@@ -269,10 +286,21 @@ export function ChatMessagesList({
   const initialMessageIdsRef = useRef<Set<string>>(new Set())
   const initialCapturedRef = useRef(false)
   const recentlyStoppedVoiceMessageIdsRef = useRef<Map<string, number>>(new Map())
-  const prependScrollHeightRef = useRef<number | null>(null)
+  const prependAnchorRef = useRef<{ messageId: string; offset: number } | null>(null)
+  const pendingHighlightMessageIdRef = useRef<string | null>(null)
   const hasUserScrollIntentRef = useRef(false)
 
   const selectedCount = selectedMessageIds.size
+  const getVirtualItemKey = useCallback((index: number) => messages[index]?.id ?? index, [messages])
+  const estimateVirtualItemSize = useCallback((index: number) => estimateMessageHeight(messages[index]), [messages])
+  const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
+    count: messages.length,
+    getScrollElement: () => containerRef.current,
+    getItemKey: getVirtualItemKey,
+    estimateSize: estimateVirtualItemSize,
+    overscan: isMobile ? 8 : 12,
+  })
+  const virtualItems = rowVirtualizer.getVirtualItems()
 
   const exitMultiSelect = useCallback(() => {
     setIsMultiSelectMode(false)
@@ -349,6 +377,22 @@ export function ChatMessagesList({
     return true
   }, [])
 
+  const capturePrependAnchor = useCallback(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    const anchorItem = rowVirtualizer
+      .getVirtualItems()
+      .find((item) => item.end >= container.scrollTop)
+    const anchorMessage = anchorItem ? messages[anchorItem.index] : null
+    if (!anchorItem || !anchorMessage) return
+
+    prependAnchorRef.current = {
+      messageId: anchorMessage.id,
+      offset: anchorItem.start - container.scrollTop,
+    }
+  }, [messages, rowVirtualizer])
+
   const tryLoadOlderMessages = useCallback(() => {
     const container = containerRef.current
     if (
@@ -360,10 +404,10 @@ export function ChatMessagesList({
       && !loadingOlderMessages
       && messages.length > 0
     ) {
-      prependScrollHeightRef.current = container.scrollHeight
+      capturePrependAnchor()
       void onLoadOlderMessages?.()
     }
-  }, [hasOlderMessages, loading, loadingOlderMessages, messages.length, onLoadOlderMessages])
+  }, [capturePrependAnchor, hasOlderMessages, loading, loadingOlderMessages, messages.length, onLoadOlderMessages])
 
   const markUserScrollIntent = useCallback(() => {
     hasUserScrollIntentRef.current = true
@@ -399,30 +443,35 @@ export function ChatMessagesList({
     }
   }, [checkIsNearBottom, showNewMessageHint, tryLoadOlderMessages])
 
-  useEffect(() => {
-    if (loadingOlderMessages || prependScrollHeightRef.current === null) return
+  useLayoutEffect(() => {
+    if (loadingOlderMessages || prependAnchorRef.current === null) return
 
-    const previousScrollHeight = prependScrollHeightRef.current
+    const anchor = prependAnchorRef.current
+    const anchorIndex = messageIndexById.get(anchor.messageId)
+    if (anchorIndex === undefined) {
+      prependAnchorRef.current = null
+      return
+    }
+
     const animationFrame = requestAnimationFrame(() => {
-      const container = containerRef.current
-      if (!container) return
+      const offsetInfo = rowVirtualizer.getOffsetForIndex(anchorIndex, 'start')
+      if (!offsetInfo) return
 
-      const heightDelta = container.scrollHeight - previousScrollHeight
-      if (heightDelta > 0) {
-        container.scrollTop += heightDelta
-      }
-      prependScrollHeightRef.current = null
+      rowVirtualizer.scrollToOffset(Math.max(0, offsetInfo[0] - anchor.offset), { behavior: 'auto' })
+      prependAnchorRef.current = null
     })
 
     return () => cancelAnimationFrame(animationFrame)
-  }, [loadingOlderMessages, messages.length])
+  }, [loadingOlderMessages, messageIndexById, messages.length, rowVirtualizer])
 
   // 滚动到底部
   const scrollToBottom = useCallback(() => {
+    if (messages.length === 0) return
+
     const alignToBottom = () => {
       const container = containerRef.current
       if (!container) return
-      messagesEndRef.current?.scrollIntoView({ block: 'end' })
+      rowVirtualizer.scrollToIndex(messages.length - 1, { align: 'end', behavior: 'auto' })
       container.scrollTop = container.scrollHeight
     }
 
@@ -437,27 +486,50 @@ export function ChatMessagesList({
       }
     }
     requestAnimationFrame(tick)
-  }, [messagesEndRef])
+  }, [messages.length, rowVirtualizer])
+
+  const highlightMessage = useCallback((messageId: string) => {
+    const messageEl = messageRefs.current.get(messageId)
+    if (!messageEl) return false
+
+    messageEl.classList.add('message-highlight')
+    if (pendingHighlightMessageIdRef.current === messageId) {
+      pendingHighlightMessageIdRef.current = null
+    }
+    window.setTimeout(() => {
+      messageEl.classList.remove('message-highlight')
+      setScrollToMessageId(null)
+    }, 3000)
+    return true
+  }, [setScrollToMessageId])
 
   // 处理消息定位
   useEffect(() => {
-    if (scrollToMessageId && messageRefs.current.has(scrollToMessageId)) {
-      const messageEl = messageRefs.current.get(scrollToMessageId)
-      if (messageEl) {
-        // 滚动到消息位置（居中显示）
-        messageEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    if (!scrollToMessageId) return
 
-        // 添加高亮效果
-        messageEl.classList.add('message-highlight')
+    const messageIndex = messageIndexById.get(scrollToMessageId)
+    if (messageIndex === undefined) return
 
-        // 3秒后移除高亮
-        setTimeout(() => {
-          messageEl.classList.remove('message-highlight')
-          setScrollToMessageId(null)
-        }, 3000)
+    pendingHighlightMessageIdRef.current = scrollToMessageId
+    rowVirtualizer.scrollToIndex(messageIndex, { align: 'center', behavior: 'smooth' })
+
+    let frame = 0
+    const tick = () => {
+      if (highlightMessage(scrollToMessageId)) return
+      frame += 1
+      if (frame < 6) {
+        requestAnimationFrame(tick)
       }
     }
-  }, [scrollToMessageId, setScrollToMessageId])
+    requestAnimationFrame(tick)
+  }, [highlightMessage, messageIndexById, rowVirtualizer, scrollToMessageId])
+
+  useEffect(() => {
+    const pendingId = pendingHighlightMessageIdRef.current
+    if (pendingId) {
+      highlightMessage(pendingId)
+    }
+  }, [highlightMessage, virtualItems])
 
   // 处理强制滚动到底部（用户发送消息后）
   useEffect(() => {
@@ -505,7 +577,8 @@ export function ChatMessagesList({
       initialCapturedRef.current = false
       recentlyStoppedVoiceMessageIdsRef.current.clear()
       hasUserScrollIntentRef.current = false
-      prependScrollHeightRef.current = null
+      prependAnchorRef.current = null
+      pendingHighlightMessageIdRef.current = null
       prevMessageCountRef.current = messages.length
       prevLastMessageIdRef.current = messages[messages.length - 1]?.id ?? null
       // 重置底部状态
@@ -535,13 +608,13 @@ export function ChatMessagesList({
       const savedPosition = getScrollPosition(chatRoomId)
       if (savedPosition !== null) {
         // 恢复滚动位置
-        containerRef.current.scrollTop = savedPosition
+        rowVirtualizer.scrollToOffset(savedPosition, { behavior: 'auto' })
       } else {
         // 没有保存的位置，滚动到底部
         scrollToBottom()
       }
     }
-  }, [loading, chatRoomId, getScrollPosition, scrollToBottom])
+  }, [loading, chatRoomId, getScrollPosition, messages.length, rowVirtualizer, scrollToBottom])
 
   // 捕获进入房间时的初始消息 ID，这些消息不走自动播放
   useEffect(() => {
@@ -804,44 +877,62 @@ export function ChatMessagesList({
             暂无消息
           </div>
         ) : (
-          <>
-            {loadingOlderMessages && (
-              <div className="flex items-center justify-center gap-2 py-2 text-xs text-muted-foreground">
-                <Loader2 className="size-3.5 animate-spin" />
-                <span>加载历史消息...</span>
-              </div>
-            )}
-            {messages.map((message) => (
-              <MessageRow
-                key={message.id}
-                chatRoomId={chatRoomId}
-                message={message}
-                isMultiSelectMode={isMultiSelectMode}
-                isSelected={selectedMessageIds.has(message.id)}
-                replyTo={message.replyMessageId ? messageById.get(message.replyMessageId) : null}
-                replyCount={replyCountsByMessageId.get(message.id) ?? 0}
-                typingAgents={typingAgents.get(message.id)}
-                mentionAgents={mentionAgents}
-                currentUser={currentUser}
-                hasBeenPlayed={playedIds.has(message.id)}
-                onSetMessageRef={handleSetMessageRef}
-                onMarkVoiceMessagesPlayed={markVoiceMessagesPlayed}
-                onStopSpeak={stopCurrentPlaybackSession}
-                onAgentAvatarClick={onAgentAvatarClick}
-                onTypingAgentClick={onTypingAgentClick}
-                onMentionClick={onMentionClick}
-                onReplyClick={onReplyClick}
-                onExecutionDetailClick={onExecutionDetailClick}
-                onMentionAgent={onMentionAgent}
-                onDeleteMessage={handleDeleteMessage}
-                onStartMultiSelect={startMultiSelect}
-                onToggleSelection={toggleMessageSelection}
-              />
-            ))}
-          </>
+          <div
+            className="relative w-full"
+            style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+          >
+            {virtualItems.map((virtualItem) => {
+              const message = messages[virtualItem.index]
+              if (!message) return null
+
+              return (
+                <div
+                  key={virtualItem.key}
+                  data-index={virtualItem.index}
+                  ref={rowVirtualizer.measureElement}
+                  className="absolute left-0 top-0 w-full"
+                  style={{ transform: `translateY(${virtualItem.start}px)` }}
+                >
+                  <MessageRow
+                    chatRoomId={chatRoomId}
+                    message={message}
+                    isMultiSelectMode={isMultiSelectMode}
+                    isSelected={selectedMessageIds.has(message.id)}
+                    replyTo={message.replyMessageId ? messageById.get(message.replyMessageId) : null}
+                    replyCount={replyCountsByMessageId.get(message.id) ?? 0}
+                    typingAgents={typingAgents.get(message.id)}
+                    mentionAgents={mentionAgents}
+                    currentUser={currentUser}
+                    hasBeenPlayed={playedIds.has(message.id)}
+                    onSetMessageRef={handleSetMessageRef}
+                    onMarkVoiceMessagesPlayed={markVoiceMessagesPlayed}
+                    onStopSpeak={stopCurrentPlaybackSession}
+                    onAgentAvatarClick={onAgentAvatarClick}
+                    onTypingAgentClick={onTypingAgentClick}
+                    onMentionClick={onMentionClick}
+                    onReplyClick={onReplyClick}
+                    onExecutionDetailClick={onExecutionDetailClick}
+                    onMentionAgent={onMentionAgent}
+                    onDeleteMessage={handleDeleteMessage}
+                    onStartMultiSelect={startMultiSelect}
+                    onToggleSelection={toggleMessageSelection}
+                  />
+                </div>
+              )
+            })}
+          </div>
         )}
         <div ref={messagesEndRef} className="h-1" />
       </div>
+
+      {loadingOlderMessages && messages.length > 0 && (
+        <div className="pointer-events-none absolute inset-x-0 top-2 z-20 flex items-center justify-center">
+          <div className="flex items-center gap-2 rounded-full border border-border bg-background/95 px-3 py-1.5 text-xs text-muted-foreground shadow-sm backdrop-blur">
+            <Loader2 className="size-3.5 animate-spin" />
+            <span>加载历史消息...</span>
+          </div>
+        </div>
+      )}
 
       {isMultiSelectMode && (
         <div className="absolute inset-x-4 bottom-4 z-30 flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-background px-4 py-3 shadow-lg dark:border-border">
