@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { X, Loader2, Download, MessageSquare, Package, Check, Search } from 'lucide-react'
 import { agentApi } from '@/lib/agent-api'
 import { skillApi, SharedSkill } from '@/lib/skill-api'
@@ -46,7 +46,7 @@ export function InstallSkillModal({
   const [searchQuery, setSearchQuery] = useState('')
 
   // 搜索过滤后的技能列表
-  const filteredSkills = sharedSkills.filter((skill) => {
+  const filteredSkills = useMemo(() => sharedSkills.filter((skill) => {
     if (!searchQuery.trim()) return true
     const q = searchQuery.toLowerCase()
     return (
@@ -54,7 +54,13 @@ export function InstallSkillModal({
       skill.description?.toLowerCase().includes(q) ||
       skill.slug.toLowerCase().includes(q)
     )
-  })
+  }), [searchQuery, sharedSkills])
+  const filteredSkillSlugs = useMemo(
+    () => filteredSkills.map((skill) => skill.slug),
+    [filteredSkills],
+  )
+  const allFilteredSelected = filteredSkillSlugs.length > 0
+    && filteredSkillSlugs.every((slug) => selectedSkills.has(slug))
 
   // 加载共享技能
   useEffect(() => {
@@ -73,6 +79,10 @@ export function InstallSkillModal({
           skill => !skill.installedAgents.includes(agentName)
         )
         setSharedSkills(availableSkills)
+        setSelectedSkills(prev => {
+          const availableSlugs = new Set(availableSkills.map((skill) => skill.slug))
+          return new Set([...prev].filter((slug) => availableSlugs.has(slug)))
+        })
       } else {
         toast.error(result.error || '获取技能列表失败')
       }
@@ -91,6 +101,20 @@ export function InstallSkillModal({
         next.delete(slug)
       } else {
         next.add(slug)
+      }
+      return next
+    })
+  }
+
+  const toggleSelectAllFiltered = () => {
+    if (filteredSkillSlugs.length === 0) return
+
+    setSelectedSkills(prev => {
+      const next = new Set(prev)
+      if (filteredSkillSlugs.every((slug) => next.has(slug))) {
+        filteredSkillSlugs.forEach((slug) => next.delete(slug))
+      } else {
+        filteredSkillSlugs.forEach((slug) => next.add(slug))
       }
       return next
     })
@@ -243,15 +267,34 @@ export function InstallSkillModal({
               ) : (
                 <>
                   {/* 搜索框 */}
-                  <div className="relative mb-3">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-                    <input
-                      type="text"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="搜索技能名称或描述..."
-                      className="w-full rounded-lg border border-border bg-background pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
-                    />
+                  <div className="mb-3 flex items-center gap-2">
+                    <div className="relative min-w-0 flex-1">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                      <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder="搜索技能名称或描述..."
+                        className="w-full rounded-lg border border-border bg-background pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={toggleSelectAllFiltered}
+                      disabled={filteredSkills.length === 0 || installing}
+                      className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+                    >
+                      <span className={cn(
+                        'flex size-4 items-center justify-center rounded border transition-colors',
+                        allFilteredSelected
+                          ? 'border-primary bg-primary text-white'
+                          : 'border-border bg-transparent'
+                      )}
+                      >
+                        {allFilteredSelected && <Check className="size-3" />}
+                      </span>
+                      {allFilteredSelected ? '取消全选' : '全选'}
+                    </button>
                   </div>
                   {filteredSkills.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-6 text-muted-foreground">

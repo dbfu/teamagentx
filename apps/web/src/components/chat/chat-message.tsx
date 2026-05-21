@@ -83,7 +83,6 @@ interface ChatMessageProps {
   typingAgents?: TypingAgent[]
   mentionAgents?: MentionAgent[]
   currentUser?: CurrentUser
-  hasBeenPlayed?: boolean
   onMarkPlayed?: () => void
   onAgentAvatarClick?: (agentId: string, agentName: string) => void
   onTypingAgentClick?: (messageId: string, agentId: string, agentName: string) => void
@@ -100,11 +99,12 @@ interface ChatMessageProps {
   onStopSpeak?: (messageId: string) => void
 }
 
-export const ChatMessage = memo(function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechButton = true, typingAgents, mentionAgents, currentUser, hasBeenPlayed, onMarkPlayed, onAgentAvatarClick, onTypingAgentClick, onMentionClick, onReplyClick, onExecutionDetailClick, onMentionAgent, onDeleteMessage, onStartMultiSelect, onToggleSelection, selectionMode, isSelected, disableContentCollapse = false, onStopSpeak }: ChatMessageProps) {
+export const ChatMessage = memo(function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechButton = true, typingAgents, mentionAgents, currentUser, onMarkPlayed, onAgentAvatarClick, onTypingAgentClick, onMentionClick, onReplyClick, onExecutionDetailClick, onMentionAgent, onDeleteMessage, onStartMultiSelect, onToggleSelection, selectionMode, isSelected, disableContentCollapse = false, onStopSpeak }: ChatMessageProps) {
   const isMobile = useIsMobile()
   const allAgents = useChatStore((s) => s.allAgents)
   const isCurrentlyPlaying = useChatStore((s) => s.playingVoiceMessageId === message.id)
   const setPlayingVoiceMessageId = useChatStore((s) => s.setPlayingVoiceMessageId)
+  const setScrollToMessageId = useChatStore((s) => s.setScrollToMessageId)
   const senderName = message.isHuman
     ? (message.user?.username ?? '用户')
     : (message.agent?.name ?? '助手')
@@ -373,9 +373,22 @@ export const ChatMessage = memo(function ChatMessage({ message, isRight, replyTo
     const replySenderName = replyTo.isHuman
       ? (replyTo.user?.username ?? '用户')
       : (replyTo.agent?.name ?? '助手')
+    const handleReplyPreviewClick = () => {
+      setScrollToMessageId(replyTo.id)
+    }
 
     return (
-      <div className="w-full select-text mb-1.5 flex items-center gap-2 rounded bg-primary/5 text-xs text-muted-foreground overflow-hidden">
+      <div
+        role="button"
+        tabIndex={0}
+        className="mb-1.5 flex w-full cursor-pointer items-center gap-2 overflow-hidden rounded bg-primary/5 text-xs text-muted-foreground hover:bg-primary/10"
+        onClick={handleReplyPreviewClick}
+        onKeyDown={(event) => {
+          if (event.key !== 'Enter' && event.key !== ' ') return
+          event.preventDefault()
+          handleReplyPreviewClick()
+        }}
+      >
         <div className="ml-2 h-3 w-0.5 shrink-0 self-center bg-primary/30" />
         <div className="w-0 flex-1 truncate py-1 pr-2">
           回复 {replySenderName}：<span className="ml-1">{replyTo.content}</span>
@@ -525,14 +538,6 @@ export const ChatMessage = memo(function ChatMessage({ message, isRight, replyTo
             {isCurrentlyPlaying ? '播放中' : '播报'}
           </span>
         </button>
-        {!hasBeenPlayed && !isCurrentlyPlaying && (
-          <span
-            role="status"
-            aria-label="未播放"
-            title="未播放"
-            className="absolute -right-0.5 top-0 size-2 rounded-full bg-orange-500/90 ring-2 ring-background dark:ring-slate-900"
-          />
-        )}
       </span>
     )
   }

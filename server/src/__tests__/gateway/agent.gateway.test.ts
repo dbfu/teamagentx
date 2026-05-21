@@ -104,6 +104,43 @@ describe('Agent Gateway API', () => {
       assert.strictEqual(body.data.prompt, '');
     });
 
+    test('新建 Agent 应排在未分类列表最前面', async () => {
+      const suffix = Date.now();
+      const firstResponse = await app.inject({
+        method: 'POST',
+        url: '/agents',
+        payload: {
+          name: `Sort First Agent ${suffix}`,
+          prompt: 'first',
+        },
+      });
+      const secondResponse = await app.inject({
+        method: 'POST',
+        url: '/agents',
+        payload: {
+          name: `Sort Second Agent ${suffix}`,
+          prompt: 'second',
+        },
+      });
+
+      assert.strictEqual(firstResponse.statusCode, 201);
+      assert.strictEqual(secondResponse.statusCode, 201);
+
+      const first = firstResponse.json().data;
+      const second = secondResponse.json().data;
+      assert.ok(second.sortOrder > first.sortOrder);
+
+      const groupedResponse = await app.inject({
+        method: 'GET',
+        url: '/agents/grouped',
+      });
+      assert.strictEqual(groupedResponse.statusCode, 200);
+
+      const grouped = groupedResponse.json();
+      assert.strictEqual(grouped.success, true);
+      assert.strictEqual(grouped.data.uncategorized[0].id, second.id);
+    });
+
     test('应该创建包含所有字段的 Agent', async () => {
       const response = await app.inject({
         method: 'POST',

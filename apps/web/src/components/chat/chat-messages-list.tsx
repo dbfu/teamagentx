@@ -57,7 +57,6 @@ interface MessageRowProps {
   typingAgents?: { agentId: string; agentName: string; status?: 'pending' | 'executing' | 'cancelled' }[]
   mentionAgents: MentionAgent[]
   currentUser?: CurrentUser
-  hasBeenPlayed: boolean
   onSetMessageRef: (messageId: string, element: HTMLDivElement | null) => void
   onMarkVoiceMessagesPlayed: (chatRoomId: string, messageIds: string[]) => void
   onStopSpeak: (messageId: string) => void
@@ -82,7 +81,6 @@ const MessageRow = memo(function MessageRow({
   typingAgents,
   mentionAgents,
   currentUser,
-  hasBeenPlayed,
   onSetMessageRef,
   onMarkVoiceMessagesPlayed,
   onStopSpeak,
@@ -152,7 +150,6 @@ const MessageRow = memo(function MessageRow({
         typingAgents={typingAgents}
         mentionAgents={mentionAgents}
         currentUser={currentUser}
-        hasBeenPlayed={hasBeenPlayed}
         onMarkPlayed={handleMarkPlayed}
         onStopSpeak={onStopSpeak}
         onAgentAvatarClick={onAgentAvatarClick}
@@ -913,7 +910,6 @@ export function ChatMessagesList({
                     typingAgents={typingAgents.get(message.id)}
                     mentionAgents={mentionAgents}
                     currentUser={currentUser}
-                    hasBeenPlayed={playedIds.has(message.id)}
                     onSetMessageRef={handleSetMessageRef}
                     onMarkVoiceMessagesPlayed={markVoiceMessagesPlayed}
                     onStopSpeak={stopCurrentPlaybackSession}

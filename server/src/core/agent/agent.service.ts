@@ -173,6 +173,8 @@ const agentInclude = {
   },
 } as const;
 
+const AGENT_SORT_ORDER_STEP = 1000;
+
 // 批量更新排序请求类型
 export type UpdateSortOrderInput = {
   id: string;
@@ -195,6 +197,15 @@ export const agentService = {
 
     const agentId = data.id || randomUUID();
     return prisma.$transaction(async (tx) => {
+      const currentFirstAgent = await tx.agent.findFirst({
+        where: {
+          categoryId,
+          agentLevel: 'normal',
+        },
+        orderBy: { sortOrder: 'desc' },
+        select: { sortOrder: true },
+      });
+
       await tx.agent.create({
         data: {
           id: agentId,
@@ -213,6 +224,7 @@ export const agentService = {
           categoryId,
           llmProviderId,
           speechConfig: serializeAgentSpeechConfig(data.speechConfig),
+          sortOrder: (currentFirstAgent?.sortOrder ?? 0) + AGENT_SORT_ORDER_STEP,
           updatedAt: now,
         },
       });
