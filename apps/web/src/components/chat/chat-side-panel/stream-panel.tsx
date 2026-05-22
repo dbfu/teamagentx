@@ -70,6 +70,32 @@ function TimeIndicator({ event, isCompleted }: { event: StreamEvent; isCompleted
   )
 }
 
+function TotalTimeIndicator({ events, isRunning }: { events: StreamEvent[]; isRunning: boolean }) {
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (!isRunning) return
+
+    const timer = setInterval(() => {
+      setNow(Date.now())
+    }, 1000)
+
+    return () => clearInterval(timer)
+  }, [isRunning])
+
+  if (events.length === 0) return null
+
+  const startTime = Math.min(...events.map(event => event.timestamp))
+  const completedEndTime = Math.max(...events.map(event => event.endTime ?? event.timestamp))
+  const endTime = isRunning ? now : completedEndTime
+
+  return (
+    <span className="text-muted-foreground tabular-nums">
+      · 耗时 {formatDuration(startTime, endTime)}
+    </span>
+  )
+}
+
 function CollapsibleStateIcon({ className }: { className?: string }) {
   return (
     <>
@@ -233,6 +259,7 @@ export function StreamPanel({
             <div className="flex items-center gap-2 text-xs text-primary">
               <Loader2 className="size-3 animate-spin" />
               <span>处理中...</span>
+              <TotalTimeIndicator events={events} isRunning={Boolean(isExecuting)} />
             </div>
             {isExecuting && onStop && chatRoomId && (
               <button

@@ -98,9 +98,9 @@ export const createCronTaskTool = tool(
       let agentInfo = '';
       if (agentIds && agentIds.length > 0) {
         if (agentIds.includes('*')) {
-          agentInfo = '\n- 触发助手: 所有助手';
+          agentInfo = '\n- 触发助手: 所有助手（任务执行时会逐个发送消息）';
         } else {
-          agentInfo = `\n- 触发助手: ${agentIds.length} 个助手（系统会自动添加 @助手名）`;
+          agentInfo = `\n- 触发助手: ${agentIds.length} 个助手（任务执行时会逐个发送消息）`;
         }
       }
 
@@ -117,7 +117,7 @@ export const createCronTaskTool = tool(
   {
     name: 'create_cron_task',
     description:
-      '创建定时任务。可以选择触发的助手，系统会自动在消息前添加 @助手名。',
+      '创建定时任务。可以选择触发的助手；选择多个助手或所有助手时，系统会循环发送消息，每条消息只触发一个助手。',
     schema: z.object({
       chatRoomId: z.string().describe('群聊 ID'),
       name: z.string().describe('任务名称'),
@@ -139,12 +139,12 @@ export const createCronTaskTool = tool(
         .describe('执行时间（scheduleType=once 时必填），ISO 格式日期字符串'),
       payload: z
         .string()
-        .describe('执行内容，发送的消息。系统会根据 agentIds 自动添加 @助手名'),
+        .describe('执行内容，发送的消息。不要在 payload 中手写 @助手名，系统会根据 agentIds 自动处理触发助手'),
       agentIds: z
         .array(z.string())
         .optional()
         .describe(
-          '要触发的助手 ID 列表。传入 ["*"] 表示所有助手（排除系统内置助手），传入具体助手 ID 表示指定助手',
+          '要触发的助手 ID 列表。传入 ["*"] 表示所有助手（排除系统内置助手）；传入多个具体助手 ID 时，系统会逐个发送消息，每条消息只触发一个助手',
         ),
       enabled: z.boolean().optional().describe('是否立即启用，默认 true'),
       maxRetries: z.number().optional().describe('最大重试次数，默认 3'),
@@ -337,7 +337,7 @@ export const updateCronTaskTool = tool(
         .optional()
         .describe('新的执行时间（scheduleType=once 时使用，ISO 格式）'),
       payload: z.string().optional().describe('新的执行内容'),
-      agentIds: z.array(z.string()).optional().describe('新的触发助手 ID 列表'),
+      agentIds: z.array(z.string()).optional().describe('新的触发助手 ID 列表；多个助手会在执行时拆成多条消息逐个触发'),
     }),
   },
 );

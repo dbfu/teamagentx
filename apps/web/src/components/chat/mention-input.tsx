@@ -105,7 +105,7 @@ export function MentionInput({
     // @ 后面是：空格、字符串结尾、或标点符号
     // 特殊处理名称中的连字符：只有当连字符后面没有名称字符时，才作为边界
     // 注意：模板字符串中 $ 直接写（不转义）表示正则的字符串结尾
-    const boundaryChars = '*_>#`-'
+    const boundaryChars = '*_>#`!?.,:;！？。，；：-'
     const endBoundaryChars = '*_>#`!?.,:;！？。，；：'
     const regex = new RegExp(`(?:^|\\s|[${boundaryChars}])@(${agentNames.join('|')})(?=\\s|$|[${endBoundaryChars}]|-(?![\\u4e00-\\u9fa5a-zA-Z0-9_]))`, 'g')
     let match: RegExpExecArray | null

@@ -52,7 +52,7 @@ describe('Codex SDK Executor provider config', () => {
 });
 
 describe('Codex SDK Executor builtin MCP servers', () => {
-  test('注入 tax，并在 GitNexus 可用时注入 gitnexus', () => {
+  test('图片生成开启时注入 tax，并在 GitNexus 可用时注入 gitnexus', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-codex-mcp-'));
     const repoDir = path.join(tmpDir, 'repo');
     const binDir = path.join(tmpDir, 'bin');
@@ -80,13 +80,7 @@ describe('Codex SDK Executor builtin MCP servers', () => {
       assert.deepStrictEqual(mcpServers.gitnexus.args, ['mcp']);
       assert.strictEqual(mcpServers.tax.command, process.execPath);
       assert.deepStrictEqual(mcpServers.tax.args, ['/tmp/teamagentx-agent-tools-mcp.mjs']);
-      assert.strictEqual(mcpServers.tax.env.TEAMAGENTX_CHAT_ROOM_ID, 'room-1');
       assert.strictEqual(mcpServers.tax.env.TEAMAGENTX_SOURCE_AGENT_ID, 'agent-1');
-      assert.strictEqual(mcpServers.tax.env.TEAMAGENTX_SOURCE_AGENT_NAME, 'Codex');
-      assert.strictEqual(
-        mcpServers.tax.env.TEAMAGENTX_CHAT_ROOM_AGENTS,
-        JSON.stringify([{ agentId: 'agent-2', name: 'Claude' }]),
-      );
       assert.strictEqual(
         mcpServers.tax.env.TEAMAGENTX_GENERATE_IMAGE_ENDPOINT,
         'http://127.0.0.1:3001/internal/agent-tools/generate-image',
@@ -102,7 +96,7 @@ describe('Codex SDK Executor builtin MCP servers', () => {
     }
   });
 
-  test('GitNexus 不可用时仍然注入 tax', () => {
+  test('GitNexus 不可用且图片生成未开启时不注入 tax', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-codex-mcp-'));
     try {
       const mcpServers = buildBuiltinCodexMcpServerConfigs({
@@ -114,9 +108,7 @@ describe('Codex SDK Executor builtin MCP servers', () => {
       }) as Record<string, any>;
 
       assert.strictEqual(mcpServers.gitnexus, undefined);
-      assert.strictEqual(mcpServers.tax.command, process.execPath);
-      assert.strictEqual(mcpServers.tax.env.TEAMAGENTX_SOURCE_AGENT_ID, '');
-      assert.strictEqual(mcpServers.tax.env.TEAMAGENTX_GENERATE_IMAGE_ENDPOINT, undefined);
+      assert.strictEqual(mcpServers.tax, undefined);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
