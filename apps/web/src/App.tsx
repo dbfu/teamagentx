@@ -30,9 +30,11 @@ import { cn } from './lib/utils'
 import { SetupWizard } from './components/setup/setup-wizard'
 import { UpdateNotification } from './components/update/update-notification'
 import { isElectron, waitForServer } from './lib/config'
-import { ChatRoom } from './lib/agent-api'
+import { ChatRoom, Message } from './lib/agent-api'
 import { useAuthStore, useChatRoomStore, useSocketStore, useUIStore } from './stores'
 import { useChatStore } from './stores/chat-store'
+
+const EMPTY_MESSAGES: Message[] = []
 
 function formatRuntimeBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
@@ -122,7 +124,7 @@ function MobileChatDetailPage({
   // 从 store 获取操作函数
   const setSidePanelMode = useChatStore((s) => s.setSidePanelMode)
   const setShowClearConfirm = useChatStore((s) => s.setShowClearConfirm)
-  const messages = useChatStore((s) => s.messages)
+  const messages = useChatStore((s) => roomId ? s.messagesByRoom[roomId] ?? EMPTY_MESSAGES : EMPTY_MESSAGES)
   const agentStatuses = useChatStore((s) => s.agentStatuses)
   const typingAgents = useChatStore((s) => s.typingAgents)
   const stopAgent = useSocketStore((s) => s.stopAgent)

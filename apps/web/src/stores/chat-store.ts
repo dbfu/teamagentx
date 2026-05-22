@@ -120,6 +120,12 @@ interface SelectedRoomAgent {
 interface ChatStore {
   // 消息状态
   messages: Message[]
+  messagesByRoom: Record<string, Message[]>
+  activeChatRoomId: string | null
+  messageLoadVersions: Record<string, number>
+  loadingByRoom: Record<string, boolean>
+  loadingOlderMessagesByRoom: Record<string, boolean>
+  hasOlderMessagesByRoom: Record<string, boolean>
   inputValue: string
   loading: boolean
   loadingOlderMessages: boolean
@@ -182,7 +188,8 @@ interface ChatStore {
 
   // Actions
   setInputValue: (value: string) => void
-  setMessages: (messages: Message[]) => void
+  setActiveChatRoomId: (chatRoomId: string | null) => void
+  setMessages: (messages: Message[], chatRoomId?: string) => void
   addMessage: (message: Message) => void
   setSidePanelMode: (mode: SidePanelMode) => void
   setShowAddAgent: (show: boolean) => void
@@ -251,6 +258,32 @@ interface ChatStore {
 
 // 每个房间最多保留多少个语音消息 ID，避免 localStorage 无限增长
 const MAX_VOICE_IDS_PER_ROOM = 500
+const EMPTY_MESSAGES: Message[] = []
+
+function findCachedMessage(
+  messages: Message[],
+  messagesByRoom: Record<string, Message[]>,
+  messageId: string,
+): Message | undefined {
+  const currentMessage = messages.find((message) => message.id === messageId)
+  if (currentMessage) return currentMessage
+
+  for (const roomMessages of Object.values(messagesByRoom)) {
+    const found = roomMessages.find((message) => message.id === messageId)
+    if (found) return found
+  }
+
+  return undefined
+}
+
+function sortMessagesByTime(messages: Message[]): Message[] {
+  return [...messages].sort((a, b) => {
+    const aTime = new Date(a.time).getTime()
+    const bTime = new Date(b.time).getTime()
+    if (aTime !== bTime) return aTime - bTime
+    return a.id.localeCompare(b.id)
+  })
+}
 
 function mergeUniqueIds(current: string[] | undefined, incoming: string[]): string[] {
   if (incoming.length === 0) return current ?? []
@@ -274,6 +307,12 @@ export const useChatStore = create<ChatStore>()(
   persist((set, get) => ({
   // 消息状态
   messages: [],
+  messagesByRoom: {},
+  activeChatRoomId: null,
+  messageLoadVersions: {},
+  loadingByRoom: {},
+  loadingOlderMessagesByRoom: {},
+  hasOlderMessagesByRoom: {},
   inputValue: '',
   loading: false,
   loadingOlderMessages: false,
@@ -331,10 +370,50 @@ export const useChatStore = create<ChatStore>()(
 
   // Actions
   setInputValue: (value) => set({ inputValue: value }),
-  setMessages: (messages) => set({ messages }),
+  setActiveChatRoomId: (chatRoomId) => set((state) => {
+    const roomMessages = chatRoomId ? state.messagesByRoom[chatRoomId] ?? [] : []
+    return {
+      activeChatRoomId: chatRoomId,
+      messages: roomMessages,
+      loading: chatRoomId ? state.loadingByRoom[chatRoomId] ?? false : false,
+      loadingOlderMessages: chatRoomId ? state.loadingOlderMessagesByRoom[chatRoomId] ?? false : false,
+      hasOlderMessages: chatRoomId ? state.hasOlderMessagesByRoom[chatRoomId] ?? true : true,
+    }
+  }),
+  setMessages: (messages, chatRoomId) => set((state) => {
+    const roomId = chatRoomId ?? messages[0]?.chatRoomId ?? state.activeChatRoomId
+    if (!roomId) return { messages }
+
+    const nextMessagesByRoom = {
+      ...state.messagesByRoom,
+      [roomId]: messages,
+    }
+
+    return {
+      messagesByRoom: nextMessagesByRoom,
+      messages: state.activeChatRoomId === roomId ? messages : state.messages,
+    }
+  }),
   addMessage: (message) => set((state) => {
-    if (state.messages.some(m => m.id === message.id)) return state
-    return { messages: [...state.messages, message] }
+    const roomId = message.chatRoomId
+    if (!roomId) {
+      if (state.messages.some(m => m.id === message.id)) return state
+      return { messages: [...state.messages, message] }
+    }
+
+    const roomMessages = state.messagesByRoom[roomId] ?? []
+    if (roomMessages.some(m => m.id === message.id)) return state
+
+    const nextRoomMessages = sortMessagesByTime([...roomMessages, message])
+    const nextMessagesByRoom = {
+      ...state.messagesByRoom,
+      [roomId]: nextRoomMessages,
+    }
+
+    return {
+      messagesByRoom: nextMessagesByRoom,
+      messages: state.activeChatRoomId === roomId ? nextRoomMessages : state.messages,
+    }
   }),
   setSidePanelMode: (mode) => set({ sidePanelMode: mode }),
   setShowAddAgent: (show) => set({ showAddAgent: show }),
@@ -427,44 +506,115 @@ export const useChatStore = create<ChatStore>()(
 
   // API calls
   loadMessages: async (chatRoomId) => {
-    set({ loading: true, loadingOlderMessages: false, hasOlderMessages: true })
+    const version = (get().messageLoadVersions[chatRoomId] ?? 0) + 1
+    set((state) => ({
+      messageLoadVersions: {
+        ...state.messageLoadVersions,
+        [chatRoomId]: version,
+      },
+      loadingByRoom: {
+        ...state.loadingByRoom,
+        [chatRoomId]: true,
+      },
+      loadingOlderMessagesByRoom: {
+        ...state.loadingOlderMessagesByRoom,
+        [chatRoomId]: false,
+      },
+      hasOlderMessagesByRoom: {
+        ...state.hasOlderMessagesByRoom,
+        [chatRoomId]: true,
+      },
+      loading: state.activeChatRoomId === chatRoomId ? true : state.loading,
+      loadingOlderMessages: state.activeChatRoomId === chatRoomId ? false : state.loadingOlderMessages,
+      hasOlderMessages: state.activeChatRoomId === chatRoomId ? true : state.hasOlderMessages,
+    }))
     try {
       const response = await messageApi.getAll(chatRoomId)
       if (response.success && response.data) {
-        set({
-          messages: response.data,
-          hasOlderMessages: response.pagination?.hasMore ?? response.data.length >= 100,
+        const hasMore = response.pagination?.hasMore ?? response.data.length >= 100
+        set((state) => {
+          if (state.messageLoadVersions[chatRoomId] !== version) return state
+
+          const nextMessagesByRoom = {
+            ...state.messagesByRoom,
+            [chatRoomId]: response.data!,
+          }
+          return {
+            messagesByRoom: nextMessagesByRoom,
+            hasOlderMessagesByRoom: {
+              ...state.hasOlderMessagesByRoom,
+              [chatRoomId]: hasMore,
+            },
+            messages: state.activeChatRoomId === chatRoomId ? response.data! : state.messages,
+            hasOlderMessages: state.activeChatRoomId === chatRoomId ? hasMore : state.hasOlderMessages,
+          }
         })
       }
     } finally {
-      set({ loading: false })
+      set((state) => {
+        if (state.messageLoadVersions[chatRoomId] !== version) return state
+        return {
+          loadingByRoom: {
+            ...state.loadingByRoom,
+            [chatRoomId]: false,
+          },
+          loading: state.activeChatRoomId === chatRoomId ? false : state.loading,
+        }
+      })
     }
   },
 
   loadOlderMessages: async (chatRoomId) => {
-    const { messages, loading, loadingOlderMessages, hasOlderMessages } = get()
+    const state = get()
+    const messages = state.messagesByRoom[chatRoomId] ?? []
+    const loading = state.loadingByRoom[chatRoomId] ?? false
+    const loadingOlderMessages = state.loadingOlderMessagesByRoom[chatRoomId] ?? false
+    const hasOlderMessages = state.hasOlderMessagesByRoom[chatRoomId] ?? true
     if (loading || loadingOlderMessages || !hasOlderMessages || messages.length === 0) return
 
     const beforeMessageId = messages[0].id
-    set({ loadingOlderMessages: true })
+    set((state) => ({
+      loadingOlderMessagesByRoom: {
+        ...state.loadingOlderMessagesByRoom,
+        [chatRoomId]: true,
+      },
+      loadingOlderMessages: state.activeChatRoomId === chatRoomId ? true : state.loadingOlderMessages,
+    }))
     try {
       const response = await messageApi.getAll(chatRoomId, { beforeMessageId })
       if (response.success && response.data) {
         set((state) => {
-          if (state.messages[0]?.id !== beforeMessageId) {
+          const roomMessages = state.messagesByRoom[chatRoomId] ?? []
+          if (roomMessages[0]?.id !== beforeMessageId) {
             return state
           }
 
-          const existingIds = new Set(state.messages.map((message) => message.id))
+          const existingIds = new Set(roomMessages.map((message) => message.id))
           const olderMessages = response.data!.filter((message) => !existingIds.has(message.id))
+          const nextRoomMessages = [...olderMessages, ...roomMessages]
+          const hasMore = response.pagination?.hasMore ?? response.data!.length >= 100
           return {
-            messages: [...olderMessages, ...state.messages],
-            hasOlderMessages: response.pagination?.hasMore ?? response.data!.length >= 100,
+            messagesByRoom: {
+              ...state.messagesByRoom,
+              [chatRoomId]: nextRoomMessages,
+            },
+            hasOlderMessagesByRoom: {
+              ...state.hasOlderMessagesByRoom,
+              [chatRoomId]: hasMore,
+            },
+            messages: state.activeChatRoomId === chatRoomId ? nextRoomMessages : state.messages,
+            hasOlderMessages: state.activeChatRoomId === chatRoomId ? hasMore : state.hasOlderMessages,
           }
         })
       }
     } finally {
-      set({ loadingOlderMessages: false })
+      set((state) => ({
+        loadingOlderMessagesByRoom: {
+          ...state.loadingOlderMessagesByRoom,
+          [chatRoomId]: false,
+        },
+        loadingOlderMessages: state.activeChatRoomId === chatRoomId ? false : state.loadingOlderMessages,
+      }))
     }
   },
 
@@ -536,18 +686,30 @@ export const useChatStore = create<ChatStore>()(
   },
 
   deleteMessage: async (messageId) => {
-    const message = get().messages.find(m => m.id === messageId)
+    const { messages, messagesByRoom } = get()
+    const message = findCachedMessage(messages, messagesByRoom, messageId)
     try {
       const response = await messageApi.delete(messageId)
       if (!response.success) {
         throw new Error(response.error || '删除消息失败')
       }
-      set((state) => ({
-        messages: state.messages
+      set((state) => {
+        const nextMessagesByRoom: Record<string, Message[]> = {}
+        for (const [roomId, roomMessages] of Object.entries(state.messagesByRoom)) {
+          nextMessagesByRoom[roomId] = roomMessages
+            .filter(m => m.id !== messageId)
+            .map(m => m.replyMessageId === messageId ? { ...m, replyMessageId: null } : m)
+        }
+        const nextMessages = state.messages
           .filter(m => m.id !== messageId)
-          .map(m => m.replyMessageId === messageId ? { ...m, replyMessageId: null } : m),
-        selectedReplyMessage: state.selectedReplyMessage?.id === messageId ? null : state.selectedReplyMessage,
-      }))
+          .map(m => m.replyMessageId === messageId ? { ...m, replyMessageId: null } : m)
+
+        return {
+          messagesByRoom: nextMessagesByRoom,
+          messages: nextMessages,
+          selectedReplyMessage: state.selectedReplyMessage?.id === messageId ? null : state.selectedReplyMessage,
+        }
+      })
       if (message?.chatRoomId) {
         void useChatRoomStore.getState().loadChatRooms()
       }
@@ -561,7 +723,11 @@ export const useChatStore = create<ChatStore>()(
     const uniqueIds = Array.from(new Set(messageIds))
     if (uniqueIds.length === 0) return
 
-    const messagesById = new Map(get().messages.map(m => [m.id, m]))
+    const state = get()
+    const messagesById = new Map([
+      ...state.messages.map(m => [m.id, m] as const),
+      ...Object.values(state.messagesByRoom).flat().map(m => [m.id, m] as const),
+    ])
     const affectedRoomIds = new Set(
       uniqueIds
         .map(id => messagesById.get(id)?.chatRoomId)
@@ -575,14 +741,25 @@ export const useChatStore = create<ChatStore>()(
       }
 
       const deletedIds = new Set(uniqueIds)
-      set((state) => ({
-        messages: state.messages
+      set((state) => {
+        const nextMessagesByRoom: Record<string, Message[]> = {}
+        for (const [roomId, roomMessages] of Object.entries(state.messagesByRoom)) {
+          nextMessagesByRoom[roomId] = roomMessages
+            .filter(m => !deletedIds.has(m.id))
+            .map(m => m.replyMessageId && deletedIds.has(m.replyMessageId) ? { ...m, replyMessageId: null } : m)
+        }
+        const nextMessages = state.messages
           .filter(m => !deletedIds.has(m.id))
-          .map(m => m.replyMessageId && deletedIds.has(m.replyMessageId) ? { ...m, replyMessageId: null } : m),
-        selectedReplyMessage: state.selectedReplyMessage && deletedIds.has(state.selectedReplyMessage.id)
-          ? null
-          : state.selectedReplyMessage,
-      }))
+          .map(m => m.replyMessageId && deletedIds.has(m.replyMessageId) ? { ...m, replyMessageId: null } : m)
+
+        return {
+          messagesByRoom: nextMessagesByRoom,
+          messages: nextMessages,
+          selectedReplyMessage: state.selectedReplyMessage && deletedIds.has(state.selectedReplyMessage.id)
+            ? null
+            : state.selectedReplyMessage,
+        }
+      })
 
       if (affectedRoomIds.size > 0) {
         void useChatRoomStore.getState().loadChatRooms()
@@ -597,7 +774,14 @@ export const useChatStore = create<ChatStore>()(
     set({ clearing: true })
     try {
       await messageApi.clearByChatRoomId(chatRoomId)
-      set({ messages: [], showClearConfirm: false })
+      set((state) => ({
+        messagesByRoom: {
+          ...state.messagesByRoom,
+          [chatRoomId]: [],
+        },
+        messages: state.activeChatRoomId === chatRoomId ? [] : state.messages,
+        showClearConfirm: false,
+      }))
     } catch (error) {
       console.error('Failed to clear messages:', error)
     } finally {
@@ -756,11 +940,11 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
   const chatRoomId = chatRoom?.id ?? null
 
   // 使用 selectors 选择具体的值，避免整个 store 对象变化
-  const messages = useChatStore((s) => s.messages)
+  const messages = useChatStore((s) => chatRoomId ? s.messagesByRoom[chatRoomId] ?? EMPTY_MESSAGES : EMPTY_MESSAGES)
   const inputValue = useChatStore((s) => s.inputValue)
-  const loading = useChatStore((s) => s.loading)
-  const loadingOlderMessages = useChatStore((s) => s.loadingOlderMessages)
-  const hasOlderMessages = useChatStore((s) => s.hasOlderMessages)
+  const loading = useChatStore((s) => chatRoomId ? s.loadingByRoom[chatRoomId] ?? false : false)
+  const loadingOlderMessages = useChatStore((s) => chatRoomId ? s.loadingOlderMessagesByRoom[chatRoomId] ?? false : false)
+  const hasOlderMessages = useChatStore((s) => chatRoomId ? s.hasOlderMessagesByRoom[chatRoomId] ?? true : true)
   const allAgents = useChatStore((s) => s.allAgents)
   const sidePanelMode = useChatStore((s) => s.sidePanelMode)
   const debugInfo = useChatStore((s) => s.debugInfo)
@@ -790,6 +974,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
 
   // Actions - 使用 getState() 获取稳定引用
   const setInputValue = useChatStore((s) => s.setInputValue)
+  const setActiveChatRoomId = useChatStore((s) => s.setActiveChatRoomId)
   const setSidePanelMode = useChatStore((s) => s.setSidePanelMode)
   const setShowAddAgent = useChatStore((s) => s.setShowAddAgent)
   const setAddingAgentIds = useChatStore((s) => s.setAddingAgentIds)
@@ -929,9 +1114,11 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     if (!isConnected) return
 
     const unsubscribe = onMessage((msg) => {
-      // 只有当前群聊的消息才添加到消息列表
+      if (!msg.chatRoomId) return
+      handleNewMessage(msg)
+
+      // 只有当前群聊的消息才标记已读
       if (chatRoomId && msg.chatRoomId === chatRoomId) {
-        handleNewMessage(msg)
         if (isActivelyViewingChatRoom({
           isSelected: true,
           isDocumentVisible: !document.hidden,
@@ -1035,20 +1222,30 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
 
       // 如果有 executionRecordId，更新消息的 executionRecordId、executionDuration 和 totalTokens
       if (data.executionRecordId && data.messageIds && data.messageIds.length > 0) {
-        useChatStore.setState((state) => ({
-          messages: state.messages.map(msg => {
-            if (data.messageIds!.includes(msg.id)) {
-              return {
+        const messageIds = new Set(data.messageIds)
+        const updateExecutionFields = (msg: Message) => (
+          messageIds.has(msg.id)
+            ? {
                 ...msg,
                 executionRecordId: data.executionRecordId,
                 executionDuration: data.duration,
                 totalTokens: data.totalTokens,
                 cacheReadTokens: data.cacheReadTokens,
               }
-            }
-            return msg
-          })
-        }))
+            : msg
+        )
+
+        useChatStore.setState((state) => {
+          const nextMessagesByRoom: Record<string, Message[]> = {}
+          for (const [roomId, roomMessages] of Object.entries(state.messagesByRoom)) {
+            nextMessagesByRoom[roomId] = roomMessages.map(updateExecutionFields)
+          }
+
+          return {
+            messagesByRoom: nextMessagesByRoom,
+            messages: state.messages.map(updateExecutionFields),
+          }
+        })
       }
     })
 
@@ -1391,6 +1588,8 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
 
   // 切换群聊时加入房间
   useEffect(() => {
+    setActiveChatRoomId(chatRoomId)
+
     if (!chatRoomId) return
 
     if (prevChatRoomIdRef.current && prevChatRoomIdRef.current !== chatRoomId) {
@@ -1417,7 +1616,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     return () => {
       leaveChatRoom(chatRoomId)
     }
-  }, [chatRoomId, isConnected, joinChatRoom, leaveChatRoom, loadMessages, setSidePanelMode, setSelectedRoomAgent, setStreamingViewAgent, setSelectedRecord, requestAgentStatus, markChatRoomRead])
+  }, [chatRoomId, isConnected, joinChatRoom, leaveChatRoom, loadMessages, setActiveChatRoomId, setSidePanelMode, setSelectedRoomAgent, setStreamingViewAgent, setSelectedRecord, requestAgentStatus, markChatRoomRead])
 
   // 计算属性
   const chatRoomAgents = chatRoom?.chatRoomAgents ?? []

@@ -1,6 +1,5 @@
 import { create } from 'zustand'
 import { io, Socket } from 'socket.io-client'
-import { useChatStore } from './chat-store'
 import { getApiBaseUrl } from '@/lib/config'
 
 // 兼容 Android WebView 的 UUID 生成函数
@@ -264,12 +263,6 @@ interface SocketStore {
   onUnreadUpdate: (callback: (data: UnreadUpdateData) => void) => () => void
   requestUnreadCounts: () => void
 
-  // 内部方法：处理 socket 事件并更新 chat-store
-  _handleAgentTyping: (data: AgentTypingData) => void
-  _handleAgentDone: (data: AgentDoneData) => void
-  _handleAgentStream: (data: AgentStreamData) => void
-  _handleAgentThinking: (data: AgentThinkingData) => void
-  _handleAgentToolCall: (data: AgentToolCallData) => void
 }
 
 export const useSocketStore = create<SocketStore>((set, get) => ({
@@ -543,147 +536,6 @@ export const useSocketStore = create<SocketStore>((set, get) => ({
     const socket = get().socket
     if (!socket) return
     socket.emit('unread:request')
-  },
-
-  // 内部方法：处理 socket 事件并更新 chat-store
-  _handleAgentTyping: (data) => {
-    const chatRoomId = get().currentChatRoomId
-    if (!chatRoomId) return
-
-    const { typingAgents, completedAgents, toolCalls, streamingThinking, streamingContent } = useChatStore.getState()
-
-    // 更新 typing agents
-    const newTypingAgents = new Map(typingAgents)
-    const existing = newTypingAgents.get(data.messageId) ?? []
-    const existingIndex = existing.findIndex(a => a.agentId === data.agentId)
-    if (existingIndex >= 0) {
-      const updated = [...existing]
-      updated[existingIndex] = {
-        ...updated[existingIndex],
-        agentName: data.agentName,
-        status: data.status ?? updated[existingIndex].status,
-      }
-      newTypingAgents.set(data.messageId, updated)
-    } else {
-      newTypingAgents.set(data.messageId, [...existing, { agentId: data.agentId, agentName: data.agentName, status: data.status }])
-    }
-
-    // 新任务开始时，从已完成列表中移除
-    const newCompletedAgents = new Set(completedAgents)
-    newCompletedAgents.delete(data.agentId)
-
-    // 清空工具调用、思考过程和输出内容
-    const newToolCalls = new Map(toolCalls)
-    newToolCalls.delete(data.agentId)
-
-    const newStreamingThinking = new Map(streamingThinking)
-    newStreamingThinking.delete(data.agentId)
-
-    const newStreamingContent = new Map(streamingContent)
-    newStreamingContent.delete(data.agentId)
-
-    useChatStore.setState({
-      typingAgents: newTypingAgents,
-      completedAgents: newCompletedAgents,
-      toolCalls: newToolCalls,
-      streamingThinking: newStreamingThinking,
-      streamingContent: newStreamingContent,
-    })
-  },
-
-  _handleAgentDone: (data) => {
-    const { completedAgents, typingAgents, messages } = useChatStore.getState()
-
-    // 标记为已完成
-    const newCompletedAgents = new Set(completedAgents)
-    newCompletedAgents.add(data.agentId)
-
-    // 移除 typing 状态
-    const newTypingAgents = new Map(typingAgents)
-    for (const [messageId, agents] of newTypingAgents) {
-      const filtered = agents.filter(a => a.agentId !== data.agentId)
-      if (filtered.length === 0) {
-        newTypingAgents.delete(messageId)
-      } else {
-        newTypingAgents.set(messageId, filtered)
-      }
-    }
-
-    // 更新消息的 executionRecordId、executionDuration 和 totalTokens
-    const newMessages = [...messages]
-    if (data.messageIds && data.messageIds.length > 0 && data.executionRecordId) {
-      for (const msgId of data.messageIds) {
-        const msgIndex = newMessages.findIndex(m => m.id === msgId)
-        if (msgIndex >= 0) {
-          newMessages[msgIndex] = {
-            ...newMessages[msgIndex],
-            executionRecordId: data.executionRecordId,
-            executionDuration: data.duration ?? null,
-            totalTokens: data.totalTokens ?? null,
-            cacheReadTokens: data.cacheReadTokens ?? null,
-          }
-        }
-      }
-    }
-
-    useChatStore.setState({
-      completedAgents: newCompletedAgents,
-      typingAgents: newTypingAgents,
-      messages: newMessages,
-    })
-  },
-
-  _handleAgentStream: (data) => {
-    const chatRoomId = get().currentChatRoomId
-    if (!chatRoomId) return
-
-    const { streamingContent } = useChatStore.getState()
-    const newStreamingContent = new Map(streamingContent)
-    newStreamingContent.set(data.agentId, data.content)
-
-    useChatStore.setState({ streamingContent: newStreamingContent })
-  },
-
-  _handleAgentThinking: (data) => {
-    const chatRoomId = get().currentChatRoomId
-    if (!chatRoomId) return
-
-    const { streamingContent, streamingThinking } = useChatStore.getState()
-
-    // 收到新的 thinking 时，清空之前的输出内容
-    const newStreamingContent = new Map(streamingContent)
-    newStreamingContent.delete(data.agentId)
-
-    const newStreamingThinking = new Map(streamingThinking)
-    newStreamingThinking.set(data.agentId, data.thinking)
-
-    useChatStore.setState({
-      streamingContent: newStreamingContent,
-      streamingThinking: newStreamingThinking,
-    })
-  },
-
-  _handleAgentToolCall: (data) => {
-    const chatRoomId = get().currentChatRoomId
-    if (!chatRoomId) return
-
-    const { toolCalls } = useChatStore.getState()
-    const newToolCalls = new Map(toolCalls)
-    const existing = newToolCalls.get(data.agentId) ?? []
-
-    // 查找是否已存在该工具调用
-    const existingIndex = existing.findIndex(tc => tc.toolCallId === data.toolCall.toolCallId)
-    if (existingIndex >= 0) {
-      // 更新现有工具调用
-      const updated = [...existing]
-      updated[existingIndex] = data.toolCall
-      newToolCalls.set(data.agentId, updated)
-    } else {
-      // 添加新工具调用
-      newToolCalls.set(data.agentId, [...existing, data.toolCall])
-    }
-
-    useChatStore.setState({ toolCalls: newToolCalls })
   },
 
 }))
