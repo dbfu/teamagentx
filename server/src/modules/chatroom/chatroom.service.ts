@@ -117,16 +117,18 @@ async function normalizeDefaultAgentId(chatRoomId: string, defaultAgentId: strin
     throw new Error('默认助手不存在或未启用');
   }
 
-  // 系统助手是虚拟成员；普通助手必须已经加入群聊。
-  if (agent.agentLevel !== 'system') {
-    const member = await prisma.chatRoomAgent.findFirst({
-      where: { chatRoomId, agentId: normalizedAgentId },
-      select: { id: true },
-    });
+  if (agent.agentLevel === 'system') {
+    throw new Error('系统助手不能设为默认接收助手');
+  }
 
-    if (!member) {
-      throw new Error('默认助手必须是群聊成员');
-    }
+  // 系统助手是虚拟成员；普通助手必须已经加入群聊。
+  const member = await prisma.chatRoomAgent.findFirst({
+    where: { chatRoomId, agentId: normalizedAgentId },
+    select: { id: true },
+  });
+
+  if (!member) {
+    throw new Error('默认助手必须是群聊成员');
   }
 
   return normalizedAgentId;
@@ -218,7 +220,7 @@ export const chatRoomService = {
         workDir: workDir?.trim() || null,
         rules,
         ownerId,
-        defaultAgentId: GROUP_ASSISTANT_ID,
+        defaultAgentId: null,
         updatedAt: now,
       },
       include: {
@@ -277,7 +279,7 @@ export const chatRoomService = {
         workDir: workDir?.trim() || null,
         rules,
         ownerId,
-        defaultAgentId: GROUP_ASSISTANT_ID,
+        defaultAgentId: null,
         updatedAt: now,
       },
       include: {
@@ -362,9 +364,7 @@ export const chatRoomService = {
           ownerId: source.ownerId,
           isQuickChatRoom: source.isQuickChatRoom,
           quickChatAgentId: source.quickChatAgentId,
-          defaultAgentId: source.isQuickChatRoom
-            ? source.defaultAgentId
-            : source.defaultAgentId || GROUP_ASSISTANT_ID,
+          defaultAgentId: source.defaultAgentId,
           agentTriggerMode: source.agentTriggerMode,
           updatedAt: now,
         },

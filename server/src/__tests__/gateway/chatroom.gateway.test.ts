@@ -78,6 +78,7 @@ describe('ChatRoom Gateway API', () => {
       assert.strictEqual(body.success, true);
       assert.ok(body.data.id);
       assert.ok(body.data.name.startsWith('Test Room'));
+      assert.strictEqual(body.data.defaultAgentId, null);
     });
 
     test('应该创建包含所有字段的聊天室', async () => {
@@ -100,6 +101,7 @@ describe('ChatRoom Gateway API', () => {
       assert.strictEqual(body.data.avatar, '🏠');
       assert.strictEqual(body.data.avatarColor, '#1890ff');
       assert.strictEqual(body.data.description, 'A test chatroom');
+      assert.strictEqual(body.data.defaultAgentId, null);
     });
   });
 

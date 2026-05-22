@@ -198,14 +198,6 @@ export async function cleanupLegacySystemAgents(): Promise<void> {
       select: { id: true },
     });
 
-    await tx.chatRoom.updateMany({
-      where: { isQuickChatRoom: false },
-      data: {
-        defaultAgentId: GROUP_ASSISTANT_ID,
-        updatedAt: now,
-      },
-    });
-
     if (legacyQuickChatRooms.length > 0) {
       await tx.chatRoom.updateMany({
         where: {

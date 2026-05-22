@@ -1305,7 +1305,11 @@ export async function chatRoomGateway(app: FastifyInstance) {
       if (error.code === 'P2025') {
         return reply.code(404).send({ success: false, error: '群聊不存在' });
       }
-      if (error.message === '默认助手不存在或未启用' || error.message === '默认助手必须是群聊成员') {
+      if (
+        error.message === '默认助手不存在或未启用' ||
+        error.message === '默认助手必须是群聊成员' ||
+        error.message === '系统助手不能设为默认接收助手'
+      ) {
         return reply.code(400).send({ success: false, error: error.message });
       }
       throw error;

@@ -34,7 +34,7 @@ export function CreateGroupModal({ isOpen, onClose, onSuccess, ownerId }: Create
   const loadAgents = async () => {
     const response = await agentApi.getActive()
     if (response.success && response.data) {
-      setAgents(response.data)
+      setAgents(response.data.filter((agent) => agent.agentLevel !== 'system'))
     }
   }
 
