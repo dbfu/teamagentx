@@ -37,7 +37,8 @@ export async function broadcastCronTriggerMessage(
   payload: string,
 ): Promise<string> {
   const messageId = randomUUID();
-  // payload 已由调度器在前面拼好 @助手 mentions，这里把它放在最前，taskName 标签放在末尾，
+  // payload 已由调度器按目标助手拆好，最多包含一个自动添加的 @助手 mention。
+  // 这里把它放在最前，taskName 标签放在末尾，
   // 既保证 @mentions 可见、可被 parseKnownMentions 命中，也保留定时任务来源信息。
   const content = `${payload}\n\n— 定时任务「${taskName}」`;
   const time = new Date();
@@ -153,10 +154,9 @@ export function parseKnownMentions(content: string, agentNames: string[]): strin
     .map(escapeRegExp);
   if (escapedNames.length === 0) return mentions;
 
-  const boundaryChars = '*_>#`-';
   const endBoundaryChars = '*_>#`!?.,:;！？。，；：';
   const regex = new RegExp(
-    `(?:^|\\s|[${boundaryChars}])@(${escapedNames.join('|')})(?=\\s|$|[${endBoundaryChars}]|-(?![\\u4e00-\\u9fa5a-zA-Z0-9_]))`,
+    `(?:^|\\r?\\n| )@(${escapedNames.join('|')})(?=\\s|$|[${endBoundaryChars}]|-(?![\\u4e00-\\u9fa5a-zA-Z0-9_]))`,
     'g',
   );
 
@@ -174,13 +174,13 @@ export function parseKnownMentions(content: string, agentNames: string[]): strin
 export function parseMentions(content: string): string[] {
   const mentions: string[] = [];
   // Match @名称 pattern (Chinese characters, letters, numbers, underscores, hyphens)
-  // 前面可以是：空格、字符串开头、或 markdown 特殊字符（*、_、>、-、#、`）
+  // @ 必须是当前行的第一个字符，或前一个字符是空格；其他行内 @ 只作为普通文本展示。
   // 名称可以包含连字符，但不能以连字符开头或结尾
   // 边界检测：空格、字符串结尾、或 markdown 特殊字符
   // 特殊处理连字符：只有当连字符后面没有名称字符时，才作为边界
   // 使用非贪婪匹配 +? 确保不会过度匹配
   // 使用 lookbehind (?<=) 确保名称不以 - 结尾
-  const regex = /(?:^|\s|[*_>#`\-])@([\u4e00-\u9fa5a-zA-Z0-9_][\u4e00-\u9fa5a-zA-Z0-9_-]*?)(?<=[\u4e00-\u9fa5a-zA-Z0-9_])(?=\s|$|[*_>#`!?.,:;！？。，；：]|-(?![\u4e00-\u9fa5a-zA-Z0-9_]))/g;
+  const regex = /(?:^|\r?\n| )@([\u4e00-\u9fa5a-zA-Z0-9_][\u4e00-\u9fa5a-zA-Z0-9_-]*?)(?<=[\u4e00-\u9fa5a-zA-Z0-9_])(?=\s|$|[*_>#`!?.,:;！？。，；：]|-(?![\u4e00-\u9fa5a-zA-Z0-9_]))/g;
   let match: RegExpExecArray | null;
   while ((match = regex.exec(content)) !== null) {
     const name = match[1];

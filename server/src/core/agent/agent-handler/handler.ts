@@ -115,7 +115,8 @@ export function setupAIHandlers(
       const activeAgents = await agentService.findActive();
       const activeAgentByName = new Map(activeAgents.map((agent) => [agent.name, agent]));
       const mentionNames = parseKnownMentions(message.content, activeAgents.map((agent) => agent.name));
-      const hasMentions = mentionNames.length > 0;
+      const triggerMentionNames = mentionNames.slice(0, 1);
+      const hasMentions = triggerMentionNames.length > 0;
 
       // 快速对话群聊：如果没有 @其他助手，则触发快速对话助手
       if (message.isHuman && chatRoom?.isQuickChatRoom && chatRoom.quickChatAgentId && !hasMentions) {
@@ -202,15 +203,20 @@ export function setupAIHandlers(
         return;
       }
 
-      debugLog('mentionsFound', {chatRoomId, mentionNames});
+      debugLog('mentionsFound', {
+        chatRoomId,
+        mentionNames,
+        triggerMentionNames,
+        ignoredMentionNames: mentionNames.slice(1),
+      });
 
       // 获取快速对话的目标助手信息（用于注入默认目标）
       const quickChatTargetAgent = chatRoom?.isQuickChatRoom && chatRoom.quickChatAgentId
         ? await agentService.findById(chatRoom.quickChatAgentId)
         : null;
 
-      // 将所有被 @ 的助手任务入队
-      for (const agentName of mentionNames) {
+      // 单条消息最多触发一个助手；多个 @ 时只处理第一个有效助手。
+      for (const agentName of triggerMentionNames) {
         // Find agent by name
         const agent = activeAgentByName.get(agentName);
         if (!agent || !agent.isActive) continue;

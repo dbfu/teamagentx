@@ -1166,7 +1166,7 @@ export async function chatRoomGateway(app: FastifyInstance) {
 
     try {
       const chatRoom = await chatRoomService.update(id, data);
-      if (data.workDir !== undefined) {
+      if (data.workDir !== undefined || data.rules !== undefined) {
         clearExecutorCache(undefined, id);
       }
       return reply.send({ success: true, data: chatRoom });

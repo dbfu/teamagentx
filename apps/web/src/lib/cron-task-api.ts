@@ -49,7 +49,7 @@ export interface CronTask {
   intervalMinutes: number | null;
   scheduledAt: string | null;
   payload: string;
-  agentIds: string[] | null;  // 选中触发的助手 ID 列表，["*"] 表示所有助手
+  agentIds: string[] | null;  // 选中触发的助手 ID 列表，["*"] 表示所有助手；执行时逐个发送
   enabled: boolean;
   maxRetries: number;
   retryCount: number;
@@ -87,7 +87,7 @@ export interface CreateCronTaskData {
   intervalMinutes?: number;
   scheduledAt?: string;
   payload: string;
-  agentIds?: string[];  // 选中的助手 ID 列表，["*"] 表示所有助手
+  agentIds?: string[];  // 选中的助手 ID 列表，["*"] 表示所有助手；执行时逐个发送
   enabled?: boolean;
   maxRetries?: number;
 }

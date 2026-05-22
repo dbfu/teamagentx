@@ -529,6 +529,7 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
     chatRoomAgents?: ChatRoomAgentInfo[],
     llmProvider?: LlmProvider,
     imageGenerationProvider?: LlmProvider | null,
+    chatRoomRules?: string,
   ) {
     this.name = name;
     this.chatRoomId = chatRoomId;
@@ -557,9 +558,16 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
 - 模型名称：${this.llmProvider.model}
 - 供应商类型：${this.llmProvider.type}`
       : '';
+    const chatRoomRulesSection = chatRoomRules?.trim()
+      ? `
+## 群规则
+以下规则来自当前群聊，适用于群内所有助手。你必须在当前群聊的回复和协作中遵守：
+${chatRoomRules.trim()}`
+      : '';
 
     this.systemPrompt = `${modelInfo}
 ${systemPrompt}
+${chatRoomRulesSection}
 
 ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
 
@@ -995,7 +1003,7 @@ ${historyText}
       const othersInfo = otherAgents.length > 0 ? otherAgentsList : '无';
       const mentionTip =
         otherAgents.length > 0
-          ? '\n【提示】\n需要给其他助手发任意消息时，必须调用 mcp__tax__send_message 工具生成消息草稿，并把工具返回的 @助手消息放入你的最终回复。工具本身不会直接发送消息；最终回复中的 @助手消息会在自动模式下触发目标助手。如果用户只是要求你给某个助手发消息，最终回复只输出这条 @助手消息，不要添加解释、寒暄、总结，也不要擅自扩写成协作邀请。再发消息之前，你需要判断一下是否真的需要发消息给某个助手。'
+          ? '\n【提示】\n需要给其他助手发消息时，直接在最终回复中写“@助手名称 消息内容”，也可以在正文中用空格后跟“@助手名称”。只有 @ 位于行首，或 @ 前一个字符是空格时，才会触发目标助手；标点后直接 @ 不会触发。单条消息最多 @ 一个助手。如果用户只是要求你给某个助手发消息，最终回复只输出这条 @助手消息，不要添加解释、寒暄、总结，也不要擅自扩写成协作邀请。发消息前先判断是否真的需要触发其他助手。'
           : '';
 
       fullMessage += `【群聊成员信息】
@@ -1149,7 +1157,6 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       );
 
     return [
-      'mcp__tax__send_message',
       ...(this.imageGenerationProvider ? ['mcp__tax__generate_image'] : []),
       ...systemToolNames.map((name) => `mcp__tax__${name}`),
     ];
@@ -1161,142 +1168,6 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       version: '1.0.0',
       alwaysLoad: true,
       tools: [
-        sdkTool(
-          'send_message',
-          '生成一段要放入最终回复的 TeamAgentX 助手消息草稿。消息内容可以是用户要求转达的任意内容，不一定是协作请求。工具支持一个或多个目标助手；不会直接发送消息，也不会直接触发任务。你必须把返回的 @目标助手 消息内容放入最终回复，最终回复落入群聊后才会在自动模式下触发目标助手。如果用户只是要求你给某个或多个助手发消息，最终回复只输出这条 @助手消息，不要添加解释、寒暄、总结，也不要擅自扩写成协作邀请。',
-          {
-            targetAgentId: z
-              .string()
-              .optional()
-              .describe('目标助手 ID。已知 ID 时优先使用。'),
-            targetAgentName: z
-              .string()
-              .optional()
-              .describe('目标助手名称。未提供 ID 时使用。'),
-            targetAgentIds: z
-              .array(z.string())
-              .optional()
-              .describe('多个目标助手 ID。已知 ID 时优先使用。'),
-            targetAgentNames: z
-              .array(z.string())
-              .optional()
-              .describe('多个目标助手名称。未提供 ID 时使用。'),
-            content: z
-              .string()
-              .describe(
-                '给目标助手的消息内容，不要包含 @目标助手名前缀。多个目标会自动生成 @助手1 @助手2 前缀。',
-              ),
-          },
-          async (args) => {
-            if (!this.agentId) {
-              return {
-                content: [
-                  {
-                    type: 'text',
-                    text: '当前助手缺少 agentId，无法生成消息草稿。',
-                  },
-                ],
-                isError: true,
-              };
-            }
-
-            try {
-              const content = args.content.trim();
-              const normalizeStringArray = (
-                value: string | string[] | undefined,
-              ) => {
-                if (Array.isArray(value)) {
-                  return value.map((item) => item.trim()).filter(Boolean);
-                }
-                return value?.trim() ? [value.trim()] : [];
-              };
-              const targetAgentIds = [
-                ...normalizeStringArray(args.targetAgentIds),
-                ...normalizeStringArray(args.targetAgentId),
-              ];
-              const targetAgentNames = [
-                ...normalizeStringArray(args.targetAgentNames),
-                ...normalizeStringArray(args.targetAgentName),
-              ];
-              const targets: {agentId?: string; agentName: string}[] = [];
-              const seen = new Set<string>();
-
-              for (const targetAgentId of targetAgentIds) {
-                const targetAgent = this.chatRoomAgents.find(
-                  (agent) => agent.agentId === targetAgentId,
-                );
-                if (!targetAgent?.name || seen.has(targetAgent.name)) continue;
-                seen.add(targetAgent.name);
-                targets.push({
-                  agentId: targetAgent.agentId,
-                  agentName: targetAgent.name,
-                });
-              }
-
-              for (const targetAgentName of targetAgentNames) {
-                const targetAgent = this.chatRoomAgents.find(
-                  (agent) => agent.name === targetAgentName,
-                );
-                const resolvedName = targetAgent?.name || targetAgentName;
-                if (seen.has(resolvedName)) continue;
-                seen.add(resolvedName);
-                targets.push({
-                  agentId: targetAgent?.agentId,
-                  agentName: resolvedName,
-                });
-              }
-
-              if (!content || targets.length === 0) {
-                return {
-                  content: [
-                    {
-                      type: 'text',
-                      text: '参数错误：必须提供 content，以及至少一个可解析的 targetAgentId/targetAgentName 或 targetAgentIds/targetAgentNames。',
-                    },
-                  ],
-                  isError: true,
-                };
-              }
-
-              const mentionPrefix = targets
-                .map((agent) => `@${agent.agentName}`)
-                .join(' ');
-              const draftContent = `${mentionPrefix} ${content}`;
-
-              return {
-                content: [
-                  {
-                    type: 'text',
-                    text: `最终回复请只输出下面这段消息，不要添加其他内容：\n${draftContent}`,
-                  },
-                ],
-                structuredContent: {
-                  targetAgentIds: targets
-                    .map((agent) => agent.agentId)
-                    .filter(Boolean),
-                  targetAgentNames: targets.map((agent) => agent.agentName),
-                  targetAgents: targets,
-                  content,
-                  draftContent,
-                },
-              };
-            } catch (error) {
-              return {
-                content: [
-                  {
-                    type: 'text',
-                    text:
-                      error instanceof Error
-                        ? error.message
-                        : '生成消息草稿失败。',
-                  },
-                ],
-                isError: true,
-              };
-            }
-          },
-          {alwaysLoad: true},
-        ),
         ...(this.imageGenerationProvider
           ? [
               sdkTool(
@@ -1639,6 +1510,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     const settingSources: SettingSource[] = this.llmProvider
       ? []
       : ['user', 'project', 'local'];
+    const allowedTaxTools = this.getAllowedTaxTools();
     const q = query({
       prompt: this.buildPrompt(fullMessage, attachments),
       options: {
@@ -1650,10 +1522,14 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
         thinking,
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
-        mcpServers: {
-          tax: this.buildTeamAgentXMcpServer(),
-        },
-        allowedTools: this.getAllowedTaxTools(),
+        ...(allowedTaxTools.length > 0
+          ? {
+              mcpServers: {
+                tax: this.buildTeamAgentXMcpServer(),
+              },
+              allowedTools: allowedTaxTools,
+            }
+          : {}),
         settingSources,
         hooks: this.buildHooks(),
         sessionId: this.hasStartedSession ? undefined : this.sessionId,

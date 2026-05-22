@@ -29,7 +29,7 @@ interface ChatRoomStore {
   addRoom: (room: ChatRoom) => void
   removeRoom: (id: string) => void
   loadChatRooms: () => Promise<void>
-  updateRoomLastMessage: (chatRoomId: string, lastMessage: LastMessage) => void
+  updateRoomLastMessage: (chatRoomId: string, lastMessage: LastMessage | null) => void
 }
 
 export const useChatRoomStore = create<ChatRoomStore>()(
@@ -67,7 +67,7 @@ export const useChatRoomStore = create<ChatRoomStore>()(
         }
       },
 
-      updateRoomLastMessage: (chatRoomId: string, lastMessage: LastMessage) => {
+      updateRoomLastMessage: (chatRoomId: string, lastMessage: LastMessage | null) => {
         set((state) => {
           const roomIndex = state.chatRooms.findIndex(room => room.id === chatRoomId)
           if (roomIndex === -1) return state
