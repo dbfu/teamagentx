@@ -75,6 +75,11 @@ function stringOrNull(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+export function isMaskedApiKey(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  return value === '****' || /^.{3}\*\*\*.{4}$/.test(value);
+}
+
 function normalizeApiProtocol(value: unknown): 'anthropic' | 'openai' | null {
   if (value !== 'anthropic' && value !== 'openai') return null;
   return value;
@@ -274,6 +279,10 @@ export const llmProviderService = {
     }
 
     const { audioUsage: rawAudioUsage, ...restData } = data;
+    if (isMaskedApiKey(restData.apiKey)) {
+      delete restData.apiKey;
+    }
+
     return prisma.llmProvider.update({
       where: { id },
       data: {

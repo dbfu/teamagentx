@@ -47,7 +47,8 @@
       "Bash(CLAUDE_CONFIG_DIR=/tmp/claude-test-cfg claude -p \"say hi\")",
       "Bash(claude -p \"say hi\")",
       "Bash(chmod 600 /tmp/claude-test-cfg/.credentials.json)",
-      "Bash(CLAUDE_CONFIG_DIR=/tmp/claude-test-cfg claude -p \"say hi briefly\")"
+      "Bash(CLAUDE_CONFIG_DIR=/tmp/claude-test-cfg claude -p \"say hi briefly\")",
+      "Bash(kill 44825 *)"
     ]
   }
 }
