@@ -203,6 +203,42 @@ describe('Message Gateway API', () => {
   describe('DELETE /messages/chatroom/:chatRoomId', () => {
     test('应该清空聊天室中的所有消息', async () => {
       const chatRoomId = randomUUID();
+      const otherChatRoomId = randomUUID();
+
+      await prisma.chatRoom.createMany({
+        data: [
+          { id: chatRoomId, name: 'Clear Room', updatedAt: new Date() },
+          { id: otherChatRoomId, name: 'Other Room', updatedAt: new Date() },
+        ],
+      });
+      await prisma.message.createMany({
+        data: [
+          {
+            id: `${chatRoomId}-message-1`,
+            type: 'MESSAGE',
+            content: 'target message 1',
+            chatRoomId,
+            isHuman: true,
+            updatedAt: new Date(),
+          },
+          {
+            id: `${chatRoomId}-message-2`,
+            type: 'MESSAGE',
+            content: 'target message 2',
+            chatRoomId,
+            isHuman: true,
+            updatedAt: new Date(),
+          },
+          {
+            id: `${otherChatRoomId}-message-1`,
+            type: 'MESSAGE',
+            content: 'other message',
+            chatRoomId: otherChatRoomId,
+            isHuman: true,
+            updatedAt: new Date(),
+          },
+        ],
+      });
 
       const response = await app.inject({
         method: 'DELETE',
@@ -213,6 +249,9 @@ describe('Message Gateway API', () => {
 
       const body = response.json();
       assert.strictEqual(body.success, true);
+      assert.strictEqual(body.count, 2);
+      assert.strictEqual(await prisma.message.count({ where: { chatRoomId } }), 0);
+      assert.strictEqual(await prisma.message.count({ where: { chatRoomId: otherChatRoomId } }), 1);
     });
   });
 });

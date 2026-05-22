@@ -185,9 +185,7 @@ sqlite3 dev.db 'PRAGMA table_info("ChatRoom");'
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **teamagentx** (9842 symbols, 17539 relationships, 279 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
-This project is indexed by GitNexus as **teamagentx** (11013 symbols, 19280 relationships, 299 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
-
+This project is indexed by GitNexus as **teamagentx** (11683 symbols, 19298 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

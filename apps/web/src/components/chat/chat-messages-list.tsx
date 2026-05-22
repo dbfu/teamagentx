@@ -52,6 +52,8 @@ interface ChatMessagesListProps {
   onDeleteMessages?: (messageIds: string[]) => Promise<void> | void
   onLoadOlderMessages?: () => Promise<void> | void
   currentUser?: CurrentUser
+  isSidePanelOpen?: boolean
+  isStreamPanelOpen?: boolean
 }
 
 interface MessageRowProps {
@@ -211,6 +213,8 @@ export function ChatMessagesList({
   onDeleteMessages,
   onLoadOlderMessages,
   currentUser,
+  isSidePanelOpen = false,
+  isStreamPanelOpen = false,
 }: ChatMessagesListProps) {
   const isMobile = useIsMobile()
   const scrollToMessageId = useChatStore((s) => s.scrollToMessageId)
@@ -303,6 +307,7 @@ export function ChatMessagesList({
   const suppressScrollSaveUntilRef = useRef(0)
   const pendingScrollSaveFrameRef = useRef<number | null>(null)
   const latestScrollAnchorRef = useRef<CapturedScrollAnchor | null>(null)
+  const wasSidePanelOpenRef = useRef(isSidePanelOpen)
 
   const selectedCount = selectedMessageIds.size
   const getVirtualItemKey = useCallback((index: number) => messages[index]?.id ?? index, [messages])
@@ -621,7 +626,7 @@ export function ChatMessagesList({
   }, [loadingOlderMessages, messageIndexById, messages.length, rowVirtualizer, suppressProgrammaticScrollSave])
 
   // 滚动到底部
-  const scrollToBottom = useCallback((options?: { save?: boolean }) => {
+  const scrollToBottom = useCallback((options?: { save?: boolean; frames?: number }) => {
     if (messages.length === 0) return
 
     const alignToBottom = () => {
@@ -636,10 +641,11 @@ export function ChatMessagesList({
     alignToBottom()
 
     let frame = 0
+    const maxFrames = options?.frames ?? 3
     const tick = () => {
       alignToBottom()
       frame += 1
-      if (frame < 3) {
+      if (frame < maxFrames) {
         requestAnimationFrame(tick)
       } else if (options?.save) {
         const scrollAnchor = captureScrollAnchor()
@@ -651,6 +657,24 @@ export function ChatMessagesList({
     }
     requestAnimationFrame(tick)
   }, [captureScrollAnchor, chatRoomId, messages.length, messagesEndRef, rowVirtualizer, saveLatestScrollAnchor, suppressProgrammaticScrollSave])
+
+  useLayoutEffect(() => {
+    const wasSidePanelOpen = wasSidePanelOpenRef.current
+    wasSidePanelOpenRef.current = isSidePanelOpen
+
+    if (
+      !isStreamPanelOpen
+      || wasSidePanelOpen
+      || !isNearBottom
+      || !messagesBelongToCurrentRoom
+      || !hasRestoredPositionRef.current
+    ) {
+      return
+    }
+
+    scrollToBottom({ save: true, frames: 14 })
+    setShowNewMessageHint(false)
+  }, [isNearBottom, isSidePanelOpen, isStreamPanelOpen, messagesBelongToCurrentRoom, scrollToBottom])
 
   const highlightMessage = useCallback((messageId: string) => {
     const messageEl = messageRefs.current.get(messageId)
