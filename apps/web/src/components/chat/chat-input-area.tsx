@@ -9,6 +9,7 @@ import { toast } from 'sonner'
 import { getApiBaseUrl } from '@/lib/config'
 import { llmProviderApi } from '@/lib/llm-provider-api'
 import { isLargeInputContent } from './chat-input-collapse'
+import { GitBranchSwitcher } from './git-branch-switcher'
 
 interface MentionAgent {
   id: string
@@ -19,6 +20,8 @@ interface MentionAgent {
 }
 
 interface ChatInputAreaProps {
+  chatRoomId: string
+  chatRoomWorkDir?: string | null
   chatRoomName: string
   handleKeyDown: (e: React.KeyboardEvent) => void
   handleSend: () => void
@@ -30,6 +33,8 @@ interface ChatInputAreaProps {
 }
 
 export const ChatInputArea = memo(function ChatInputArea({
+  chatRoomId,
+  chatRoomWorkDir,
   chatRoomName,
   handleKeyDown,
   handleSend,
@@ -415,6 +420,12 @@ export const ChatInputArea = memo(function ChatInputArea({
           <ImagePreviewList images={pendingImages} onRemove={onImageRemove} />
         </div>
       )}
+
+      <GitBranchSwitcher
+        chatRoomId={chatRoomId}
+        workDir={chatRoomWorkDir}
+        className="mb-1.5 justify-end pr-1"
+      />
 
       <div
         className={cn(

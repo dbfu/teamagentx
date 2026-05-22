@@ -1,5 +1,7 @@
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Fastify, { FastifyInstance } from 'fastify';
@@ -24,7 +26,22 @@ describe('ChatRoom Gateway API', () => {
 
   afterEach(async () => {
     await app.close();
+    fs.rmSync(workDirRoot, { recursive: true, force: true });
   });
+
+  function createGitRepo(name: string): string {
+    const repoDir = path.join(workDirRoot, name);
+    fs.mkdirSync(repoDir, { recursive: true });
+    execFileSync('git', ['init', '-b', 'main'], { cwd: repoDir });
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: repoDir });
+    execFileSync('git', ['config', 'user.name', 'TeamAgentX Test'], { cwd: repoDir });
+    fs.writeFileSync(path.join(repoDir, 'README.md'), '# test\n');
+    execFileSync('git', ['add', 'README.md'], { cwd: repoDir });
+    execFileSync('git', ['commit', '-m', 'Initial commit'], { cwd: repoDir });
+    execFileSync('git', ['switch', '-c', 'feature/chat-branch'], { cwd: repoDir });
+    execFileSync('git', ['switch', 'main'], { cwd: repoDir });
+    return repoDir;
+  }
 
   describe('GET /chatrooms', () => {
     test('应该返回所有聊天室列表', async () => {
@@ -263,6 +280,66 @@ describe('ChatRoom Gateway API', () => {
           vendorOptions: null,
         },
       });
+    });
+  });
+
+  describe('Git branch status', () => {
+    test('应该返回绑定 git 工作目录的当前分支和本地分支列表', async () => {
+      const repoDir = createGitRepo('status-repo');
+      const chatRoomResponse = await app.inject({
+        method: 'POST',
+        url: '/chatrooms',
+        payload: {
+          name: 'Git Status Room ' + Date.now(),
+          workDir: repoDir,
+        },
+      });
+      const createdRoom = chatRoomResponse.json();
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/chatrooms/${createdRoom.data.id}/git-status`,
+      });
+
+      assert.strictEqual(response.statusCode, 200);
+      const body = response.json();
+      assert.strictEqual(body.success, true);
+      assert.strictEqual(body.data.isGitRepo, true);
+      assert.strictEqual(body.data.currentBranch, 'main');
+      assert.deepStrictEqual(
+        body.data.branches.map((branch: { name: string }) => branch.name).sort(),
+        ['feature/chat-branch', 'main']
+      );
+    });
+
+    test('应该切换绑定 git 工作目录的当前分支', async () => {
+      const repoDir = createGitRepo('switch-repo');
+      const chatRoomResponse = await app.inject({
+        method: 'POST',
+        url: '/chatrooms',
+        payload: {
+          name: 'Git Switch Room ' + Date.now(),
+          workDir: repoDir,
+        },
+      });
+      const createdRoom = chatRoomResponse.json();
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/chatrooms/${createdRoom.data.id}/git-branch`,
+        payload: {
+          branch: 'feature/chat-branch',
+        },
+      });
+
+      assert.strictEqual(response.statusCode, 200);
+      const body = response.json();
+      assert.strictEqual(body.success, true);
+      assert.strictEqual(body.data.currentBranch, 'feature/chat-branch');
+      assert.strictEqual(
+        execFileSync('git', ['branch', '--show-current'], { cwd: repoDir, encoding: 'utf8' }).trim(),
+        'feature/chat-branch'
+      );
     });
   });
 

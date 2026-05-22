@@ -186,6 +186,18 @@ export interface ChatRoom {
   lastMessage?: LastMessage | null  // 最后一条消息
 }
 
+export interface GitBranchInfo {
+  name: string
+  current: boolean
+}
+
+export interface GitBranchStatus {
+  isGitRepo: boolean
+  workDir: string
+  currentBranch: string | null
+  branches: GitBranchInfo[]
+}
+
 export interface ChatRoomAgent {
   id: string
   userId: string | null
@@ -507,6 +519,17 @@ export const chatRoomApi = {
     return request<ChatRoom>(`/chatrooms/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
+    })
+  },
+
+  async getGitStatus(id: string): Promise<ApiResponse<GitBranchStatus>> {
+    return request<GitBranchStatus>(`/chatrooms/${id}/git-status`)
+  },
+
+  async switchGitBranch(id: string, branch: string): Promise<ApiResponse<GitBranchStatus>> {
+    return request<GitBranchStatus>(`/chatrooms/${id}/git-branch`, {
+      method: 'POST',
+      body: JSON.stringify({ branch }),
     })
   },
 
