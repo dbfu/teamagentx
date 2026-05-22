@@ -4,6 +4,7 @@ import { cn, formatDateTime } from '@/lib/utils'
 import { copyToClipboard } from '@/lib/copy-utils'
 import { Bot, CheckSquare, MessageSquareMore, Info, Copy, XCircle, Trash2, Volume2, ChevronDown, ChevronUp, Clock } from 'lucide-react'
 import { memo, useState, useCallback, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import { toast } from 'sonner'
 import { ImageViewerModal } from './image-viewer-modal'
 import { AudioMessagePlayer } from './audio-message-player'
@@ -627,6 +628,19 @@ export const ChatMessage = memo(function ChatMessage({ message, isRight, replyTo
     )
   }
 
+  const renderContextMenuLayer = () => {
+    if (!showContextMenu) return null
+
+    const layer = (
+      <>
+        <div className="fixed inset-0 z-40" onClick={handleClickOutside} />
+        {renderContextMenu()}
+      </>
+    )
+
+    return typeof document === 'undefined' ? layer : createPortal(layer, document.body)
+  }
+
   const renderContentToggleButton = (isCollapsed: boolean) => (
     <button
       type="button"
@@ -693,10 +707,7 @@ export const ChatMessage = memo(function ChatMessage({ message, isRight, replyTo
   if (isRight) {
     return (
       <>
-        {showContextMenu && (
-          <div className="fixed inset-0 z-40" onClick={handleClickOutside} />
-        )}
-        {renderContextMenu()}
+        {renderContextMenuLayer()}
         <div
           className={cn("flex justify-end py-2", isMobile ? "px-2" : "px-6")}
           onClickCapture={handleSelectionClickCapture}
@@ -758,10 +769,7 @@ export const ChatMessage = memo(function ChatMessage({ message, isRight, replyTo
 
   return (
     <>
-      {showContextMenu && (
-        <div className="fixed inset-0 z-40" onClick={handleClickOutside} />
-      )}
-      {renderContextMenu()}
+      {renderContextMenuLayer()}
       <div
         className={cn("py-2", isMobile ? "px-2" : "px-6")}
         onClickCapture={handleSelectionClickCapture}

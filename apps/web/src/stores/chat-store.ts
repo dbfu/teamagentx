@@ -294,6 +294,22 @@ function sortMessagesByTime(messages: Message[]): Message[] {
   })
 }
 
+function mergeLoadedMessages(cachedMessages: Message[], loadedMessages: Message[]): Message[] {
+  const sortedLoadedMessages = sortMessagesByTime(loadedMessages)
+  if (cachedMessages.length === 0 || sortedLoadedMessages.length === 0) {
+    return sortedLoadedMessages
+  }
+
+  const loadedIds = new Set(sortedLoadedMessages.map((message) => message.id))
+  const firstLoadedTime = new Date(sortedLoadedMessages[0].time).getTime()
+  const retainedOlderMessages = cachedMessages.filter((message) => {
+    if (loadedIds.has(message.id)) return false
+    return new Date(message.time).getTime() < firstLoadedTime
+  })
+
+  return sortMessagesByTime([...retainedOlderMessages, ...sortedLoadedMessages])
+}
+
 function mergeUniqueIds(current: string[] | undefined, incoming: string[]): string[] {
   if (incoming.length === 0) return current ?? []
   const merged = new Set(current ?? [])
@@ -522,6 +538,7 @@ export const useChatStore = create<ChatStore>()(
   // API calls
   loadMessages: async (chatRoomId) => {
     const version = (get().messageLoadVersions[chatRoomId] ?? 0) + 1
+    const previousHasOlderMessages = get().hasOlderMessagesByRoom[chatRoomId]
     set((state) => ({
       messageLoadVersions: {
         ...state.messageLoadVersions,
@@ -550,18 +567,24 @@ export const useChatStore = create<ChatStore>()(
         set((state) => {
           if (state.messageLoadVersions[chatRoomId] !== version) return state
 
+          const roomMessages = state.messagesByRoom[chatRoomId] ?? []
+          const nextRoomMessages = mergeLoadedMessages(roomMessages, response.data!)
+          const retainedOlderMessages = nextRoomMessages.length > response.data!.length
+          const nextHasMore = retainedOlderMessages
+            ? previousHasOlderMessages ?? hasMore
+            : hasMore
           const nextMessagesByRoom = {
             ...state.messagesByRoom,
-            [chatRoomId]: response.data!,
+            [chatRoomId]: nextRoomMessages,
           }
           return {
             messagesByRoom: nextMessagesByRoom,
             hasOlderMessagesByRoom: {
               ...state.hasOlderMessagesByRoom,
-              [chatRoomId]: hasMore,
+              [chatRoomId]: nextHasMore,
             },
-            messages: state.activeChatRoomId === chatRoomId ? response.data! : state.messages,
-            hasOlderMessages: state.activeChatRoomId === chatRoomId ? hasMore : state.hasOlderMessages,
+            messages: state.activeChatRoomId === chatRoomId ? nextRoomMessages : state.messages,
+            hasOlderMessages: state.activeChatRoomId === chatRoomId ? nextHasMore : state.hasOlderMessages,
           }
         })
       }
@@ -942,6 +965,8 @@ export const useChatStore = create<ChatStore>()(
   {
     name: 'chat-ui-storage',
     partialize: (state) => ({
+      scrollPositions: state.scrollPositions,
+      scrollAnchors: state.scrollAnchors,
       handledVoiceMessageIdsByRoom: state.handledVoiceMessageIdsByRoom,
       playedVoiceMessageIdsByRoom: state.playedVoiceMessageIdsByRoom,
     }),
