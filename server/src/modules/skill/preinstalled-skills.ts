@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { skillInstallService } from './skill-install.service.js';
+import { createSkillDirectoryLink } from './skill-link.js';
 
 export const PREINSTALLED_SKILL_NAMES = [
   'find-skills',
@@ -62,9 +63,11 @@ export async function installDefaultSkillsForNewAgent(
     }
 
     try {
-      fs.symlinkSync(sourceDir, targetSymlink, 'dir');
+      const result = createSkillDirectoryLink(sourceDir, targetSymlink);
       installedSkills.push(skillName);
-      console.log(`[preinstalled-skills] 已为助手「${agent.name}」安装默认技能: ${skillName}`);
+      console.log(
+        `[preinstalled-skills] 已为助手「${agent.name}」安装默认技能: ${skillName} (${result.method})`,
+      );
     } catch (error) {
       console.warn(
         `[preinstalled-skills] 为助手「${agent.name}」安装默认技能失败: ${skillName}`,

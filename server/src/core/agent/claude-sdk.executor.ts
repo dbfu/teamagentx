@@ -47,18 +47,7 @@ import {
     buildInstalledSkillsSignature,
 } from './skill-instructions.js';
 import { syncGlobalClaudeLocalConfig } from './claude-local-config.js';
-import {
-    AGENT_CREATOR_AGENT_ID,
-    agentCreatorTools,
-    CHATROOM_HELPER_AGENT_ID,
-    chatroomHelperTools,
-    createExternalPlatformHelperTools,
-    CRON_TASK_HELPER_AGENT_ID,
-    cronTaskHelperTools,
-    EXTERNAL_PLATFORM_HELPER_AGENT_ID,
-    SKILL_MANAGER_AGENT_ID,
-    skillManagerTools,
-} from './tools/index.js';
+import { getSystemAssistantTools } from './tools/index.js';
 import { getDefaultChatRoomWorkDir, resolveAgentWorkDir } from './work-dir.js';
 
 function shortHash(input: string): string {
@@ -1100,20 +1089,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
   }
 
   private getSystemAssistantTools(): any[] {
-    switch (this.agentId) {
-      case AGENT_CREATOR_AGENT_ID:
-        return agentCreatorTools;
-      case SKILL_MANAGER_AGENT_ID:
-        return skillManagerTools;
-      case CRON_TASK_HELPER_AGENT_ID:
-        return cronTaskHelperTools;
-      case CHATROOM_HELPER_AGENT_ID:
-        return chatroomHelperTools;
-      case EXTERNAL_PLATFORM_HELPER_AGENT_ID:
-        return createExternalPlatformHelperTools(this.chatRoomId);
-      default:
-        return [];
-    }
+    return getSystemAssistantTools(this.agentId, this.chatRoomId);
   }
 
   private buildSystemAssistantMcpTools(): any[] {

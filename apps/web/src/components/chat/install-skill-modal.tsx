@@ -15,8 +15,8 @@ interface InstallSkillModalProps {
   agentName: string
 }
 
-// 技能安装助手的专用 ID
-const SKILLS_HELPER_AGENT_ID = '596667f7-f901-4613-92a7-cc71d859fa22'
+// 群助手的专用 ID
+const GROUP_ASSISTANT_ID = '4f7c8a91-2d6b-4c8f-9a7e-5b1d2c3e4f60'
 
 // 安装模式
 type InstallMode = 'chat' | 'select'
@@ -168,8 +168,8 @@ export function InstallSkillModal({
 
     setIsCreating(true)
     try {
-      // 创建与技能安装助手的快速对话
-      const res = await agentApi.createQuickChat(SKILLS_HELPER_AGENT_ID, user.id)
+      // 创建与群助手的快速对话
+      const res = await agentApi.createQuickChat(GROUP_ASSISTANT_ID, user.id)
       if (res.success && res.data) {
         // 刷新聊天室列表，确保新会话已加载
         await loadChatRooms()

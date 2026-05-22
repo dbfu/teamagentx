@@ -117,6 +117,8 @@ interface CodexBuiltinMcpServerContext {
   agentName: string;
   chatRoomAgents: ChatRoomAgentInfo[];
   generateImageEndpoint?: string;
+  systemToolsListEndpoint?: string;
+  systemToolsCallEndpoint?: string;
 }
 
 interface CodexBuiltinMcpServerDefinition {
@@ -261,17 +263,23 @@ const BUILTIN_CODEX_MCP_SERVERS: CodexBuiltinMcpServerDefinition[] = [
     name: 'tax',
     build: ({
       teamAgentXMcpServerPath,
+      chatRoomId,
       agentId,
       generateImageEndpoint,
+      systemToolsListEndpoint,
+      systemToolsCallEndpoint,
     }) => {
-      if (!generateImageEndpoint) return undefined;
+      if (!generateImageEndpoint && !systemToolsListEndpoint) return undefined;
 
       return {
         command: process.execPath,
         args: [teamAgentXMcpServerPath],
         env: {
+          TEAMAGENTX_CHAT_ROOM_ID: chatRoomId,
           TEAMAGENTX_SOURCE_AGENT_ID: agentId || '',
           TEAMAGENTX_GENERATE_IMAGE_ENDPOINT: generateImageEndpoint,
+          TEAMAGENTX_SYSTEM_TOOLS_LIST_ENDPOINT: systemToolsListEndpoint,
+          TEAMAGENTX_SYSTEM_TOOLS_CALL_ENDPOINT: systemToolsCallEndpoint,
           TEAMAGENTX_INTERNAL_TOOL_TOKEN: getInternalAgentToolToken(),
         },
       };
@@ -844,8 +852,11 @@ ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
     const serverPath = this.getTeamAgentXMcpServerPath();
     const script = `#!/usr/bin/env node
 const generateImageEndpoint = process.env.TEAMAGENTX_GENERATE_IMAGE_ENDPOINT;
+const systemToolsListEndpoint = process.env.TEAMAGENTX_SYSTEM_TOOLS_LIST_ENDPOINT;
+const systemToolsCallEndpoint = process.env.TEAMAGENTX_SYSTEM_TOOLS_CALL_ENDPOINT;
 const token = process.env.TEAMAGENTX_INTERNAL_TOOL_TOKEN;
 const sourceAgentId = process.env.TEAMAGENTX_SOURCE_AGENT_ID;
+const chatRoomId = process.env.TEAMAGENTX_CHAT_ROOM_ID;
 
 function write(message) {
   process.stdout.write(JSON.stringify(message) + "\\n");
@@ -857,6 +868,15 @@ function toolResult(text, structuredContent, isError = false) {
     structuredContent,
     isError,
   };
+}
+
+function stringifyPayload(value) {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }
 
 async function callGenerateImage(args) {
@@ -902,6 +922,51 @@ async function callGenerateImage(args) {
   }
 }
 
+async function listSystemTools() {
+  if (!systemToolsListEndpoint || !token || !sourceAgentId || !chatRoomId) return [];
+
+  try {
+    const response = await fetch(systemToolsListEndpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer " + token,
+      },
+      body: JSON.stringify({ sourceAgentId, chatRoomId }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.success === false) return [];
+    return Array.isArray(payload.data?.tools) ? payload.data.tools : [];
+  } catch {
+    return [];
+  }
+}
+
+async function callSystemTool(name, args) {
+  if (!systemToolsCallEndpoint || !token || !sourceAgentId || !chatRoomId) {
+    return toolResult("当前助手没有可用的系统工具。", {}, true);
+  }
+
+  try {
+    const response = await fetch(systemToolsCallEndpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer " + token,
+      },
+      body: JSON.stringify({ sourceAgentId, chatRoomId, name, args }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.success === false) {
+      return toolResult(payload.error || "工具执行失败。", payload, true);
+    }
+    const result = payload.data ?? payload;
+    return toolResult(stringifyPayload(result), result, false);
+  } catch (error) {
+    return toolResult(error instanceof Error ? error.message : "工具执行失败。", {}, true);
+  }
+}
+
 async function handle(request) {
   const { id, method, params } = request;
   if (!method) return;
@@ -943,6 +1008,15 @@ async function handle(request) {
         },
       });
     }
+    const systemTools = await listSystemTools();
+    for (const systemTool of systemTools) {
+      if (!systemTool?.name || tools.some((tool) => tool.name === systemTool.name)) continue;
+      tools.push({
+        name: systemTool.name,
+        description: systemTool.description || systemTool.name,
+        inputSchema: systemTool.inputSchema || { type: "object", additionalProperties: true },
+      });
+    }
     write({
       jsonrpc: "2.0",
       id,
@@ -961,11 +1035,8 @@ async function handle(request) {
       write({ jsonrpc: "2.0", id, result });
       return;
     }
-    write({
-      jsonrpc: "2.0",
-      id,
-      result: toolResult("未知工具：" + name, {}, true),
-    });
+    const result = await callSystemTool(name, args);
+    write({ jsonrpc: "2.0", id, result });
     return;
   }
 
@@ -1200,6 +1271,8 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     const generateImageEndpoint = this.imageGenerationProvider
       ? `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/generate-image`
       : undefined;
+    const systemToolsListEndpoint = `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/system-tools/list`;
+    const systemToolsCallEndpoint = `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/system-tools/call`;
     const builtinMcpServers = buildBuiltinCodexMcpServerConfigs({
       workDir: this.workDir,
       teamAgentXMcpServerPath: mcpServerPath,
@@ -1208,6 +1281,8 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       agentName: this.name,
       chatRoomAgents: this.chatRoomAgents,
       generateImageEndpoint,
+      systemToolsListEndpoint,
+      systemToolsCallEndpoint,
     });
     const config = {
       hide_agent_reasoning: false,

@@ -8,6 +8,7 @@ import {
   SKILL_MANAGER_DEFAULT_SKILLS,
 } from '../modules/skill/preinstalled-skills.js';
 import { skillInstallService } from '../modules/skill/skill-install.service.js';
+import { createSkillDirectoryLink } from '../modules/skill/skill-link.js';
 import { getSkillsHelperDefinition } from './system-agent-definitions.js';
 import { syncSystemAgent } from './system-agent-sync.js';
 
@@ -73,8 +74,8 @@ async function installDefaultSkillsToManager(
     }
 
     try {
-      fs.symlinkSync(sourceDir, targetSymlink, 'dir');
-      console.log(`[init-skills-helper] 已安装技能: ${skillName} (symlink)`);
+      const result = createSkillDirectoryLink(sourceDir, targetSymlink);
+      console.log(`[init-skills-helper] 已安装技能: ${skillName} (${result.method})`);
     } catch (error) {
       console.error(`[init-skills-helper] 安装技能失败: ${skillName}`, error);
     }

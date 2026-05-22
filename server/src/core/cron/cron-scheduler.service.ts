@@ -3,13 +3,6 @@ import { cronTaskService, type CronTaskWithRelations } from '../../modules/cron-
 import { ScheduleType, CronTaskState } from '@prisma/client';
 import prisma from '../../lib/prisma.js';
 
-// 系统内置助手的 ID（触发所有助手时需要过滤掉）
-const SYSTEM_BUILTIN_AGENT_IDS = [
-  '596667f7-f901-4613-92a7-cc71d859fa22', // 技能安装助手
-  '29ffb519-82d2-4c32-8bc8-0b8d814a4eee', // 助手生成器
-  'a1b2c3d4-e5f6-7890-abcd-ef1234567890', // 定时任务助手
-];
-
 interface ScheduledJob {
   taskId: string;
   cronJob: Cron | null;
@@ -226,17 +219,29 @@ class CronSchedulerService {
 
       const chatRoomAgents = await prisma.chatRoomAgent.findMany({
         where: { chatRoomId: task.chatRoomId },
-        include: { agent: { select: { id: true, name: true } } },
+        include: { agent: { select: { id: true, name: true, agentLevel: true } } },
       });
       const roomAgents = chatRoomAgents
-        .filter(a => a.agent && !SYSTEM_BUILTIN_AGENT_IDS.includes(a.agent.id))
+        .filter(a => a.agent && a.agent.agentLevel !== 'system')
         .map(a => a.agent!);
+      const selectedSystemAgents = agentIds.includes('*') || agentIds.length === 0
+        ? []
+        : await prisma.agent.findMany({
+            where: {
+              id: { in: agentIds },
+              agentLevel: 'system',
+              isActive: true,
+            },
+            select: { id: true, name: true, agentLevel: true },
+          });
 
       let mentionTargets: CronMentionTarget[] = [];
       if (agentIds.includes('*')) {
         mentionTargets = roomAgents;
       } else if (agentIds.length > 0) {
-        const roomAgentById = new Map(roomAgents.map(agent => [agent.id, agent]));
+        const roomAgentById = new Map(
+          [...roomAgents, ...selectedSystemAgents].map(agent => [agent.id, agent]),
+        );
         const seenAgentIds = new Set<string>();
         for (const agentId of agentIds) {
           const agent = roomAgentById.get(agentId);

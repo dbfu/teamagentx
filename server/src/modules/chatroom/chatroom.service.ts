@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { agentService } from '../../core/agent/agent.service.js';
+import { GROUP_ASSISTANT_ID } from '../../core/agent/system-assistant.constants.js';
 import {
   getSystemAgentsCached,
   type SystemAgentInfo as CachedSystemAgentInfo,
@@ -165,6 +166,7 @@ function addVirtualSystemAgents<T extends { id: string; chatRoomAgents: any[] }>
         description: agent.description,
         type: agent.type,
         agentLevel: agent.agentLevel,
+        workDir: agent.workDir,
         speechConfig: agent.speechConfig,
       },
     }));
@@ -216,6 +218,7 @@ export const chatRoomService = {
         workDir: workDir?.trim() || null,
         rules,
         ownerId,
+        defaultAgentId: GROUP_ASSISTANT_ID,
         updatedAt: now,
       },
       include: {
@@ -274,6 +277,7 @@ export const chatRoomService = {
         workDir: workDir?.trim() || null,
         rules,
         ownerId,
+        defaultAgentId: GROUP_ASSISTANT_ID,
         updatedAt: now,
       },
       include: {
@@ -358,7 +362,9 @@ export const chatRoomService = {
           ownerId: source.ownerId,
           isQuickChatRoom: source.isQuickChatRoom,
           quickChatAgentId: source.quickChatAgentId,
-          defaultAgentId: source.defaultAgentId,
+          defaultAgentId: source.isQuickChatRoom
+            ? source.defaultAgentId
+            : source.defaultAgentId || GROUP_ASSISTANT_ID,
           agentTriggerMode: source.agentTriggerMode,
           updatedAt: now,
         },
@@ -637,19 +643,7 @@ export const chatRoomService = {
     });
 
     // 获取所有系统助手
-    const systemAgents = await prisma.agent.findMany({
-      where: { agentLevel: 'system', isActive: true },
-      select: {
-        id: true,
-        name: true,
-        avatar: true,
-        avatarColor: true,
-        description: true,
-        type: true,
-        agentLevel: true,
-        workDir: true,
-      },
-    });
+    const systemAgents = await getSystemAgents();
 
     // 构造虚拟的 ChatRoomAgent 对象用于系统助手
     const virtualSystemAgents = systemAgents.map((agent) => ({
@@ -672,6 +666,7 @@ export const chatRoomService = {
         type: agent.type,
         agentLevel: agent.agentLevel,
         workDir: agent.workDir,
+        speechConfig: agent.speechConfig,
       },
     }));
 

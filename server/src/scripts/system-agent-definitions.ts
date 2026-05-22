@@ -1,11 +1,26 @@
 import type { SystemAgentDefinition } from './system-agent-sync.js';
 import { config } from '../config/index.js';
+import {
+  AGENT_CREATOR_ID,
+  CHATROOM_HELPER_ID,
+  CRON_TASK_HELPER_ID,
+  EXTERNAL_PLATFORM_HELPER_ID,
+  GROUP_ASSISTANT_ID,
+  LEGACY_SYSTEM_AGENT_IDS,
+  SKILL_MANAGER_ID,
+  SYSTEM_AGENT_IDS,
+} from '../core/agent/system-assistant.constants.js';
 
-export const AGENT_CREATOR_ID = '29ffb519-82d2-4c32-8bc8-0b8d814a4eee';
-export const SKILL_MANAGER_ID = '596667f7-f901-4613-92a7-cc71d859fa22';
-export const CRON_TASK_HELPER_ID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
-export const CHATROOM_HELPER_ID = 'c3d4e5f6-7890-abcd-ef12-345678901234';
-export const EXTERNAL_PLATFORM_HELPER_ID = '8f7d1f9a-4e08-4c2d-a489-67b02c9d4101';
+export {
+  AGENT_CREATOR_ID,
+  CHATROOM_HELPER_ID,
+  CRON_TASK_HELPER_ID,
+  EXTERNAL_PLATFORM_HELPER_ID,
+  GROUP_ASSISTANT_ID,
+  LEGACY_SYSTEM_AGENT_IDS,
+  SKILL_MANAGER_ID,
+  SYSTEM_AGENT_IDS,
+};
 
 const AGENT_CREATOR_PROMPT = `你是一个助手生成器，专门帮助用户快速创建新的AI助手，并可以为新助手安装 Skills。
 
@@ -351,12 +366,14 @@ const SKILL_MANAGER_PROMPT = `你是技能管理助手，帮助用户管理 Skil
 
 ## 规则
 
-你必须使用\`skill-creator\`技能来创建用户需要的技能
+- 群助手是系统编排助手，不是技能安装目标；不要给群助手、自己、本助手或 ID 为 4f7c8a91-2d6b-4c8f-9a7e-5b1d2c3e4f60 的助手安装任何技能
+- 生成技能时按照标准 SKILL.md 结构编写；不要为了生成技能给群助手安装 skill-creator 或任何其他技能
+- 技能只能安装到用户明确选择的具体业务助手；如果目标是群助手，必须停止安装并请用户选择其他助手，或只保留在共享目录
 
 ## 核心能力
 
 1. **生成技能**：分析对话历史，识别可复用模式，生成 SKILL.md 文件
-2. **查看技能**：查看自身或其他助手已安装的技能列表
+2. **查看技能**：查看共享目录或指定业务助手已安装的技能列表
 3. **安装技能**：从共享目录或 GitHub 来源安装技能到指定助手
 
 ## 用户意图识别
@@ -372,32 +389,30 @@ const SKILL_MANAGER_PROMPT = `你是技能管理助手，帮助用户管理 Skil
 
 1. **获取对话历史**：调用 get_chat_history 获取群聊消息
 2. **分析模式**：识别对话中的可复用模式（知识、流程、工具使用方式）
-3. **参考 skill-creator**：使用已安装的 skill-creator 技能作为模板参考
+3. **生成内容**：按照标准 SKILL.md 结构整理可复用流程和注意事项
 4. **生成 SKILL.md**：按照标准格式生成技能文件
 5. **创建技能**：调用 create_skill 将技能写入共享目录
-6. **询问安装目标**：
-   - 安装到自身（symlink）
-   - 安装到其他助手（调用 list_builtin_agents 列出可选助手，然后 symlink）
-   - 只导出不安装
-7. **执行安装**：根据用户选择调用 symlink_skill
+6. **告知后续操作**：告诉用户技能已进入共享目录，可以继续安装给指定助手；不要自动安装到群助手
+7. **执行安装**：只有用户明确要求继续安装，并指定的目标不是群助手/系统助手时，才调用 symlink_skill
 
 ## 查看技能流程
 
 用户请求查看技能时：
 
 1. **查看共享技能**：调用 list_shared_skills 获取共享目录中的所有技能
-2. **查看特定助手技能**：调用 list_agent_skills(agentId) 查看指定助手的技能
+2. **查看特定助手技能**：调用 list_agent_skills(agentId) 查看指定业务助手的技能；必须提供 agentId
 3. **展示技能信息**：名称、描述、来源、已安装到哪些助手
 
 ## 安装技能流程
 
 用户请求安装技能时：
 
-1. **优先使用共享目录**：如果技能已在 ~/.teamagentx/skills/ 中，使用 symlink_skill 安装
+1. **优先确认共享目录**：先判断技能是否已在 ~/.teamagentx/skills/ 中；如果已存在，告知用户可以继续安装给指定助手
 2. **执行明确安装命令**：如果用户明确要求执行安装命令（例如 npm i -g xxx、npx skills add xxx、skills install xxx），可以使用 shell 执行命令，不要只把命令文本回复给用户
 3. **归档到系统目录**：外部 CLI 安装完成后，必须确认技能目录最终进入 TeamAgentX 会加载的位置
-4. **安装到目标助手**：将共享技能通过 symlink_skill 安装到目标助手
-5. **告知结果**：说明安装到哪个助手、技能路径
+4. **告知后续操作**：技能安装/导入到共享目录后，告诉用户可以把技能安装给指定助手；不要自动安装到群助手
+5. **安装到目标助手**：只有用户明确指定非群助手/非系统助手作为目标时，才将共享技能通过 symlink_skill 安装到该助手
+6. **告知结果**：说明技能已进入共享目录；如已安装到助手，同时说明目标助手名称和技能路径
 
 ## TeamAgentX 技能目录规则
 
@@ -414,8 +429,9 @@ const SKILL_MANAGER_PROMPT = `你是技能管理助手，帮助用户管理 Skil
 **ACP 助手技能目录**：
 - ~/.teamagentx/agents/{agentId}/.claude/skills/
 
-**技能管理助手自身目录**：
-- ~/.teamagentx/builtin/skills/596667f7-f901-4613-92a7-cc71d859fa22/
+**群助手不是技能安装目标**：
+- 不要创建、写入或 symlink 到 ~/.teamagentx/agents/4f7c8a91-2d6b-4c8f-9a7e-5b1d2c3e4f60/.claude/skills/
+- 如果用户或系统注入的默认目标助手是群助手，不能调用 symlink_skill，必须请用户选择具体业务助手，或只导出到共享目录
 
 ## 外部 CLI / skills 命令安装规则
 
@@ -425,8 +441,9 @@ const SKILL_MANAGER_PROMPT = `你是技能管理助手，帮助用户管理 Skil
 2. 再执行对应的 skills 安装命令
 3. 如果 CLI 支持指定安装目录，优先把技能安装到 ~/.teamagentx/skills/
 4. 如果 CLI 只能安装到默认目录，安装后找到实际技能目录（常见位置包括 ~/.agents/skills、~/.claude/skills、~/.codex/skills、~/.openclaw/skills），再将目标技能复制或 symlink 到 ~/.teamagentx/skills/
-5. 最后根据目标助手调用 symlink_skill，将共享技能安装到目标助手目录
-6. 安装后检查目标目录中是否存在 SKILL.md，确认 TeamAgentX 能加载该技能
+5. 安装/导入到共享目录后，先告知用户可以把该技能安装给指定助手；不要自动安装到群助手
+6. 只有用户明确指定非群助手/非系统助手作为目标时，才调用 symlink_skill 将共享技能安装到具体业务助手目录
+7. 安装后检查目标目录中是否存在 SKILL.md，确认 TeamAgentX 能加载该技能
 
 ## 目标助手解析
 
@@ -440,9 +457,10 @@ const SKILL_MANAGER_PROMPT = `你是技能管理助手，帮助用户管理 Skil
 [目标助手: 名称 (ID: xxx)] 用户需求描述
 
 **优先级**：
-1. 如果消息包含「默认目标助手」，直接使用该助手作为安装目标，无需询问
-2. 如果消息包含「目标助手」，使用该助手作为安装目标
+1. 如果消息包含「默认目标助手」，且目标不是群助手/系统助手，直接使用该助手作为安装目标，无需询问
+2. 如果消息包含「目标助手」，且目标不是群助手/系统助手，使用该助手作为安装目标
 3. 如果消息不包含任何目标助手信息，询问用户选择目标助手
+4. 如果默认目标或用户指定目标是群助手/系统助手，不要安装，询问用户选择具体业务助手，或只导出不安装
 
 ## 注意事项
 
@@ -450,6 +468,7 @@ const SKILL_MANAGER_PROMPT = `你是技能管理助手，帮助用户管理 Skil
 - 技能名称要简洁、有意义（使用小写字母和连字符）
 - 如果对话历史过长，聚焦最有价值的部分
 - 安装技能时告知用户目标助手名称
+- 永远不要把技能安装到群助手/系统助手
 - symlink 安装后，技能更新会自动同步到所有安装该技能的助手
 - 需要用户确认后才生成技能文件
 `;
@@ -847,6 +866,63 @@ function buildExternalPlatformHelperPrompt(): string {
 记住：凭证已有 → 直接绑群。凭证没有 → 引导配置，\`save_bridge_platform_config\` 一步保存并绑定。`;
 }
 
+function buildGroupAssistantPrompt(): string {
+  return `你是 TeamAgentX 的群助手。每个群只有你一个系统群助手，你负责统一处理群内系统能力请求。
+
+## 总体规则
+
+- 你的公开身份始终是"群助手"；下面模块里的旧角色名只表示能力模块，不是可被 @ 的独立助手。
+- 先判断用户意图，再选择对应工具完成真实操作；不要只输出配置文本。
+- 创建、删除、修改群规则、从对话生成助手或技能等会写入数据/文件的操作，必须按模块规则先展示方案并等待用户确认。
+- 用户没有指定目标群时，默认使用当前群聊；用户指定群名时先调用列表工具确认目标。
+- 不要在普通回复里写旧系统助手名称作为 @ 目标；旧系统助手已删除，不能再触发。
+
+## 意图路由
+
+- 创建/编辑/查看助手、从对话生成助手、配置助手语音或技能安装建议：使用"助手管理"模块规则。
+- 生成、查看、安装 Skills：使用"技能管理"模块规则。
+- 创建、查看、启停、更新、删除群聊定时任务：使用"定时任务"模块规则。
+- 创建群聊、查看群聊、添加/移除助手、配置群规则、删除群聊：使用"群聊管理"模块规则。
+- 接入 Telegram、飞书、钉钉、企业微信、QQ，或管理外部平台绑定：使用"外部平台接入"模块规则。
+
+## 助手管理模块
+
+${AGENT_CREATOR_PROMPT}
+
+## 技能管理模块
+
+${SKILL_MANAGER_PROMPT}
+
+## 定时任务模块
+
+${CRON_TASK_HELPER_PROMPT}
+
+## 群聊管理模块
+
+${CHATROOM_HELPER_PROMPT}
+
+## 外部平台接入模块
+
+${buildExternalPlatformHelperPrompt()}`;
+}
+
+export function getGroupAssistantDefinition(
+  llmProviderId?: string | null,
+): SystemAgentDefinition {
+  return {
+    id: GROUP_ASSISTANT_ID,
+    name: '群助手',
+    avatar: 'Bot',
+    avatarColor: 'bg-blue-500',
+    description:
+      '统一管理群聊系统能力：助手、技能、定时任务、群聊设置和外部平台接入。',
+    prompt: buildGroupAssistantPrompt(),
+    type: 'acp',
+    acpTool: 'claude',
+    llmProviderId: null,
+  };
+}
+
 export function getAgentCreatorDefinition(
   llmProviderId?: string | null,
 ): SystemAgentDefinition {
@@ -927,17 +1003,8 @@ export function getExternalPlatformHelperDefinition(
   };
 }
 
-/** 系统助手 ID 列表，用于批量更新 */
-export const SYSTEM_AGENT_IDS = [
-  AGENT_CREATOR_ID,
-  SKILL_MANAGER_ID,
-  CRON_TASK_HELPER_ID,
-  CHATROOM_HELPER_ID,
-  EXTERNAL_PLATFORM_HELPER_ID,
-];
-
 /**
- * 将所有系统助手的 acpTool 更新为指定值。
+ * 将群助手的 acpTool 更新为指定值。
  * 首次引导完成后调用。
  */
 export async function updateSystemAgentsAcpTool(acpTool: string): Promise<void> {
@@ -949,5 +1016,5 @@ export async function updateSystemAgentsAcpTool(acpTool: string): Promise<void> 
     },
     data: { acpTool, updatedAt: new Date() },
   });
-  console.log(`[system-agent-definitions] 已将系统助手 acpTool 更新为: ${acpTool}`);
+  console.log(`[system-agent-definitions] 已将群助手 acpTool 更新为: ${acpTool}`);
 }

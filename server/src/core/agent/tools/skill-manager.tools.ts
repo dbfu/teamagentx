@@ -9,7 +9,9 @@ import { createSystemTool as tool } from './system-tool.js';
 import { agentService } from '../../../core/agent/agent.service.js';
 import { messageService } from '../../../modules/message/message.service.js';
 import { skillInstallService } from '../../../modules/skill/skill-install.service.js';
+import { replaceWithSkillDirectoryLink } from '../../../modules/skill/skill-link.js';
 import { getSharedSkillsDir } from '../../../modules/skill/preinstalled-skills.js';
+import { GROUP_ASSISTANT_ID } from '../system-assistant.constants.js';
 import { clearExecutorCacheEntries } from '../agent-handler/cache.js';
 
 // 技能管理助手的专用 ID
@@ -182,18 +184,7 @@ export const symlinkSkillTool = tool(
       // 确保目标目录存在
       fs.mkdirSync(targetSkillsDir, { recursive: true });
 
-      // 如果已存在同名文件/目录，先删除
-      if (fs.existsSync(targetSymlink)) {
-        const stats = fs.lstatSync(targetSymlink);
-        if (stats.isSymbolicLink()) {
-          fs.unlinkSync(targetSymlink);
-        } else {
-          fs.rmSync(targetSymlink, { recursive: true, force: true });
-        }
-      }
-
-      // 创建 symlink
-      fs.symlinkSync(sourceSkillDir, targetSymlink, 'dir');
+      replaceWithSkillDirectoryLink(sourceSkillDir, targetSymlink);
       clearExecutorCacheEntries(targetAgent.name);
 
       return `✅ 技能「${skillSlug}」已安装到「${targetAgent.name}」\n路径: ${targetSymlink}`;
@@ -325,7 +316,7 @@ export const listAgentSkillsTool = tool(
   async ({ agentId }: { agentId?: string }) => {
     try {
       // 如果没有提供 agentId，使用技能管理助手自身的 ID
-      const targetAgentId = agentId || SKILL_MANAGER_AGENT_ID;
+      const targetAgentId = agentId || GROUP_ASSISTANT_ID;
 
       const targetAgent = await agentService.findById(targetAgentId);
       if (!targetAgent) {
