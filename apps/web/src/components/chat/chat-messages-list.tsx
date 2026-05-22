@@ -291,6 +291,7 @@ export function ChatMessagesList({
   const pendingHighlightMessageIdRef = useRef<string | null>(null)
   const hasUserScrollIntentRef = useRef(false)
   const pendingScrollSaveFrameRef = useRef<number | null>(null)
+  const latestScrollPositionRef = useRef<{ chatRoomId: string; scrollTop: number } | null>(null)
 
   const selectedCount = selectedMessageIds.size
   const getVirtualItemKey = useCallback((index: number) => messages[index]?.id ?? index, [messages])
@@ -439,11 +440,18 @@ export function ChatMessagesList({
     const nearBottom = checkIsNearBottom()
     setIsNearBottom(nearBottom)
 
+    if (containerRef.current) {
+      latestScrollPositionRef.current = {
+        chatRoomId,
+        scrollTop: containerRef.current.scrollTop,
+      }
+    }
     if (pendingScrollSaveFrameRef.current === null) {
       pendingScrollSaveFrameRef.current = requestAnimationFrame(() => {
         pendingScrollSaveFrameRef.current = null
-        if (containerRef.current) {
-          saveScrollPosition(chatRoomId, containerRef.current.scrollTop)
+        const latest = latestScrollPositionRef.current
+        if (latest) {
+          saveScrollPosition(latest.chatRoomId, latest.scrollTop)
         }
       })
     }
@@ -867,8 +875,9 @@ export function ChatMessagesList({
         cancelAnimationFrame(pendingScrollSaveFrameRef.current)
         pendingScrollSaveFrameRef.current = null
       }
-      if (containerRef.current) {
-        saveScrollPosition(chatRoomId, containerRef.current.scrollTop)
+      const latest = latestScrollPositionRef.current
+      if (latest?.chatRoomId === chatRoomId) {
+        saveScrollPosition(latest.chatRoomId, latest.scrollTop)
       }
     }
   }, [chatRoomId, saveScrollPosition])
