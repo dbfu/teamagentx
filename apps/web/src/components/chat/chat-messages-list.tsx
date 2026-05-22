@@ -1,6 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { Message } from '@/lib/agent-api'
+import { Agent, Message } from '@/lib/agent-api'
 import { ChatMessage } from './chat-message'
 import { useChatStore } from '@/stores/chat-store'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -59,6 +59,7 @@ interface ChatMessagesListProps {
 interface MessageRowProps {
   chatRoomId: string
   message: Message
+  isVoicePlayed: boolean
   isMultiSelectMode: boolean
   isSelected: boolean
   replyTo?: Message | null
@@ -69,6 +70,8 @@ interface MessageRowProps {
   onSetMessageRef: (messageId: string, element: HTMLDivElement | null) => void
   onMarkVoiceMessagesPlayed: (chatRoomId: string, messageIds: string[]) => void
   onStopSpeak: (messageId: string) => void
+  onStartManualSpeak: (messageId: string) => void
+  onCompleteManualSpeak: (messageId: string) => void
   onAgentAvatarClick: (agentId: string, agentName: string) => void
   onTypingAgentClick: (messageId: string, agentId: string, agentName: string) => void
   onMentionClick: (agentId: string, agentName: string) => void
@@ -80,9 +83,172 @@ interface MessageRowProps {
   onToggleSelection: (messageId: string) => void
 }
 
+type PreparedAutoSpeakItem = {
+  messageId: string
+  agentId: string
+  text: string
+  voiceConfig: AgentVoicePanelConfig
+}
+
+function logVoiceQueue(event: string, details: Record<string, unknown>): void {
+  console.debug(`[voice-queue] ${event}`, details)
+  void window.electronAPI?.appendDebugLog?.(`[voice-queue] ${event}`, details)
+}
+
+interface PrepareAutoSpeakBatchOptions {
+  chatRoomId: string
+  messages: Message[]
+  agentsList: Agent[]
+  handledSet: Set<string>
+  queuedIds: Set<string>
+  deferredIds: Set<string>
+  playedSet: Set<string>
+  initialMessageIds: Set<string>
+}
+
+interface AutoSpeakQueueStartOptions {
+  queueLength: number
+  isAutoSpeaking: boolean
+  activePlayingMessageId: string | null
+}
+
+export function getSequentialAutoSpeakItemsAfterManualMessage({
+  chatRoomId,
+  completedMessageId,
+  messages,
+  agentsList,
+  queuedIds,
+  deferredIds,
+  playedSet,
+}: {
+  chatRoomId: string
+  completedMessageId: string
+  messages: Message[]
+  agentsList: Agent[]
+  queuedIds: Set<string>
+  deferredIds: Set<string>
+  playedSet: Set<string>
+}): PreparedAutoSpeakItem[] {
+  const completedIndex = messages.findIndex((message) => message.id === completedMessageId)
+  if (completedIndex < 0) return []
+
+  const items: PreparedAutoSpeakItem[] = []
+  for (const message of messages.slice(completedIndex + 1)) {
+    if (message.chatRoomId !== chatRoomId || message.isHuman || !message.agentId || !message.content.trim()) continue
+    if (queuedIds.has(message.id) || deferredIds.has(message.id) || playedSet.has(message.id)) continue
+
+    const agent = agentsList.find((item) => item.id === message.agentId)
+    if (!agent?.speechConfig) continue
+    const voiceConfig = toVoicePanelConfig(agent.speechConfig)
+    const normalizedText = normalizeSpeechText(message.content)
+    const shouldAutoPlay = voiceConfig.enabled
+      && voiceConfig.outputMode === 'auto_final_only'
+      && supportsSpeechPlayback(voiceConfig)
+      && Boolean(normalizedText)
+
+    if (!shouldAutoPlay) continue
+
+    items.push({
+      messageId: message.id,
+      agentId: message.agentId,
+      text: normalizedText,
+      voiceConfig,
+    })
+  }
+
+  return items
+}
+
+export function prepareAutoSpeakBatch({
+  chatRoomId,
+  messages,
+  agentsList,
+  handledSet,
+  queuedIds,
+  deferredIds,
+  playedSet,
+  initialMessageIds,
+}: PrepareAutoSpeakBatchOptions): {
+  permanentlySkippedMessageIds: string[]
+  prewarmItems: PreparedAutoSpeakItem[]
+  queueItems: PreparedAutoSpeakItem[]
+} {
+  const newMessages = messages.filter(
+    (message) => message.chatRoomId === chatRoomId
+      && !handledSet.has(message.id)
+      && !queuedIds.has(message.id)
+      && !deferredIds.has(message.id),
+  )
+
+  const permanentlySkippedMessageIds: string[] = []
+  const prewarmItems: PreparedAutoSpeakItem[] = []
+  const queueItems: PreparedAutoSpeakItem[] = []
+
+  for (const message of newMessages) {
+    if (message.isHuman || !message.agentId || !message.content.trim()) {
+      permanentlySkippedMessageIds.push(message.id)
+      continue
+    }
+
+    const agent = agentsList.find((item) => item.id === message.agentId)
+    if (!agent?.speechConfig) {
+      continue
+    }
+
+    const voiceConfig = toVoicePanelConfig(agent.speechConfig)
+    const normalizedText = normalizeSpeechText(message.content)
+
+    if (voiceConfig.enabled && voiceConfig.provider === 'openai-compatible-tts') {
+      prewarmItems.push({
+        messageId: message.id,
+        agentId: message.agentId,
+        text: message.content,
+        voiceConfig,
+      })
+    }
+
+    if (playedSet.has(message.id)) {
+      permanentlySkippedMessageIds.push(message.id)
+      continue
+    }
+
+    const shouldAutoPlay = voiceConfig.enabled
+      && voiceConfig.outputMode === 'auto_final_only'
+      && supportsSpeechPlayback(voiceConfig)
+      && !initialMessageIds.has(message.id)
+      && Boolean(normalizedText)
+
+    if (!shouldAutoPlay) {
+      continue
+    }
+
+    queueItems.push({
+      messageId: message.id,
+      agentId: message.agentId,
+      text: normalizedText,
+      voiceConfig,
+    })
+  }
+
+  return {
+    permanentlySkippedMessageIds,
+    prewarmItems,
+    queueItems,
+  }
+}
+
+export function shouldStartAutoSpeakQueue({
+  queueLength,
+  isAutoSpeaking,
+  activePlayingMessageId,
+}: AutoSpeakQueueStartOptions): boolean {
+  return queueLength > 0 && !isAutoSpeaking && !activePlayingMessageId
+}
+
 const MessageRow = memo(function MessageRow({
   chatRoomId,
   message,
+  isVoicePlayed,
   isMultiSelectMode,
   isSelected,
   replyTo,
@@ -93,6 +259,8 @@ const MessageRow = memo(function MessageRow({
   onSetMessageRef,
   onMarkVoiceMessagesPlayed,
   onStopSpeak,
+  onStartManualSpeak,
+  onCompleteManualSpeak,
   onAgentAvatarClick,
   onTypingAgentClick,
   onMentionClick,
@@ -153,6 +321,7 @@ const MessageRow = memo(function MessageRow({
       )}
       <ChatMessage
         message={message}
+        isVoicePlayed={isVoicePlayed}
         isRight={message.isHuman}
         replyTo={replyTo}
         replyCount={replyCount}
@@ -161,6 +330,8 @@ const MessageRow = memo(function MessageRow({
         currentUser={currentUser}
         onMarkPlayed={handleMarkPlayed}
         onStopSpeak={onStopSpeak}
+        onStartManualSpeak={onStartManualSpeak}
+        onCompleteManualSpeak={onCompleteManualSpeak}
         onAgentAvatarClick={onAgentAvatarClick}
         onTypingAgentClick={onTypingAgentClick}
         onMentionClick={onMentionClick}
@@ -226,6 +397,7 @@ export function ChatMessagesList({
   const saveScrollAnchor = useChatStore((s) => s.saveScrollAnchor)
   const getScrollAnchor = useChatStore((s) => s.getScrollAnchor)
   const allAgents = useChatStore((s) => s.allAgents)
+  const playingVoiceMessageId = useChatStore((s) => s.playingVoiceMessageId)
   const setPlayingVoiceMessageId = useChatStore((s) => s.setPlayingVoiceMessageId)
   const handledVoiceMessageIdsByRoom = useChatStore((s) => s.handledVoiceMessageIdsByRoom)
   const playedVoiceMessageIdsByRoom = useChatStore((s) => s.playedVoiceMessageIdsByRoom)
@@ -943,17 +1115,38 @@ export function ChatMessagesList({
     if (isSpeakingRef.current) return
     isSpeakingRef.current = true
     const runId = speechRunIdRef.current
+    logVoiceQueue('process:start', {
+      chatRoomId,
+      runId,
+      queueLength: speechQueueRef.current.length,
+      playingVoiceMessageId: useChatStore.getState().playingVoiceMessageId,
+    })
     while (speechQueueRef.current.length > 0) {
       if (runId !== speechRunIdRef.current) {
+        logVoiceQueue('process:abort-runid-changed', {
+          chatRoomId,
+          runId,
+          latestRunId: speechRunIdRef.current,
+        })
         break
       }
       const item = speechQueueRef.current.shift()!
       // 避免重复播报：在 shift 后再次检查 playedIds
       if (playedIdsRef.current.has(item.messageId)) {
         queuedVoiceMessageIdsRef.current.delete(item.messageId)
+        logVoiceQueue('process:skip-played', {
+          chatRoomId,
+          messageId: item.messageId,
+        })
         continue
       }
       setPlayingVoiceMessageId(item.messageId)
+      logVoiceQueue('process:item-start', {
+        chatRoomId,
+        runId,
+        messageId: item.messageId,
+        remainingQueueLength: speechQueueRef.current.length,
+      })
       // 预热队列中接下来 3 条，避免播完等待
       for (const next of speechQueueRef.current.slice(0, 3)) {
         prewarmTts({
@@ -969,6 +1162,18 @@ export function ChatMessagesList({
       }
       let playedSuccessfully = false
       let interrupted = false
+      let playbackStarted = false
+      const markPlaybackStarted = () => {
+        if (playbackStarted) return
+        playbackStarted = true
+        markVoiceMessagesHandled(chatRoomId, [item.messageId])
+        markVoiceMessagesPlayed(chatRoomId, [item.messageId])
+        logVoiceQueue('process:item-playback-start', {
+          chatRoomId,
+          runId,
+          messageId: item.messageId,
+        })
+      }
       try {
         await speakText({
           text: item.text,
@@ -989,31 +1194,64 @@ export function ChatMessagesList({
           chatRoomId,
           messageId: item.messageId,
           source: 'assistant-auto-speak',
+          onPlaybackStart: markPlaybackStarted,
         })
         playedSuccessfully = true
+        logVoiceQueue('process:item-complete', {
+          chatRoomId,
+          runId,
+          messageId: item.messageId,
+        })
       } catch (e) {
         if (e instanceof Error && e.message === 'speech_interrupted') {
           interrupted = true
         } else if (e instanceof Error && (e as Error & { cancelled?: boolean }).cancelled) {
           interrupted = true
         }
+        logVoiceQueue('process:item-error', {
+          chatRoomId,
+          runId,
+          messageId: item.messageId,
+          interrupted,
+          error: e instanceof Error ? e.message : String(e),
+        })
       }
       queuedVoiceMessageIdsRef.current.delete(item.messageId)
       if (interrupted || runId !== speechRunIdRef.current) {
-        deferredVoiceMessageIdsRef.current.add(item.messageId)
+        if (!playbackStarted) {
+          deferredVoiceMessageIdsRef.current.add(item.messageId)
+        } else {
+          deferredVoiceMessageIdsRef.current.delete(item.messageId)
+        }
+        logVoiceQueue('process:item-break', {
+          chatRoomId,
+          runId,
+          messageId: item.messageId,
+          interrupted,
+          playbackStarted,
+          deferredSize: deferredVoiceMessageIdsRef.current.size,
+        })
         break
       }
       if (playedSuccessfully) {
         deferredVoiceMessageIdsRef.current.delete(item.messageId)
-        markVoiceMessagesHandled(chatRoomId, [item.messageId])
-        markVoiceMessagesPlayed(chatRoomId, [item.messageId])
       } else {
-        deferredVoiceMessageIdsRef.current.add(item.messageId)
+        if (!playbackStarted) {
+          deferredVoiceMessageIdsRef.current.add(item.messageId)
+        } else {
+          deferredVoiceMessageIdsRef.current.delete(item.messageId)
+        }
       }
     }
     if (speechRunIdRef.current === runId) {
       setPlayingVoiceMessageId(null)
       isSpeakingRef.current = false
+      logVoiceQueue('process:end', {
+        chatRoomId,
+        runId,
+        queueLength: speechQueueRef.current.length,
+        deferredSize: deferredVoiceMessageIdsRef.current.size,
+      })
     }
   }, [chatRoomId, markVoiceMessagesHandled, markVoiceMessagesPlayed, setPlayingVoiceMessageId])
 
@@ -1032,91 +1270,123 @@ export function ChatMessagesList({
     setPlayingVoiceMessageId(null)
   }, [setPlayingVoiceMessageId])
 
+  const pauseAutoPlaybackForManualStart = useCallback((messageId: string) => {
+    speechRunIdRef.current += 1
+    isSpeakingRef.current = false
+    speechQueueRef.current = []
+    queuedVoiceMessageIdsRef.current.clear()
+
+    const currentPlayingMessageId = useChatStore.getState().playingVoiceMessageId
+    const shouldStopActivePlayback = Boolean(currentPlayingMessageId && currentPlayingMessageId !== messageId)
+    if (currentPlayingMessageId && currentPlayingMessageId !== messageId) {
+      deferredVoiceMessageIdsRef.current.add(currentPlayingMessageId)
+      recentlyStoppedVoiceMessageIdsRef.current.set(currentPlayingMessageId, Date.now())
+    }
+
+    if (shouldStopActivePlayback) {
+      stopSpeechPlayback()
+    }
+    setPlayingVoiceMessageId(null)
+    logVoiceQueue('manual:start', {
+      chatRoomId,
+      messageId,
+      currentPlayingMessageId,
+      shouldStopActivePlayback,
+      deferredSize: deferredVoiceMessageIdsRef.current.size,
+    })
+  }, [setPlayingVoiceMessageId])
+
+  const resumeAutoPlaybackAfterManualSpeak = useCallback((completedMessageId: string) => {
+    const queueItems = getSequentialAutoSpeakItemsAfterManualMessage({
+      chatRoomId,
+      completedMessageId,
+      messages,
+      agentsList: allAgentsRef.current,
+      queuedIds: queuedVoiceMessageIdsRef.current,
+      deferredIds: deferredVoiceMessageIdsRef.current,
+      playedSet: playedIdsRef.current,
+    })
+
+    for (const item of queueItems) {
+      queuedVoiceMessageIdsRef.current.add(item.messageId)
+      speechQueueRef.current.push(item)
+    }
+    logVoiceQueue('manual:resume', {
+      chatRoomId,
+      completedMessageId,
+      queueItems: queueItems.map((item) => item.messageId),
+      queueLength: speechQueueRef.current.length,
+      playingVoiceMessageId: useChatStore.getState().playingVoiceMessageId,
+    })
+
+    if (shouldStartAutoSpeakQueue({
+      queueLength: speechQueueRef.current.length,
+      isAutoSpeaking: isSpeakingRef.current,
+      activePlayingMessageId: useChatStore.getState().playingVoiceMessageId,
+    })) {
+      void processQueue()
+    }
+  }, [chatRoomId, messages, processQueue])
+
   useEffect(() => {
     if (loading) return
     if (document.hidden) return
 
-    const handledSet = handledIdsRef.current
-    const playedSet = playedIdsRef.current
-    const agentsList = allAgentsRef.current
-
-    // 找出未播报的新消息（不在 effect 开头清空 deferred set）
-    const newMessages = messages.filter(
-      (message) => message.chatRoomId === chatRoomId
-        && !handledSet.has(message.id)
-        && !queuedVoiceMessageIdsRef.current.has(message.id)
-        && !deferredVoiceMessageIdsRef.current.has(message.id),
-    )
-    if (newMessages.length === 0) return
-    const permanentlySkippedMessageIds: string[] = []
-
-    // 收集所有需要播报的新消息，按顺序入队
-    const toSpeak = newMessages.filter((message) => {
-      if (message.isHuman || !message.agentId || !message.content.trim()) {
-        permanentlySkippedMessageIds.push(message.id)
-        return false
-      }
-      const agent = agentsList.find((item) => item.id === message.agentId)
-      if (!agent) {
-        return false
-      }
-      const voiceConfig = agent.speechConfig ? toVoicePanelConfig(agent.speechConfig) : null
-      const shouldAutoPlay = voiceConfig?.enabled
-        && voiceConfig.outputMode === 'auto_final_only'
-        && supportsSpeechPlayback(voiceConfig)
-        && !playedSet.has(message.id)
-        && !initialMessageIdsRef.current.has(message.id)
-
-      if (playedSet.has(message.id)) {
-        permanentlySkippedMessageIds.push(message.id)
-        return false
-      }
-
-      return shouldAutoPlay
+    const { permanentlySkippedMessageIds, prewarmItems, queueItems } = prepareAutoSpeakBatch({
+      chatRoomId,
+      messages,
+      agentsList: allAgentsRef.current,
+      handledSet: handledIdsRef.current,
+      queuedIds: queuedVoiceMessageIdsRef.current,
+      deferredIds: deferredVoiceMessageIdsRef.current,
+      playedSet: playedIdsRef.current,
+      initialMessageIds: initialMessageIdsRef.current,
     })
-
     if (permanentlySkippedMessageIds.length > 0) {
       markVoiceMessagesHandled(chatRoomId, permanentlySkippedMessageIds)
     }
 
-    for (const message of newMessages) {
-      if (message.isHuman || !message.agentId || !message.content.trim()) continue
-      const agent = agentsList.find((item) => item.id === message.agentId)
-      const vc = agent?.speechConfig ? toVoicePanelConfig(agent.speechConfig) : null
-      if (!vc?.enabled || vc.provider !== 'openai-compatible-tts') continue
+    for (const item of prewarmItems) {
       prewarmTts({
-        text: message.content,
-        provider: vc.provider,
-        model: vc.model,
-        voiceId: vc.voiceId,
-        rate: vc.speed,
-        format: vc.format ?? undefined,
-        agentId: message.agentId,
+        text: item.text,
+        provider: item.voiceConfig.provider,
+        model: item.voiceConfig.model,
+        voiceId: item.voiceConfig.voiceId,
+        rate: item.voiceConfig.speed,
+        format: item.voiceConfig.format ?? undefined,
+        agentId: item.agentId,
         chatRoomId,
       })
     }
 
-    if (toSpeak.length === 0) return
+    if (queueItems.length === 0) return
 
-    // 已有语音正在播放时，只预热缓存，不入队打断
-    if (isSpeakingRef.current) return
-
-    for (const message of toSpeak) {
-      const agent = agentsList.find((item) => item.id === message.agentId)
-      const agentConfig = agent?.speechConfig
-      if (!agentConfig) continue
-      const vc = toVoicePanelConfig(agentConfig)
-      queuedVoiceMessageIdsRef.current.add(message.id)
-      speechQueueRef.current.push({
-        messageId: message.id,
-        agentId: message.agentId!,
-        text: normalizeSpeechText(message.content),
-        voiceConfig: vc,
-      })
+    for (const item of queueItems) {
+      queuedVoiceMessageIdsRef.current.add(item.messageId)
+      speechQueueRef.current.push(item)
     }
 
+    if (shouldStartAutoSpeakQueue({
+      queueLength: speechQueueRef.current.length,
+      isAutoSpeaking: isSpeakingRef.current,
+      activePlayingMessageId: playingVoiceMessageId,
+    })) {
+      void processQueue()
+    }
+  }, [chatRoomId, loading, markVoiceMessagesHandled, messages, playingVoiceMessageId, processQueue, visibilityVersion])
+
+  useEffect(() => {
+    if (loading) return
+    if (document.hidden) return
+    if (!shouldStartAutoSpeakQueue({
+      queueLength: speechQueueRef.current.length,
+      isAutoSpeaking: isSpeakingRef.current,
+      activePlayingMessageId: playingVoiceMessageId,
+    })) {
+      return
+    }
     void processQueue()
-  }, [chatRoomId, loading, markVoiceMessagesHandled, messages, processQueue, visibilityVersion])
+  }, [loading, playingVoiceMessageId, processQueue, visibilityVersion])
 
   // 组件卸载时保存当前滚动位置
   useEffect(() => {
@@ -1169,6 +1439,7 @@ export function ChatMessagesList({
                   <MessageRow
                     chatRoomId={chatRoomId}
                     message={message}
+                    isVoicePlayed={playedIds.has(message.id)}
                     isMultiSelectMode={isMultiSelectMode}
                     isSelected={selectedMessageIds.has(message.id)}
                     replyTo={message.replyMessageId ? messageById.get(message.replyMessageId) : null}
@@ -1179,6 +1450,8 @@ export function ChatMessagesList({
                     onSetMessageRef={handleSetMessageRef}
                     onMarkVoiceMessagesPlayed={markVoiceMessagesPlayed}
                     onStopSpeak={stopCurrentPlaybackSession}
+                    onStartManualSpeak={pauseAutoPlaybackForManualStart}
+                    onCompleteManualSpeak={resumeAutoPlaybackAfterManualSpeak}
                     onAgentAvatarClick={onAgentAvatarClick}
                     onTypingAgentClick={onTypingAgentClick}
                     onMentionClick={onMentionClick}

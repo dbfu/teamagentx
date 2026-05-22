@@ -13,6 +13,7 @@ class FakeSpeechSynthesisUtterance {
   rate = 1
   volume = 1
   pitch = 1
+  onstart: (() => void) | null = null
   onend: (() => void) | null = null
   onerror: ((event: { error?: string }) => void) | null = null
 
@@ -46,10 +47,12 @@ function installSpeechSynthesisStub(options: SynthStubOptions = {}) {
       utterances.push(utterance)
       const mode = options.speakMode ?? 'end'
       if (mode === 'end') {
+        utterance.onstart?.()
         utterance.onend?.()
       } else if (mode === 'manual') {
         // do nothing — caller will drive onend/onerror manually
       } else if (typeof mode === 'object' && 'errorCode' in mode) {
+        utterance.onstart?.()
         utterance.onerror?.({ error: mode.errorCode })
       }
     },
@@ -163,6 +166,29 @@ describe('browser-local speech provider', () => {
     assert.deepStrictEqual(spokenTexts, ['你好 **世界**'])
   })
 
+  test('真正开始播报时应触发 onPlaybackStart 回调', async () => {
+    installSpeechSynthesisStub()
+    const provider = createBrowserLocalSpeechProvider()
+    let started = 0
+
+    await provider.synthesize!({
+      type: 'tts',
+      profile: {
+        provider: 'browser-local',
+      },
+      input: {
+        text: '开始播报',
+      },
+      runtime: {
+        onPlaybackStart: () => {
+          started += 1
+        },
+      },
+    })
+
+    assert.strictEqual(started, 1)
+  })
+
   test('应通过 provider 暴露浏览器语音识别会话', async () => {
     installSpeechRecognitionStub('测试转写')
     const provider = createBrowserLocalSpeechProvider()
@@ -204,8 +230,8 @@ describe('browser-local speech provider', () => {
       await assert.rejects(promise, (err: Error) => err.message === 'speech_interrupted')
     })
 
-    test('interrupted 且未调用外部 stop → resolve（兜底为正常结束）', async () => {
-      const { utterances } = installSpeechSynthesisStub({ speakMode: 'manual' })
+    test('interrupted 且未调用外部 stop 且重试后仍中断 → resolve interrupted', async () => {
+      const { utterances, spokenTexts } = installSpeechSynthesisStub({ speakMode: 'manual' })
       const provider = createBrowserLocalSpeechProvider()
 
       const promise = provider.synthesize!({
@@ -215,11 +241,40 @@ describe('browser-local speech provider', () => {
       })
 
       await Promise.resolve()
+      utterances[0]!.onstart?.()
       utterances[0]!.onerror?.({ error: 'interrupted' })
+      await Promise.resolve()
+      assert.strictEqual(spokenTexts.length, 2)
+      utterances[1]!.onstart?.()
+      utterances[1]!.onerror?.({ error: 'interrupted' })
 
       const result = await promise
       assert.strictEqual(result.kind, 'audio')
       assert.strictEqual(result.metadata?.interrupted, true)
+    })
+
+    test('interrupted 且未调用外部 stop 时应先自动重试一次', async () => {
+      const { utterances, spokenTexts } = installSpeechSynthesisStub({ speakMode: 'manual' })
+      const provider = createBrowserLocalSpeechProvider()
+
+      const promise = provider.synthesize!({
+        type: 'tts',
+        profile: { provider: 'browser-local' },
+        input: { text: 'hello' },
+      })
+
+      await Promise.resolve()
+      utterances[0]!.onstart?.()
+      utterances[0]!.onerror?.({ error: 'interrupted' })
+      await Promise.resolve()
+
+      assert.strictEqual(spokenTexts.length, 2)
+      utterances[1]!.onstart?.()
+      utterances[1]!.onend?.()
+
+      const result = await promise
+      assert.strictEqual(result.kind, 'audio')
+      assert.strictEqual(result.metadata?.interrupted, undefined)
     })
 
     test('其他 error code → reject 普通错误', async () => {
@@ -239,7 +294,7 @@ describe('browser-local speech provider', () => {
     })
   })
 
-  test('Chrome onend 不触发时应在 30s 超时后 resolve 且 metadata.timedOut 为 true', async (t) => {
+  test('Chrome onend 不触发时应在 60s 超时后 resolve 且 metadata.timedOut 为 true', async (t) => {
     t.mock.timers.enable({ apis: ['setTimeout'] })
     installSpeechSynthesisStub({ speakMode: 'manual' })
     const provider = createBrowserLocalSpeechProvider()
@@ -250,8 +305,8 @@ describe('browser-local speech provider', () => {
       input: { text: 'hi' },
     })
 
-    // 推进 30 秒，触发兜底超时
-    t.mock.timers.tick(30_000)
+    // 推进 60 秒，触发兜底超时
+    t.mock.timers.tick(60_000)
 
     const result = await promise
     assert.strictEqual(result.kind, 'audio')
@@ -273,7 +328,7 @@ describe('browser-local speech provider', () => {
     stub.utterances[0]!.onerror?.({ error: 'interrupted' })
     await assert.rejects(first, (err: Error) => err.message === 'speech_interrupted')
 
-    // 第二次：未再次调用 stop，触发 interrupted 应被视为噪音，resolve 而非 reject
+    // 第二次：未再次调用 stop，第一次 interrupted 会自动重试，第二次 interrupted 才兜底 resolve
     const second = provider.synthesize!({
       type: 'tts',
       profile: { provider: 'browser-local' },
@@ -281,6 +336,8 @@ describe('browser-local speech provider', () => {
     })
     await Promise.resolve()
     stub.utterances[1]!.onerror?.({ error: 'interrupted' })
+    await Promise.resolve()
+    stub.utterances[2]!.onerror?.({ error: 'interrupted' })
     const result = await second
     assert.strictEqual(result.kind, 'audio')
     assert.strictEqual(result.metadata?.interrupted, true)

@@ -55,6 +55,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   getServerStatus: () => ipcRenderer.invoke('get-server-status'),
   openLogFolder: () => ipcRenderer.invoke('open-log-folder'),
+  appendDebugLog: (message: string, payload?: unknown) => ipcRenderer.invoke('debug:append-log', { message, payload }),
   // Runtime（server 从 resources 解压/拷贝到 userData）准备事件。
   // 首次启动或升级后会触发 start → progress* → done/error，
   // UI 可借此显示"正在准备运行环境"和文件级进度。

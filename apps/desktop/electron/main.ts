@@ -32,6 +32,11 @@ function writeLog(message: string): void {
   }
 }
 
+function appendRendererDebugLog(message: string, payload?: unknown): void {
+  const suffix = payload === undefined ? '' : ` ${JSON.stringify(payload)}`
+  writeLog(`[renderer] ${message}${suffix}`)
+}
+
 // Prevent multiple instances
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -2129,6 +2134,12 @@ app.whenReady().then(async () => {
         progress: lastRuntimeProgress,
       },
     };
+  });
+
+  ipcMain.handle('debug:append-log', async (_event, input: { message?: unknown; payload?: unknown }) => {
+    const message = typeof input?.message === 'string' ? input.message : 'unknown'
+    appendRendererDebugLog(message, input?.payload)
+    return { success: true }
   });
 
   // 让用户在错误界面"打开日志文件夹"以协助排查
