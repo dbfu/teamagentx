@@ -70,7 +70,7 @@ function TimeIndicator({ event, isCompleted }: { event: StreamEvent; isCompleted
   )
 }
 
-function TotalTimeIndicator({ events, isRunning }: { events: StreamEvent[]; isRunning: boolean }) {
+function TotalTimeIndicator({ events, isRunning, startTime }: { events: StreamEvent[]; isRunning: boolean; startTime?: number }) {
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
@@ -83,15 +83,22 @@ function TotalTimeIndicator({ events, isRunning }: { events: StreamEvent[]; isRu
     return () => clearInterval(timer)
   }, [isRunning])
 
-  if (events.length === 0) return null
+  if (!startTime && events.length === 0) return null
 
-  const startTime = Math.min(...events.map(event => event.timestamp))
-  const completedEndTime = Math.max(...events.map(event => event.endTime ?? event.timestamp))
+  const firstEventTime = events.length > 0
+    ? Math.min(...events.map(event => event.timestamp))
+    : undefined
+  const totalStartTime = startTime ?? firstEventTime
+  if (!totalStartTime) return null
+
+  const completedEndTime = events.length > 0
+    ? Math.max(...events.map(event => event.endTime ?? event.timestamp))
+    : totalStartTime
   const endTime = isRunning ? now : completedEndTime
 
   return (
     <span className="text-muted-foreground tabular-nums">
-      · 耗时 {formatDuration(startTime, endTime)}
+      · 耗时 {formatDuration(totalStartTime, endTime)}
     </span>
   )
 }
@@ -107,6 +114,7 @@ function CollapsibleStateIcon({ className }: { className?: string }) {
 
 interface StreamPanelProps {
   streamingViewAgent: { messageId: string; agentId: string; name: string } | null
+  messageStartTime?: number
   completedAgents: Set<string>
   streamEvents: Map<string, StreamEvent[]>
   chatRoomId?: string
@@ -115,6 +123,7 @@ interface StreamPanelProps {
 
 export function StreamPanel({
   streamingViewAgent,
+  messageStartTime,
   completedAgents,
   streamEvents,
   chatRoomId,
@@ -259,7 +268,7 @@ export function StreamPanel({
             <div className="flex items-center gap-2 text-xs text-primary">
               <Loader2 className="size-3 animate-spin" />
               <span>处理中...</span>
-              <TotalTimeIndicator events={events} isRunning={Boolean(isExecuting)} />
+              <TotalTimeIndicator events={events} isRunning={Boolean(isExecuting)} startTime={messageStartTime} />
             </div>
             {isExecuting && onStop && chatRoomId && (
               <button

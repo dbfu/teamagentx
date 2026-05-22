@@ -111,6 +111,16 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
     return [...ids]
   }, [agentStatuses, chatRoom, messages, typingAgents])
 
+  const streamingMessageStartTime = useMemo(() => {
+    if (!streamingViewAgent) return undefined
+
+    const message = messages.find((item) => item.id === streamingViewAgent.messageId)
+    if (!message) return undefined
+
+    const timestamp = new Date(message.time).getTime()
+    return Number.isFinite(timestamp) ? timestamp : undefined
+  }, [messages, streamingViewAgent])
+
   const handleStopAllTasks = () => {
     if (!chatRoom || activeTaskAgentIds.length === 0) return
 
@@ -278,6 +288,7 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
           setSidePanelMode={setSidePanelMode}
           setStreamingViewAgent={setStreamingViewAgent}
           streamingViewAgent={streamingViewAgent}
+          streamingMessageStartTime={streamingMessageStartTime}
           completedAgents={completedAgents}
           streamEvents={streamEvents}
           agentStatuses={agentStatuses}
@@ -343,7 +354,7 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
         messages={messages}
         roomName={chatRoom.name}
         roomAvatar={chatRoom.avatar}
-        roomAvatarColor={chatRoom.avatarColor}
+        isQuickChatRoom={chatRoom.isQuickChatRoom}
         mentionAgents={mentionAgents}
         currentUser={currentUser ? {
           username: currentUser.username,
