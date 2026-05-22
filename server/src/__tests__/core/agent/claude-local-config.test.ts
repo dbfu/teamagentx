@@ -15,11 +15,16 @@ describe('Claude local config sync', () => {
   const originalUserProfile = process.env.USERPROFILE;
   let tempHome: string;
 
+  const originalKeychainDisabled =
+    process.env.TEAMAGENTX_DISABLE_CLAUDE_KEYCHAIN_FALLBACK;
+
   beforeEach(() => {
     tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-claude-home-'));
     process.env.HOME = tempHome;
     // os.homedir() 在 Windows 上读 USERPROFILE，需要同时覆盖
     process.env.USERPROFILE = tempHome;
+    // 测试时禁用 macOS Keychain 回退，否则会读到开发者机器上的真实凭据
+    process.env.TEAMAGENTX_DISABLE_CLAUDE_KEYCHAIN_FALLBACK = '1';
   });
 
   afterEach(() => {
@@ -32,6 +37,12 @@ describe('Claude local config sync', () => {
       delete process.env.USERPROFILE;
     } else {
       process.env.USERPROFILE = originalUserProfile;
+    }
+    if (originalKeychainDisabled === undefined) {
+      delete process.env.TEAMAGENTX_DISABLE_CLAUDE_KEYCHAIN_FALLBACK;
+    } else {
+      process.env.TEAMAGENTX_DISABLE_CLAUDE_KEYCHAIN_FALLBACK =
+        originalKeychainDisabled;
     }
     fs.rmSync(tempHome, {recursive: true, force: true});
   });
@@ -125,6 +136,62 @@ describe('Claude local config sync', () => {
     // 非 env 的字段：全局会覆盖同名顶层 key，但 per-agent 独有字段保留
     assert.strictEqual(synced.outputStyle, 'Chinese');
     assert.strictEqual(synced.agentPushNotifEnabled, true);
+  });
+
+  test('strips stale top-level model when global no longer pins one', () => {
+    const globalClaudeDir = path.join(tempHome, '.claude');
+    fs.mkdirSync(globalClaudeDir, {recursive: true});
+    // 全局没有顶层 model（用户已切回官方订阅，让 SDK / CLI 自己选默认模型）
+    fs.writeFileSync(
+      path.join(globalClaudeDir, 'settings.json'),
+      JSON.stringify({env: {}}),
+    );
+
+    // per-agent 留着上次第三方供应商写入的 model
+    const configDir = path.join(tempHome, '.teamagentx', 'acp-config', 'agent-1');
+    fs.mkdirSync(configDir, {recursive: true});
+    fs.writeFileSync(
+      path.join(configDir, 'settings.json'),
+      JSON.stringify({
+        model: 'glm-5.1',
+        outputStyle: 'Chinese',
+        env: {},
+      }),
+    );
+
+    const result = syncGlobalClaudeSettingsToConfigDir(configDir);
+    assert.strictEqual(result.copied, true);
+
+    const synced = JSON.parse(
+      fs.readFileSync(path.join(configDir, 'settings.json'), 'utf-8'),
+    );
+    // 陈旧的 model 必须被清掉，否则 CLI 会拿它当默认模型
+    assert.strictEqual(synced.model, undefined);
+    // 与 model 无关的自定义字段照常保留
+    assert.strictEqual(synced.outputStyle, 'Chinese');
+  });
+
+  test('keeps top-level model when global pins one', () => {
+    const globalClaudeDir = path.join(tempHome, '.claude');
+    fs.mkdirSync(globalClaudeDir, {recursive: true});
+    fs.writeFileSync(
+      path.join(globalClaudeDir, 'settings.json'),
+      JSON.stringify({model: 'opusplan', env: {}}),
+    );
+
+    const configDir = path.join(tempHome, '.teamagentx', 'acp-config', 'agent-1');
+    fs.mkdirSync(configDir, {recursive: true});
+    fs.writeFileSync(
+      path.join(configDir, 'settings.json'),
+      JSON.stringify({model: 'glm-5.1', env: {}}),
+    );
+
+    syncGlobalClaudeSettingsToConfigDir(configDir);
+
+    const synced = JSON.parse(
+      fs.readFileSync(path.join(configDir, 'settings.json'), 'utf-8'),
+    );
+    assert.strictEqual(synced.model, 'opusplan');
   });
 
   test('returns target_current when nothing changes between syncs', () => {
