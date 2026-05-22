@@ -265,6 +265,8 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
 
             {/* Input area */}
             <ChatInputArea
+              chatRoomId={chatRoom.id}
+              chatRoomWorkDir={chatRoom.workDir}
               chatRoomName={chatRoom.name}
               handleKeyDown={handleKeyDown}
               handleSend={handleSend}

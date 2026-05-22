@@ -82,6 +82,11 @@ function isAudioSttDefaultEligible(provider: Pick<LlmProvider, 'modelType' | 'au
   return provider.modelType !== 'audio' || provider.audioUsage !== 'tts'
 }
 
+function isMaskedApiKey(value: string | null | undefined): boolean {
+  if (!value) return false
+  return value === '****' || /^.{3}\*\*\*.{4}$/.test(value)
+}
+
 function getAudioUsageLabel(audioUsage: AudioUsage): string {
   switch (audioUsage) {
     case 'tts':
@@ -342,7 +347,7 @@ export function ModelPage() {
       modelType: provider.modelType || 'text',
       apiProtocol: provider.apiProtocol || 'anthropic',
       apiUrl,
-      apiKey: provider.apiKey,
+      apiKey: '',
       model: provider.model,
       sttModel: provider.sttModel ?? null,
       audioUsage: ((provider as any).audioUsage ?? 'both') as AudioUsage,
@@ -380,8 +385,13 @@ export function ModelPage() {
 
   // 提交表单
   const handleSubmit = async () => {
-    if (!formData.name || !formData.apiKey || !formData.model || !formData.apiUrl) {
+    const keepsExistingApiKey = Boolean(editingProvider && isMaskedApiKey(formData.apiKey))
+    if (!formData.name || (!formData.apiKey && !keepsExistingApiKey) || !formData.model || !formData.apiUrl) {
       toast.error('请填写必填字段：名称、API URL、API Key、模型')
+      return
+    }
+    if (!editingProvider && isMaskedApiKey(formData.apiKey)) {
+      toast.error('请填写完整 API Key，不能使用已遮罩的密钥')
       return
     }
     if (formData.modelType === 'image' && (!formData.imageProvider || !formData.imageApiType)) {
@@ -391,7 +401,10 @@ export function ModelPage() {
 
     const payload = formData.modelType === 'audio' && formData.audioUsage === 'tts'
       ? { ...formData, isDefault: false }
-      : formData
+      : { ...formData }
+    if (editingProvider && isMaskedApiKey(payload.apiKey)) {
+      delete (payload as Partial<typeof formData>).apiKey
+    }
 
     if (editingProvider) {
       // 更新

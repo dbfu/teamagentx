@@ -1,6 +1,35 @@
+import {execFileSync} from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+
+// macOS 上 Claude Code 默认把 OAuth 凭据存到 Keychain，文件 ~/.claude/.credentials.json
+// 通常不存在；同时 Claude Code 只有在 CLAUDE_CONFIG_DIR 为默认 (~/.claude) 时才会
+// 读 Keychain，自定义 CLAUDE_CONFIG_DIR（我们 per-agent 都会设）下只读
+// <CLAUDE_CONFIG_DIR>/.credentials.json，否则会报 “Not logged in. Please run /login”。
+const MACOS_KEYCHAIN_SERVICE = 'Claude Code-credentials';
+
+function readMacosKeychainCredentials(): string | null {
+  if (process.platform !== 'darwin') return null;
+  if (process.env.TEAMAGENTX_DISABLE_CLAUDE_KEYCHAIN_FALLBACK === '1') return null;
+  try {
+    const result = execFileSync(
+      'security',
+      ['find-generic-password', '-s', MACOS_KEYCHAIN_SERVICE, '-w'],
+      {encoding: 'utf-8', timeout: 5000},
+    );
+    const trimmed = result.trim();
+    if (!trimmed) return null;
+    try {
+      JSON.parse(trimmed);
+    } catch {
+      return null;
+    }
+    return `${trimmed}\n`;
+  } catch {
+    return null;
+  }
+}
 
 // 全局 settings.json 对这些 env 键拥有权威：全局有则推到 per-agent，
 // 全局没有则从 per-agent 里删除。否则切换登录方式（OAuth ↔ API Key/Token）
@@ -19,6 +48,15 @@ const CLAUDE_GLOBAL_AUTH_ENV_KEYS = [
   'ANTHROPIC_DEFAULT_HAIKU_MODEL',
   'ANTHROPIC_REASONING_MODEL',
 ] as const;
+
+// 与鉴权 env 同样的逻辑，但作用在 settings.json 的顶层字段：
+// Claude CLI 内 /model 等命令会把模型选择落到 settings.json 的顶层
+// `model` 字段；用户在第三方供应商（如 glm-5.1）下用过一次后，再切回
+// 官方订阅模式，per-agent settings.json 还残留 "model": "glm-5.1"。
+// SDK 此时 options.model 为 undefined，CLI 会回退到 settings.json，
+// 拿到陈旧模型名后直接报 "issue with the selected model"。
+// 因此把这些字段也视作全局独占：全局有就跟，全局没有就抹掉。
+const CLAUDE_GLOBAL_OWNED_TOP_LEVEL_KEYS = ['model'] as const;
 
 const CLAUDE_GLOBAL_STATE_KEYS = [
   'userID',
@@ -64,11 +102,21 @@ function mergeClaudeSettings(
     mergedEnv[key] = value;
   }
 
-  return {
+  const merged: Record<string, unknown> = {
     ...targetSettings,
     ...globalSettings,
     env: mergedEnv,
   };
+
+  // 全局独占的顶层字段（如 model）：全局没有就必须从 per-agent 抹掉，
+  // 否则切换供应商后陈旧值会留下来顶掉新模型。
+  for (const key of CLAUDE_GLOBAL_OWNED_TOP_LEVEL_KEYS) {
+    if (!(key in globalSettings)) {
+      delete merged[key];
+    }
+  }
+
+  return merged;
 }
 
 export interface ClaudeSettingsSyncResult {
@@ -243,17 +291,31 @@ export interface ClaudeCredentialsSyncResult {
 export function syncGlobalClaudeCredentialsToConfigDir(
   configDir: string,
 ): ClaudeCredentialsSyncResult {
-  const sourcePath = getGlobalClaudeCredentialsPath();
+  const filePath = getGlobalClaudeCredentialsPath();
   const targetPath = path.join(configDir, '.credentials.json');
 
-  if (!fs.existsSync(sourcePath)) {
-    return {copied: false, sourcePath, targetPath, reason: 'source_missing'};
+  let sourceContent: string | null = null;
+  let sourcePath = filePath;
+
+  if (fs.existsSync(filePath)) {
+    try {
+      sourceContent = fs.readFileSync(filePath, 'utf-8');
+    } catch {
+      sourceContent = null;
+    }
   }
 
-  let sourceContent: string;
-  try {
-    sourceContent = fs.readFileSync(sourcePath, 'utf-8');
-  } catch {
+  // macOS 上文件通常不存在，回退到 Keychain。Claude Code CLI 在自定义
+  // CLAUDE_CONFIG_DIR 下不会再去查 Keychain，必须由我们把凭据落盘到 per-agent dir。
+  if (!sourceContent) {
+    const keychainContent = readMacosKeychainCredentials();
+    if (keychainContent) {
+      sourceContent = keychainContent;
+      sourcePath = `keychain:${MACOS_KEYCHAIN_SERVICE}`;
+    }
+  }
+
+  if (!sourceContent) {
     return {copied: false, sourcePath, targetPath, reason: 'source_missing'};
   }
 

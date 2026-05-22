@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import { createLlmClient } from '../lib/llm-client.js';
-import { llmProviderService } from '../modules/llm-provider/llm-provider.service.js';
+import { isMaskedApiKey, llmProviderService } from '../modules/llm-provider/llm-provider.service.js';
 import { clearExecutorCache } from '../core/agent/agent-handler/index.js';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { authService } from '../modules/auth/auth.service.js';
@@ -369,6 +369,9 @@ export async function llmProviderGateway(app: FastifyInstance) {
         validateApiUrl(apiUrl);
       } catch (err: any) {
         return reply.code(400).send({ success: false, error: err.message });
+      }
+      if (isMaskedApiKey(apiKey)) {
+        return reply.code(400).send({ success: false, error: '请填写完整 API Key，不能使用已遮罩的密钥' });
       }
 
       try {

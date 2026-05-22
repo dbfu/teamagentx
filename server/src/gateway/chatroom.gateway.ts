@@ -22,6 +22,7 @@ import { taskQueueService } from '../modules/task-queue/task-queue.service.js';
 import { messageService } from '../modules/message/message.service.js';
 import { agentMemoryService } from '../modules/agent-memory/agent-memory.service.js';
 import { deserializeAgentSpeechConfig } from '../modules/speech/speech-config.js';
+import { gitBranchService } from '../modules/chatroom/git-branch.service.js';
 
 // Schema definitions
 const lastMessageSchema = {
@@ -228,6 +229,10 @@ interface UpdateChatRoomBody {
   agentTriggerMode?: 'auto' | 'manual';
 }
 
+interface UpdateGitBranchBody {
+  branch: string;
+}
+
 interface AddAgentBody {
   userId?: string;
   agentId?: string;
@@ -300,6 +305,132 @@ export async function chatRoomGateway(app: FastifyInstance) {
     }
 
     return reply.send({ success: true, data: serializeChatRoomForResponse(chatRoom) });
+  });
+
+  app.get<{ Params: ChatRoomParams }>('/chatrooms/:id/git-status', {
+    schema: {
+      description: '获取群聊工作目录 git 分支状态',
+      tags: ['ChatRooms'],
+      params: {
+        type: 'object',
+        properties: { id: { type: 'string' } },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: {
+              type: 'object',
+              properties: {
+                isGitRepo: { type: 'boolean' },
+                workDir: { type: 'string' },
+                currentBranch: { type: 'string', nullable: true },
+                branches: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      name: { type: 'string' },
+                      current: { type: 'boolean' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        404: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const chatRoom = await chatRoomService.findById(id);
+
+    if (!chatRoom) {
+      return reply.code(404).send({ success: false, error: '群聊不存在' });
+    }
+
+    const status = await gitBranchService.getStatus(chatRoom.id, chatRoom.workDir);
+    return reply.send({ success: true, data: status });
+  });
+
+  app.post<{ Params: ChatRoomParams; Body: UpdateGitBranchBody }>('/chatrooms/:id/git-branch', {
+    schema: {
+      description: '切换群聊工作目录 git 分支',
+      tags: ['ChatRooms'],
+      params: {
+        type: 'object',
+        properties: { id: { type: 'string' } },
+      },
+      body: {
+        type: 'object',
+        required: ['branch'],
+        properties: {
+          branch: { type: 'string' },
+        },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: {
+              type: 'object',
+              properties: {
+                isGitRepo: { type: 'boolean' },
+                workDir: { type: 'string' },
+                currentBranch: { type: 'string', nullable: true },
+                branches: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      name: { type: 'string' },
+                      current: { type: 'boolean' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        400: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+        404: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const chatRoom = await chatRoomService.findById(id);
+
+    if (!chatRoom) {
+      return reply.code(404).send({ success: false, error: '群聊不存在' });
+    }
+
+    try {
+      const status = await gitBranchService.switchBranch(chatRoom.id, chatRoom.workDir, request.body.branch);
+      return reply.send({ success: true, data: status });
+    } catch (error: any) {
+      return reply.code(400).send({ success: false, error: error.message || '切换分支失败' });
+    }
   });
 
   // Create chatRoom

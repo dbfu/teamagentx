@@ -2,7 +2,7 @@ import { afterEach, describe, test } from 'node:test';
 import assert from 'node:assert';
 import type { LlmProvider } from '@prisma/client';
 import prisma from '../../../lib/prisma.js';
-import { llmProviderService, parseAiConfigResponse } from '../../../modules/llm-provider/llm-provider.service.js';
+import { isMaskedApiKey, llmProviderService, parseAiConfigResponse } from '../../../modules/llm-provider/llm-provider.service.js';
 
 const originalCount = prisma.llmProvider.count;
 const originalUpdateMany = prisma.llmProvider.updateMany;
@@ -84,6 +84,37 @@ describe('llmProviderService audio defaults', () => {
       llmProviderService.setDefault('tts-only'),
       /仅支持将 STT 或 TTS \+ STT 语音模型设为默认 STT/,
     );
+  });
+
+  test('更新供应商时应忽略已遮罩的 API Key', async () => {
+    let updatedPayload: Record<string, unknown> | null = null;
+
+    prisma.llmProvider.findUnique = ((async () => createAudioProvider({
+      modelType: 'text',
+      audioUsage: 'both',
+    })) as unknown) as typeof prisma.llmProvider.findUnique;
+    prisma.llmProvider.update = (async ({ data }) => {
+      updatedPayload = data as Record<string, unknown>;
+      return createAudioProvider(data as Partial<LlmProvider>);
+    }) as typeof prisma.llmProvider.update;
+
+    await llmProviderService.update('provider-1', {
+      name: 'Updated',
+      apiKey: 'sk-***abcd',
+    });
+
+    const payload = updatedPayload as Record<string, unknown> | null;
+    assert.ok(payload);
+    assert.strictEqual('apiKey' in payload, false);
+    assert.strictEqual(payload.name, 'Updated');
+  });
+});
+
+describe('isMaskedApiKey', () => {
+  test('识别接口返回的遮罩密钥格式', () => {
+    assert.strictEqual(isMaskedApiKey('sk-***Tmok'), true);
+    assert.strictEqual(isMaskedApiKey('****'), true);
+    assert.strictEqual(isMaskedApiKey('sk-real-key'), false);
   });
 });
 
