@@ -291,6 +291,7 @@ export function ChatMessagesList({
   const prependAnchorRef = useRef<{ messageId: string; offset: number } | null>(null)
   const pendingHighlightMessageIdRef = useRef<string | null>(null)
   const hasUserScrollIntentRef = useRef(false)
+  const userScrollIntentUntilRef = useRef(0)
   const suppressScrollSaveUntilRef = useRef(0)
   const pendingScrollSaveFrameRef = useRef<number | null>(null)
   const latestScrollAnchorRef = useRef<{ chatRoomId: string; messageId: string; offset: number; scrollTop: number } | null>(null)
@@ -421,7 +422,6 @@ export function ChatMessagesList({
       messageId: latest.messageId,
       offset: latest.offset,
       scrollTop: latest.scrollTop,
-      source: 'user',
     })
   }, [saveScrollAnchor])
 
@@ -447,6 +447,8 @@ export function ChatMessagesList({
 
   const markUserScrollIntent = useCallback(() => {
     hasUserScrollIntentRef.current = true
+    const durationMs = 1600
+    userScrollIntentUntilRef.current = Math.max(userScrollIntentUntilRef.current, Date.now() + durationMs)
   }, [])
 
   const handleWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
@@ -461,8 +463,10 @@ export function ChatMessagesList({
   }, [markUserScrollIntent])
 
   const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (['ArrowUp', 'PageUp', 'Home'].includes(event.key) || (event.key === ' ' && event.shiftKey)) {
+    if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key) || event.key === ' ') {
       markUserScrollIntent()
+    }
+    if (['ArrowUp', 'PageUp', 'Home'].includes(event.key) || (event.key === ' ' && event.shiftKey)) {
       tryLoadOlderMessages()
     }
   }, [markUserScrollIntent, tryLoadOlderMessages])
@@ -473,8 +477,10 @@ export function ChatMessagesList({
     const nearBottom = checkIsNearBottom()
     setIsNearBottom(nearBottom)
 
-    const canSaveScroll = hasUserScrollIntentRef.current && Date.now() >= suppressScrollSaveUntilRef.current
+    const now = Date.now()
+    const canSaveScroll = now >= suppressScrollSaveUntilRef.current && now <= userScrollIntentUntilRef.current
     if (canSaveScroll) {
+      userScrollIntentUntilRef.current = now + 800
       const scrollAnchor = captureScrollAnchor()
       if (scrollAnchor) {
         latestScrollAnchorRef.current = scrollAnchor
@@ -519,7 +525,7 @@ export function ChatMessagesList({
   }, [loadingOlderMessages, messageIndexById, messages.length, rowVirtualizer, suppressProgrammaticScrollSave])
 
   // 滚动到底部
-  const scrollToBottom = useCallback(() => {
+  const scrollToBottom = useCallback((options?: { save?: boolean }) => {
     if (messages.length === 0) return
 
     const alignToBottom = () => {
@@ -539,10 +545,16 @@ export function ChatMessagesList({
       frame += 1
       if (frame < 3) {
         requestAnimationFrame(tick)
+      } else if (options?.save) {
+        const scrollAnchor = captureScrollAnchor()
+        if (scrollAnchor) {
+          latestScrollAnchorRef.current = scrollAnchor
+          saveLatestScrollAnchor(scrollAnchor)
+        }
       }
     }
     requestAnimationFrame(tick)
-  }, [messages.length, messagesEndRef, rowVirtualizer, suppressProgrammaticScrollSave])
+  }, [captureScrollAnchor, messages.length, messagesEndRef, rowVirtualizer, saveLatestScrollAnchor, suppressProgrammaticScrollSave])
 
   const highlightMessage = useCallback((messageId: string) => {
     const messageEl = messageRefs.current.get(messageId)
@@ -590,7 +602,7 @@ export function ChatMessagesList({
   // 处理强制滚动到底部（用户发送消息后）
   useEffect(() => {
     if (forceScrollToBottom) {
-      scrollToBottom()
+      scrollToBottom({ save: true })
       setShowNewMessageHint(false)
       setIsNearBottom(true)
       setForceScrollToBottom(false)
@@ -615,7 +627,7 @@ export function ChatMessagesList({
     if (hasNewMessages) {
       if (isNearBottom) {
         // 在底部，自动滚动
-        scrollToBottom()
+        scrollToBottom({ save: true })
       } else {
         // 不在底部，显示新消息提示
         setShowNewMessageHint(true)
@@ -639,8 +651,10 @@ export function ChatMessagesList({
       initialCapturedRef.current = false
       recentlyStoppedVoiceMessageIdsRef.current.clear()
       hasUserScrollIntentRef.current = false
+      userScrollIntentUntilRef.current = 0
       prependAnchorRef.current = null
       pendingHighlightMessageIdRef.current = null
+      latestScrollAnchorRef.current = null
       prevMessageCountRef.current = messages.length
       prevLastMessageIdRef.current = messages[messages.length - 1]?.id ?? null
       // 重置底部状态
@@ -668,11 +682,7 @@ export function ChatMessagesList({
     if (!loading && messages.length > 0 && messagesBelongToCurrentRoom && containerRef.current && !hasRestoredPositionRef.current) {
       hasRestoredPositionRef.current = true
       const savedAnchor = getScrollAnchor(chatRoomId)
-      let canUseSavedPosition = true
       if (savedAnchor) {
-        canUseSavedPosition = savedAnchor.source === 'user'
-      }
-      if (savedAnchor && savedAnchor.source === 'user') {
         const anchorIndex = messageIndexById.get(savedAnchor.messageId)
         if (anchorIndex !== undefined) {
           suppressProgrammaticScrollSave()
@@ -725,7 +735,7 @@ export function ChatMessagesList({
         }
       }
 
-      const savedPosition = canUseSavedPosition ? getScrollPosition(chatRoomId) : null
+      const savedPosition = getScrollPosition(chatRoomId)
       if (savedPosition !== null) {
         // 恢复滚动位置
         suppressProgrammaticScrollSave()
@@ -1102,7 +1112,7 @@ export function ChatMessagesList({
       {showNewMessageHint && (
         <button
           onClick={() => {
-            scrollToBottom()
+            scrollToBottom({ save: true })
             setShowNewMessageHint(false)
           }}
           className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full bg-blue-500 px-4 py-1.5 text-sm text-white shadow-lg hover:bg-blue-600 transition-colors"

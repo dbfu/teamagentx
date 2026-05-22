@@ -30,7 +30,6 @@ type ChatScrollAnchor = {
   messageId: string
   offset: number
   scrollTop: number
-  source?: 'user'
 }
 
 const missingRecipientToast = createElement(
