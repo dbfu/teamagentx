@@ -1,5 +1,5 @@
 import { ArrowLeft, ChevronLeft, ClipboardList, Eraser, Loader2, MoreVertical, RefreshCw, Square } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Route, Routes, useLocation, useNavigate, useSearchParams, useParams } from 'react-router-dom'
 import { LoginModal } from './components/auth/login-modal'
 import { RegisterModal } from './components/auth/register-modal'
@@ -362,6 +362,15 @@ function AppContent() {
   const visibleChatRoomId = useMemo(() => {
     return getVisibleChatRoomId(location.pathname, isMobile ? null : selectedRoomId)
   }, [isMobile, location.pathname, selectedRoomId])
+  const visibleChatRoomIdRef = useRef<string | null>(visibleChatRoomId)
+  visibleChatRoomIdRef.current = visibleChatRoomId
+
+  const selectRoomAndClearUnread = useCallback((roomId: string) => {
+    if (roomId) {
+      updateUnreadCount(roomId, 0)
+    }
+    selectRoom(roomId)
+  }, [selectRoom, updateUnreadCount])
 
   // 刷新状态
   const [isRefreshing, setIsRefreshing] = useState(false)
@@ -394,7 +403,7 @@ function AppContent() {
   const handleNavigateToChatRoom = async (roomId: string) => {
     // 先刷新群聊列表，确保新创建的群聊已加载
     await loadChatRooms()
-    selectRoom(roomId)
+    selectRoomAndClearUnread(roomId)
     navigate('/')
   }
 
@@ -483,7 +492,7 @@ function AppContent() {
       // 检查该群聊是否存在
       const roomExists = chatRooms.some(room => room.id === roomId)
       if (roomExists && selectedRoomId !== roomId) {
-        selectRoom(roomId)
+        selectRoomAndClearUnread(roomId)
       }
       // 如果有 msg 参数，设置滚动定位
       if (msgId) {
@@ -492,22 +501,24 @@ function AppContent() {
       // 清除 URL 参数
       setSearchParams({})
     }
-  }, [searchParams, chatRooms, selectedRoomId, selectRoom, setSearchParams, setScrollToMessageId])
+  }, [searchParams, chatRooms, selectedRoomId, selectRoomAndClearUnread, setSearchParams, setScrollToMessageId])
 
   // 监听未读数更新事件 - 需要在 socket 连接后设置
   useEffect(() => {
     if (!isConnected) return
 
     const unsubscribe = onUnreadUpdate((data) => {
+      const currentVisibleChatRoomId = visibleChatRoomIdRef.current
+
       if (data.unreadCounts) {
         // 批量更新所有未读数
-        setUnreadCounts(visibleChatRoomId
-          ? { ...data.unreadCounts, [visibleChatRoomId]: 0 }
+        setUnreadCounts(currentVisibleChatRoomId
+          ? { ...data.unreadCounts, [currentVisibleChatRoomId]: 0 }
           : data.unreadCounts
         )
       } else if (data.chatRoomId && data.count !== undefined) {
         // 只有当前真正显示的聊天窗口才自动清零；停留在助手/模型等页面时仍显示未读。
-        if (data.chatRoomId === visibleChatRoomId) {
+        if (data.chatRoomId === currentVisibleChatRoomId) {
           updateUnreadCount(data.chatRoomId, 0)
         } else {
           updateUnreadCount(data.chatRoomId, data.count)
@@ -515,7 +526,7 @@ function AppContent() {
       }
     })
     return unsubscribe
-  }, [isConnected, onUnreadUpdate, setUnreadCounts, updateUnreadCount, visibleChatRoomId])
+  }, [isConnected, onUnreadUpdate, setUnreadCounts, updateUnreadCount])
 
   // 切换群聊时重新请求未读数
   useEffect(() => {
@@ -564,7 +575,7 @@ function AppContent() {
 
   // 移动端导航到群聊
   const handleMobileNavigateToChatRoom = (roomId: string) => {
-    selectRoom(roomId)
+    selectRoomAndClearUnread(roomId)
   }
 
   return (
@@ -589,7 +600,7 @@ function AppContent() {
             <DesktopMessagePage
               chatRooms={chatRooms}
               selectedRoomId={selectedRoomId}
-              onSelectRoom={selectRoom}
+              onSelectRoom={selectRoomAndClearUnread}
               onChatRoomChange={loadChatRooms}
               unreadCounts={unreadCounts}
               executingChatRooms={executingChatRooms}
