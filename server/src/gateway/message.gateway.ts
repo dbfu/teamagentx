@@ -416,6 +416,7 @@ export async function messageGateway(app: FastifyInstance) {
           type: 'object',
           properties: {
             success: { type: 'boolean' },
+            count: { type: 'integer' },
           },
         },
       },
@@ -444,6 +445,9 @@ export async function messageGateway(app: FastifyInstance) {
 
     // 2. 删除群聊的所有待处理任务
     await taskQueueService.deleteByChatRoomId(chatRoomId);
+
+    // 2.25. 删除群聊的所有消息
+    const deletedMessages = await messageService.deleteByChatRoomId(chatRoomId);
 
     // 2.5. 删除群聊的所有执行记录
     await executionRecordService.deleteByChatRoomId(chatRoomId);
@@ -511,7 +515,7 @@ export async function messageGateway(app: FastifyInstance) {
     io?.to(chatRoomId).emit('agent:inactive-tasks', { chatRoomId, tasks: [] });
     await broadcastAgentStatus(chatRoomId);
 
-    return reply.send({ success: true });
+    return reply.send({ success: true, count: deletedMessages.count });
   });
 
   // Clear execution records for a chatRoom and agent

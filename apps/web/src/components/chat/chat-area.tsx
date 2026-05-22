@@ -249,6 +249,8 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
               onDeleteMessages={deleteMessages}
               onLoadOlderMessages={loadOlderMessages}
               currentUser={currentUser}
+              isSidePanelOpen={!isMobile && sidePanelMode !== null}
+              isStreamPanelOpen={!isMobile && sidePanelMode === 'stream'}
             />
 
             {/* Input area */}

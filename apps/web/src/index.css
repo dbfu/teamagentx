@@ -54,6 +54,7 @@
   --radius-panel: 0.75rem;
   --page-top-spacing: 1.5rem;
   --page-side-spacing: 1.25rem;
+  --font-markdown-code: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 .dark {
@@ -563,7 +564,7 @@
 }
 
 .prose code {
-  font-family: var(--font-mono);
+  font-family: var(--font-markdown-code);
   color: #7c3aed;
   background-color: #f5f3ff;
   padding: 0.125rem 0.25rem;
@@ -577,7 +578,7 @@
 }
 
 .prose pre {
-  font-family: var(--font-mono);
+  font-family: var(--font-markdown-code);
   background-color: #f3f4f6;
   padding: 0.5rem;
   border-radius: 0.25rem;
