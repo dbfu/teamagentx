@@ -429,50 +429,48 @@ export function RoomSettingsPanel({
         )}
 
         {/* 外部平台接入 */}
-        {!chatRoom.isQuickChatRoom && (
-          <div className="border-t border-border pt-4 mt-4">
-            <label className="mb-2 block text-sm font-medium text-muted-foreground">外部平台机器人绑定</label>
-            <p className="mb-3 text-xs text-muted-foreground">机器人只负责外部平台通信。当前群聊可以同时连接多个平台机器人，消息会同步到这些已连接机器人。</p>
-            {roomBots.length > 0 ? (
-              <div className="space-y-2">
-                {roomBots.map((bot) => (
-                  <div key={bot.id} className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm">
-                    <div className="flex min-w-0 flex-1 items-center gap-3">
-                      <div className={cn(
-                        'flex size-9 shrink-0 items-center justify-center rounded-lg',
-                        bot.enabled ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-500',
-                      )}>
-                        <Bot className="size-4" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-medium text-foreground">{bot.name}</div>
-                        <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                          <span className="rounded-full bg-blue-50 px-2 py-0.5 font-medium text-blue-700">{bot.platform}</span>
-                          <span className="text-gray-300">•</span>
-                          <span className={cn('inline-flex items-center gap-1', bot.enabled ? 'text-green-600' : 'text-gray-500')}>
-                            <span className={cn('size-1.5 rounded-full', bot.enabled ? 'bg-green-500' : 'bg-gray-400')} />
-                            {bot.enabled ? '启用中' : '已停用'}
-                          </span>
-                        </div>
+        <div className="border-t border-border pt-4 mt-4">
+          <label className="mb-2 block text-sm font-medium text-muted-foreground">外部平台机器人绑定</label>
+          <p className="mb-3 text-xs text-muted-foreground">机器人只负责外部平台通信。当前群聊可以同时连接多个平台机器人，消息会同步到这些已连接机器人。</p>
+          {roomBots.length > 0 ? (
+            <div className="space-y-2">
+              {roomBots.map((bot) => (
+                <div key={bot.id} className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm">
+                  <div className="flex min-w-0 flex-1 items-center gap-3">
+                    <div className={cn(
+                      'flex size-9 shrink-0 items-center justify-center rounded-lg',
+                      bot.enabled ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-500',
+                    )}>
+                      <Bot className="size-4" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium text-foreground">{bot.name}</div>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                        <span className="rounded-full bg-blue-50 px-2 py-0.5 font-medium text-blue-700">{bot.platform}</span>
+                        <span className="text-gray-300">•</span>
+                        <span className={cn('inline-flex items-center gap-1', bot.enabled ? 'text-green-600' : 'text-gray-500')}>
+                          <span className={cn('size-1.5 rounded-full', bot.enabled ? 'bg-green-500' : 'bg-gray-400')} />
+                          {bot.enabled ? '启用中' : '已停用'}
+                        </span>
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteChannel(bot)}
-                      className="shrink-0 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
-                    >
-                      解绑
-                    </button>
                   </div>
-                ))}
-              </div>
-            ) : (
-              <div className="rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
-                当前群聊还没有绑定机器人。你可以在频道页创建机器人实例后直接绑定到这里，或者在群里让“外部平台接入助手”拿到凭证后自动绑定当前群聊。
-              </div>
-            )}
-          </div>
-        )}
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteChannel(bot)}
+                    className="shrink-0 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                  >
+                    解绑
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
+              当前群聊还没有绑定机器人。你可以在频道页创建机器人实例后直接绑定到这里，或者在群里让“外部平台接入助手”拿到凭证后自动绑定当前群聊。
+            </div>
+          )}
+        </div>
       </div>
 
       {/* 固定在底部的按钮 */}
