@@ -18,6 +18,11 @@ import { normalizeSpeechText, prewarmTts, speakText, stopSpeechPlayback, support
 import { resolveAssetUrl } from '@/lib/asset-url'
 import { MarkdownContent } from './markdown-content'
 
+function logManualVoice(event: string, details: Record<string, unknown>): void {
+  console.debug(`[voice-manual] ${event}`, details)
+  void window.electronAPI?.appendDebugLog?.(`[voice-manual] ${event}`, details)
+}
+
 function formatDuration(ms: number): string {
   const totalSeconds = Math.round(ms / 1000)
   const minutes = Math.floor(totalSeconds / 60)
@@ -77,6 +82,7 @@ function getCollapsedPreviewContent(content: string): string {
 
 interface ChatMessageProps {
   message: Message
+  isVoicePlayed?: boolean
   isRight?: boolean
   replyTo?: Message | null
   replyCount?: number
@@ -98,9 +104,11 @@ interface ChatMessageProps {
   isSelected?: boolean
   disableContentCollapse?: boolean
   onStopSpeak?: (messageId: string) => void
+  onStartManualSpeak?: (messageId: string) => void
+  onCompleteManualSpeak?: (messageId: string) => void
 }
 
-export const ChatMessage = memo(function ChatMessage({ message, isRight, replyTo, replyCount, showSpeechButton = true, typingAgents, mentionAgents, currentUser, onMarkPlayed, onAgentAvatarClick, onTypingAgentClick, onMentionClick, onReplyClick, onExecutionDetailClick, onMentionAgent, onDeleteMessage, onStartMultiSelect, onToggleSelection, selectionMode, isSelected, disableContentCollapse = false, onStopSpeak }: ChatMessageProps) {
+export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = true, isRight, replyTo, replyCount, showSpeechButton = true, typingAgents, mentionAgents, currentUser, onMarkPlayed, onAgentAvatarClick, onTypingAgentClick, onMentionClick, onReplyClick, onExecutionDetailClick, onMentionAgent, onDeleteMessage, onStartMultiSelect, onToggleSelection, selectionMode, isSelected, disableContentCollapse = false, onStopSpeak, onStartManualSpeak, onCompleteManualSpeak }: ChatMessageProps) {
   const isMobile = useIsMobile()
   const allAgents = useChatStore((s) => s.allAgents)
   const isCurrentlyPlaying = useChatStore((s) => s.playingVoiceMessageId === message.id)
@@ -254,6 +262,12 @@ export const ChatMessage = memo(function ChatMessage({ message, isRight, replyTo
     const speechText = normalizedContent
     if (!speechText) return
 
+    logManualVoice('start', {
+      messageId: message.id,
+      chatRoomId: message.chatRoomId,
+      provider: voiceConfig.provider,
+    })
+    onStartManualSpeak?.(message.id)
     setPlayingVoiceMessageId(message.id)
     try {
       await speakText({
@@ -274,20 +288,30 @@ export const ChatMessage = memo(function ChatMessage({ message, isRight, replyTo
         agentId: message.agentId ?? undefined,
         chatRoomId: message.chatRoomId,
         messageId: message.id,
+        onPlaybackStart: onMarkPlayed,
       })
-      onMarkPlayed?.()
     } catch (error) {
       // 用户主动停止不显示错误提示
       if (error instanceof Error && (error as Error & { cancelled?: boolean }).cancelled) return
       if (error instanceof Error && error.message === 'speech_interrupted') return
+      logManualVoice('error', {
+        messageId: message.id,
+        chatRoomId: message.chatRoomId,
+        error: error instanceof Error ? error.message : String(error),
+      })
       console.error('语音播报失败:', error)
       toast.error(error instanceof Error ? error.message : '语音播报失败')
     } finally {
       if (useChatStore.getState().playingVoiceMessageId === message.id) {
         setPlayingVoiceMessageId(null)
       }
+      logManualVoice('end', {
+        messageId: message.id,
+        chatRoomId: message.chatRoomId,
+      })
+      onCompleteManualSpeak?.(message.id)
     }
-  }, [isCurrentlyPlaying, message.chatRoomId, message.content, message.id, message.agentId, normalizedContent, onMarkPlayed, onStopSpeak, setPlayingVoiceMessageId, voiceConfig])
+  }, [isCurrentlyPlaying, message.chatRoomId, message.content, message.id, message.agentId, normalizedContent, onCompleteManualSpeak, onMarkPlayed, onStartManualSpeak, onStopSpeak, setPlayingVoiceMessageId, voiceConfig])
 
   const handlePrewarm = useCallback(() => {
     if (isCurrentlyPlaying || voiceConfig?.provider !== 'openai-compatible-tts') return
@@ -510,6 +534,7 @@ export const ChatMessage = memo(function ChatMessage({ message, isRight, replyTo
   const renderSpeechButton = () => {
     if (message.isHuman || !showSpeechButton) return null
     if (!voiceConfig?.enabled || !normalizedContent || !supportsSpeechPlayback(voiceConfig)) return null
+    const showUnplayedDot = !isCurrentlyPlaying && !isVoicePlayed
 
     return (
       <span className="relative inline-flex">
@@ -548,6 +573,9 @@ export const ChatMessage = memo(function ChatMessage({ message, isRight, replyTo
             {isCurrentlyPlaying ? '播放中' : '播报'}
           </span>
         </button>
+        {showUnplayedDot && (
+          <span className="absolute -right-1 -top-1 size-2 rounded-full bg-red-500 ring-2 ring-background" aria-hidden />
+        )}
       </span>
     )
   }

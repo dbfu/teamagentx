@@ -1,13 +1,23 @@
 import { afterEach, describe, test } from 'node:test'
 import assert from 'node:assert'
-import { normalizeSpeechText, speakText } from '../src/lib/browser-speech.ts'
+import { normalizeSpeechText, prewarmTts, speakText } from '../src/lib/browser-speech.ts'
+import { markRemoteTtsUnavailable, resetRemoteTtsHealth } from '../src/speech/remote-tts-health.ts'
 import { webSpeechService } from '../src/speech/default-service.ts'
 
 const originalExecute = webSpeechService.execute.bind(webSpeechService)
 const originalWindow = globalThis.window
+const originalFetch = globalThis.fetch
+const originalLocalStorage = globalThis.localStorage
 
 afterEach(() => {
   webSpeechService.execute = originalExecute
+  globalThis.fetch = originalFetch
+  if (originalLocalStorage === undefined) {
+    Reflect.deleteProperty(globalThis, 'localStorage')
+  } else {
+    globalThis.localStorage = originalLocalStorage
+  }
+  resetRemoteTtsHealth()
   if (originalWindow === undefined) {
     delete (globalThis as typeof globalThis & { window?: Window }).window
     return
@@ -30,6 +40,7 @@ describe('browser speech helpers', () => {
 
   test('应透传 agent 上下文并在存在 fallback provider 时启用回退', async () => {
     let capturedTask: Record<string, unknown> | null = null
+    const onPlaybackStart = () => {}
 
     webSpeechService.execute = async (task) => {
       capturedTask = task as Record<string, unknown>
@@ -48,6 +59,7 @@ describe('browser speech helpers', () => {
       chatRoomId: 'room-1',
       messageId: 'message-1',
       source: 'assistant-preview',
+      onPlaybackStart,
     })
 
     assert.ok(capturedTask)
@@ -59,6 +71,9 @@ describe('browser speech helpers', () => {
     })
     assert.deepStrictEqual(capturedTask?.preferences, {
       allowFallback: true,
+    })
+    assert.deepStrictEqual(capturedTask?.runtime, {
+      onPlaybackStart,
     })
   })
 
@@ -101,5 +116,38 @@ describe('browser speech helpers', () => {
       prompt: null,
       vendorOptions: null,
     })
+  })
+
+  test('远程 provider 熔断期间预热应静默跳过', () => {
+    let fetchCalled = false
+    globalThis.localStorage = {
+      getItem: () => null,
+      setItem: () => {},
+      removeItem: () => {},
+      clear: () => {},
+      key: () => null,
+      length: 0,
+    }
+
+    markRemoteTtsUnavailable({
+      provider: 'openai-compatible-tts',
+      model: 'FunAudioLLM/CosyVoice2-0.5B',
+      vendorOptions: { llmProviderId: 'provider-dead' },
+    })
+
+    globalThis.fetch = async () => {
+      fetchCalled = true
+      throw new Error('不应发起预热请求')
+    }
+
+    prewarmTts({
+      text: '静默跳过预热',
+      provider: 'openai-compatible-tts',
+      model: 'FunAudioLLM/CosyVoice2-0.5B',
+      vendorOptions: { llmProviderId: 'provider-dead' },
+      chatRoomId: 'room-1',
+    })
+
+    assert.strictEqual(fetchCalled, false)
   })
 })

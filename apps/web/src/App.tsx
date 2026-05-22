@@ -31,6 +31,7 @@ import { SetupWizard } from './components/setup/setup-wizard'
 import { UpdateNotification } from './components/update/update-notification'
 import { isElectron, waitForServer } from './lib/config'
 import { ChatRoom, Message } from './lib/agent-api'
+import { getVisibleChatRoomId } from './lib/chat-room-presence'
 import { useAuthStore, useChatRoomStore, useSocketStore, useUIStore } from './stores'
 import { useChatStore } from './stores/chat-store'
 
@@ -359,12 +360,7 @@ function AppContent() {
   const { isConnected, onUnreadUpdate, requestUnreadCounts, onMessage, onChatRoomCreated, onAgentsUpdated, onAgentStatus, user: socketUser } = useSocketStore()
   const { user } = useAuthStore()
   const visibleChatRoomId = useMemo(() => {
-    if (isMobile) {
-      const match = location.pathname.match(/^\/chat\/([^/]+)$/)
-      return match ? decodeURIComponent(match[1]) : null
-    }
-
-    return location.pathname === '/' ? selectedRoomId : null
+    return getVisibleChatRoomId(location.pathname, isMobile ? null : selectedRoomId)
   }, [isMobile, location.pathname, selectedRoomId])
 
   // 刷新状态

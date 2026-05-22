@@ -50,6 +50,7 @@ declare global {
         progress: RuntimePrepareProgress | null;
       };
     }>;
+    appendDebugLog?: (message: string, payload?: unknown) => Promise<{ success: boolean; error?: string }>;
     openLogFolder?: () => Promise<{ success: boolean; error?: string }>;
     onRuntimePrepareStart?: (callback: () => void) => () => void;
     onRuntimePrepareProgress?: (callback: (progress: RuntimePrepareProgress) => void) => () => void;

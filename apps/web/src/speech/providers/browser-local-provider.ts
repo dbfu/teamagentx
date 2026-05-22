@@ -170,9 +170,15 @@ export function supportsBrowserSpeechSynthesis(): boolean {
 // 用于区分"外部主动停止"和"Chrome 偶发的 interrupted/canceled 噪音"。
 let externalStopRequested = false
 
+function logBrowserLocalTts(event: string, details?: Record<string, unknown>): void {
+  console.debug(`[browser-local-tts] ${event}`, details)
+  void window.electronAPI?.appendDebugLog?.(`[browser-local-tts] ${event}`, details)
+}
+
 export function stopBrowserSpeechSynthesis(): void {
   if (!supportsBrowserSpeechSynthesis()) return
   externalStopRequested = true
+  logBrowserLocalTts('stop-requested')
   window.speechSynthesis.cancel()
 }
 
@@ -186,6 +192,12 @@ export function getBrowserSpeechVoices(): BrowserSpeechVoiceOption[] {
     voiceURI: voice.voiceURI,
     default: voice.default,
   }))
+}
+
+function getSpeechSynthesisTimeoutMs(text: string, rate: number): number {
+  const safeRate = Number.isFinite(rate) && rate > 0 ? rate : 1
+  // 中文长文本实际朗读时长明显高于旧的 100ms/字估算；超时只用于兜底，不应抢在正常朗读前触发。
+  return Math.max(60_000, Math.ceil((text.length * 240) / safeRate))
 }
 
 async function synthesizeWithBrowser(task: SpeechTask<{ text: string }>): Promise<SpeechArtifact> {
@@ -202,70 +214,111 @@ async function synthesizeWithBrowser(task: SpeechTask<{ text: string }>): Promis
     }
   }
 
-  return new Promise<SpeechArtifact>((resolve, reject) => {
-    const utterance = new SpeechSynthesisUtterance(text)
-    const voice = pickVoice(task.profile)
-    if (voice) {
-      utterance.voice = voice
-      utterance.lang = voice.lang
-    } else {
-      utterance.lang = 'zh-CN'
-    }
+  const voice = pickVoice(task.profile)
+  let playbackStarted = false
+  const notifyPlaybackStart = () => {
+    if (playbackStarted) return
+    playbackStarted = true
+    task.runtime?.onPlaybackStart?.()
+  }
 
-    utterance.rate = task.profile?.speed ?? 1.3
-    utterance.volume = task.profile?.volume ?? 1
-    if (typeof task.profile?.pitch === 'number') {
-      utterance.pitch = task.profile.pitch
-    }
-
-    // Chrome 偶发 bug：onend 可能永远不触发。按字数估算最长等待时间作为兜底，
-    // 至少 30 秒，每个字符约 100ms，超时则取消合成并视为正常完成，避免阻塞队列。
-    const timeoutId = setTimeout(() => {
-      try {
-        window.speechSynthesis.cancel()
-      } catch {
-        // ignore
+  const attemptSynthesis = (remainingUnexpectedInterruptRetries: number): Promise<SpeechArtifact> => (
+    new Promise<SpeechArtifact>((resolve, reject) => {
+      const utterance = new SpeechSynthesisUtterance(text)
+      if (voice) {
+        utterance.voice = voice
+        utterance.lang = voice.lang
+      } else {
+        utterance.lang = 'zh-CN'
       }
-      // 兜底超时也需要消费 stop 标志，避免泄漏到下一次 speak
-      externalStopRequested = false
-      resolve({
-        kind: 'audio',
-        provider: 'browser-local',
-        text,
-        voice: task.profile?.voice ?? voice?.voiceURI ?? voice?.name ?? null,
-        metadata: {
-          runtime: 'client',
-          timedOut: true,
-        },
-      })
-    }, Math.max(30_000, text.length * 100))
 
-    utterance.onend = () => {
-      clearTimeout(timeoutId)
-      // 正常结束也消费一次 stop 标志，避免泄漏给下一个 utterance
-      externalStopRequested = false
-      resolve({
-        kind: 'audio',
-        provider: 'browser-local',
-        text,
-        voice: task.profile?.voice ?? voice?.voiceURI ?? voice?.name ?? null,
-        metadata: {
-          runtime: 'client',
-        },
-      })
-    }
-    utterance.onerror = (event) => {
-      clearTimeout(timeoutId)
-      // 先读出再立即重置，保证并发/连续播放时每次 stop 标志只被消费一次
-      const wasExternalStop = externalStopRequested
-      externalStopRequested = false
-      const errorCode = (event as SpeechSynthesisErrorEvent).error
-      if (errorCode === 'interrupted' || errorCode === 'canceled') {
-        // 仅当外部显式调用 stopBrowserSpeechSynthesis() 时才视为"外部中断"，
-        // 否则 Chrome 偶发的 interrupted/canceled 是噪音，应视为正常结束。
-        if (wasExternalStop) {
-          reject(new Error('speech_interrupted'))
-        } else {
+      utterance.rate = task.profile?.speed ?? 1.3
+      utterance.volume = task.profile?.volume ?? 1
+      if (typeof task.profile?.pitch === 'number') {
+        utterance.pitch = task.profile.pitch
+      }
+      const timeoutMs = getSpeechSynthesisTimeoutMs(text, utterance.rate)
+
+      utterance.onstart = () => {
+        logBrowserLocalTts('onstart', {
+          textLength: text.length,
+          remainingUnexpectedInterruptRetries,
+          timeoutMs,
+        })
+        notifyPlaybackStart()
+      }
+
+      // Chrome 偶发 bug：onend 可能永远不触发。这里的超时只做"挂死兜底"，
+      // 不应抢在长文本正常朗读完成前触发。
+      const timeoutId = setTimeout(() => {
+        try {
+          window.speechSynthesis.cancel()
+        } catch {
+          // ignore
+        }
+        externalStopRequested = false
+        logBrowserLocalTts('timeout', {
+          textLength: text.length,
+          timeoutMs,
+        })
+        resolve({
+          kind: 'audio',
+          provider: 'browser-local',
+          text,
+          voice: task.profile?.voice ?? voice?.voiceURI ?? voice?.name ?? null,
+          metadata: {
+            runtime: 'client',
+            timedOut: true,
+          },
+        })
+      }, timeoutMs)
+
+      utterance.onend = () => {
+        clearTimeout(timeoutId)
+        externalStopRequested = false
+        logBrowserLocalTts('onend', {
+          textLength: text.length,
+        })
+        resolve({
+          kind: 'audio',
+          provider: 'browser-local',
+          text,
+          voice: task.profile?.voice ?? voice?.voiceURI ?? voice?.name ?? null,
+          metadata: {
+            runtime: 'client',
+          },
+        })
+      }
+
+      utterance.onerror = (event) => {
+        clearTimeout(timeoutId)
+        const wasExternalStop = externalStopRequested
+        externalStopRequested = false
+        const errorCode = (event as SpeechSynthesisErrorEvent).error
+        logBrowserLocalTts('onerror', {
+          textLength: text.length,
+          errorCode,
+          wasExternalStop,
+          remainingUnexpectedInterruptRetries,
+        })
+        if (errorCode === 'interrupted' || errorCode === 'canceled') {
+          if (wasExternalStop) {
+            reject(new Error('speech_interrupted'))
+            return
+          }
+          if (remainingUnexpectedInterruptRetries > 0) {
+            try {
+              window.speechSynthesis.cancel()
+            } catch {
+              // ignore
+            }
+            logBrowserLocalTts('retry', {
+              textLength: text.length,
+              nextRemainingRetries: remainingUnexpectedInterruptRetries - 1,
+            })
+            resolve(attemptSynthesis(remainingUnexpectedInterruptRetries - 1))
+            return
+          }
           resolve({
             kind: 'audio',
             provider: 'browser-local',
@@ -273,14 +326,16 @@ async function synthesizeWithBrowser(task: SpeechTask<{ text: string }>): Promis
             voice: task.profile?.voice ?? voice?.voiceURI ?? voice?.name ?? null,
             metadata: { runtime: 'client', interrupted: true },
           })
+          return
         }
-        return
+        reject(new Error('语音播报失败'))
       }
-      reject(new Error('语音播报失败'))
-    }
 
-    window.speechSynthesis.speak(utterance)
-  })
+      window.speechSynthesis.speak(utterance)
+    })
+  )
+
+  return attemptSynthesis(1)
 }
 
 async function transcribeWithBrowser(task: SpeechTask<BrowserSpeechRecognitionTaskInput>): Promise<SpeechArtifact> {

@@ -32,6 +32,9 @@ export interface SpeechTask<TInput = unknown> {
     allowFallback?: boolean
     cacheKey?: string | null
   }
+  runtime?: {
+    onPlaybackStart?: (() => void) | null
+  }
 }
 
 export interface SpeechArtifact {

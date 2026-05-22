@@ -10,6 +10,7 @@ import {
 } from '@/speech/providers/browser-local-provider'
 import type { SpeechTask } from '@/speech'
 import { stopRemoteTtsPlayback } from '@/speech/providers/remote-tts-provider'
+import { clearRemoteTtsUnavailable, isRemoteTtsTemporarilyUnavailable, markRemoteTtsUnavailable } from '@/speech/remote-tts-health'
 import { buildTtsCacheKey, PREWARM_MAX_TEXT_LENGTH, roomTtsPrefetchCache } from '@/speech/tts-prefetch-cache'
 import { deleteExpiredIdbEntries, deleteIdbEntry, loadRoomIdbEntries, writeIdbEntry } from '@/speech/tts-idb-cache'
 import { streamingTtsManager } from '@/speech/streaming-tts'
@@ -39,6 +40,7 @@ export interface SpeakTextOptions {
   chatRoomId?: string
   messageId?: string
   source?: NonNullable<SpeechTask['context']>['source']
+  onPlaybackStart?: (() => void) | null
 }
 
 export function supportsBrowserSpeechRecognition(): boolean {
@@ -167,6 +169,9 @@ export async function speakText(options: SpeakTextOptions): Promise<void> {
     preferences: {
       allowFallback: Boolean(options.fallbackProvider),
     },
+    runtime: {
+      onPlaybackStart: options.onPlaybackStart ?? null,
+    },
   })
 }
 
@@ -181,6 +186,12 @@ export function prewarmTts(options: SpeakTextOptions): void {
   const provider = options.provider ?? 'browser-local'
   if (provider !== 'openai-compatible-tts') return
   if (!options.chatRoomId) return
+  const profile = {
+    provider,
+    model: options.model ?? null,
+    vendorOptions: options.vendorOptions ?? null,
+  }
+  if (isRemoteTtsTemporarilyUnavailable(profile)) return
 
   const roomCache = roomTtsPrefetchCache.forRoom(options.chatRoomId)
   const cacheKey = buildTtsCacheKey({
@@ -224,7 +235,11 @@ export function prewarmTts(options: SpeakTextOptions): void {
         }),
         signal: controller.signal,
       })
-      if (!response.ok) throw new Error(`prewarm failed: ${response.status}`)
+      if (!response.ok) {
+        markRemoteTtsUnavailable(profile, { status: response.status })
+        throw new Error(`prewarm failed: ${response.status}`)
+      }
+      clearRemoteTtsUnavailable(profile)
       const contentType = response.headers.get('content-type') || 'audio/mpeg'
       const mimeType = contentType.split(';')[0].trim()
       const blob = new Blob([await response.arrayBuffer()], { type: mimeType })

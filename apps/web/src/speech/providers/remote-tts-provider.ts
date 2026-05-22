@@ -1,6 +1,7 @@
 import { getApiBaseUrl } from '@/lib/config'
 import type { SpeechArtifact } from '@/speech/domain/types'
 import type { SpeechProvider } from '@/speech/providers/provider'
+import { clearRemoteTtsUnavailable, isRemoteTtsTemporarilyUnavailable, markRemoteTtsUnavailable } from '@/speech/remote-tts-health'
 import { buildTtsCacheKey, PREWARM_MAX_TEXT_LENGTH, roomTtsPrefetchCache } from '@/speech/tts-prefetch-cache'
 
 type RemoteTtsProviderDependencies = {
@@ -32,16 +33,12 @@ const playbackManager = (() => {
     isCurrentRequest(nextRequestId: number) {
       return requestId === nextRequestId
     },
-    set(controller: ActiveRemotePlayback) {
-      // 设置新 controller 之前先同步 stop 旧的，保证顺序
+    trySet(controller: ActiveRemotePlayback) {
       if (active && active !== controller) {
-        try {
-          active.stop()
-        } catch {
-          // ignore stop errors
-        }
+        return false
       }
       active = controller
+      return true
     },
     clearIf(controller: ActiveRemotePlayback) {
       if (active === controller) active = null
@@ -71,9 +68,19 @@ function ensureCurrentRequest(nextRequestId: number): void {
   }
 }
 
-async function playAudioUrl(audioUrl: string, nextRequestId: number): Promise<void> {
+async function playAudioUrl(
+  audioUrl: string,
+  nextRequestId: number,
+  onPlaybackStart?: (() => void) | null,
+): Promise<void> {
   ensureCurrentRequest(nextRequestId)
   const audio = new Audio(audioUrl)
+  let playbackStarted = false
+  const notifyPlaybackStart = () => {
+    if (playbackStarted) return
+    playbackStarted = true
+    onPlaybackStart?.()
+  }
   let revoked = false
   const revokeOnce = () => {
     if (revoked) return
@@ -131,10 +138,18 @@ async function playAudioUrl(audioUrl: string, nextRequestId: number): Promise<vo
     }
 
     ensureCurrentRequest(nextRequestId)
-    playbackManager.set(controller)
+    if (!playbackManager.trySet(controller)) {
+      finished = true
+      reject(createCancelledPlaybackError())
+      return
+    }
     audio.onended = () => finish()
     audio.onerror = () => fail()
-    audio.play().catch(() => fail())
+    audio.play()
+      .then(() => {
+        notifyPlaybackStart()
+      })
+      .catch(() => fail())
   })
 }
 
@@ -153,6 +168,10 @@ export function createRemoteTtsSpeechProvider(
       taskTypes: ['tts'],
     },
     async synthesize(task) {
+      if (isRemoteTtsTemporarilyUnavailable(task.profile ?? null)) {
+        throw new Error('remote_tts_temporarily_unavailable')
+      }
+
       const currentRequestId = playbackManager.createRequest()
       const text = String((task.input as { text?: string }).text || '').trim()
 
@@ -173,7 +192,7 @@ export function createRemoteTtsSpeechProvider(
           try {
             const { blob, mimeType } = await cached
             const audioUrl = URL.createObjectURL(blob)
-            await playAudioUrl(audioUrl, currentRequestId)
+            await playAudioUrl(audioUrl, currentRequestId, task.runtime?.onPlaybackStart)
             return {
               kind: 'audio',
               provider: providerId,
@@ -201,15 +220,20 @@ export function createRemoteTtsSpeechProvider(
         body: JSON.stringify(task),
         signal: AbortSignal.timeout(60_000),
       })
-      if (!response.ok) throw new Error(`TTS failed: ${response.status}`)
+      if (!response.ok) {
+        markRemoteTtsUnavailable(task.profile ?? null, { status: response.status })
+        throw new Error(`TTS failed: ${response.status}`)
+      }
+      clearRemoteTtsUnavailable(task.profile ?? null)
       const contentType = response.headers.get('content-type') || 'audio/mpeg'
       const mimeType = contentType.split(';')[0].trim()
       const blob = new Blob([await response.arrayBuffer()], { type: mimeType })
       const audioUrl = URL.createObjectURL(blob)
-      await playAudioUrl(audioUrl, currentRequestId)
+      await playAudioUrl(audioUrl, currentRequestId, task.runtime?.onPlaybackStart)
       return {
         kind: 'audio',
         provider: providerId,
+        mimeType,
         text: String((task.input as { text?: string }).text || ''),
         metadata: { runtime: 'client', transport: providerId, mode: 'non-streaming-fallback' },
       } satisfies SpeechArtifact

@@ -1,23 +1,44 @@
 import { afterEach, describe, test } from 'node:test'
 import assert from 'node:assert'
 import { createRemoteTtsSpeechProvider, stopRemoteTtsPlayback } from '../src/speech/providers/remote-tts-provider.ts'
+import { markRemoteTtsUnavailable, resetRemoteTtsHealth } from '../src/speech/remote-tts-health.ts'
 import { buildTtsCacheKey, roomTtsPrefetchCache } from '../src/speech/tts-prefetch-cache.ts'
 
 const originalFetch = globalThis.fetch
 const originalURL = globalThis.URL
 const originalAudio = globalThis.Audio
+const originalLocalStorage = globalThis.localStorage
 
 afterEach(() => {
   globalThis.fetch = originalFetch
   globalThis.URL = originalURL
   globalThis.Audio = originalAudio
+  if (originalLocalStorage === undefined) {
+    Reflect.deleteProperty(globalThis, 'localStorage')
+  } else {
+    globalThis.localStorage = originalLocalStorage
+  }
   roomTtsPrefetchCache.deleteRoom('room-cache-stop')
+  resetRemoteTtsHealth()
 })
+
+function installLocalStorageStub() {
+  globalThis.localStorage = {
+    getItem: () => null,
+    setItem: () => {},
+    removeItem: () => {},
+    clear: () => {},
+    key: () => null,
+    length: 0,
+  }
+}
 
 describe('remote-tts speech provider', () => {
   test('应从服务端获取音频并返回 SpeechArtifact', async () => {
     let createdBlob: Blob | null = null
     let revokedUrl: string | null = null
+    let playbackStarted = 0
+    installLocalStorageStub()
 
     globalThis.fetch = async (input, init) => {
       assert.strictEqual(input, 'http://127.0.0.1:3001/speech/tts')
@@ -72,6 +93,11 @@ describe('remote-tts speech provider', () => {
       input: {
         text: '远程试听',
       },
+      runtime: {
+        onPlaybackStart: () => {
+          playbackStarted += 1
+        },
+      },
     })
 
     assert.ok(result)
@@ -81,11 +107,14 @@ describe('remote-tts speech provider', () => {
     assert.ok(createdBlob)
     assert.strictEqual(createdBlob?.type, 'audio/mpeg')
     assert.strictEqual(revokedUrl, 'blob:remote-tts-preview')
+    assert.strictEqual(playbackStarted, 1)
   })
 
   test('应支持停止远程播报并释放 blob url', async () => {
     let revokedUrl: string | null = null
     let paused = false
+    let playbackStarted = 0
+    installLocalStorageStub()
 
     globalThis.fetch = async () => {
       return new Response(new Uint8Array([5, 6, 7]), {
@@ -133,6 +162,11 @@ describe('remote-tts speech provider', () => {
       input: {
         text: '停止测试',
       },
+      runtime: {
+        onPlaybackStart: () => {
+          playbackStarted += 1
+        },
+      },
     }) ?? Promise.reject(new Error('provider missing'))
 
     await new Promise((resolve) => setTimeout(resolve, 20))
@@ -146,11 +180,13 @@ describe('remote-tts speech provider', () => {
     })
     assert.strictEqual(paused, true)
     assert.strictEqual(revokedUrl, 'blob:remote-tts-stop')
+    assert.strictEqual(playbackStarted, 1)
   })
 
   test('缓存音频在暂停后才完成时不应自动开始播放', async () => {
     let resolveCachedAudio: ((audio: { blob: Blob; mimeType: string }) => void) | null = null
     let audioCreated = false
+    installLocalStorageStub()
 
     globalThis.fetch = async () => {
       throw new Error('不应走网络请求')
@@ -231,6 +267,7 @@ describe('remote-tts speech provider', () => {
   })
 
   test('服务端返回非 2xx 时应抛错', async () => {
+    installLocalStorageStub()
     globalThis.fetch = async () => {
       return new Response(null, { status: 502 })
     }
@@ -263,9 +300,45 @@ describe('remote-tts speech provider', () => {
     )
   })
 
-  test('连续两次 synthesize 时应停掉前一个 controller', async () => {
+  test('远程 provider 熔断期间应直接短路，避免重复请求坏掉的服务', async () => {
+    let fetchCalled = false
+    installLocalStorageStub()
+
+    markRemoteTtsUnavailable({
+      provider: 'openai-compatible-tts',
+      model: 'FunAudioLLM/CosyVoice2-0.5B',
+      vendorOptions: { llmProviderId: 'provider-dead' },
+    })
+
+    globalThis.fetch = async () => {
+      fetchCalled = true
+      throw new Error('不应触发网络请求')
+    }
+
+    const provider = createRemoteTtsSpeechProvider({
+      getBaseUrl: async () => 'http://127.0.0.1:3001',
+    })
+
+    await assert.rejects(
+      provider.synthesize?.({
+        type: 'tts',
+        profile: {
+          provider: 'openai-compatible-tts',
+          model: 'FunAudioLLM/CosyVoice2-0.5B',
+          vendorOptions: { llmProviderId: 'provider-dead' },
+        },
+        input: { text: '直接走 fallback' },
+      }),
+      /remote_tts_temporarily_unavailable/,
+    )
+    assert.strictEqual(fetchCalled, false)
+  })
+
+  test('连续两次 synthesize 时后一个请求不应隐式打断前一个播放', async () => {
     let playCount = 0
     let pausedCount = 0
+    let firstEnded: (() => void) | null = null
+    installLocalStorageStub()
 
     globalThis.fetch = async () => {
       return new Response(new Uint8Array([1, 2]), {
@@ -285,11 +358,19 @@ describe('remote-tts speech provider', () => {
       currentTime = 0
       constructor(public readonly src: string) {}
       async play() {
-        // 延迟结束，让第二次 synthesize 有时间中断
-        await new Promise((r) => setTimeout(r, 30))
+        if (this.src === 'blob:play-1') {
+          await new Promise<void>((resolve) => {
+            firstEnded = () => {
+              this.onended?.()
+              resolve()
+            }
+          })
+          return
+        }
         this.onended?.()
       }
       pause() { pausedCount++ }
+      load() {}
     }
     globalThis.Audio = FakeAudio as unknown as typeof Audio
 
@@ -311,10 +392,11 @@ describe('remote-tts speech provider', () => {
       input: { text: '第二条' },
     })
 
-    // 第一次应该被 stop 导致 cancelled reject
-    await assert.rejects(first, /播放已取消/)
-    const result = await second
+    await assert.rejects(second, /播放已取消/)
+    assert.strictEqual(pausedCount, 0, '后一个请求不应隐式暂停前一个播放')
+
+    firstEnded?.()
+    const result = await first
     assert.strictEqual(result.kind, 'audio')
-    assert.ok(pausedCount >= 1, '前一个 audio 应被 pause')
   })
 })

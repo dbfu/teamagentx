@@ -3,7 +3,7 @@ import { ChatRoom, chatRoomApi } from '@/lib/agent-api'
 import { AgentAvatarImage } from '@/lib/agent-avatars'
 import { GroupAvatarImage } from '@/lib/group-avatars'
 import { cn, formatDateTime } from '@/lib/utils'
-import { Copy, Import, Loader2, MessageSquare, Pin, Plus, RefreshCw, Trash2, Upload } from 'lucide-react'
+import { Copy, Download, Loader2, MessageSquare, Pin, Plus, RefreshCw, Trash2, Upload } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { GroupTemplateExportModal } from './group-template-export-modal'
@@ -162,7 +162,7 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
               title="导入模板包"
               style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
             >
-              <Import className="size-4" />
+              <Upload className="size-4" />
             </button>
               {onCreateChatRoom && (
                 <button
@@ -377,7 +377,7 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
               }}
               className="flex w-full items-center gap-2 px-3 py-2 text-sm text-popover-foreground hover:bg-accent"
             >
-              <Upload className="size-4" />
+              <Download className="size-4" />
               导出模板包
             </button>
             <button
