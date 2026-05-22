@@ -21,7 +21,18 @@ export interface CreateExecutorOptions {
  * 根据助手类型创建对应的执行器
  */
 export function createExecutor(options: CreateExecutorOptions): IAgentExecutor {
-  const { agent, chatRoomId, injectGroupHistory, chatRoomAgents, sessionDir, customWorkDir, llmProvider, imageGenerationProvider, lastInjectedMessageId } = options;
+  const {
+    agent,
+    chatRoomId,
+    injectGroupHistory,
+    chatRoomAgents,
+    sessionDir,
+    customWorkDir,
+    llmProvider,
+    imageGenerationProvider,
+    lastInjectedMessageId,
+    chatRoomRules,
+  } = options;
 
   switch (agent.type) {
     case 'acp':
@@ -40,6 +51,7 @@ export function createExecutor(options: CreateExecutorOptions): IAgentExecutor {
           chatRoomAgents,
           llmProvider,
           imageGenerationProvider,
+          chatRoomRules,
         );
       }
       if (acpTool === 'codex') {
@@ -58,6 +70,7 @@ export function createExecutor(options: CreateExecutorOptions): IAgentExecutor {
           imageGenerationProvider,
           agent.proxyConfig,
           agent.codexModel,
+          chatRoomRules,
         );
       }
       throw new Error(`Unsupported agent tool: ${acpTool}`);
@@ -77,6 +90,7 @@ export function createExecutor(options: CreateExecutorOptions): IAgentExecutor {
         chatRoomAgents,
         (llmProvider as any)?.apiProtocol === 'anthropic' ? llmProvider : undefined,
         imageGenerationProvider,
+        chatRoomRules,
       );
   }
 }

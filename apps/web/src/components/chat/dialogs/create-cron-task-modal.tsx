@@ -283,13 +283,13 @@ export function CreateCronTaskModal({
               <textarea
                 value={payload}
                 onChange={(e) => setPayload(e.target.value)}
-                placeholder="消息内容，可使用 @助手名 触发特定助手执行"
+                placeholder="消息内容；如需触发助手，请在下方选择"
                 rows={3}
                 className="w-full resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
                 required
               />
               <p className="mt-1 text-xs text-muted-foreground">
-                提示：在消息中使用 @助手名 可以触发特定助手执行任务
+                提示：不要在内容里手动写 @助手名，系统会根据下方选择自动处理
               </p>
             </div>
 
@@ -299,7 +299,7 @@ export function CreateCronTaskModal({
                 触发助手
               </label>
               <p className="mb-2 text-xs text-muted-foreground">
-                选择要自动 @ 的助手，任务执行时会自动在消息前添加 @助手名
+                选择要触发的助手；多选或选择所有助手时，任务执行会逐条发送消息
               </p>
 
               {/* 所有助手选项 */}

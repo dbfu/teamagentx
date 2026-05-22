@@ -41,9 +41,16 @@ const missingRecipientToast = createElement(
   createElement('span', { className: 'font-semibold text-yellow-700' }, '设置默认接收助手'),
 )
 
+const tooManyMentionsToast = createElement(
+  'span',
+  { className: 'text-sm' },
+  '一次消息只能 ',
+  createElement('span', { className: 'font-semibold text-yellow-700' }, '@ 一个助手'),
+)
+
 function getMentionedAgentNames(content: string): string[] {
   const names: string[] = []
-  const regex = /(?:^|\s|[*_>#`\-])@([\u4e00-\u9fa5a-zA-Z0-9_](?:[\u4e00-\u9fa5a-zA-Z0-9_-]*[\u4e00-\u9fa5a-zA-Z0-9_])?)(?=\s|$|[*_>#`!?.,:;！？。，；：]|-(?![\u4e00-\u9fa5a-zA-Z0-9_]))/g
+  const regex = /(?:^|\r?\n| )@([\u4e00-\u9fa5a-zA-Z0-9_](?:[\u4e00-\u9fa5a-zA-Z0-9_-]*[\u4e00-\u9fa5a-zA-Z0-9_])?)(?=\s|$|[*_>#`!?.,:;！？。，；：]|-(?![\u4e00-\u9fa5a-zA-Z0-9_]))/g
   let match: RegExpExecArray | null
   while ((match = regex.exec(content)) !== null) {
     if (match[1] && !names.includes(match[1])) {
@@ -66,10 +73,9 @@ function getMentionedKnownAgentNames(content: string, agentNames: string[]): str
     .map(escapeRegExp)
   if (escapedNames.length === 0) return names
 
-  const boundaryChars = '*_>#`-'
   const endBoundaryChars = '*_>#`!?.,:;！？。，；：'
   const regex = new RegExp(
-    `(?:^|\\s|[${boundaryChars}])@(${escapedNames.join('|')})(?=\\s|$|[${endBoundaryChars}]|-(?![\\u4e00-\\u9fa5a-zA-Z0-9_]))`,
+    `(?:^|\\r?\\n| )@(${escapedNames.join('|')})(?=\\s|$|[${endBoundaryChars}]|-(?![\\u4e00-\\u9fa5a-zA-Z0-9_]))`,
     'g',
   )
 
@@ -82,7 +88,7 @@ function getMentionedKnownAgentNames(content: string, agentNames: string[]): str
   return names
 }
 
-function hasMentionedDispatchableAgent(content: string, chatRoom: ChatRoom, allAgents: Agent[]): boolean {
+function getMentionedDispatchableAgentNames(content: string, chatRoom: ChatRoom, allAgents: Agent[]): string[] {
   const dispatchableAgentNames = new Set(
     (chatRoom.chatRoomAgents ?? [])
       .map((roomAgent) => roomAgent.agent?.name)
@@ -96,9 +102,7 @@ function hasMentionedDispatchableAgent(content: string, chatRoom: ChatRoom, allA
   }
 
   const mentionedNames = getMentionedKnownAgentNames(content, Array.from(dispatchableAgentNames))
-  if (mentionedNames.length === 0) return false
-
-  return mentionedNames.some((name) => dispatchableAgentNames.has(name))
+  return mentionedNames.filter((name) => dispatchableAgentNames.has(name))
 }
 
 export type SidePanelMode = 'agents' | 'context' | 'history' | 'stream' | 'agent-detail' | 'record-detail' | 'reply-detail' | 'room-settings' | 'execution-detail' | 'cron-tasks' | 'task-queue' | 'task-board' | null
@@ -820,6 +824,9 @@ export const useChatStore = create<ChatStore>()(
         messages: state.activeChatRoomId === chatRoomId ? [] : state.messages,
         showClearConfirm: false,
       }))
+      const chatRoomStore = useChatRoomStore.getState()
+      chatRoomStore.updateRoomLastMessage(chatRoomId, null)
+      void chatRoomStore.loadChatRooms()
     } catch (error) {
       console.error('Failed to clear messages:', error)
     } finally {
@@ -1701,10 +1708,16 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
       return
     }
 
+    const mentionedDispatchableAgentNames = getMentionedDispatchableAgentNames(trimmedInput, chatRoom, allAgents)
+    if (mentionedDispatchableAgentNames.length > 1) {
+      toast.warning(tooManyMentionsToast)
+      return
+    }
+
     if (
       !chatRoom.isQuickChatRoom &&
       !chatRoom.defaultAgentId &&
-      !hasMentionedDispatchableAgent(trimmedInput, chatRoom, allAgents)
+      mentionedDispatchableAgentNames.length === 0
     ) {
       toast.warning(missingRecipientToast)
       return

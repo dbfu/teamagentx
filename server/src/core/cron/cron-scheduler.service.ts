@@ -2,7 +2,6 @@ import { Cron } from 'croner';
 import { cronTaskService, type CronTaskWithRelations } from '../../modules/cron-task/cron-task.service.js';
 import { ScheduleType, CronTaskState } from '@prisma/client';
 import prisma from '../../lib/prisma.js';
-import { agentService } from '../agent/agent.service.js';
 
 // 系统内置助手的 ID（触发所有助手时需要过滤掉）
 const SYSTEM_BUILTIN_AGENT_IDS = [
@@ -16,6 +15,11 @@ interface ScheduledJob {
   cronJob: Cron | null;
   intervalTimer: NodeJS.Timeout | null;
   timeoutTimer: NodeJS.Timeout | null;
+}
+
+interface CronMentionTarget {
+  id: string;
+  name: string;
 }
 
 // 广播定时任务触发消息的函数引用（由 agent.handler 通过 setBroadcastFn 设置）
@@ -211,7 +215,7 @@ class CronSchedulerService {
     });
 
     try {
-      // 解析 agentIds，解析出实际要 @ 的助手名
+      // 解析 agentIds，解析出实际要逐个触发的助手。
       let agentIds: string[] = [];
       try {
         const parsed = JSON.parse(task.agentIds || '[]');
@@ -228,30 +232,42 @@ class CronSchedulerService {
         .filter(a => a.agent && !SYSTEM_BUILTIN_AGENT_IDS.includes(a.agent.id))
         .map(a => a.agent!);
 
-      let mentionNames: string[] = [];
+      let mentionTargets: CronMentionTarget[] = [];
       if (agentIds.includes('*')) {
-        mentionNames = roomAgents.map(a => a.name);
+        mentionTargets = roomAgents;
       } else if (agentIds.length > 0) {
-        mentionNames = roomAgents.filter(a => agentIds.includes(a.id)).map(a => a.name);
-        if (mentionNames.length === 0) {
+        const roomAgentById = new Map(roomAgents.map(agent => [agent.id, agent]));
+        const seenAgentIds = new Set<string>();
+        for (const agentId of agentIds) {
+          const agent = roomAgentById.get(agentId);
+          if (agent && !seenAgentIds.has(agent.id)) {
+            mentionTargets.push(agent);
+            seenAgentIds.add(agent.id);
+          }
+        }
+
+        if (mentionTargets.length === 0) {
           // 选了助手但都不在房间里（被移除等），降级 @ 所有非系统助手，避免任务静默失败
           console.warn(
-            `[CronScheduler] Task ${task.name} selected agentIds ${JSON.stringify(agentIds)} 在房间 ${task.chatRoomId} 中无匹配助手，降级 @ 全部房间助手`,
+            `[CronScheduler] Task ${task.name} selected agentIds ${JSON.stringify(agentIds)} 在房间 ${task.chatRoomId} 中无匹配助手，降级逐个触发全部房间助手`,
           );
-          mentionNames = roomAgents.map(a => a.name);
+          mentionTargets = roomAgents;
         }
       }
 
-      const mentionPrefix = mentionNames.length > 0 ? mentionNames.map(n => `@${n}`).join(' ') + ' ' : '';
-      const finalPayload = mentionPrefix + task.payload;
+      const payloads = mentionTargets.length > 0
+        ? mentionTargets.map(agent => `@${agent.name} ${task.payload}`)
+        : [task.payload];
 
       console.log(
-        `[CronScheduler] Task ${task.name} broadcasting with mentions [${mentionNames.join(', ')}]`,
+        `[CronScheduler] Task ${task.name} broadcasting ${payloads.length} message(s) with mentions [${mentionTargets.map(agent => agent.name).join(', ')}]`,
       );
 
-      // 广播定时任务触发消息到群里（消息内容包含 @助手 标记）
+      // 广播定时任务触发消息到群里：每条消息最多只包含一个自动添加的 @助手 标记。
       if (broadcastCronTriggerMessageFn) {
-        await broadcastCronTriggerMessageFn(task.chatRoomId, task.name, finalPayload);
+        for (const payload of payloads) {
+          await broadcastCronTriggerMessageFn(task.chatRoomId, task.name, payload);
+        }
       }
 
       // 更新执行记录
