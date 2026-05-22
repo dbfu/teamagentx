@@ -210,8 +210,9 @@ export function ChatMessagesList({
   const setScrollToMessageId = useChatStore((s) => s.setScrollToMessageId)
   const forceScrollToBottom = useChatStore((s) => s.forceScrollToBottom)
   const setForceScrollToBottom = useChatStore((s) => s.setForceScrollToBottom)
-  const saveScrollPosition = useChatStore((s) => s.saveScrollPosition)
   const getScrollPosition = useChatStore((s) => s.getScrollPosition)
+  const saveScrollAnchor = useChatStore((s) => s.saveScrollAnchor)
+  const getScrollAnchor = useChatStore((s) => s.getScrollAnchor)
   const allAgents = useChatStore((s) => s.allAgents)
   const setPlayingVoiceMessageId = useChatStore((s) => s.setPlayingVoiceMessageId)
   const handledVoiceMessageIdsByRoom = useChatStore((s) => s.handledVoiceMessageIdsByRoom)
@@ -291,7 +292,7 @@ export function ChatMessagesList({
   const pendingHighlightMessageIdRef = useRef<string | null>(null)
   const hasUserScrollIntentRef = useRef(false)
   const pendingScrollSaveFrameRef = useRef<number | null>(null)
-  const latestScrollPositionRef = useRef<{ chatRoomId: string; scrollTop: number } | null>(null)
+  const latestScrollAnchorRef = useRef<{ chatRoomId: string; messageId: string; offset: number; scrollTop: number } | null>(null)
 
   const selectedCount = selectedMessageIds.size
   const getVirtualItemKey = useCallback((index: number) => messages[index]?.id ?? index, [messages])
@@ -396,6 +397,32 @@ export function ChatMessagesList({
     }
   }, [messages, rowVirtualizer])
 
+  const captureScrollAnchor = useCallback(() => {
+    const container = containerRef.current
+    if (!container) return null
+
+    const anchorItem = rowVirtualizer
+      .getVirtualItems()
+      .find((item) => item.end >= container.scrollTop)
+    const anchorMessage = anchorItem ? messages[anchorItem.index] : null
+    if (!anchorItem || !anchorMessage) return null
+
+    return {
+      chatRoomId,
+      messageId: anchorMessage.id,
+      offset: anchorItem.start - container.scrollTop,
+      scrollTop: container.scrollTop,
+    }
+  }, [chatRoomId, messages, rowVirtualizer])
+
+  const saveLatestScrollAnchor = useCallback((latest: { chatRoomId: string; messageId: string; offset: number; scrollTop: number }) => {
+    saveScrollAnchor(latest.chatRoomId, {
+      messageId: latest.messageId,
+      offset: latest.offset,
+      scrollTop: latest.scrollTop,
+    })
+  }, [saveScrollAnchor])
+
   const tryLoadOlderMessages = useCallback(() => {
     const container = containerRef.current
     if (
@@ -440,18 +467,16 @@ export function ChatMessagesList({
     const nearBottom = checkIsNearBottom()
     setIsNearBottom(nearBottom)
 
-    if (containerRef.current) {
-      latestScrollPositionRef.current = {
-        chatRoomId,
-        scrollTop: containerRef.current.scrollTop,
-      }
+    const scrollAnchor = captureScrollAnchor()
+    if (scrollAnchor) {
+      latestScrollAnchorRef.current = scrollAnchor
     }
     if (pendingScrollSaveFrameRef.current === null) {
       pendingScrollSaveFrameRef.current = requestAnimationFrame(() => {
         pendingScrollSaveFrameRef.current = null
-        const latest = latestScrollPositionRef.current
+        const latest = latestScrollAnchorRef.current
         if (latest) {
-          saveScrollPosition(latest.chatRoomId, latest.scrollTop)
+          saveLatestScrollAnchor(latest)
         }
       })
     }
@@ -460,7 +485,7 @@ export function ChatMessagesList({
     if (nearBottom && showNewMessageHint) {
       setShowNewMessageHint(false)
     }
-  }, [chatRoomId, checkIsNearBottom, saveScrollPosition, showNewMessageHint, tryLoadOlderMessages])
+  }, [captureScrollAnchor, checkIsNearBottom, saveLatestScrollAnchor, showNewMessageHint, tryLoadOlderMessages])
 
   useLayoutEffect(() => {
     if (loadingOlderMessages || prependAnchorRef.current === null) return
@@ -630,6 +655,44 @@ export function ChatMessagesList({
   useEffect(() => {
     if (!loading && messages.length > 0 && messagesBelongToCurrentRoom && containerRef.current && !hasRestoredPositionRef.current) {
       hasRestoredPositionRef.current = true
+      const savedAnchor = getScrollAnchor(chatRoomId)
+      if (savedAnchor) {
+        const anchorIndex = messageIndexById.get(savedAnchor.messageId)
+        if (anchorIndex !== undefined) {
+          rowVirtualizer.scrollToIndex(anchorIndex, { align: 'start', behavior: 'auto' })
+
+          let attempts = 0
+          let alignedFrames = 0
+          let restoreFrame: number | null = null
+          const alignToAnchor = () => {
+            attempts += 1
+            const offsetInfo = rowVirtualizer.getOffsetForIndex(anchorIndex, 'start')
+            if (offsetInfo) {
+              rowVirtualizer.scrollToOffset(Math.max(0, offsetInfo[0] - savedAnchor.offset), { behavior: 'auto' })
+              alignedFrames += 1
+              if (alignedFrames < 3) {
+                restoreFrame = requestAnimationFrame(alignToAnchor)
+              }
+              return
+            }
+
+            if (attempts >= 6) {
+              rowVirtualizer.scrollToOffset(savedAnchor.scrollTop, { behavior: 'auto' })
+              return
+            }
+
+            restoreFrame = requestAnimationFrame(alignToAnchor)
+          }
+
+          restoreFrame = requestAnimationFrame(alignToAnchor)
+          return () => {
+            if (restoreFrame !== null) {
+              cancelAnimationFrame(restoreFrame)
+            }
+          }
+        }
+      }
+
       const savedPosition = getScrollPosition(chatRoomId)
       if (savedPosition !== null) {
         // 恢复滚动位置
@@ -639,7 +702,7 @@ export function ChatMessagesList({
         scrollToBottom()
       }
     }
-  }, [loading, chatRoomId, getScrollPosition, messages.length, messagesBelongToCurrentRoom, rowVirtualizer, scrollToBottom])
+  }, [chatRoomId, getScrollAnchor, getScrollPosition, loading, messageIndexById, messages.length, messagesBelongToCurrentRoom, rowVirtualizer, scrollToBottom])
 
   // 捕获进入房间时的初始消息 ID，这些消息不走自动播放
   useEffect(() => {
@@ -875,12 +938,12 @@ export function ChatMessagesList({
         cancelAnimationFrame(pendingScrollSaveFrameRef.current)
         pendingScrollSaveFrameRef.current = null
       }
-      const latest = latestScrollPositionRef.current
+      const latest = latestScrollAnchorRef.current
       if (latest?.chatRoomId === chatRoomId) {
-        saveScrollPosition(latest.chatRoomId, latest.scrollTop)
+        saveLatestScrollAnchor(latest)
       }
     }
-  }, [chatRoomId, saveScrollPosition])
+  }, [chatRoomId, saveLatestScrollAnchor])
 
   return (
     <div className="relative flex-1 min-h-0 flex flex-col">

@@ -26,6 +26,12 @@ function generateUUID(): string {
 
 export const VOICE_MESSAGE_PLACEHOLDER = '[语音消息]'
 
+type ChatScrollAnchor = {
+  messageId: string
+  offset: number
+  scrollTop: number
+}
+
 const missingRecipientToast = createElement(
   'span',
   { className: 'text-sm' },
@@ -179,6 +185,7 @@ interface ChatStore {
   forceScrollToBottom: boolean
   // 滚动位置记忆（按群聊 ID 存储）
   scrollPositions: Record<string, number>  // chatRoomId -> scrollTop
+  scrollAnchors: Record<string, ChatScrollAnchor>  // chatRoomId -> visible message anchor
   // 当前正在语音播报的消息 ID（auto 或 manual）
   playingVoiceMessageId: string | null
   // 语音消息已处理记录（用于避免自动重复播报）
@@ -228,6 +235,8 @@ interface ChatStore {
   setForceScrollToBottom: (force: boolean) => void
   saveScrollPosition: (chatRoomId: string, scrollTop: number) => void
   getScrollPosition: (chatRoomId: string) => number | null
+  saveScrollAnchor: (chatRoomId: string, anchor: ChatScrollAnchor) => void
+  getScrollAnchor: (chatRoomId: string) => ChatScrollAnchor | null
   setPlayingVoiceMessageId: (id: string | null) => void
   markVoiceMessagesHandled: (chatRoomId: string, messageIds: string[]) => void
   markVoiceMessagesPlayed: (chatRoomId: string, messageIds: string[]) => void
@@ -330,6 +339,7 @@ export const useChatStore = create<ChatStore>()(
   scrollToMessageId: null,
   forceScrollToBottom: false,
   scrollPositions: {},  // 滚动位置记忆
+  scrollAnchors: {},
   playingVoiceMessageId: null,
   handledVoiceMessageIdsByRoom: {},
   playedVoiceMessageIdsByRoom: {},
@@ -503,6 +513,11 @@ export const useChatStore = create<ChatStore>()(
     scrollPositions: { ...state.scrollPositions, [chatRoomId]: scrollTop }
   })),
   getScrollPosition: (chatRoomId) => get().scrollPositions[chatRoomId] ?? null,
+  saveScrollAnchor: (chatRoomId, anchor) => set((state) => ({
+    scrollAnchors: { ...state.scrollAnchors, [chatRoomId]: anchor },
+    scrollPositions: { ...state.scrollPositions, [chatRoomId]: anchor.scrollTop },
+  })),
+  getScrollAnchor: (chatRoomId) => get().scrollAnchors[chatRoomId] ?? null,
 
   // API calls
   loadMessages: async (chatRoomId) => {
