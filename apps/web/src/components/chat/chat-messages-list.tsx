@@ -290,6 +290,7 @@ export function ChatMessagesList({
   const prependAnchorRef = useRef<{ messageId: string; offset: number } | null>(null)
   const pendingHighlightMessageIdRef = useRef<string | null>(null)
   const hasUserScrollIntentRef = useRef(false)
+  const pendingScrollSaveFrameRef = useRef<number | null>(null)
 
   const selectedCount = selectedMessageIds.size
   const getVirtualItemKey = useCallback((index: number) => messages[index]?.id ?? index, [messages])
@@ -438,11 +439,20 @@ export function ChatMessagesList({
     const nearBottom = checkIsNearBottom()
     setIsNearBottom(nearBottom)
 
+    if (pendingScrollSaveFrameRef.current === null) {
+      pendingScrollSaveFrameRef.current = requestAnimationFrame(() => {
+        pendingScrollSaveFrameRef.current = null
+        if (containerRef.current) {
+          saveScrollPosition(chatRoomId, containerRef.current.scrollTop)
+        }
+      })
+    }
+
     // 如果用户滚动到底部，隐藏新消息提示
     if (nearBottom && showNewMessageHint) {
       setShowNewMessageHint(false)
     }
-  }, [checkIsNearBottom, showNewMessageHint, tryLoadOlderMessages])
+  }, [chatRoomId, checkIsNearBottom, saveScrollPosition, showNewMessageHint, tryLoadOlderMessages])
 
   useLayoutEffect(() => {
     if (loadingOlderMessages || prependAnchorRef.current === null) return
@@ -853,6 +863,10 @@ export function ChatMessagesList({
   // 组件卸载时保存当前滚动位置
   useEffect(() => {
     return () => {
+      if (pendingScrollSaveFrameRef.current !== null) {
+        cancelAnimationFrame(pendingScrollSaveFrameRef.current)
+        pendingScrollSaveFrameRef.current = null
+      }
       if (containerRef.current) {
         saveScrollPosition(chatRoomId, containerRef.current.scrollTop)
       }
