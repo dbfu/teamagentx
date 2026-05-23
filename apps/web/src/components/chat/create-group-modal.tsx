@@ -81,6 +81,7 @@ export function CreateGroupModal({ isOpen, onClose, onSuccess, ownerId }: Create
         description: description.trim() || undefined,
         workDir: workDir.trim() || null,
         ownerId,
+        agentTriggerMode: 'coordinator',
       })
 
       if (!createResponse.success || !createResponse.data) {

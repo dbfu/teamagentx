@@ -31,7 +31,7 @@ export function RoomSettingsPanel({
   const [rules, setRules] = useState(chatRoom.rules || '')
   const [workDir, setWorkDir] = useState(chatRoom.workDir || '')
   const [defaultAgentId, setDefaultAgentId] = useState(chatRoom.defaultAgentId || '')
-  const [agentTriggerMode, setAgentTriggerMode] = useState(chatRoom.agentTriggerMode || 'auto')
+  const [agentTriggerMode, setAgentTriggerMode] = useState<AgentTriggerMode>(chatRoom.agentTriggerMode || 'coordinator')
   const [selectedIconIndex, setSelectedIconIndex] = useState(currentIconIndex)
   const [saving, setSaving] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
@@ -52,6 +52,7 @@ export function RoomSettingsPanel({
   const rulesInputRef = useRef<HTMLTextAreaElement>(null)
   const selectableAgents = (chatRoom.chatRoomAgents || []).filter((roomAgent) => roomAgent.agent)
   const hasSelectedDefaultAgent = selectableAgents.some((roomAgent) => roomAgent.agent?.id === defaultAgentId)
+  const isCoordinatorMode = agentTriggerMode === 'coordinator'
 
   useEffect(() => {
     setName(chatRoom.name)
@@ -60,7 +61,7 @@ export function RoomSettingsPanel({
     setWorkDir(chatRoom.workDir || '')
     setWorkDirDraft(chatRoom.workDir || '')
     setDefaultAgentId(chatRoom.defaultAgentId || '')
-    setAgentTriggerMode(chatRoom.agentTriggerMode || 'auto')
+    setAgentTriggerMode(chatRoom.agentTriggerMode || 'coordinator')
     setSelectedIconIndex(normalizeGroupAvatarIndex(chatRoom.avatar))
   }, [chatRoom.id, chatRoom.name, chatRoom.description, chatRoom.rules, chatRoom.workDir, chatRoom.defaultAgentId, chatRoom.agentTriggerMode, chatRoom.avatar])
 
@@ -135,6 +136,11 @@ export function RoomSettingsPanel({
 
   const handleTriggerModeChange = (value: AgentTriggerMode) => {
     setAgentTriggerMode(value)
+    if (value === 'coordinator') {
+      setDefaultAgentId('')
+      handleSave({ agentTriggerMode: value, defaultAgentId: null })
+      return
+    }
     handleSave({ agentTriggerMode: value })
   }
 
@@ -332,7 +338,7 @@ export function RoomSettingsPanel({
         </div>
 
         {/* 默认接收助手 */}
-        {!chatRoom.isQuickChatRoom && (
+        {!chatRoom.isQuickChatRoom && !isCoordinatorMode && (
           <div>
             <label className="mb-1.5 block text-sm font-medium text-muted-foreground">默认接收助手</label>
             <div className="text-xs text-muted-foreground mb-2">
@@ -366,7 +372,7 @@ export function RoomSettingsPanel({
           <div>
             <label className="mb-1.5 block text-sm font-medium text-muted-foreground">助手触发模式</label>
             <div className="text-xs text-muted-foreground mb-2">
-              协调模式：只有群助手可以派发其他助手。<br />
+              协调模式：系统内置协调助手会接收未 @ 的消息并派发助手。<br />
               自由协作：助手消息中的 @ 会触发其他助手。<br />
               手动模式：助手消息中的 @ 仅作提及。
             </div>
@@ -379,7 +385,7 @@ export function RoomSettingsPanel({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="coordinator">协调模式（推荐）</SelectItem>
+                <SelectItem value="coordinator">协调模式</SelectItem>
                 <SelectItem value="auto">自由协作</SelectItem>
                 <SelectItem value="manual">手动模式</SelectItem>
               </SelectContent>

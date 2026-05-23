@@ -6,6 +6,11 @@ import { createExecutor } from '../executor.factory.js';
 import { resolveAgentImageProvider } from '../image-generation.service.js';
 import { clearAgentLog } from '../agent-log.js';
 import { agentService } from '../agent.service.js';
+import { GROUP_ASSISTANT_ID } from '../system-assistant.constants.js';
+import {
+  createInternalCoordinatorAgent,
+  isInternalCoordinatorAgentName,
+} from '../internal-coordinator-agent.js';
 import { clearExecutorCacheEntries, executorCache, getCacheKey } from './cache.js';
 import { setBroadcastCronTriggerMessageFn } from '../../cron/cron-scheduler.service.js';
 import { broadcastCronTriggerMessage } from './message-utils.js';
@@ -48,8 +53,15 @@ export async function getExecutor(
     return executorCache.get(cacheKey)!;
   }
 
-  // Load from database
-  const agent = await agentService.findByName(agentName);
+  // Load from database. The internal coordinator reuses the system agent runtime,
+  // but with a dedicated name and prompt so it is not the public group assistant.
+  const isInternalCoordinator = isInternalCoordinatorAgentName(agentName);
+  const baseAgent = isInternalCoordinator
+    ? await agentService.findById(GROUP_ASSISTANT_ID)
+    : await agentService.findByName(agentName);
+  const agent = isInternalCoordinator && baseAgent
+    ? createInternalCoordinatorAgent(baseAgent, { executorOnly: true })
+    : baseAgent;
   if (!agent || !agent.isActive) {
     return null;
   }

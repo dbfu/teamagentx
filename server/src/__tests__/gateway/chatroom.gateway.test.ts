@@ -79,6 +79,7 @@ describe('ChatRoom Gateway API', () => {
       assert.ok(body.data.id);
       assert.ok(body.data.name.startsWith('Test Room'));
       assert.strictEqual(body.data.defaultAgentId, null);
+      assert.strictEqual(body.data.agentTriggerMode, 'coordinator');
     });
 
     test('应该创建包含所有字段的聊天室', async () => {
@@ -218,7 +219,7 @@ describe('ChatRoom Gateway API', () => {
       });
     });
 
-    test('应该返回虚拟系统助手的 speechConfig', async () => {
+    test('不应该把内置协调助手作为群成员返回', async () => {
       const systemAgent = await syncSystemAgent(getGroupAssistantDefinition());
 
       await agentService.update(systemAgent.id, {
@@ -256,36 +257,18 @@ describe('ChatRoom Gateway API', () => {
       assert.strictEqual(response.statusCode, 200);
       const body = response.json();
       const roomAgent = body.data.chatRoomAgents.find((item: any) => item.agent?.id === GROUP_ASSISTANT_ID);
-      assert.ok(roomAgent);
-      assert.deepStrictEqual(roomAgent.agent.speechConfig, {
-        behavior: {
-          enabled: true,
-          outputMode: 'manual',
-          autoPlay: false,
-        },
-        profile: {
-          provider: 'browser-local',
-          model: null,
-          voice: null,
-          fallbackProvider: null,
-          speed: 1,
-          volume: 1,
-          pitch: null,
-          emotion: null,
-          style: 'professional',
-          format: null,
-          sampleRate: null,
-          temperature: null,
-          prompt: null,
-          vendorOptions: null,
-        },
-      });
+      assert.strictEqual(roomAgent, undefined);
     });
   });
 
   describe('PUT /chatrooms/:id', () => {
-    test('应该允许群助手作为协调模式默认助手', async () => {
+    test('协调模式会清空默认接收助手', async () => {
       await syncSystemAgent(getGroupAssistantDefinition());
+      const createdAgent = await agentService.create({
+        name: 'Default Receiver ' + Date.now(),
+        description: 'Default receiver',
+        prompt: 'Handle messages',
+      });
 
       const chatRoomResponse = await app.inject({
         method: 'POST',
@@ -297,12 +280,29 @@ describe('ChatRoom Gateway API', () => {
       });
       assert.strictEqual(chatRoomResponse.statusCode, 201);
       const createdRoom = chatRoomResponse.json();
+      const addAgentResponse = await app.inject({
+        method: 'POST',
+        url: `/chatrooms/${createdRoom.data.id}/agents`,
+        payload: {
+          agentId: createdAgent.id,
+        },
+      });
+      assert.strictEqual(addAgentResponse.statusCode, 201);
+
+      const defaultResponse = await app.inject({
+        method: 'PUT',
+        url: `/chatrooms/${createdRoom.data.id}`,
+        payload: {
+          defaultAgentId: createdAgent.id,
+          agentTriggerMode: 'auto',
+        },
+      });
+      assert.strictEqual(defaultResponse.statusCode, 200);
 
       const response = await app.inject({
         method: 'PUT',
         url: `/chatrooms/${createdRoom.data.id}`,
         payload: {
-          defaultAgentId: GROUP_ASSISTANT_ID,
           agentTriggerMode: 'coordinator',
         },
       });
@@ -310,8 +310,37 @@ describe('ChatRoom Gateway API', () => {
       assert.strictEqual(response.statusCode, 200);
       const body = response.json();
       assert.strictEqual(body.success, true);
-      assert.strictEqual(body.data.defaultAgentId, GROUP_ASSISTANT_ID);
+      assert.strictEqual(body.data.defaultAgentId, null);
       assert.strictEqual(body.data.agentTriggerMode, 'coordinator');
+    });
+
+    test('不允许系统助手作为默认接收助手', async () => {
+      await syncSystemAgent(getGroupAssistantDefinition());
+
+      const chatRoomResponse = await app.inject({
+        method: 'POST',
+        url: '/chatrooms',
+        payload: {
+          name: 'System Default Room ' + Date.now(),
+          workDir: path.join(workDirRoot, 'system-default-room'),
+        },
+      });
+      assert.strictEqual(chatRoomResponse.statusCode, 201);
+      const createdRoom = chatRoomResponse.json();
+
+      const response = await app.inject({
+        method: 'PUT',
+        url: `/chatrooms/${createdRoom.data.id}`,
+        payload: {
+          defaultAgentId: GROUP_ASSISTANT_ID,
+          agentTriggerMode: 'auto',
+        },
+      });
+
+      assert.strictEqual(response.statusCode, 400);
+      const body = response.json();
+      assert.strictEqual(body.success, false);
+      assert.strictEqual(body.error, '系统助手不能设为默认接收助手');
     });
   });
 

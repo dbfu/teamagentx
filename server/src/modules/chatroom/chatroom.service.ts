@@ -5,7 +5,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { agentService } from '../../core/agent/agent.service.js';
-import { GROUP_ASSISTANT_ID } from '../../core/agent/system-assistant.constants.js';
 import {
   getSystemAgentsCached,
   type SystemAgentInfo as CachedSystemAgentInfo,
@@ -19,6 +18,7 @@ export interface CreateChatRoomData {
   workDir?: string | null;
   ownerId?: string;
   rules?: string;
+  agentTriggerMode?: 'auto' | 'manual' | 'coordinator';
 }
 
 export interface DuplicateChatRoomData {
@@ -117,15 +117,10 @@ async function normalizeDefaultAgentId(chatRoomId: string, defaultAgentId: strin
     throw new Error('默认助手不存在或未启用');
   }
 
-  if (agent.agentLevel === 'system' && agent.id !== GROUP_ASSISTANT_ID) {
-    throw new Error('只有群助手可以作为默认系统助手');
+  if (agent.agentLevel === 'system') {
+    throw new Error('系统助手不能设为默认接收助手');
   }
 
-  if (agent.id === GROUP_ASSISTANT_ID) {
-    return normalizedAgentId;
-  }
-
-  // 群助手是虚拟成员；普通助手必须已经加入群聊。
   const member = await prisma.chatRoomAgent.findFirst({
     where: { chatRoomId, agentId: normalizedAgentId },
     select: { id: true },
@@ -138,49 +133,13 @@ async function normalizeDefaultAgentId(chatRoomId: string, defaultAgentId: strin
   return normalizedAgentId;
 }
 
-// 为群聊添加虚拟系统助手
+// 系统协调助手仅作为内部执行器使用，不作为群成员返回给前端。
 function addVirtualSystemAgents<T extends { id: string; chatRoomAgents: any[] }>(
   chatRoom: T,
   systemAgents: SystemAgentInfo[]
 ): T {
-  // 获取已经在群聊中的助手 ID（避免重复添加）
-  const existingAgentIds = new Set(
-    chatRoom.chatRoomAgents
-      .filter((ra: any) => ra.agentId)
-      .map((ra: any) => ra.agentId)
-  );
-
-  // 只添加不在群聊中的系统助手
-  const virtualSystemAgents = systemAgents
-    .filter((agent: SystemAgentInfo) => !existingAgentIds.has(agent.id))
-    .map((agent: SystemAgentInfo) => ({
-      id: `system-${agent.id}`,
-      chatRoomId: chatRoom.id,
-      userId: null,
-      agentId: agent.id,
-      role: 'MEMBER',
-      injectGroupHistory: true,
-      customWorkDir: null,
-      joinedAt: new Date(),
-      lastReadAt: new Date(),
-      user: null,
-      agent: {
-        id: agent.id,
-        name: agent.name,
-        avatar: agent.avatar,
-        avatarColor: agent.avatarColor,
-        description: agent.description,
-        type: agent.type,
-        agentLevel: agent.agentLevel,
-        workDir: agent.workDir,
-        speechConfig: agent.speechConfig,
-      },
-    }));
-
-  return {
-    ...chatRoom,
-    chatRoomAgents: [...chatRoom.chatRoomAgents, ...virtualSystemAgents],
-  };
+  void systemAgents;
+  return chatRoom;
 }
 
 function syncQuickChatRoomAvatar<T extends {
@@ -211,7 +170,7 @@ function syncQuickChatRoomAvatar<T extends {
 
 export const chatRoomService = {
   async create(data: CreateChatRoomData) {
-    const { name, avatar, avatarColor, description, workDir, ownerId, rules } = data;
+    const { name, avatar, avatarColor, description, workDir, ownerId, rules, agentTriggerMode } = data;
     const now = new Date();
 
     const chatRoom = await prisma.chatRoom.create({
@@ -225,6 +184,7 @@ export const chatRoomService = {
         rules,
         ownerId,
         defaultAgentId: null,
+        agentTriggerMode: agentTriggerMode ?? 'coordinator',
         updatedAt: now,
       },
       include: {
@@ -245,7 +205,7 @@ export const chatRoomService = {
     // 确保工作目录存在
     ensureWorkDirExists(chatRoom.id, workDir);
 
-    // 返回更新后的群聊（包含系统助手）
+    // 返回更新后的群聊
     const result = await prisma.chatRoom.findUnique({
       where: { id: chatRoom.id },
       include: {
@@ -269,7 +229,7 @@ export const chatRoomService = {
   },
 
   async createWithOwner(data: CreateChatRoomData & { ownerId: string }) {
-    const { name, avatar, avatarColor, description, workDir, ownerId, rules } = data;
+    const { name, avatar, avatarColor, description, workDir, ownerId, rules, agentTriggerMode } = data;
     const now = new Date();
 
     // Create chatRoom with owner
@@ -284,6 +244,7 @@ export const chatRoomService = {
         rules,
         ownerId,
         defaultAgentId: null,
+        agentTriggerMode: agentTriggerMode ?? 'coordinator',
         updatedAt: now,
       },
       include: {
@@ -315,7 +276,7 @@ export const chatRoomService = {
       },
     });
 
-    // Return chatRoom with updated agents (包含系统助手)
+    // Return chatRoom with updated agents
     const result = await prisma.chatRoom.findUnique({
       where: { id: chatRoom.id },
       include: {
@@ -607,7 +568,8 @@ export const chatRoomService = {
   },
 
   async update(id: string, data: UpdateChatRoomData) {
-    const { defaultAgentId, ...restData } = data;
+    const { defaultAgentId, agentTriggerMode, ...restData } = data;
+    const shouldClearDefaultAgent = agentTriggerMode === 'coordinator';
     const normalizedDefaultAgentId = defaultAgentId !== undefined
       ? await normalizeDefaultAgentId(id, defaultAgentId)
       : undefined;
@@ -616,8 +578,11 @@ export const chatRoomService = {
       where: { id },
       data: {
         ...restData,
+        ...(agentTriggerMode !== undefined && { agentTriggerMode }),
         ...(data.workDir !== undefined && { workDir: data.workDir?.trim() || null }),
-        ...(defaultAgentId !== undefined && { defaultAgentId: normalizedDefaultAgentId }),
+        ...((defaultAgentId !== undefined || shouldClearDefaultAgent) && {
+          defaultAgentId: shouldClearDefaultAgent ? null : normalizedDefaultAgentId,
+        }),
         updatedAt: new Date(),
       },
       include: {
@@ -909,7 +874,7 @@ export const chatRoomService = {
       },
     });
 
-    // 返回更新后的群聊（包含系统助手）
+    // 返回更新后的群聊
     const result = await prisma.chatRoom.findUnique({
       where: { id: chatRoom.id },
       include: {

@@ -235,6 +235,7 @@ export interface CreateChatRoomRequest {
   rules?: string
   workDir?: string | null
   ownerId?: string
+  agentTriggerMode?: AgentTriggerMode
 }
 
 export interface AddAgentToChatRoomRequest {

@@ -313,7 +313,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
       const allAgents = [
         ...groupedResponse.data.categories.flatMap(cg => cg.agents),
         ...groupedResponse.data.uncategorized
-      ]
+      ].filter(agent => agent.agentLevel !== 'system')
       setAssistants(allAgents)
       // 默认展开所有分类（包括未分类）
       const allCategoryIds = [...groupedResponse.data.categories.map(cg => cg.category.id), '__uncategorized__']
@@ -887,11 +887,10 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
   // Filter helpers for grouped display
   const displayedGroupedData = dragPreviewGroupedData || groupedData
 
-  // 分离系统分类（sortOrder = -1000）和普通分类
-  const { normalCategories, systemCategory } = displayedGroupedData ? {
+  // 系统协调助手是内置执行器，不作为可管理助手展示。
+  const { normalCategories } = displayedGroupedData ? {
     normalCategories: displayedGroupedData.categories.filter(cg => cg.category.sortOrder !== -1000),
-    systemCategory: displayedGroupedData.categories.find(cg => cg.category.sortOrder === -1000),
-  } : { normalCategories: [], systemCategory: null }
+  } : { normalCategories: [] }
 
   const filteredGroupedData = displayedGroupedData ? {
     categories: normalCategories
@@ -902,13 +901,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
           a.description?.toLowerCase().includes(searchQuery.toLowerCase())
         )
       })),
-    systemCategory: systemCategory ? {
-      category: systemCategory.category,
-      agents: systemCategory.agents.filter(a =>
-        a.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        a.description?.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-    } : null,
+    systemCategory: null as { category: AgentCategory; agents: Agent[] } | null,
     uncategorized: displayedGroupedData.uncategorized.filter(a =>
       a.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       a.description?.toLowerCase().includes(searchQuery.toLowerCase())

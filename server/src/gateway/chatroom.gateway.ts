@@ -191,6 +191,7 @@ const createChatRoomBodySchema = {
     rules: { type: 'string', description: '群规则/指南，注入到群内所有 Agent 的上下文' },
     workDir: { type: 'string', nullable: true, description: '群聊工作目录，留空使用默认目录' },
     ownerId: { type: 'string', description: 'Owner user ID' },
+    agentTriggerMode: { type: 'string', enum: ['auto', 'manual', 'coordinator'], description: '助手触发模式' },
   },
 };
 
@@ -212,6 +213,7 @@ interface CreateChatRoomBody {
   rules?: string;
   workDir?: string | null;
   ownerId?: string;
+  agentTriggerMode?: 'auto' | 'manual' | 'coordinator';
 }
 
 interface DuplicateChatRoomBody {
@@ -450,7 +452,7 @@ export async function chatRoomGateway(app: FastifyInstance) {
       },
     },
   }, async (request, reply) => {
-    const { name, avatar, avatarColor, description, rules, workDir, ownerId } = request.body;
+    const { name, avatar, avatarColor, description, rules, workDir, ownerId, agentTriggerMode } = request.body;
 
     // If ownerId is provided, use createWithOwner to auto-add OWNER agent
     const chatRoom = ownerId
@@ -462,6 +464,7 @@ export async function chatRoomGateway(app: FastifyInstance) {
           rules,
           workDir,
           ownerId,
+          agentTriggerMode,
         })
       : await chatRoomService.create({
           name,
@@ -470,6 +473,7 @@ export async function chatRoomGateway(app: FastifyInstance) {
           description,
           rules,
           workDir,
+          agentTriggerMode,
         });
 
     // 广播给所有已连接客户端（通知其他端有新群聊创建）

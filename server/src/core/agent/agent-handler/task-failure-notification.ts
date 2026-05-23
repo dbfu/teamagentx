@@ -70,7 +70,7 @@ export async function notifySourceAgentOnFailure(params: {
     return;
   }
   if (chatRoom?.agentTriggerMode === 'coordinator' && sourceAgent.id !== GROUP_ASSISTANT_ID) {
-    console.warn('[notifySourceAgentOnFailure] 群聊为协调模式，非群助手分配者跳过自动通知');
+    console.warn('[notifySourceAgentOnFailure] 群聊为协调模式，非内置协调助手分配者跳过自动通知');
     return;
   }
 
