@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils'
 import { Bot } from 'lucide-react'
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
+import { useState, useRef, useCallback, useEffect, useImperativeHandle, useMemo, forwardRef } from 'react'
 import { AgentAvatarImage } from '@/lib/agent-avatars'
 
 interface Agent {
@@ -93,7 +93,11 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\\/]/g, '\\$&')
 }
 
-export function MentionInput({
+export interface MentionInputRef {
+  focus: () => void
+}
+
+export const MentionInput = forwardRef<MentionInputRef, MentionInputProps>(function MentionInput({
   value,
   onChange,
   onKeyDown,
@@ -101,7 +105,7 @@ export function MentionInput({
   agents,
   className,
   onMentionClick,
-}: MentionInputProps) {
+}, ref) {
   const [showMentions, setShowMentions] = useState(false)
   const [mentionQuery, setMentionQuery] = useState('')
   const [mentionLeft, setMentionLeft] = useState(0)
@@ -117,6 +121,15 @@ export function MentionInput({
   const commandDropdownRef = useRef<HTMLDivElement>(null)
   const selectedCommandRef = useRef<HTMLDivElement>(null)
   const isComposingRef = useRef(false)
+
+  // 暴露 focus 方法给父组件
+  useImperativeHandle(ref, () => ({
+    focus: () => {
+      if (editorRef.current) {
+        editorRef.current.focus()
+      }
+    },
+  }), [])
 
   // 撤销历史栈
   const historyRef = useRef<HistoryEntry[]>([])
@@ -911,4 +924,4 @@ export function MentionInput({
       )}
     </div>
   )
-}
+})
