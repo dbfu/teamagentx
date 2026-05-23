@@ -10,6 +10,7 @@ import {
   ExternalSkill,
   ExternalImportResult,
 } from '../modules/skill/skill-install.service.js';
+import { replaceWithSkillDirectoryLink } from '../modules/skill/skill-link.js';
 import { agentService } from '../core/agent/agent.service.js';
 import { clearExecutorCache } from '../core/agent/agent-handler/index.js';
 import * as path from 'path';
@@ -105,36 +106,7 @@ function linkSharedSkillToAgent(
   const targetPath = path.join(targetSkillsDir, sharedSkill.slug);
   fs.mkdirSync(targetSkillsDir, { recursive: true });
 
-  if (fs.existsSync(targetPath)) {
-    const stats = fs.lstatSync(targetPath);
-    if (stats.isSymbolicLink()) {
-      fs.unlinkSync(targetPath);
-    } else {
-      fs.rmSync(targetPath, { recursive: true, force: true });
-    }
-  }
-
-  try {
-    fs.symlinkSync(
-      sharedSkill.sourceDir,
-      targetPath,
-      process.platform === 'win32' ? 'junction' : 'dir',
-    );
-  } catch (error) {
-    if (process.platform !== 'win32') {
-      throw error;
-    }
-
-    fs.rmSync(targetPath, { recursive: true, force: true });
-    fs.cpSync(sharedSkill.sourceDir, targetPath, {
-      recursive: true,
-      dereference: true,
-      filter: (src) => {
-        const relative = path.relative(sharedSkill.sourceDir, src);
-        return !relative.startsWith('.git');
-      },
-    });
-  }
+  replaceWithSkillDirectoryLink(sharedSkill.sourceDir, targetPath);
   return targetPath;
 }
 

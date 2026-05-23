@@ -10,6 +10,7 @@ import {
   installDefaultSkillsForNewAgent,
 } from '../../../modules/skill/preinstalled-skills.js';
 import { skillInstallService } from '../../../modules/skill/skill-install.service.js';
+import { createSkillDirectoryLink } from '../../../modules/skill/skill-link.js';
 import { installSkillFromSourceTool } from './skills-helper.tools.js';
 import { getChatHistoryTool, listSharedSkillsTool } from './skill-manager.tools.js';
 import {
@@ -174,7 +175,7 @@ async function installModelSelectedSkills(
     }
 
     try {
-      fs.symlinkSync(skill.sourceDir, targetSymlink, 'dir');
+      createSkillDirectoryLink(skill.sourceDir, targetSymlink);
       installedSkills.push(skill.slug);
       console.log(`[agent-creator] 已根据模型选择为「${agent.name}」安装技能: ${skill.slug}`);
     } catch (error) {

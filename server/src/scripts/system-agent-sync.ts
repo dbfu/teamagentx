@@ -1,5 +1,11 @@
 import type { Agent, AgentType } from '@prisma/client';
+import { randomUUID } from 'crypto';
 import prisma from '../lib/prisma.js';
+import {
+  GROUP_ASSISTANT_ID,
+  LEGACY_SYSTEM_AGENT_IDS,
+} from '../core/agent/system-assistant.constants.js';
+import { invalidateSystemAgentsCache } from '../modules/chatroom/system-agents-cache.js';
 import { normalizeAgentSpeechConfig, type AgentSpeechConfig } from '../modules/speech/speech-config.js';
 
 // 系统分类 ID（固定值，便于启动同步和前端分组）
@@ -119,6 +125,7 @@ export async function syncSystemAgent(
       },
     });
     console.log(`[system-agent-sync] 已创建系统助手: ${agent.name}`);
+    invalidateSystemAgentsCache();
     return agent;
   }
 
@@ -134,6 +141,7 @@ export async function syncSystemAgent(
     },
   });
   console.log(`[system-agent-sync] 已同步系统助手: ${agent.name}`);
+  invalidateSystemAgentsCache();
   return agent;
 }
 
@@ -145,4 +153,139 @@ export async function syncSystemAgents(
     agents.push(await syncSystemAgent(definition));
   }
   return agents;
+}
+
+function normalizeCronAgentIds(rawAgentIds: string | null): string | null {
+  if (!rawAgentIds) return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawAgentIds);
+  } catch {
+    return rawAgentIds;
+  }
+
+  if (!Array.isArray(parsed)) return rawAgentIds;
+  if (parsed.includes('*')) return rawAgentIds;
+
+  let changed = false;
+  const nextIds: string[] = [];
+  for (const item of parsed) {
+    if (typeof item !== 'string') continue;
+    const nextId = LEGACY_SYSTEM_AGENT_IDS.includes(item)
+      ? GROUP_ASSISTANT_ID
+      : item;
+    if (nextId !== item) changed = true;
+    if (!nextIds.includes(nextId)) nextIds.push(nextId);
+  }
+
+  return changed ? JSON.stringify(nextIds) : rawAgentIds;
+}
+
+/**
+ * 旧版有 5 个系统助手。合并后只保留「群助手」，启动时把引用迁移过来，
+ * 然后硬删除旧系统助手记录，避免它们继续出现在 @ 候选或系统分类里。
+ */
+export async function cleanupLegacySystemAgents(): Promise<void> {
+  const now = new Date();
+
+  await prisma.$transaction(async (tx) => {
+    const legacyQuickChatRooms = await tx.chatRoom.findMany({
+      where: {
+        isQuickChatRoom: true,
+        quickChatAgentId: { in: LEGACY_SYSTEM_AGENT_IDS },
+      },
+      select: { id: true },
+    });
+
+    if (legacyQuickChatRooms.length > 0) {
+      await tx.chatRoom.updateMany({
+        where: {
+          id: { in: legacyQuickChatRooms.map((room) => room.id) },
+        },
+        data: {
+          name: '群助手',
+          quickChatAgentId: GROUP_ASSISTANT_ID,
+          updatedAt: now,
+        },
+      });
+
+      for (const room of legacyQuickChatRooms) {
+        await tx.chatRoomAgent.upsert({
+          where: {
+            chatRoomId_agentId: {
+              chatRoomId: room.id,
+              agentId: GROUP_ASSISTANT_ID,
+            },
+          },
+          update: {
+            injectGroupHistory: false,
+          },
+          create: {
+            id: randomUUID(),
+            chatRoomId: room.id,
+            agentId: GROUP_ASSISTANT_ID,
+            role: 'MEMBER',
+            injectGroupHistory: false,
+          },
+        });
+      }
+    }
+
+    await tx.platformConfig.updateMany({
+      where: { defaultAgentId: { in: LEGACY_SYSTEM_AGENT_IDS } },
+      data: {
+        defaultAgentId: GROUP_ASSISTANT_ID,
+        updatedAt: now,
+      },
+    });
+
+    await tx.bridgeBot.updateMany({
+      where: { defaultAgentId: { in: LEGACY_SYSTEM_AGENT_IDS } },
+      data: {
+        defaultAgentId: GROUP_ASSISTANT_ID,
+        updatedAt: now,
+      },
+    });
+
+    await tx.externalChannel.updateMany({
+      where: { defaultAgentId: { in: LEGACY_SYSTEM_AGENT_IDS } },
+      data: {
+        defaultAgentId: GROUP_ASSISTANT_ID,
+        updatedAt: now,
+      },
+    });
+
+    const cronTasks = await tx.cronTask.findMany({
+      where: {
+        OR: LEGACY_SYSTEM_AGENT_IDS.map((agentId) => ({
+          agentIds: { contains: agentId },
+        })),
+      },
+      select: { id: true, agentIds: true },
+    });
+
+    for (const task of cronTasks) {
+      const normalizedAgentIds = normalizeCronAgentIds(task.agentIds);
+      if (normalizedAgentIds !== null && normalizedAgentIds !== task.agentIds) {
+        await tx.cronTask.update({
+          where: { id: task.id },
+          data: {
+            agentIds: normalizedAgentIds,
+            updatedAt: now,
+          },
+        });
+      }
+    }
+
+    await tx.agent.deleteMany({
+      where: {
+        id: { in: LEGACY_SYSTEM_AGENT_IDS },
+        agentLevel: 'system',
+      },
+    });
+  });
+
+  invalidateSystemAgentsCache();
+  console.log('[system-agent-sync] 已迁移引用并删除 5 个旧系统助手');
 }

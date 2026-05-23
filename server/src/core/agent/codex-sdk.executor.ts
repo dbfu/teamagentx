@@ -117,6 +117,8 @@ interface CodexBuiltinMcpServerContext {
   agentName: string;
   chatRoomAgents: ChatRoomAgentInfo[];
   generateImageEndpoint?: string;
+  systemToolsListEndpoint?: string;
+  systemToolsCallEndpoint?: string;
 }
 
 interface CodexBuiltinMcpServerDefinition {
@@ -261,17 +263,23 @@ const BUILTIN_CODEX_MCP_SERVERS: CodexBuiltinMcpServerDefinition[] = [
     name: 'tax',
     build: ({
       teamAgentXMcpServerPath,
+      chatRoomId,
       agentId,
       generateImageEndpoint,
+      systemToolsListEndpoint,
+      systemToolsCallEndpoint,
     }) => {
-      if (!generateImageEndpoint) return undefined;
+      if (!generateImageEndpoint && !systemToolsListEndpoint) return undefined;
 
       return {
         command: process.execPath,
         args: [teamAgentXMcpServerPath],
         env: {
+          TEAMAGENTX_CHAT_ROOM_ID: chatRoomId,
           TEAMAGENTX_SOURCE_AGENT_ID: agentId || '',
           TEAMAGENTX_GENERATE_IMAGE_ENDPOINT: generateImageEndpoint,
+          TEAMAGENTX_SYSTEM_TOOLS_LIST_ENDPOINT: systemToolsListEndpoint,
+          TEAMAGENTX_SYSTEM_TOOLS_CALL_ENDPOINT: systemToolsCallEndpoint,
           TEAMAGENTX_INTERNAL_TOOL_TOKEN: getInternalAgentToolToken(),
         },
       };
@@ -725,15 +733,15 @@ export class CodexSdkExecutor implements IAgentExecutor {
 
     const modelInfo = this.llmProvider
       ? `
-## 当前模型
-你正在使用 ${this.llmProvider.name} 提供的模型服务。
-- 模型名称：${this.llmProvider.model}
-- 供应商类型：${this.llmProvider.type}`
+## Current Model
+You are using the model service provided by ${this.llmProvider.name}.
+- Model name: ${this.llmProvider.model}
+- Provider type: ${this.llmProvider.type}`
       : '';
     const chatRoomRulesSection = chatRoomRules?.trim()
       ? `
-## 群规则
-以下规则来自当前群聊，适用于群内所有助手。你必须在当前群聊的回复和协作中遵守：
+## Group Rules
+The following rules come from the current chatroom and apply to all assistants in this chatroom. You must follow them in replies and collaboration in this chatroom:
 ${chatRoomRules.trim()}`
       : '';
 
@@ -743,9 +751,9 @@ ${chatRoomRulesSection}
 
 ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
 
-## 工作目录
-你的工作目录是：${this.workDir}
-执行文件操作和命令时，默认在此目录下操作。使用相对路径时，基于此目录解析。`;
+## Working Directory
+Your working directory is: ${this.workDir}
+When you perform file operations or run commands, operate in this directory by default. Resolve relative paths from this directory.`;
 
     this.ensureWorkDirectory();
     this.threadId = this.loadThreadId();
@@ -844,8 +852,11 @@ ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
     const serverPath = this.getTeamAgentXMcpServerPath();
     const script = `#!/usr/bin/env node
 const generateImageEndpoint = process.env.TEAMAGENTX_GENERATE_IMAGE_ENDPOINT;
+const systemToolsListEndpoint = process.env.TEAMAGENTX_SYSTEM_TOOLS_LIST_ENDPOINT;
+const systemToolsCallEndpoint = process.env.TEAMAGENTX_SYSTEM_TOOLS_CALL_ENDPOINT;
 const token = process.env.TEAMAGENTX_INTERNAL_TOOL_TOKEN;
 const sourceAgentId = process.env.TEAMAGENTX_SOURCE_AGENT_ID;
+const chatRoomId = process.env.TEAMAGENTX_CHAT_ROOM_ID;
 
 function write(message) {
   process.stdout.write(JSON.stringify(message) + "\\n");
@@ -859,18 +870,27 @@ function toolResult(text, structuredContent, isError = false) {
   };
 }
 
+function stringifyPayload(value) {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
 async function callGenerateImage(args) {
   if (!generateImageEndpoint || !token || !sourceAgentId) {
-    return toolResult("当前助手未开启图片生成能力。", {}, true);
+    return toolResult("The current assistant does not have image generation enabled.", {}, true);
   }
 
   const prompt = typeof args?.prompt === "string" ? args.prompt.trim() : "";
   const n = Number.isInteger(args?.n) ? args.n : undefined;
   if (!prompt) {
-    return toolResult("参数错误：必须提供 prompt。", {}, true);
+    return toolResult("Parameter error: prompt is required.", {}, true);
   }
   if (n !== undefined && (n < 1 || n > 4)) {
-    return toolResult("参数错误：n 必须在 1 到 4 之间。", {}, true);
+    return toolResult("Parameter error: n must be between 1 and 4.", {}, true);
   }
 
   try {
@@ -891,14 +911,59 @@ async function callGenerateImage(args) {
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || payload.success === false) {
-      return toolResult(payload.error || "图片生成失败。", payload, true);
+      return toolResult(payload.error || "Image generation failed.", payload, true);
     }
     const result = payload.data || payload;
     const urls = Array.isArray(result.urls) ? result.urls : [];
     const files = Array.isArray(result.files) ? result.files : [];
-    return toolResult("图片生成成功：" + (urls.join(", ") || files.join(", ")), result, false);
+    return toolResult("Image generation succeeded: " + (urls.join(", ") || files.join(", ")), result, false);
   } catch (error) {
-    return toolResult(error instanceof Error ? error.message : "图片生成失败。", {}, true);
+    return toolResult(error instanceof Error ? error.message : "Image generation failed.", {}, true);
+  }
+}
+
+async function listSystemTools() {
+  if (!systemToolsListEndpoint || !token || !sourceAgentId || !chatRoomId) return [];
+
+  try {
+    const response = await fetch(systemToolsListEndpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer " + token,
+      },
+      body: JSON.stringify({ sourceAgentId, chatRoomId }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.success === false) return [];
+    return Array.isArray(payload.data?.tools) ? payload.data.tools : [];
+  } catch {
+    return [];
+  }
+}
+
+async function callSystemTool(name, args) {
+  if (!systemToolsCallEndpoint || !token || !sourceAgentId || !chatRoomId) {
+    return toolResult("The current assistant has no available system tools.", {}, true);
+  }
+
+  try {
+    const response = await fetch(systemToolsCallEndpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer " + token,
+      },
+      body: JSON.stringify({ sourceAgentId, chatRoomId, name, args }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.success === false) {
+      return toolResult(payload.error || "Tool execution failed.", payload, true);
+    }
+    const result = payload.data ?? payload;
+    return toolResult(stringifyPayload(result), result, false);
+  } catch (error) {
+    return toolResult(error instanceof Error ? error.message : "Tool execution failed.", {}, true);
   }
 }
 
@@ -928,19 +993,28 @@ async function handle(request) {
     if (generateImageEndpoint) {
       tools.push({
         name: "generate_image",
-        description: "通过 TeamAgentX 服务端受控图片模型生成图片。API Key 只在服务端使用。",
+        description: "Generate images through the TeamAgentX server-controlled image model. API keys are used only on the server.",
         inputSchema: {
           type: "object",
           properties: {
-            prompt: { type: "string", description: "详细图片提示词。应包含主体、风格、构图、色彩、用途等。" },
-            size: { type: "string", description: "图片尺寸或比例，例如 1024x1024、1024x1792、1:1。" },
-            n: { type: "number", description: "生成图片数量，默认 1，最多 4。" },
-            filename: { type: "string", description: "可选文件名，不要包含路径。" },
-            extraJson: { type: "object", description: "供应商特定额外参数。" },
+            prompt: { type: "string", description: "Detailed image prompt. Include subject, style, composition, colors, intended use, and other relevant details." },
+            size: { type: "string", description: "Image size or aspect ratio, for example 1024x1024, 1024x1792, or 1:1." },
+            n: { type: "number", description: "Number of images to generate. Default 1, maximum 4." },
+            filename: { type: "string", description: "Optional filename. Do not include a path." },
+            extraJson: { type: "object", description: "Provider-specific extra parameters." },
           },
           required: ["prompt"],
           additionalProperties: false,
         },
+      });
+    }
+    const systemTools = await listSystemTools();
+    for (const systemTool of systemTools) {
+      if (!systemTool?.name || tools.some((tool) => tool.name === systemTool.name)) continue;
+      tools.push({
+        name: systemTool.name,
+        description: systemTool.description || systemTool.name,
+        inputSchema: systemTool.inputSchema || { type: "object", additionalProperties: true },
       });
     }
     write({
@@ -961,11 +1035,8 @@ async function handle(request) {
       write({ jsonrpc: "2.0", id, result });
       return;
     }
-    write({
-      jsonrpc: "2.0",
-      id,
-      result: toolResult("未知工具：" + name, {}, true),
-    });
+    const result = await callSystemTool(name, args);
+    write({ jsonrpc: "2.0", id, result });
     return;
   }
 
@@ -1116,7 +1187,7 @@ process.stdin.on("data", (chunk) => {
     let fullMessage = '';
 
     if (this.systemPrompt) {
-      fullMessage += `【系统指令】\n${this.systemPrompt}\n\n`;
+      fullMessage += `[System Instructions]\n${this.systemPrompt}\n\n`;
     }
 
     const longTermMemorySection = buildAgentLongTermMemorySection(this.chatRoomId, this.agentId, this.name);
@@ -1134,7 +1205,7 @@ process.stdin.on("data", (chunk) => {
       const recentHistory = history.filter((msg) => msg.kind !== 'memory_summary');
 
       if (memorySummary) {
-        fullMessage += `【群聊长期记忆摘要】
+        fullMessage += `[Group Chat Long-Term Memory Summary]
 ${memorySummary}
 
 `;
@@ -1145,7 +1216,8 @@ ${memorySummary}
           .map((msg) => `[${msg.senderName}]: ${msg.content}`)
           .join('\n');
 
-        fullMessage += `【最近群聊消息】以下是当前消息之前最近的群聊消息（共 ${recentHistory.length} 条）：
+        fullMessage += `[Recent Group Chat Messages]
+The following are the most recent group-chat messages before the current message (${recentHistory.length} total):
 ${historyText}
 
 `;
@@ -1153,24 +1225,24 @@ ${historyText}
     }
 
     if (this.chatRoomAgents.length > 0) {
-      const agentsInfo = this.chatRoomAgents.map((agent) => agent.name).join('、');
+      const agentsInfo = this.chatRoomAgents.map((agent) => agent.name).join(', ');
       const otherAgents = this.chatRoomAgents.filter((agent) => agent.name !== this.name);
-      const otherAgentsList = otherAgents.map((agent) => agent.name).join('、');
-      const othersInfo = otherAgents.length > 0 ? otherAgentsList : '无';
+      const otherAgentsList = otherAgents.map((agent) => agent.name).join(', ');
+      const othersInfo = otherAgents.length > 0 ? otherAgentsList : 'none';
       const mentionTip = otherAgents.length > 0
-        ? '\n【提示】\n需要给其他助手发消息时，直接在最终回复中写“@助手名称 消息内容”，也可以在正文中用空格后跟“@助手名称”。只有 @ 位于行首，或 @ 前一个字符是空格时，才会触发目标助手；标点后直接 @ 不会触发。单条消息最多 @ 一个助手。如果用户只是要求你给某个助手发消息，最终回复只输出这条 @助手消息，不要添加解释、寒暄、总结，也不要擅自扩写成协作邀请。'
+        ? '\n[Tip]\nWhen you need to message another assistant, write "@assistant_name message content" directly in your final reply. You may also mention an assistant in body text when the @ is preceded by a space. A target assistant is triggered only when @ is at the start of a line or the previous character is a space; @ immediately after punctuation will not trigger. A single message may mention at most one assistant. If the user only asks you to send a message to another assistant, output only that @assistant message in the final reply, with no explanation, pleasantries, summary, or expanded collaboration invitation.'
         : '';
 
-      fullMessage += `【群聊成员信息】
-群聊工作目录：${this.workDir}
-当前群聊中的助手有：${agentsInfo}
-你是：${this.name}
-其他助手：${othersInfo}${mentionTip}
+      fullMessage += `[Group Chat Member Info]
+Chatroom working directory: ${this.workDir}
+Assistants in the current chatroom: ${agentsInfo}
+You are: ${this.name}
+Other assistants: ${othersInfo}${mentionTip}
 
 `;
     }
 
-    fullMessage += `【当前消息】\n${message}`;
+    fullMessage += `[Current Message]\n${message}`;
     return fullMessage;
   }
 
@@ -1184,7 +1256,7 @@ ${historyText}
     if (this.threadId) {
       this.saveThreadId();
     }
-    return `【技能清单更新】
+    return `[Installed Skills Update]
 ${buildInstalledSkillsInstructions(this.agentId)}`;
   }
 
@@ -1200,6 +1272,8 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     const generateImageEndpoint = this.imageGenerationProvider
       ? `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/generate-image`
       : undefined;
+    const systemToolsListEndpoint = `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/system-tools/list`;
+    const systemToolsCallEndpoint = `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/system-tools/call`;
     const builtinMcpServers = buildBuiltinCodexMcpServerConfigs({
       workDir: this.workDir,
       teamAgentXMcpServerPath: mcpServerPath,
@@ -1208,6 +1282,8 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       agentName: this.name,
       chatRoomAgents: this.chatRoomAgents,
       generateImageEndpoint,
+      systemToolsListEndpoint,
+      systemToolsCallEndpoint,
     });
     const config = {
       hide_agent_reasoning: false,

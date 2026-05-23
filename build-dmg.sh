@@ -33,10 +33,12 @@ cleanup() {
 trap cleanup EXIT
 
 # 检查依赖
-if ! command -v pnpm &> /dev/null; then
-  log_error "pnpm is not installed. Please install pnpm first."
+if ! command -v npx &> /dev/null; then
+  log_error "npx is not installed. Please install Node.js/npm first."
   exit 1
 fi
+
+PNPM_CMD=(npx pnpm@10.24.0)
 
 echo "======================================="
 echo "  TeamAgentX Desktop Build (macOS DMG)"
@@ -55,7 +57,7 @@ echo ""
 # Step 1: 编译后端
 log_info "Step 1/4: Building server..."
 cd "$SCRIPT_DIR/server"
-pnpm db:generate && pnpm build && ALLOW_STALE_MIGRATION=1 pnpm prebuild:electron
+"${PNPM_CMD[@]}" db:generate && "${PNPM_CMD[@]}" build && ALLOW_STALE_MIGRATION=1 "${PNPM_CMD[@]}" prebuild:electron
 if [ $? -ne 0 ]; then
   log_error "Server build failed"
   exit 1
@@ -66,13 +68,13 @@ echo ""
 # Step 2: 部署生产依赖
 log_info "Step 2/4: Deploying production dependencies..."
 cd "$SCRIPT_DIR"
-pnpm --filter=server deploy server/node_modules-prod --prod --frozen-lockfile --force
+"${PNPM_CMD[@]}" --filter=server deploy server/node_modules-prod --prod --frozen-lockfile --force
 if [ $? -ne 0 ]; then
   log_error "Production dependency deployment failed"
   exit 1
 fi
 cd "$SCRIPT_DIR/server"
-pnpm verify:electron-deps && pnpm sync:prisma:prod
+"${PNPM_CMD[@]}" verify:electron-deps && "${PNPM_CMD[@]}" sync:prisma:prod
 if [ $? -ne 0 ]; then
   log_error "Electron dependency verification failed"
   exit 1
@@ -83,17 +85,17 @@ echo ""
 # Step 3: 编译前端
 log_info "Step 3/4: Building renderer..."
 cd "$SCRIPT_DIR/apps/desktop"
-pnpm typecheck
+"${PNPM_CMD[@]}" typecheck
 if [ $? -ne 0 ]; then
   log_error "TypeScript type check failed"
   exit 1
 fi
-pnpm exec tsc -p ../web/tsconfig.json
+"${PNPM_CMD[@]}" exec tsc -p ../web/tsconfig.json
 if [ $? -ne 0 ]; then
   log_error "Frontend TypeScript compilation failed"
   exit 1
 fi
-cd ../web && pnpm exec vite --config ../desktop/vite.config.ts --mode electron build
+cd ../web && "${PNPM_CMD[@]}" exec vite --config ../desktop/vite.config.ts --mode electron build
 if [ $? -ne 0 ]; then
   log_error "Vite build failed"
   exit 1
@@ -104,7 +106,7 @@ echo ""
 # Step 4: 打包 DMG
 log_info "Step 4/4: Packaging macOS DMG..."
 cd "$SCRIPT_DIR/apps/desktop"
-pnpm electron-builder --mac dmg
+"${PNPM_CMD[@]}" exec electron-builder --mac dmg
 if [ $? -ne 0 ]; then
   log_error "DMG packaging failed"
   exit 1

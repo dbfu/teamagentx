@@ -58,18 +58,18 @@ function buildDefaultResetWhere(modelType: LlmModelType, idToExclude?: string) {
   };
 }
 
-// AI 解析模型配置的系统提示词
-const PARSE_CONFIG_PROMPT = `你是一个模型配置解析助手。用户会提供他们的 API 配置信息描述，你需要从中提取出以下字段并以 JSON 格式返回：
+// System prompt for AI-assisted model configuration parsing.
+const PARSE_CONFIG_PROMPT = `You are a model configuration parsing assistant. The user will provide a description of API configuration details. Extract the following fields and return them as JSON:
 
-- name: 模型配置名称（仅提取用户明确提到的名称，未提及则返回 null）
-- apiUrl: API 端点 URL（仅提取用户明确提到的 URL，未提及则返回 null）
-- apiKey: API Key（仅提取用户明确提到的 Key，未提及则返回 null）
-- model: 模型名称（仅提取用户明确提到的模型名称，未提及则返回 null）
-- apiProtocol: API 协议类型，anthropic 或 openai（仅根据用户明确提到的协议判断，未提及则返回 null）
+- name: model configuration name. Only extract a name explicitly provided by the user; otherwise return null.
+- apiUrl: API endpoint URL. Only extract a URL explicitly provided by the user; otherwise return null.
+- apiKey: API key. Only extract a key explicitly provided by the user; otherwise return null.
+- model: model name. Only extract a model name explicitly provided by the user; otherwise return null.
+- apiProtocol: API protocol type, either anthropic or openai. Only infer this from an explicitly mentioned protocol; otherwise return null.
 
-注意：不要推测或猜测任何字段的值，只提取用户明确提供的信息。
+Do not infer or guess any field values. Only extract information the user explicitly provided.
 
-请只返回 JSON，不要包含其他解释文字。`;
+Return JSON only. Do not include any explanatory text.`;
 
 function stringOrNull(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;

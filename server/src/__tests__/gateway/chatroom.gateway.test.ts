@@ -6,7 +6,10 @@ import os from 'node:os';
 import path from 'node:path';
 import Fastify, { FastifyInstance } from 'fastify';
 import { agentService } from '../../core/agent/agent.service.js';
+import { GROUP_ASSISTANT_ID } from '../../core/agent/system-assistant.constants.js';
 import { chatRoomGateway } from '../../gateway/chatroom.gateway.js';
+import { getGroupAssistantDefinition } from '../../scripts/system-agent-definitions.js';
+import { syncSystemAgent } from '../../scripts/system-agent-sync.js';
 
 // Helper to build test app
 function buildTestApp(): FastifyInstance {
@@ -75,6 +78,7 @@ describe('ChatRoom Gateway API', () => {
       assert.strictEqual(body.success, true);
       assert.ok(body.data.id);
       assert.ok(body.data.name.startsWith('Test Room'));
+      assert.strictEqual(body.data.defaultAgentId, null);
     });
 
     test('应该创建包含所有字段的聊天室', async () => {
@@ -97,6 +101,7 @@ describe('ChatRoom Gateway API', () => {
       assert.strictEqual(body.data.avatar, '🏠');
       assert.strictEqual(body.data.avatarColor, '#1890ff');
       assert.strictEqual(body.data.description, 'A test chatroom');
+      assert.strictEqual(body.data.defaultAgentId, null);
     });
   });
 
@@ -214,12 +219,7 @@ describe('ChatRoom Gateway API', () => {
     });
 
     test('应该返回虚拟系统助手的 speechConfig', async () => {
-      const systemAgent = await agentService.create({
-        name: 'System Voice Agent ' + Date.now(),
-        description: 'System voice test agent',
-        prompt: 'Speak like a system agent',
-        agentLevel: 'system',
-      });
+      const systemAgent = await syncSystemAgent(getGroupAssistantDefinition());
 
       await agentService.update(systemAgent.id, {
         speechConfig: {
@@ -255,7 +255,7 @@ describe('ChatRoom Gateway API', () => {
 
       assert.strictEqual(response.statusCode, 200);
       const body = response.json();
-      const roomAgent = body.data.chatRoomAgents.find((item: any) => item.agent?.id === systemAgent.id);
+      const roomAgent = body.data.chatRoomAgents.find((item: any) => item.agent?.id === GROUP_ASSISTANT_ID);
       assert.ok(roomAgent);
       assert.deepStrictEqual(roomAgent.agent.speechConfig, {
         behavior: {

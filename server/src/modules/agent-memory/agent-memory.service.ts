@@ -29,7 +29,7 @@ function formatMessages(messages: MessageWithSender[]): string {
   return messages
     .map((message) => {
       const time = new Date(message.time).toLocaleString('zh-CN');
-      const role = message.isHuman ? '用户' : '助手';
+      const role = message.isHuman ? 'User' : 'Assistant';
       return `- ${message.id} | ${time} | ${role}(${senderName(message)}): ${message.content}`;
     })
     .join('\n');
@@ -93,7 +93,7 @@ async function findMessagesBefore(
 async function createSummary(oldSummary: string, messages: MessageWithSender[]): Promise<string> {
   const provider = await llmProviderService.findDefault();
   if (!provider) {
-    throw new Error('未找到默认 LLM Provider，无法压缩群历史摘要');
+    throw new Error('No default LLM Provider found; cannot compact group history summary');
   }
 
   const model = createLlmClient(provider, {
@@ -101,56 +101,56 @@ async function createSummary(oldSummary: string, messages: MessageWithSender[]):
     maxTokens: config.agent.memorySummaryTargetTokens,
   });
 
-  const prompt = `你是群聊长期记忆压缩器。请把旧摘要和新增群聊消息合并为新的长期记忆摘要。
+  const prompt = `You are a long-term memory compactor for a group chat. Merge the old summary and newly added group-chat messages into a new long-term memory summary.
 
-要求：
-1. 不要编造未出现的信息。
-2. 保留用户明确要求、限制、偏好。
-3. 保留尚未完成的任务、负责人、当前状态。
-4. 保留关键技术细节：文件名、函数名、接口、数据库表、错误信息、命令、环境变量。
-5. 保留已经做出的决策，以及决策原因。
-6. 如果存在冲突信息，记录冲突，不要擅自合并。
-7. 删除寒暄、重复确认、无实际信息的过程文本。
-8. 输出结构化 Markdown，控制在约 ${config.agent.memorySummaryTargetTokens} tokens 内。
+Requirements:
+1. Do not invent information that does not appear in the input.
+2. Preserve explicit user requests, constraints, and preferences.
+3. Preserve unfinished tasks, owners, and current status.
+4. Preserve key technical details: filenames, function names, APIs, database tables, error messages, commands, and environment variables.
+5. Preserve decisions that have already been made and the reasons for those decisions.
+6. If information conflicts, record the conflict and do not merge it on your own.
+7. Remove pleasantries, repeated confirmations, and process text with no durable information.
+8. Output structured Markdown within about ${config.agent.memorySummaryTargetTokens} tokens.
 
-输出结构：
-## 当前目标
+Output structure:
+## Current Goal
 - ...
 
-## 已确认事实
+## Confirmed Facts
 - ...
 
-## 已完成事项
+## Completed Work
 - ...
 
-## 未完成任务
+## Open Tasks
 - ...
 
-## 用户偏好和约束
+## User Preferences and Constraints
 - ...
 
-## 技术上下文
+## Technical Context
 - ...
 
-## Agent 分工
+## Agent Responsibilities
 - ...
 
-## 关键决策
+## Key Decisions
 - ...
 
-## 风险和阻塞
+## Risks and Blockers
 - ...
 
-旧摘要：
-${oldSummary || '暂无'}
+Old summary:
+${oldSummary || 'None'}
 
-新增群聊消息：
+New group-chat messages:
 ${formatMessages(messages)}
 
-请直接输出新的长期记忆摘要。`;
+Output the new long-term memory summary only.`;
 
   const content = await model.invoke([
-    { role: 'system', content: '你负责把群聊历史压缩成可持续滚动更新的长期记忆。' },
+    { role: 'system', content: 'You compact group-chat history into durable, continuously updated long-term memory.' },
     { role: 'user', content: prompt },
   ]);
 

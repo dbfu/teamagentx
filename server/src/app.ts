@@ -6,11 +6,7 @@ import os from 'os';
 import path from 'path';
 import { config } from './config/index.js';
 import { initAgents, clearAllExecutionState } from './core/agent/agent-handler/index.js';
-import { ensureAgentCreatorExists } from './scripts/init-agent-creator.js';
-import { ensureSkillsHelperExists } from './scripts/init-skills-helper.js';
-import { ensureCronTaskHelperExists } from './scripts/init-cron-task-helper.js';
-import { ensureChatroomHelperExists } from './scripts/init-chatroom-helper.js';
-import { ensureExternalPlatformHelperExists } from './scripts/init-external-platform-helper.js';
+import { ensureGroupAssistantExists } from './scripts/init-group-assistant.js';
 import { migrateAgentAvatars } from './scripts/migrate-agent-avatars.js';
 import { migrateChatRoomAvatars } from './scripts/migrate-chatroom-avatars.js';
 import { migrateSiliconflowVoiceIds } from './scripts/migrate-siliconflow-voice-ids.js';
@@ -166,20 +162,8 @@ export async function createApp(options?: { enableSwagger?: boolean }) {
   // 清理所有执行状态（服务重启时中断）
   clearAllExecutionState();
 
-  // 确保助手生成器存在
-  await ensureAgentCreatorExists();
-
-  // 确保技能安装助手存在
-  await ensureSkillsHelperExists();
-
-  // 确保定时任务助手存在
-  await ensureCronTaskHelperExists();
-
-  // 确保群聊管理助手存在
-  await ensureChatroomHelperExists();
-
-  // 确保外部平台接入助手存在
-  await ensureExternalPlatformHelperExists();
+  // 确保唯一系统群助手存在，并删除旧版 5 个系统助手
+  await ensureGroupAssistantExists();
 
   // 迁移助手头像为数字索引
   await migrateAgentAvatars();

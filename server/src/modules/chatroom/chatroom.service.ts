@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { agentService } from '../../core/agent/agent.service.js';
+import { GROUP_ASSISTANT_ID } from '../../core/agent/system-assistant.constants.js';
 import {
   getSystemAgentsCached,
   type SystemAgentInfo as CachedSystemAgentInfo,
@@ -116,16 +117,18 @@ async function normalizeDefaultAgentId(chatRoomId: string, defaultAgentId: strin
     throw new Error('默认助手不存在或未启用');
   }
 
-  // 系统助手是虚拟成员；普通助手必须已经加入群聊。
-  if (agent.agentLevel !== 'system') {
-    const member = await prisma.chatRoomAgent.findFirst({
-      where: { chatRoomId, agentId: normalizedAgentId },
-      select: { id: true },
-    });
+  if (agent.agentLevel === 'system') {
+    throw new Error('系统助手不能设为默认接收助手');
+  }
 
-    if (!member) {
-      throw new Error('默认助手必须是群聊成员');
-    }
+  // 系统助手是虚拟成员；普通助手必须已经加入群聊。
+  const member = await prisma.chatRoomAgent.findFirst({
+    where: { chatRoomId, agentId: normalizedAgentId },
+    select: { id: true },
+  });
+
+  if (!member) {
+    throw new Error('默认助手必须是群聊成员');
   }
 
   return normalizedAgentId;
@@ -165,6 +168,7 @@ function addVirtualSystemAgents<T extends { id: string; chatRoomAgents: any[] }>
         description: agent.description,
         type: agent.type,
         agentLevel: agent.agentLevel,
+        workDir: agent.workDir,
         speechConfig: agent.speechConfig,
       },
     }));
@@ -216,6 +220,7 @@ export const chatRoomService = {
         workDir: workDir?.trim() || null,
         rules,
         ownerId,
+        defaultAgentId: null,
         updatedAt: now,
       },
       include: {
@@ -274,6 +279,7 @@ export const chatRoomService = {
         workDir: workDir?.trim() || null,
         rules,
         ownerId,
+        defaultAgentId: null,
         updatedAt: now,
       },
       include: {
@@ -637,19 +643,7 @@ export const chatRoomService = {
     });
 
     // 获取所有系统助手
-    const systemAgents = await prisma.agent.findMany({
-      where: { agentLevel: 'system', isActive: true },
-      select: {
-        id: true,
-        name: true,
-        avatar: true,
-        avatarColor: true,
-        description: true,
-        type: true,
-        agentLevel: true,
-        workDir: true,
-      },
-    });
+    const systemAgents = await getSystemAgents();
 
     // 构造虚拟的 ChatRoomAgent 对象用于系统助手
     const virtualSystemAgents = systemAgents.map((agent) => ({
@@ -672,6 +666,7 @@ export const chatRoomService = {
         type: agent.type,
         agentLevel: agent.agentLevel,
         workDir: agent.workDir,
+        speechConfig: agent.speechConfig,
       },
     }));
 

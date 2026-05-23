@@ -80,28 +80,28 @@ export function buildAgentLongTermMemorySection(
   const roomMemory = readMemoryFile(roomMemoryFile);
   const agentMemory = readMemoryFile(agentMemoryFile);
 
-  const instructions = `【长期记忆规则】
-你有两份长期记忆文件：
-1. 当前房间中的助手记忆（room + agent）：${roomMemoryFile}
-2. 助手全局记忆（agent）：${agentMemoryFile}
+  const instructions = `[Long-Term Memory Rules]
+You have two long-term memory files:
+1. Room-specific assistant memory (room + agent): ${roomMemoryFile}
+2. Global assistant memory (agent): ${agentMemoryFile}
 
-写入规则：
-- 当用户明确要求你记住某些长期有效的信息、偏好、身份资料、项目习惯或约束时，请你自己将信息整理后写入合适的 Markdown 文件。
-- 当用户只说“记住 xxx”但没有说明作用范围时，默认写入“当前房间中的助手记忆”，它只在当前群聊/房间内对你生效。
-- 如果这条记忆看起来也适合跨群聊复用，可以在回复中询问用户是否也保存到“助手全局记忆”，但不要擅自写入全局记忆。
-- 只有当用户明确要求“所有群聊都记住”、“全局记住”、“这个助手以后都记住”，或明确同意保存到共享/全局记忆时，才写入“助手全局记忆”。
-- 不要把临时任务、寒暄、一次性上下文或未经用户明确要求保存的信息写入长期记忆。
-- 当用户要求修改或忘记某条长期记忆时，请你自己编辑对应的记忆文件。`;
+Write rules:
+- When the user explicitly asks you to remember long-lived information, preferences, identity details, project habits, or constraints, organize the information and write it to the appropriate Markdown file yourself.
+- When the user only says "remember xxx" without specifying scope, default to the room-specific assistant memory. It only applies in the current chatroom/room.
+- If the memory also appears useful across chatrooms, ask whether the user wants it saved to global assistant memory, but do not write global memory without permission.
+- Only write to global assistant memory when the user explicitly asks for "all chatrooms", "global", "this assistant should always remember", or clearly agrees to shared/global memory.
+- Do not write temporary tasks, pleasantries, one-off context, or information the user did not explicitly ask you to save into long-term memory.
+- When the user asks you to modify or forget a long-term memory item, edit the corresponding memory file yourself.`;
 
   const memorySections: string[] = [];
   if (agentMemory) {
-    memorySections.push(`【助手全局长期记忆内容】
-以下内容来自助手全局记忆文件，会在所有房间中参考：
+    memorySections.push(`[Global Assistant Long-Term Memory]
+The following content comes from the assistant global memory file and applies across rooms:
 ${agentMemory}`);
   }
   if (roomMemory) {
-    memorySections.push(`【当前房间助手长期记忆内容】
-以下内容来自当前房间中的助手记忆文件，只适用于当前房间：
+    memorySections.push(`[Current Room Assistant Long-Term Memory]
+The following content comes from the current room assistant memory file and only applies in this room:
 ${roomMemory}`);
   }
 

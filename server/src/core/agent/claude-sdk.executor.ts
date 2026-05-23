@@ -47,18 +47,7 @@ import {
     buildInstalledSkillsSignature,
 } from './skill-instructions.js';
 import { syncGlobalClaudeLocalConfig } from './claude-local-config.js';
-import {
-    AGENT_CREATOR_AGENT_ID,
-    agentCreatorTools,
-    CHATROOM_HELPER_AGENT_ID,
-    chatroomHelperTools,
-    createExternalPlatformHelperTools,
-    CRON_TASK_HELPER_AGENT_ID,
-    cronTaskHelperTools,
-    EXTERNAL_PLATFORM_HELPER_AGENT_ID,
-    SKILL_MANAGER_AGENT_ID,
-    skillManagerTools,
-} from './tools/index.js';
+import { getSystemAssistantTools } from './tools/index.js';
 import { getDefaultChatRoomWorkDir, resolveAgentWorkDir } from './work-dir.js';
 
 function shortHash(input: string): string {
@@ -553,15 +542,15 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
 
     const modelInfo = this.llmProvider
       ? `
-## 当前模型
-你正在使用 ${this.llmProvider.name} 提供的模型服务。
-- 模型名称：${this.llmProvider.model}
-- 供应商类型：${this.llmProvider.type}`
+## Current Model
+You are using the model service provided by ${this.llmProvider.name}.
+- Model name: ${this.llmProvider.model}
+- Provider type: ${this.llmProvider.type}`
       : '';
     const chatRoomRulesSection = chatRoomRules?.trim()
       ? `
-## 群规则
-以下规则来自当前群聊，适用于群内所有助手。你必须在当前群聊的回复和协作中遵守：
+## Group Rules
+The following rules come from the current chatroom and apply to all assistants in this chatroom. You must follow them in replies and collaboration in this chatroom:
 ${chatRoomRules.trim()}`
       : '';
 
@@ -571,9 +560,9 @@ ${chatRoomRulesSection}
 
 ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
 
-## 工作目录
-你的工作目录是：${this.workDir}
-执行文件操作和命令时，默认在此目录下操作。使用相对路径时，基于此目录解析。`;
+## Working Directory
+Your working directory is: ${this.workDir}
+When you perform file operations or run commands, operate in this directory by default. Resolve relative paths from this directory.`;
 
     this.ensureWorkDirectory();
   }
@@ -948,7 +937,7 @@ ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
     let fullMessage = '';
 
     if (this.systemPrompt) {
-      fullMessage += `【系统指令】\n${this.systemPrompt}\n\n`;
+      fullMessage += `[System Instructions]\n${this.systemPrompt}\n\n`;
     }
 
     const longTermMemorySection = buildAgentLongTermMemorySection(
@@ -974,7 +963,7 @@ ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
       );
 
       if (memorySummary) {
-        fullMessage += `【群聊长期记忆摘要】
+        fullMessage += `[Group Chat Long-Term Memory Summary]
 ${memorySummary}
 
 `;
@@ -985,7 +974,8 @@ ${memorySummary}
           .map((msg) => `[${msg.senderName}]: ${msg.content}`)
           .join('\n');
 
-        fullMessage += `【最近群聊消息】以下是当前消息之前最近的群聊消息（共 ${recentHistory.length} 条）：
+        fullMessage += `[Recent Group Chat Messages]
+The following are the most recent group-chat messages before the current message (${recentHistory.length} total):
 ${historyText}
 
 `;
@@ -995,27 +985,27 @@ ${historyText}
     if (this.chatRoomAgents.length > 0) {
       const agentsInfo = this.chatRoomAgents
         .map((agent) => agent.name)
-        .join('、');
+        .join(', ');
       const otherAgents = this.chatRoomAgents.filter(
         (agent) => agent.name !== this.name,
       );
-      const otherAgentsList = otherAgents.map((agent) => agent.name).join('、');
-      const othersInfo = otherAgents.length > 0 ? otherAgentsList : '无';
+      const otherAgentsList = otherAgents.map((agent) => agent.name).join(', ');
+      const othersInfo = otherAgents.length > 0 ? otherAgentsList : 'none';
       const mentionTip =
         otherAgents.length > 0
-          ? '\n【提示】\n需要给其他助手发消息时，直接在最终回复中写“@助手名称 消息内容”，也可以在正文中用空格后跟“@助手名称”。只有 @ 位于行首，或 @ 前一个字符是空格时，才会触发目标助手；标点后直接 @ 不会触发。单条消息最多 @ 一个助手。如果用户只是要求你给某个助手发消息，最终回复只输出这条 @助手消息，不要添加解释、寒暄、总结，也不要擅自扩写成协作邀请。发消息前先判断是否真的需要触发其他助手。'
+          ? '\n[Tip]\nWhen you need to message another assistant, write "@assistant_name message content" directly in your final reply. You may also mention an assistant in body text when the @ is preceded by a space. A target assistant is triggered only when @ is at the start of a line or the previous character is a space; @ immediately after punctuation will not trigger. A single message may mention at most one assistant. If the user only asks you to send a message to another assistant, output only that @assistant message in the final reply, with no explanation, pleasantries, summary, or expanded collaboration invitation. Before sending such a message, decide whether triggering another assistant is actually necessary.'
           : '';
 
-      fullMessage += `【群聊成员信息】
-群聊工作目录：${this.workDir}
-当前群聊中的助手有：${agentsInfo}
-你是：${this.name}
-其他助手：${othersInfo}${mentionTip}
+      fullMessage += `[Group Chat Member Info]
+Chatroom working directory: ${this.workDir}
+Assistants in the current chatroom: ${agentsInfo}
+You are: ${this.name}
+Other assistants: ${othersInfo}${mentionTip}
 
 `;
     }
 
-    fullMessage += `【当前消息】\n${message}`;
+    fullMessage += `[Current Message]\n${message}`;
     return fullMessage;
   }
 
@@ -1027,7 +1017,7 @@ ${historyText}
 
     this.lastInjectedSkillsSignature = currentSignature;
     this.saveSessionId();
-    return `【技能清单更新】
+    return `[Installed Skills Update]
 ${buildInstalledSkillsInstructions(this.agentId)}`;
   }
 
@@ -1100,20 +1090,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
   }
 
   private getSystemAssistantTools(): any[] {
-    switch (this.agentId) {
-      case AGENT_CREATOR_AGENT_ID:
-        return agentCreatorTools;
-      case SKILL_MANAGER_AGENT_ID:
-        return skillManagerTools;
-      case CRON_TASK_HELPER_AGENT_ID:
-        return cronTaskHelperTools;
-      case CHATROOM_HELPER_AGENT_ID:
-        return chatroomHelperTools;
-      case EXTERNAL_PLATFORM_HELPER_AGENT_ID:
-        return createExternalPlatformHelperTools(this.chatRoomId);
-      default:
-        return [];
-    }
+    return getSystemAssistantTools(this.agentId, this.chatRoomId);
   }
 
   private buildSystemAssistantMcpTools(): any[] {
@@ -1137,7 +1114,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
                 {
                   type: 'text' as const,
                   text:
-                    error instanceof Error ? error.message : '工具执行失败。',
+                    error instanceof Error ? error.message : 'Tool execution failed.',
                 },
               ],
               isError: true,
@@ -1172,18 +1149,18 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
           ? [
               sdkTool(
                 'generate_image',
-                '通过 TeamAgentX 服务端受控图片模型生成图片。API Key 只在服务端使用。用户明确要求生成图片、海报、插画、产品图或视觉稿时使用。',
+                'Generate images through the TeamAgentX server-controlled image model. API keys are used only on the server. Use this when the user explicitly asks for an image, poster, illustration, product visual, or visual draft.',
                 {
                   prompt: z
                     .string()
                     .describe(
-                      '详细图片提示词。应包含主体、风格、构图、色彩、用途等。',
+                      'Detailed image prompt. Include subject, style, composition, colors, intended use, and other relevant details.',
                     ),
                   size: z
                     .string()
                     .optional()
                     .describe(
-                      '图片尺寸或比例，例如 1024x1024、1024x1792、1:1。',
+                      'Image size or aspect ratio, for example 1024x1024, 1024x1792, or 1:1.',
                     ),
                   n: z
                     .number()
@@ -1191,15 +1168,15 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
                     .min(1)
                     .max(4)
                     .optional()
-                    .describe('生成图片数量，默认 1，最多 4。'),
+                    .describe('Number of images to generate. Default 1, maximum 4.'),
                   filename: z
                     .string()
                     .optional()
-                    .describe('可选文件名，不要包含路径。'),
+                    .describe('Optional filename. Do not include a path.'),
                   extraJson: z
                     .record(z.string(), z.unknown())
                     .optional()
-                    .describe('供应商特定额外参数。'),
+                    .describe('Provider-specific extra parameters.'),
                 },
                 async (args) => {
                   if (!this.agentId) {
@@ -1207,7 +1184,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
                       content: [
                         {
                           type: 'text',
-                          text: '当前助手缺少 agentId，无法生成图片。',
+                          text: 'The current assistant is missing agentId and cannot generate images.',
                         },
                       ],
                       isError: true,
@@ -1226,7 +1203,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
                       content: [
                         {
                           type: 'text',
-                          text: `图片生成成功：${result.urls.join(', ') || result.files.join(', ')}`,
+                          text: `Image generation succeeded: ${result.urls.join(', ') || result.files.join(', ')}`,
                         },
                       ],
                       structuredContent: result as unknown as Record<
@@ -1242,7 +1219,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
                           text:
                             error instanceof Error
                               ? error.message
-                              : '图片生成失败。',
+                              : 'Image generation failed.',
                         },
                       ],
                       isError: true,

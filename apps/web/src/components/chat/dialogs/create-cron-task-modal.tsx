@@ -23,13 +23,6 @@ const cronPresets = [
   { label: '每月 1 号 9:00', value: '0 9 1 * *' },
 ];
 
-// 系统内置助手的 ID（触发助手时需要过滤掉）
-const SYSTEM_BUILTIN_AGENT_IDS = [
-  '596667f7-f901-4613-92a7-cc71d859fa22', // 技能安装助手
-  '29ffb519-82d2-4c32-8bc8-0b8d814a4eee', // 助手生成器
-  'a1b2c3d4-e5f6-7890-abcd-ef1234567890', // 定时任务助手
-];
-
 interface AgentInfo {
   id: string;
   agentId: string | null;
@@ -38,6 +31,7 @@ interface AgentInfo {
     name: string;
     avatar?: string | null;
     avatarColor?: string | null;
+    agentLevel?: 'normal' | 'system';
   } | null;
 }
 
@@ -84,9 +78,9 @@ export function CreateCronTaskModal({
 
   const isEditing = !!initialData;
 
-  // 过滤出有效的助手列表（排除系统内置助手）
+  // 过滤出有效的助手列表（排除系统助手）
   const validAgents = agents
-    .filter(a => a.agent && !SYSTEM_BUILTIN_AGENT_IDS.includes(a.agent!.id))
+    .filter(a => a.agent && a.agent.agentLevel !== 'system')
     .map(a => ({
       id: a.agent!.id,
       name: a.agent!.name,
