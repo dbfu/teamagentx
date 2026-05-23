@@ -22,7 +22,7 @@ import { taskQueueService } from '../modules/task-queue/task-queue.service.js';
 import { messageService } from '../modules/message/message.service.js';
 import { agentMemoryService } from '../modules/agent-memory/agent-memory.service.js';
 import { deserializeAgentSpeechConfig } from '../modules/speech/speech-config.js';
-import { gitBranchService } from '../modules/chatroom/git-branch.service.js';
+import { gitBranchService, type GitCommandAction } from '../modules/chatroom/git-branch.service.js';
 
 // Schema definitions
 const lastMessageSchema = {
@@ -233,6 +233,11 @@ interface UpdateGitBranchBody {
   branch: string;
 }
 
+interface ExecuteGitCommandBody {
+  action: GitCommandAction;
+  message?: string;
+}
+
 interface AddAgentBody {
   userId?: string;
   agentId?: string;
@@ -430,6 +435,81 @@ export async function chatRoomGateway(app: FastifyInstance) {
       return reply.send({ success: true, data: status });
     } catch (error: any) {
       return reply.code(400).send({ success: false, error: error.message || '切换分支失败' });
+    }
+  });
+
+  app.post<{ Params: ChatRoomParams; Body: ExecuteGitCommandBody }>('/chatrooms/:id/git-command', {
+    schema: {
+      description: '执行群聊工作目录的白名单 Git 快捷指令',
+      tags: ['ChatRooms'],
+      params: {
+        type: 'object',
+        properties: { id: { type: 'string' } },
+      },
+      body: {
+        type: 'object',
+        required: ['action'],
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['init', 'status', 'diff', 'add_all', 'commit', 'log', 'branch'],
+          },
+          message: { type: 'string' },
+        },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: {
+              type: 'object',
+              properties: {
+                action: { type: 'string' },
+                command: { type: 'string' },
+                workDir: { type: 'string' },
+                exitCode: { type: 'number' },
+                stdout: { type: 'string' },
+                stderr: { type: 'string' },
+                output: { type: 'string' },
+              },
+            },
+          },
+        },
+        400: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+        404: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const chatRoom = await chatRoomService.findById(id);
+
+    if (!chatRoom) {
+      return reply.code(404).send({ success: false, error: '群聊不存在' });
+    }
+
+    try {
+      const result = await gitBranchService.executeCommand(
+        chatRoom.id,
+        chatRoom.workDir,
+        request.body.action,
+        request.body.message,
+      );
+      return reply.send({ success: true, data: result });
+    } catch (error: any) {
+      return reply.code(400).send({ success: false, error: error.message || 'Git 命令执行失败' });
     }
   });
 

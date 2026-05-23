@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { createElement, useRef, useCallback, useEffect, useMemo } from 'react'
-import { Agent, Message, messageApi, agentApi, ExecutionRecord, debugApi, AgentDebugInfo, ChatRoom, chatRoomApi, AgentContextInfo, uploadApi } from '@/lib/agent-api'
+import { Agent, Message, messageApi, agentApi, ExecutionRecord, debugApi, AgentDebugInfo, ChatRoom, chatRoomApi, AgentContextInfo, uploadApi, type GitCommandAction } from '@/lib/agent-api'
 import { useSocketStore } from './socket-store'
 import { useChatRoomStore } from './chat-room-store'
 import type { ToolCall, StreamEvent, AgentStatus } from './socket-store'
@@ -47,6 +47,49 @@ const tooManyMentionsToast = createElement(
   '一次消息只能 ',
   createElement('span', { className: 'font-semibold text-yellow-700' }, '@ 一个助手'),
 )
+
+type NormalizedSlashCommandContent = {
+  content: string
+  gitCommand?: {
+    action: GitCommandAction
+    message?: string
+  }
+}
+
+function normalizeSlashCommandContent(content: string): NormalizedSlashCommandContent | null | undefined {
+  const gitCommitMatch = content.match(/^\/git\s+commit(?:\s+([\s\S]+))?$/i)
+  if (gitCommitMatch) {
+    const message = gitCommitMatch[1]?.trim()
+    if (!message) return null
+    return {
+      content: `git commit -m ${JSON.stringify(message)}`,
+      gitCommand: { action: 'commit', message },
+    }
+  }
+
+  const gitCommands: Record<string, { content: string; action: GitCommandAction }> = {
+    '/git init': { content: 'git init', action: 'init' },
+    '/git status': { content: 'git status', action: 'status' },
+    '/git diff': { content: 'git diff', action: 'diff' },
+    '/git add .': { content: 'git add .', action: 'add_all' },
+    '/git log': { content: 'git log --oneline -n 20', action: 'log' },
+    '/git branch': { content: 'git branch', action: 'branch' },
+  }
+  const gitCommand = gitCommands[content.toLowerCase()]
+  if (gitCommand) {
+    return {
+      content: gitCommand.content,
+      gitCommand: { action: gitCommand.action },
+    }
+  }
+
+  return undefined
+}
+
+function formatGitCommandResult(command: string, output: string, exitCode: number): string {
+  const header = exitCode === 0 ? 'Git 命令执行完成' : `Git 命令执行失败（退出码 ${exitCode}）`
+  return `${header}\n\n\`\`\`bash\n$ ${command}\n${output}\n\`\`\``
+}
 
 function getMentionedAgentNames(content: string): string[] {
   const names: string[] = []
@@ -1708,9 +1751,113 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
       return
     }
 
-    const mentionedDispatchableAgentNames = getMentionedDispatchableAgentNames(trimmedInput, chatRoom, allAgents)
+    const normalizedCommandContent = normalizeSlashCommandContent(trimmedInput)
+    if (normalizedCommandContent === null) {
+      toast.warning('请输入提交信息，例如：/git commit 修复问题')
+      return
+    }
+    const messageContent = normalizedCommandContent?.content ?? trimmedInput
+
+    const mentionedDispatchableAgentNames = getMentionedDispatchableAgentNames(messageContent, chatRoom, allAgents)
     if (mentionedDispatchableAgentNames.length > 1) {
       toast.warning(tooManyMentionsToast)
+      return
+    }
+
+    const gitCommand = normalizedCommandContent?.gitCommand
+    const shouldExecuteSystemGitCommand =
+      gitCommand &&
+      uploadedImages.length === 0 &&
+      !chatRoom.isQuickChatRoom &&
+      !chatRoom.defaultAgentId &&
+      mentionedDispatchableAgentNames.length === 0
+
+    if (shouldExecuteSystemGitCommand) {
+      const now = new Date().toISOString()
+      const humanMessage: Message = {
+        id: generateUUID(),
+        type: 'MESSAGE',
+        content: messageContent,
+        time: now,
+        userId: null,
+        agentId: null,
+        chatRoomId: chatRoom.id,
+        replyMessageId: null,
+        isHuman: true,
+        createdAt: now,
+        updatedAt: now,
+        user: { id: '', socketId: '', username: '用户', avatar: null },
+        agent: null,
+      }
+      useChatStore.getState().addMessage(humanMessage)
+      useChatRoomStore.getState().updateRoomLastMessage(chatRoom.id, humanMessage)
+      setInputValue('')
+      useChatStore.getState().setForceScrollToBottom(true)
+
+      try {
+        const response = await chatRoomApi.executeGitCommand(chatRoom.id, gitCommand)
+        if (!response.success || !response.data) {
+          throw new Error(response.error || 'Git 命令执行失败')
+        }
+
+        const resultTime = new Date().toISOString()
+        const resultMessage: Message = {
+          id: generateUUID(),
+          type: 'MESSAGE',
+          content: formatGitCommandResult(response.data.command, response.data.output, response.data.exitCode),
+          time: resultTime,
+          userId: null,
+          agentId: null,
+          chatRoomId: chatRoom.id,
+          replyMessageId: null,
+          isHuman: false,
+          createdAt: resultTime,
+          updatedAt: resultTime,
+          user: null,
+          agent: {
+            id: 'system-git',
+            name: '系统 Git',
+            avatar: null,
+            avatarColor: 'blue',
+          },
+        }
+        useChatStore.getState().addMessage(resultMessage)
+        useChatRoomStore.getState().updateRoomLastMessage(chatRoom.id, resultMessage)
+        if (response.data.exitCode === 0) {
+          toast.success('Git 命令执行完成')
+        } else {
+          toast.error('Git 命令执行失败')
+        }
+      } catch (error) {
+        const resultTime = new Date().toISOString()
+        const resultMessage: Message = {
+          id: generateUUID(),
+          type: 'MESSAGE',
+          content: error instanceof Error ? error.message : 'Git 命令执行失败',
+          time: resultTime,
+          userId: null,
+          agentId: null,
+          chatRoomId: chatRoom.id,
+          replyMessageId: null,
+          isHuman: false,
+          createdAt: resultTime,
+          updatedAt: resultTime,
+          user: null,
+          agent: {
+            id: 'system-git',
+            name: '系统 Git',
+            avatar: null,
+            avatarColor: 'blue',
+          },
+        }
+        useChatStore.getState().addMessage(resultMessage)
+        useChatRoomStore.getState().updateRoomLastMessage(chatRoom.id, resultMessage)
+        toast.error(resultMessage.content)
+      }
+
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur()
+      }
       return
     }
 
@@ -1735,7 +1882,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     }))
 
     // 消息内容不再包含 Markdown 图片格式，图片通过 attachments 传递
-    const content = trimmedInput
+    const content = messageContent
 
     // 生成临时消息 ID（兼容 Android WebView）
     const tempMessageId = generateUUID()

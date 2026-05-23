@@ -52,6 +52,41 @@ const SLASH_COMMANDS: SlashCommand[] = [
     title: '清空上下文',
     description: '清除当前助手的上下文记忆',
   },
+  {
+    command: '/git status',
+    title: 'Git status',
+    description: '查看工作区状态',
+  },
+  {
+    command: '/git init',
+    title: 'Git init',
+    description: '初始化 Git 仓库',
+  },
+  {
+    command: '/git diff',
+    title: 'Git diff',
+    description: '查看未暂存变更',
+  },
+  {
+    command: '/git add .',
+    title: 'Git add all',
+    description: '暂存全部变更',
+  },
+  {
+    command: '/git commit',
+    title: 'Git commit',
+    description: '后续文本会作为提交信息',
+  },
+  {
+    command: '/git log',
+    title: 'Git log',
+    description: '查看最近提交',
+  },
+  {
+    command: '/git branch',
+    title: 'Git branch',
+    description: '查看分支列表',
+  },
 ]
 
 function escapeRegExp(value: string): string {
@@ -849,7 +884,7 @@ export function MentionInput({
       {showSlashCommands && filteredCommands.length > 0 && (
         <div
           ref={commandDropdownRef}
-          className="absolute bottom-full z-20 mb-1 max-h-72 w-72 overflow-y-auto rounded-lg border border-border bg-popover shadow-lg animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-2 duration-200"
+          className="absolute bottom-full z-20 mb-1 max-h-72 w-80 overflow-y-auto rounded-lg border border-border bg-popover shadow-lg animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-2 duration-200"
           style={{ left: `${slashLeft}px` }}
         >
           {filteredCommands.map((item, index) => (
@@ -863,7 +898,7 @@ export function MentionInput({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => handleSelectSlashCommand(item)}
             >
-              <span className="mt-0.5 inline-flex w-16 shrink-0 justify-center rounded-md bg-blue-500/10 px-1.5 py-0.5 font-mono text-xs font-medium text-blue-600">
+              <span className="mt-0.5 inline-flex min-w-[6.75rem] shrink-0 whitespace-nowrap rounded-md bg-blue-500/10 px-2 py-0.5 font-mono text-xs font-medium text-blue-600">
                 {item.command}
               </span>
               <span className="min-w-0 flex-1">
