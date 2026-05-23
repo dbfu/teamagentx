@@ -9,6 +9,7 @@ import type { ToolCall } from '../executor.interface.js';
 import { parseKnownMentions } from './message-utils.js';
 import { debugLog } from './debug.js';
 import { enqueueAgentTask } from './agent-dispatch.service.js';
+import { GROUP_ASSISTANT_ID } from '../system-assistant.constants.js';
 // 消息接收事件接口
 interface ReceivedMessageEvent {
   message: Message;
@@ -101,12 +102,21 @@ export function setupAIHandlers(
 
       const chatRoom = await chatRoomService.findById(chatRoomId);
 
+      const agentTriggerMode = chatRoom?.agentTriggerMode ?? 'auto';
+
       // 手动模式下，助手消息中的 @ 只作为公开展示。
-      if (!message.isHuman && chatRoom?.agentTriggerMode !== 'auto') {
+      // 协调模式下，只有群助手可以通过 @ 派发其他助手。
+      if (
+        !message.isHuman &&
+        (
+          agentTriggerMode === 'manual' ||
+          (agentTriggerMode === 'coordinator' && message.agentId !== GROUP_ASSISTANT_ID)
+        )
+      ) {
         debugLog('assistantMentionTriggerSkipped', {
           chatRoomId,
           messageId: message.id,
-          reason: 'manualMode',
+          reason: agentTriggerMode === 'coordinator' ? 'coordinatorModeWorkerMention' : 'manualMode',
         });
         return;
       }

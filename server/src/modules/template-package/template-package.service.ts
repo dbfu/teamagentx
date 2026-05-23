@@ -101,7 +101,7 @@ export const templatePackageService = {
         rules: room.rules,
         workDir: room.workDir,
         defaultAgentId: room.defaultAgentId,
-        agentTriggerMode: (room.agentTriggerMode as 'auto' | 'manual') ?? 'auto',
+        agentTriggerMode: (room.agentTriggerMode as 'auto' | 'manual' | 'coordinator') ?? 'auto',
       },
       agents: agents.map((agent) => ({
         id: agent.id,
@@ -210,7 +210,7 @@ export const templatePackageService = {
         description: string | null;
         rules: string | null;
         defaultAgentId: string | null;
-        agentTriggerMode: 'auto' | 'manual';
+        agentTriggerMode: 'auto' | 'manual' | 'coordinator';
       };
       agents: Array<{
         id: string;

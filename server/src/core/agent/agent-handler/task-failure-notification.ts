@@ -3,6 +3,7 @@ import { agentService } from '../agent.service.js';
 import { chatRoomService } from '../../../modules/chatroom/chatroom.service.js';
 import { messageService } from '../../../modules/message/message.service.js';
 import { sendMessageToAgent } from './agent-dispatch.service.js';
+import { GROUP_ASSISTANT_ID } from '../system-assistant.constants.js';
 
 /**
  * 任务失败后通知分配者助手
@@ -66,6 +67,10 @@ export async function notifySourceAgentOnFailure(params: {
   const chatRoom = await chatRoomService.findById(chatRoomId);
   if (chatRoom?.agentTriggerMode === 'manual') {
     console.warn('[notifySourceAgentOnFailure] 群聊为手动模式，跳过自动通知');
+    return;
+  }
+  if (chatRoom?.agentTriggerMode === 'coordinator' && sourceAgent.id !== GROUP_ASSISTANT_ID) {
+    console.warn('[notifySourceAgentOnFailure] 群聊为协调模式，非群助手分配者跳过自动通知');
     return;
   }
 

@@ -68,7 +68,7 @@ const chatRoomSchema = {
     isQuickChatRoom: { type: 'boolean' },
     quickChatAgentId: { type: 'string', nullable: true },
     defaultAgentId: { type: 'string', nullable: true },
-    agentTriggerMode: { type: 'string' },
+    agentTriggerMode: { type: 'string', enum: ['auto', 'manual', 'coordinator'] },
     isPinned: { type: 'boolean' },
     pinnedAt: { type: 'string', nullable: true },
     createdAt: { type: 'string' },
@@ -226,7 +226,7 @@ interface UpdateChatRoomBody {
   rules?: string;
   workDir?: string | null;
   defaultAgentId?: string | null;
-  agentTriggerMode?: 'auto' | 'manual';
+  agentTriggerMode?: 'auto' | 'manual' | 'coordinator';
 }
 
 interface UpdateGitBranchBody {
@@ -1271,7 +1271,7 @@ export async function chatRoomGateway(app: FastifyInstance) {
           rules: { type: 'string' },
           workDir: { type: 'string', nullable: true },
           defaultAgentId: { type: 'string', nullable: true },
-          agentTriggerMode: { type: 'string' },
+          agentTriggerMode: { type: 'string', enum: ['auto', 'manual', 'coordinator'] },
         },
       },
       response: {

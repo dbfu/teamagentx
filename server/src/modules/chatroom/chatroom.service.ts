@@ -34,7 +34,7 @@ export interface UpdateChatRoomData {
   rules?: string;
   workDir?: string | null;
   defaultAgentId?: string | null;
-  agentTriggerMode?: 'auto' | 'manual';
+  agentTriggerMode?: 'auto' | 'manual' | 'coordinator';
 }
 
 export interface AddAgentData {
@@ -117,11 +117,15 @@ async function normalizeDefaultAgentId(chatRoomId: string, defaultAgentId: strin
     throw new Error('默认助手不存在或未启用');
   }
 
-  if (agent.agentLevel === 'system') {
-    throw new Error('系统助手不能设为默认接收助手');
+  if (agent.agentLevel === 'system' && agent.id !== GROUP_ASSISTANT_ID) {
+    throw new Error('只有群助手可以作为默认系统助手');
   }
 
-  // 系统助手是虚拟成员；普通助手必须已经加入群聊。
+  if (agent.id === GROUP_ASSISTANT_ID) {
+    return normalizedAgentId;
+  }
+
+  // 群助手是虚拟成员；普通助手必须已经加入群聊。
   const member = await prisma.chatRoomAgent.findFirst({
     where: { chatRoomId, agentId: normalizedAgentId },
     select: { id: true },

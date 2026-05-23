@@ -7,7 +7,7 @@ interface SnapshotRoomInput {
   rules: string | null;
   workDir: string | null;
   defaultAgentId: string | null;
-  agentTriggerMode: 'auto' | 'manual';
+  agentTriggerMode: 'auto' | 'manual' | 'coordinator';
 }
 
 interface SnapshotAgentCapabilityInput {

@@ -1,6 +1,6 @@
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ChatRoom, chatRoomApi } from '@/lib/agent-api'
+import { ChatRoom, chatRoomApi, type AgentTriggerMode } from '@/lib/agent-api'
 import { bridgeApi, BridgeBot } from '@/lib/bridge-api'
 import { groupAvatarOptions, GroupAvatarImage, normalizeGroupAvatarIndex } from '@/lib/group-avatars'
 import { cn } from '@/lib/utils'
@@ -50,9 +50,7 @@ export function RoomSettingsPanel({
   const nameInputRef = useRef<HTMLInputElement>(null)
   const descInputRef = useRef<HTMLInputElement>(null)
   const rulesInputRef = useRef<HTMLTextAreaElement>(null)
-  const selectableAgents = (chatRoom.chatRoomAgents || []).filter(
-    (roomAgent) => roomAgent.agent && roomAgent.agent.agentLevel !== 'system',
-  )
+  const selectableAgents = (chatRoom.chatRoomAgents || []).filter((roomAgent) => roomAgent.agent)
   const hasSelectedDefaultAgent = selectableAgents.some((roomAgent) => roomAgent.agent?.id === defaultAgentId)
 
   useEffect(() => {
@@ -90,7 +88,7 @@ export function RoomSettingsPanel({
     }).catch(() => {})
   }, [chatRoom.id])
 
-  const handleSave = async (updates: { name?: string; avatar?: string; description?: string; rules?: string; workDir?: string | null; defaultAgentId?: string | null; agentTriggerMode?: 'auto' | 'manual' }) => {
+  const handleSave = async (updates: { name?: string; avatar?: string; description?: string; rules?: string; workDir?: string | null; defaultAgentId?: string | null; agentTriggerMode?: AgentTriggerMode }) => {
     setSaving(true)
     try {
       const response = await chatRoomApi.update(chatRoom.id, updates)
@@ -135,7 +133,7 @@ export function RoomSettingsPanel({
     handleSave({ defaultAgentId: nextAgentId || null })
   }
 
-  const handleTriggerModeChange = (value: 'auto' | 'manual') => {
+  const handleTriggerModeChange = (value: AgentTriggerMode) => {
     setAgentTriggerMode(value)
     handleSave({ agentTriggerMode: value })
   }
@@ -368,19 +366,21 @@ export function RoomSettingsPanel({
           <div>
             <label className="mb-1.5 block text-sm font-medium text-muted-foreground">助手触发模式</label>
             <div className="text-xs text-muted-foreground mb-2">
-              自动模式：助手消息中的 @ 会触发其他助手执行任务。<br />
-              手动模式：助手消息中的 @ 不会触发其他助手，仅作提及。
+              协调模式：只有群助手可以派发其他助手。<br />
+              自由协作：助手消息中的 @ 会触发其他助手。<br />
+              手动模式：助手消息中的 @ 仅作提及。
             </div>
             <Select
               value={agentTriggerMode}
-              onValueChange={(v) => handleTriggerModeChange(v as 'auto' | 'manual')}
+              onValueChange={(v) => handleTriggerModeChange(v as AgentTriggerMode)}
               disabled={saving}
             >
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="auto">自动模式（推荐）</SelectItem>
+                <SelectItem value="coordinator">协调模式（推荐）</SelectItem>
+                <SelectItem value="auto">自由协作</SelectItem>
                 <SelectItem value="manual">手动模式</SelectItem>
               </SelectContent>
             </Select>

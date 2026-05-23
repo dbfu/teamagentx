@@ -125,6 +125,9 @@ export async function sendMessageToAgent(params: {
   if (!sourceAgent || !sourceAgent.isActive) {
     throw new Error('来源助手不存在或未启用');
   }
+  if (chatRoom.agentTriggerMode === 'coordinator' && sourceAgent.id !== GROUP_ASSISTANT_ID) {
+    throw new Error('当前群聊为协调模式，只有群助手可以派发其他助手');
+  }
   if (sourceAgent.agentLevel !== 'system') {
     const isSourceMember = await chatRoomService.isAgentMember(params.chatRoomId, sourceAgent.id);
     if (!isSourceMember) {

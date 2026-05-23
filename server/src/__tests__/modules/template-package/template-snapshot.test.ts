@@ -92,4 +92,23 @@ describe('template snapshot builder', () => {
     assert.equal(snapshot.cronTasks[0]?.name, '日报');
     assert.equal(snapshot.agents[0]?.claudeModel, 'claude-sonnet-4');
   });
+
+  test('keeps coordinator trigger mode in room metadata', () => {
+    const snapshot = buildTemplateSnapshot({
+      room: {
+        id: 'room-1',
+        name: '协作群',
+        description: null,
+        rules: null,
+        workDir: null,
+        defaultAgentId: null,
+        agentTriggerMode: 'coordinator',
+      },
+      agents: [],
+      categories: [],
+      cronTasks: [],
+    });
+
+    assert.equal(snapshot.room.agentTriggerMode, 'coordinator');
+  });
 });

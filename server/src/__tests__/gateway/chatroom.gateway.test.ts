@@ -283,6 +283,38 @@ describe('ChatRoom Gateway API', () => {
     });
   });
 
+  describe('PUT /chatrooms/:id', () => {
+    test('应该允许群助手作为协调模式默认助手', async () => {
+      await syncSystemAgent(getGroupAssistantDefinition());
+
+      const chatRoomResponse = await app.inject({
+        method: 'POST',
+        url: '/chatrooms',
+        payload: {
+          name: 'Coordinator Room ' + Date.now(),
+          workDir: path.join(workDirRoot, 'coordinator-room'),
+        },
+      });
+      assert.strictEqual(chatRoomResponse.statusCode, 201);
+      const createdRoom = chatRoomResponse.json();
+
+      const response = await app.inject({
+        method: 'PUT',
+        url: `/chatrooms/${createdRoom.data.id}`,
+        payload: {
+          defaultAgentId: GROUP_ASSISTANT_ID,
+          agentTriggerMode: 'coordinator',
+        },
+      });
+
+      assert.strictEqual(response.statusCode, 200);
+      const body = response.json();
+      assert.strictEqual(body.success, true);
+      assert.strictEqual(body.data.defaultAgentId, GROUP_ASSISTANT_ID);
+      assert.strictEqual(body.data.agentTriggerMode, 'coordinator');
+    });
+  });
+
   describe('Git branch status', () => {
     test('应该返回绑定 git 工作目录的当前分支和本地分支列表', async () => {
       const repoDir = createGitRepo('status-repo');

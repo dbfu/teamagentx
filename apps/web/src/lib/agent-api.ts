@@ -1,6 +1,8 @@
 import { getApiBaseUrl } from './config'
 import type { SpeechProfile } from '@/speech'
 
+export type AgentTriggerMode = 'auto' | 'manual' | 'coordinator'
+
 // 分类相关类型
 export interface AgentCategory {
   id: string
@@ -174,7 +176,7 @@ export interface ChatRoom {
   isQuickChatRoom?: boolean
   quickChatAgentId?: string | null
   defaultAgentId?: string | null
-  agentTriggerMode?: 'auto' | 'manual'  // 助手触发模式：auto(自动) | manual(手动)
+  agentTriggerMode?: AgentTriggerMode  // 助手触发模式：auto(自由协作) | manual(手动) | coordinator(协调)
   owner?: {
     id: string
     username: string
@@ -300,7 +302,7 @@ export interface TemplatePackageSnapshot {
     description: string | null
     rules: string | null
     defaultAgentId: string | null
-    agentTriggerMode: 'auto' | 'manual'
+    agentTriggerMode: AgentTriggerMode
   }
   agents: Array<{
     id: string
@@ -515,7 +517,7 @@ export const chatRoomApi = {
   },
 
   // 更新群组
-  async update(id: string, data: { name?: string; avatar?: string; avatarColor?: string; description?: string; rules?: string; workDir?: string | null; defaultAgentId?: string | null; agentTriggerMode?: 'auto' | 'manual' }): Promise<ApiResponse<ChatRoom>> {
+  async update(id: string, data: { name?: string; avatar?: string; avatarColor?: string; description?: string; rules?: string; workDir?: string | null; defaultAgentId?: string | null; agentTriggerMode?: AgentTriggerMode }): Promise<ApiResponse<ChatRoom>> {
     return request<ChatRoom>(`/chatrooms/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
