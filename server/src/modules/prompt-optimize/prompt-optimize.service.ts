@@ -2,14 +2,14 @@ import type { FastifyReply } from 'fastify';
 import { createLlmClient } from '../../lib/llm-client.js';
 import { llmProviderService } from '../llm-provider/llm-provider.service.js';
 
-// 优化提示词的系统 prompt
-const OPTIMIZE_SYSTEM_PROMPT = `你是一个专业的 AI 助手提示词优化专家。请优化用户提供的提示词，使其：
-1. 更加清晰、结构化
-2. 包含明确的角色定义
-3. 包含具体的行为指导
-4. 保持原意不变
+// System prompt for prompt optimization.
+const OPTIMIZE_SYSTEM_PROMPT = `You are an expert at optimizing AI assistant prompts. Improve the user's prompt so that it:
+1. Is clearer and more structured.
+2. Includes a clear role definition.
+3. Includes concrete behavioral guidance.
+4. Preserves the original intent.
 
-请直接输出优化后的提示词，不要添加任何解释或说明。`;
+Output only the optimized prompt. Do not add explanations or commentary.`;
 
 export const promptOptimizeService = {
   /**

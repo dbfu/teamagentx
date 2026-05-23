@@ -94,25 +94,25 @@ export function buildInstalledSkillsInstructions(
   skillsDirOverride?: string,
 ): string {
   if (!agentId) {
-    return `## 已安装技能
-当前助手未绑定技能目录。用户询问有哪些技能时，只能回答未安装技能，不要列出系统内置技能、全局技能或其他助手的技能。`;
+    return `## Installed Skills
+The current assistant is not bound to a skills directory. If the user asks what skills are available, only say that no skills are installed. Do not list built-in system skills, global skills, or skills from other assistants.`;
   }
 
   const skillsDir = resolveSkillsDir(agentId, skillsDirOverride);
   if (!skillsDir) {
-    return `## 已安装技能
-当前助手未绑定技能目录。用户询问有哪些技能时，只能回答未安装技能，不要列出系统内置技能、全局技能或其他助手的技能。`;
+    return `## Installed Skills
+The current assistant is not bound to a skills directory. If the user asks what skills are available, only say that no skills are installed. Do not list built-in system skills, global skills, or skills from other assistants.`;
   }
 
   if (!fs.existsSync(skillsDir)) {
-    return `## 已安装技能
-当前助手未安装技能。用户询问有哪些技能时，只能回答未安装技能，不要列出系统内置技能、全局技能或其他助手的技能。`;
+    return `## Installed Skills
+The current assistant has no installed skills. If the user asks what skills are available, only say that no skills are installed. Do not list built-in system skills, global skills, or skills from other assistants.`;
   }
 
   const skillEntries = readSkillEntries(skillsDir);
   if (skillEntries === null) {
-    return `## 已安装技能
-当前助手的技能目录不可读取。用户询问有哪些技能时，只能回答当前无法读取已安装技能，不要列出系统内置技能、全局技能或其他助手的技能。`;
+    return `## Installed Skills
+The current assistant's skills directory cannot be read. If the user asks what skills are available, only say that installed skills cannot be read right now. Do not list built-in system skills, global skills, or skills from other assistants.`;
   }
 
   const skills: Array<{ slug: string; name: string; description?: string }> = [];
@@ -126,8 +126,8 @@ export function buildInstalledSkillsInstructions(
   }
 
   if (skills.length === 0) {
-    return `## 已安装技能
-当前助手未安装技能。用户询问有哪些技能时，只能回答未安装技能，不要列出系统内置技能、全局技能或其他助手的技能。`;
+    return `## Installed Skills
+The current assistant has no installed skills. If the user asks what skills are available, only say that no skills are installed. Do not list built-in system skills, global skills, or skills from other assistants.`;
   }
 
   const availableSkills = skills
@@ -137,8 +137,8 @@ export function buildInstalledSkillsInstructions(
     })
     .join('\n');
 
-  return `## 已安装技能
-以下是 TeamAgentX 为当前助手安装的全部技能。用户询问有哪些技能时，只能列出这里的技能；不要列出系统内置技能、全局技能、其他目录中的技能或其他助手的技能。
+  return `## Installed Skills
+The following are all skills TeamAgentX has installed for the current assistant. If the user asks what skills are available, only list these skills. Do not list built-in system skills, global skills, skills from other directories, or skills from other assistants.
 
 ### Skill roots
 - \`teamagentx\` = \`${skillsDir}\`
@@ -147,6 +147,6 @@ export function buildInstalledSkillsInstructions(
 ${availableSkills}
 
 ### How to use skills
-- 当用户明确点名某个已安装技能，或任务明显匹配该技能描述时，先读取对应的 \`SKILL.md\`，再按其中说明执行。
-- 不要主动使用未列在上方的技能。`;
+- When the user explicitly names an installed skill, or the task clearly matches a skill description, read the corresponding \`SKILL.md\` first and then follow its instructions.
+- Do not proactively use skills that are not listed above.`;
 }

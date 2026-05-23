@@ -60,41 +60,41 @@ export function getImageGenerationSkillInstructions(provider: ImageGenerationPro
   const profile = getImageProviderProfile(providerName, provider.model);
   const docs = profile.docs.length > 0
     ? profile.docs.map((url) => `- ${url}`).join('\n')
-    : '- 当前供应商没有单独维护的参考链接，请优先使用最保守的 size / n / extraJson。';
+    : '- This provider has no separately maintained reference links. Prefer conservative size / n / extraJson usage.';
   const sizeGuidance = profile.sizeGuidance.map((item) => `- ${item}`).join('\n');
   const extraFieldGuidance = profile.extraFieldGuidance.map((item) => `- ${item}`).join('\n');
   const examples = profile.examples.map((item) => `- ${item}`).join('\n');
 
-  return `## 图片生成能力
-当前助手已开启图片生成能力，可在用户要求生成图片、海报、插画、产品图、视觉稿时使用。
+  return `## Image Generation Capability
+The current assistant has image generation enabled. Use it when the user asks to create images, posters, illustrations, product visuals, or visual drafts.
 
-### 当前图片模型
-- 配置名称：${provider.name}
-- 模型 ID：${provider.model}
-- 供应商类型：${providerName}
-- 调用方式：${apiType}
-- API Base URL：${provider.apiUrl || '(未配置，自带默认值)'}
+### Current Image Model
+- Configuration name: ${provider.name}
+- Model ID: ${provider.model}
+- Provider type: ${providerName}
+- Invocation mode: ${apiType}
+- API Base URL: ${provider.apiUrl || '(not configured; built-in default is used)'}
 
-### 当前供应商参数手册
+### Current Provider Parameter Guide
 ${profile.summary}
 
-参考文档：
+Reference docs:
 ${docs}
 
-尺寸规则：
+Size rules:
 ${sizeGuidance}
 
-额外参数规则：
+Extra parameter rules:
 ${extraFieldGuidance}
 
-常见映射示例：
+Common mapping examples:
 ${examples}
 
-### 调用规则
-- 必须通过 TeamAgentX 受控工具生成图片：Claude 工具名为 \`mcp__tax__generate_image\`，Codex/ACP 工具名为 \`tax.generate_image\` 或 \`generate_image\`。
-- 不要自己读取、要求或输出 API Key；模型密钥只保存在 TeamAgentX 服务端。
-- 用户如果只给了语义化尺寸，比如“竖版海报”“横版 banner”“方形头像”，你应该先结合当前供应商手册，把它翻译成合适的 \`size\` 和必要的 \`extraJson\`，再调用工具。
-- 只有在当前供应商文档明确支持时，才传 \`extraJson\` 字段；不要臆造字段名。
-- 工具成功后读取 \`urls\` 字段，并在回复中使用 Markdown 图片语法返回给用户，例如：\`![生成图片](/uploads/images/example.png)\`。
-- **工具调用失败时，禁止自动重试**：不要再次调用 \`generate_image\`/\`mcp__tax__generate_image\`，无论错误是网络、超时、HTTP 4xx/5xx、任务失败还是任何其他原因。把错误信息原样转述给用户，并简要给出可以调整的提示词、尺寸、数量或模型配置建议，由用户决定是否重新发起请求。`;
+### Invocation Rules
+- You must generate images through TeamAgentX-controlled tools: for Claude, use \`mcp__tax__generate_image\`; for Codex/ACP, use \`tax.generate_image\` or \`generate_image\`.
+- Do not read, request, or output API keys yourself. Model credentials are stored only on the TeamAgentX server.
+- If the user only gives a semantic size such as "portrait poster", "landscape banner", or "square avatar", translate it into an appropriate \`size\` and any required \`extraJson\` based on the current provider guide before calling the tool.
+- Only pass \`extraJson\` fields that are explicitly supported by the current provider docs. Do not invent field names.
+- After a successful tool call, read the \`urls\` field and return the result with Markdown image syntax, for example: \`![generated image](/uploads/images/example.png)\`.
+- **Do not auto-retry after a tool failure**: do not call \`generate_image\`/\`mcp__tax__generate_image\` again, whether the failure is caused by network issues, timeout, HTTP 4xx/5xx, task failure, or anything else. Relay the error as-is and briefly suggest prompt, size, count, or model-configuration adjustments; let the user decide whether to retry.`;
 }
