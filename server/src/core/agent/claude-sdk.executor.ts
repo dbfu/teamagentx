@@ -232,7 +232,7 @@ function isRecoverableSessionError(message: string): boolean {
   );
 }
 
-const DEFAULT_BACKGROUND_IDLE_FINISH_MS = 20 * 1000;
+const DEFAULT_BACKGROUND_IDLE_FINISH_MS = 60 * 1000;
 
 function getBackgroundIdleFinishMs(): number {
   const rawValue = process.env.CLAUDE_AGENT_BACKGROUND_IDLE_FINISH_MS;
@@ -245,6 +245,23 @@ function getBackgroundIdleFinishMs(): number {
 
   return parsed;
 }
+
+function shouldApplyBackgroundIdleFinish(state: {
+  hasBackgroundedLongRunningCommand: boolean;
+  waitingForTaskOutput: boolean;
+  waitingForAssistantAfterToolResult: boolean;
+}): boolean {
+  return (
+    state.hasBackgroundedLongRunningCommand &&
+    !state.waitingForTaskOutput &&
+    !state.waitingForAssistantAfterToolResult
+  );
+}
+
+export const __claudeSdkTestUtils = {
+  getBackgroundIdleFinishMs,
+  shouldApplyBackgroundIdleFinish,
+};
 
 function resolveClaudeCodeExecutable(): string | undefined {
   const isWindows = process.platform === 'win32';
@@ -1491,10 +1508,13 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
 
       const nextMessage = iterator.next();
       const result =
-        this.hasBackgroundedLongRunningCommand &&
-        !this.waitingForTaskOutput &&
-        !this.waitingForAssistantAfterToolResult &&
-        this.content.trim()
+        shouldApplyBackgroundIdleFinish({
+          hasBackgroundedLongRunningCommand:
+            this.hasBackgroundedLongRunningCommand,
+          waitingForTaskOutput: this.waitingForTaskOutput,
+          waitingForAssistantAfterToolResult:
+            this.waitingForAssistantAfterToolResult,
+        })
           ? await Promise.race([
               nextMessage,
               new Promise<{done: true; value: undefined; timedOut: true}>(
