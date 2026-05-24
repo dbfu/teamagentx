@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils'
 import { Image, Loader2, Maximize2, Mic, Minimize2, Send, Square } from 'lucide-react'
-import { MentionInput } from './mention-input'
+import { MentionInput, MentionInputRef } from './mention-input'
 import { ImagePreviewList, PendingImage } from './image-preview-list'
 import { useRef, useState, useEffect, DragEvent, ChangeEvent, ClipboardEvent, memo } from 'react'
 import { useChatStore } from '@/stores/chat-store'
@@ -47,6 +47,7 @@ export const ChatInputArea = memo(function ChatInputArea({
   const inputValue = useChatStore((s) => s.inputValue)
   const setInputValue = useChatStore((s) => s.setInputValue)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const mentionInputRef = useRef<MentionInputRef>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const mediaStreamRef = useRef<MediaStream | null>(null)
@@ -58,6 +59,15 @@ export const ChatInputArea = memo(function ChatInputArea({
   const [isInputExpanded, setIsInputExpanded] = useState(false)
   const isMountedRef = useRef(true)   // #31: 组件挂载状态跟踪
   const isMobile = useIsMobile()
+
+  // 切换群聊时自动聚焦输入框
+  useEffect(() => {
+    // 延迟聚焦，等待 DOM 更新完成
+    const timer = setTimeout(() => {
+      mentionInputRef.current?.focus()
+    }, 100)
+    return () => clearTimeout(timer)
+  }, [chatRoomId])
 
   // #30: 组件卸载时清理 MediaRecorder 和媒体流
   useEffect(() => {
@@ -327,6 +337,7 @@ export const ChatInputArea = memo(function ChatInputArea({
 
   const inputEditor = (
     <MentionInput
+      ref={mentionInputRef}
       value={inputValue}
       onChange={setInputValue}
       onKeyDown={handleKeyDown}

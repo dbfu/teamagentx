@@ -204,6 +204,18 @@ export interface GitBranchStatus {
   branches: GitBranchInfo[]
 }
 
+export type GitCommandAction = 'init' | 'status' | 'diff' | 'add_all' | 'commit' | 'log' | 'branch'
+
+export interface GitCommandResult {
+  action: GitCommandAction
+  command: string
+  workDir: string
+  exitCode: number
+  stdout: string
+  stderr: string
+  output: string
+}
+
 export interface PackageScriptInfo {
   id: string
   name: string
@@ -561,6 +573,13 @@ export const chatRoomApi = {
     return request<GitBranchStatus>(`/chatrooms/${id}/git-branch`, {
       method: 'POST',
       body: JSON.stringify({ branch }),
+    })
+  },
+
+  async executeGitCommand(id: string, data: { action: GitCommandAction; message?: string }): Promise<ApiResponse<GitCommandResult>> {
+    return request<GitCommandResult>(`/chatrooms/${id}/git-command`, {
+      method: 'POST',
+      body: JSON.stringify(data),
     })
   },
 
