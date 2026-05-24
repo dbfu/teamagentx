@@ -511,6 +511,10 @@ function quotePowerShellString(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
+function encodePowerShellCommand(command: string): string {
+  return Buffer.from(command, 'utf16le').toString('base64');
+}
+
 function buildKeepAliveShellCommand(shellPath: string): string {
   const shellName = path.basename(shellPath);
   if (shellName === 'zsh') {
@@ -591,12 +595,32 @@ async function runCommandInTerminal(
       `Set-Location -LiteralPath ${quotePowerShellString(folderPath)}`,
       `& ${command}`,
     ].join('; ');
-    const child = spawn('powershell.exe', ['-NoProfile', '-Command', `Start-Process powershell.exe -ArgumentList '-NoExit', '-Command', ${quotePowerShellString(powerShellCommand)}`], {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: false,
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn('cmd.exe', [
+        '/d',
+        '/s',
+        '/c',
+        'start',
+        '',
+        'powershell.exe',
+        '-NoExit',
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-EncodedCommand',
+        encodePowerShellCommand(powerShellCommand),
+      ], {
+        cwd: folderPath,
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: false,
+      });
+      child.once('error', reject);
+      child.once('spawn', () => {
+        child.unref();
+        resolve();
+      });
     });
-    child.unref();
     return;
   }
 
