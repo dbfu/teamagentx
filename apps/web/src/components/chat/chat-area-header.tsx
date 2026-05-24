@@ -54,10 +54,12 @@ export function ChatAreaHeader({
   const visibleScripts = packageScripts?.scripts ?? []
   const shouldShowPackageScriptsMenu = packageScripts?.hasPackageJson === true
 
-  const loadPackageScripts = useCallback(async () => {
+  const loadPackageScripts = useCallback(async (options: { reset?: boolean } = {}) => {
     const requestId = packageScriptsRequestRef.current + 1
     packageScriptsRequestRef.current = requestId
-    setPackageScripts(null)
+    if (options.reset) {
+      setPackageScripts(null)
+    }
 
     setLoadingScripts(true)
     try {
@@ -68,7 +70,9 @@ export function ChatAreaHeader({
       }
     } catch {
       if (packageScriptsRequestRef.current !== requestId) return
-      setPackageScripts(null)
+      if (options.reset) {
+        setPackageScripts(null)
+      }
     } finally {
       if (packageScriptsRequestRef.current === requestId) {
         setLoadingScripts(false)
@@ -77,7 +81,7 @@ export function ChatAreaHeader({
   }, [chatRoom.id, chatRoom.workDir])
 
   useEffect(() => {
-    void loadPackageScripts()
+    void loadPackageScripts({ reset: true })
     return () => {
       packageScriptsRequestRef.current += 1
     }
