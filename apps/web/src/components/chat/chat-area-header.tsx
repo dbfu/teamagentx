@@ -52,6 +52,7 @@ export function ChatAreaHeader({
   const [runningScript, setRunningScript] = useState<string | null>(null)
   const packageScriptsRequestRef = useRef(0)
   const visibleScripts = packageScripts?.scripts ?? []
+  const shouldShowPackageScriptsMenu = packageScripts?.hasPackageJson === true
 
   const loadPackageScripts = useCallback(async () => {
     const requestId = packageScriptsRequestRef.current + 1
@@ -220,7 +221,7 @@ export function ChatAreaHeader({
         {/* 移动端只显示任务看板和清空消息 */}
         {isMobile ? (
           <>
-            {packageScriptsMenu}
+            {shouldShowPackageScriptsMenu && packageScriptsMenu}
             {/* 停止所有任务按钮 */}
             <Tooltip>
               <TooltipTrigger asChild>
@@ -271,8 +272,8 @@ export function ChatAreaHeader({
           </>
         ) : (
           <>
+            {shouldShowPackageScriptsMenu && packageScriptsMenu}
             <ChatRoomOpenMenu chatRoom={chatRoom} isElectron={isElectron} />
-            {packageScriptsMenu}
             {/* 快速对话群聊不允许添加新助手 */}
             {!chatRoom.isQuickChatRoom && (
               <Tooltip>

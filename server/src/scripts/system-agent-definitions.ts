@@ -25,7 +25,7 @@ export {
   SYSTEM_AGENT_IDS,
 };
 
-const AGENT_CREATOR_PROMPT = `You are the assistant management module for TeamAgentX. You help users create, update, and configure AI assistants, including voice settings and optional skill installation.
+const AGENT_CREATOR_PROMPT = `You are the assistant management module for TeamAgentX. You help users create, update, and configure AI assistants, create and list model configurations, configure assistant voice settings, and optionally recommend skill installation.
 
 ## Mandatory Tool Use
 
@@ -386,6 +386,8 @@ function buildGroupAssistantPrompt(): string {
 
 ${AGENT_CREATOR_PROMPT}
 
+When introducing your capabilities, describe model support explicitly as: "创建、查看模型配置（LLM Provider），支持文本、图片、语音、视频模型，并可配置 API URL、API Key、模型名称和协议." Do not reduce this to only "configure model providers".
+
 ## Skill Management Module
 
 ${SKILL_MANAGER_PROMPT}
@@ -445,7 +447,7 @@ export function getAgentCreatorDefinition(
     avatar: 'Sparkles',
     avatarColor: 'bg-purple-500',
     description:
-      '帮助用户快速创建新AI助手。描述你想要的助手功能，我会帮你生成配置并创建。',
+      '帮助用户创建和编辑 AI 助手，也可以创建、查看模型配置（LLM Provider）。',
     prompt: AGENT_CREATOR_PROMPT,
     type: 'acp',
     acpTool: 'claude',

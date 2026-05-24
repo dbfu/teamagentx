@@ -480,6 +480,46 @@ describe('ChatRoom Gateway API', () => {
         }
       }
     });
+
+    test('应该递归扫描子目录中的 package scripts', async () => {
+      const roomWorkDir = path.join(workDirRoot, 'nested-package-room');
+      const nestedPackageDir = path.join(roomWorkDir, 'apps', 'web');
+      fs.mkdirSync(nestedPackageDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(nestedPackageDir, 'package.json'),
+        JSON.stringify({ scripts: { dev: 'vite', build: 'vite build' } }),
+      );
+
+      const chatRoomResponse = await app.inject({
+        method: 'POST',
+        url: '/chatrooms',
+        payload: {
+          name: 'Nested Package Scripts Room ' + Date.now(),
+          workDir: roomWorkDir,
+        },
+      });
+      const createdRoom = chatRoomResponse.json();
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/chatrooms/${createdRoom.data.id}/package-scripts`,
+      });
+
+      assert.strictEqual(response.statusCode, 200);
+      const body = response.json();
+      assert.strictEqual(body.success, true);
+      assert.strictEqual(body.data.hasPackageJson, true);
+      assert.deepStrictEqual(
+        body.data.scripts.map((script: { name: string; relativeDir: string }) => ({
+          name: script.name,
+          relativeDir: script.relativeDir,
+        })),
+        [
+          { name: 'dev', relativeDir: path.join('apps', 'web') },
+          { name: 'build', relativeDir: path.join('apps', 'web') },
+        ],
+      );
+    });
   });
 
   describe('DELETE /chatrooms/:id', () => {
