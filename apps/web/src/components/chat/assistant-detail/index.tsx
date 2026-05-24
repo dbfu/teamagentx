@@ -2,7 +2,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Agent, AgentSpeechConfig, agentApi } from '@/lib/agent-api'
+import { Agent, AgentSpeechConfig, agentApi, type AgentThinkingMode } from '@/lib/agent-api'
 import { cn } from '@/lib/utils'
 import { useAuthStore, useChatRoomStore } from '@/stores'
 import {
@@ -293,6 +293,7 @@ export function AssistantDetailPage() {
     proxyConfig?: string | null
     codexModel?: string | null
     claudeModel?: string | null
+    thinkingMode?: AgentThinkingMode | null
     categoryId: string | null
     llmProviderId: string | null
     speechConfig: AgentSpeechConfig | null
@@ -309,6 +310,7 @@ export function AssistantDetailPage() {
       proxyConfig: data.proxyConfig || null,
       codexModel: data.codexModel || null,
       claudeModel: data.claudeModel || null,
+      thinkingMode: data.thinkingMode || 'high',
       categoryId: data.categoryId,
       llmProviderId: data.llmProviderId,
       speechConfig: data.speechConfig,
@@ -451,6 +453,7 @@ export function AssistantDetailPage() {
 
       {/* 编辑助手 Modal */}
       <EditAssistantModal
+        key={agent.id}
         isOpen={isEditModalOpen}
         onClose={() => setIsEditModalOpen(false)}
         onSubmit={handleUpdateAssistant}

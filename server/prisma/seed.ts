@@ -6,7 +6,7 @@
  */
 import prisma from '../src/lib/prisma.js';
 import { llmProviderService } from '../src/modules/llm-provider/llm-provider.service.js';
-import { getGroupAssistantDefinition } from '../src/scripts/system-agent-definitions.js';
+import { getGroupAssistantDefinition, getGroupCoordinatorDefinition } from '../src/scripts/system-agent-definitions.js';
 import { cleanupLegacySystemAgents, syncSystemAgents } from '../src/scripts/system-agent-sync.js';
 
 async function seed() {
@@ -16,6 +16,7 @@ async function seed() {
     const defaultProvider = await llmProviderService.findDefault();
     await syncSystemAgents([
       getGroupAssistantDefinition(defaultProvider?.id),
+      getGroupCoordinatorDefinition(defaultProvider?.id),
     ]);
     await cleanupLegacySystemAgents();
     console.log('\n系统助手种子数据同步完成！');

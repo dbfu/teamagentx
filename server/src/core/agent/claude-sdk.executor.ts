@@ -48,6 +48,10 @@ import {
 } from './skill-instructions.js';
 import { syncGlobalClaudeLocalConfig } from './claude-local-config.js';
 import { getSystemAssistantTools } from './tools/index.js';
+import {
+  DEFAULT_AGENT_THINKING_MODE,
+  type AgentThinkingMode,
+} from './thinking-mode.js';
 import { getDefaultChatRoomWorkDir, resolveAgentWorkDir } from './work-dir.js';
 
 function shortHash(input: string): string {
@@ -169,15 +173,30 @@ function getClaudeMaxTurns(): number {
 
 function getClaudeThinkingOptions(
   provider?: LlmProvider,
+  thinkingMode?: AgentThinkingMode | null,
 ):
   | {type: 'adaptive'}
   | {type: 'enabled'; budgetTokens?: number}
   | {type: 'disabled'}
   | undefined {
+  if ((provider as any)?.supportsThinking === false) {
+    return {type: 'disabled'};
+  }
+
+  if (thinkingMode) {
+    const mode = thinkingMode || DEFAULT_AGENT_THINKING_MODE;
+    if (mode === 'off') return {type: 'disabled'};
+    const budgetTokensByMode: Record<Exclude<AgentThinkingMode, 'off'>, number> = {
+      low: 4000,
+      medium: 10000,
+      high: 16000,
+    };
+    return {type: 'enabled', budgetTokens: budgetTokensByMode[mode]};
+  }
+
   const mode = (process.env.CLAUDE_AGENT_THINKING || 'enabled').toLowerCase();
 
   if (
-    (provider as any)?.supportsThinking === false ||
     mode === 'disabled' ||
     mode === 'off' ||
     mode === '0'
@@ -213,31 +232,7 @@ function isRecoverableSessionError(message: string): boolean {
   );
 }
 
-const DEFAULT_LONG_RUNNING_BASH_TIMEOUT_MS = 15 * 1000;
 const DEFAULT_BACKGROUND_IDLE_FINISH_MS = 20 * 1000;
-
-const LONG_RUNNING_COMMAND_PATTERNS = [
-  /\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:dev|serve|preview|start)\b/i,
-  /\b(?:vite|next|nuxt|astro|remix|webpack-dev-server|storybook)\b/i,
-  /\b(?:tsx|ts-node|node)\b.*\b(?:dev|serve|server|watch)\b/i,
-  /\b(?:python|python3)\s+-m\s+(?:http\.server|uvicorn)\b/i,
-  /\b(?:uvicorn|fastapi\s+dev|flask\s+run|django-admin\s+runserver)\b/i,
-  /\b(?:rails|bin\/rails)\s+(?:s|server)\b/i,
-  /\b(?:php\s+-S|air|reflex)\b/i,
-  /\b(?:docker\s+compose|docker-compose)\s+up\b/i,
-] as const;
-
-function getLongRunningBashTimeoutMs(): number {
-  const rawValue = process.env.CLAUDE_AGENT_LONG_RUNNING_BASH_TIMEOUT_MS;
-  if (!rawValue) return DEFAULT_LONG_RUNNING_BASH_TIMEOUT_MS;
-
-  const parsed = Number.parseInt(rawValue, 10);
-  if (!Number.isFinite(parsed) || parsed < 1000) {
-    return DEFAULT_LONG_RUNNING_BASH_TIMEOUT_MS;
-  }
-
-  return parsed;
-}
 
 function getBackgroundIdleFinishMs(): number {
   const rawValue = process.env.CLAUDE_AGENT_BACKGROUND_IDLE_FINISH_MS;
@@ -249,24 +244,6 @@ function getBackgroundIdleFinishMs(): number {
   }
 
   return parsed;
-}
-
-function normalizeBashCommand(command: string): string {
-  return command.replace(/^\s*(?:cd\s+[^;&|]+\s*&&\s*)+/i, '').trim();
-}
-
-function shouldRunBashInBackground(command: string): boolean {
-  const normalizedCommand = normalizeBashCommand(command);
-  if (
-    !normalizedCommand ||
-    /(?:^|\s)(?:&|nohup|disown)(?:\s|$)/.test(normalizedCommand)
-  ) {
-    return false;
-  }
-
-  return LONG_RUNNING_COMMAND_PATTERNS.some((pattern) =>
-    pattern.test(normalizedCommand),
-  );
 }
 
 function resolveClaudeCodeExecutable(): string | undefined {
@@ -476,6 +453,7 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
   readonly chatRoomAgents: ChatRoomAgentInfo[];
   readonly llmProvider?: LlmProvider;
   readonly imageGenerationProvider?: LlmProvider | null;
+  readonly thinkingMode: AgentThinkingMode;
 
   private _lastInjectedMessageId?: string;
   private systemPrompt: string;
@@ -490,6 +468,9 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
   private thinking = '';
   private toolCalls: ToolCall[] = [];
   private hasBackgroundedLongRunningCommand = false;
+  private waitingForTaskOutput = false;
+  private waitingForAssistantAfterToolResult = false;
+  private receivedAssistantEndTurn = false;
 
   private lastContext: string | null = null;
   private lastResponse: string | null = null;
@@ -518,6 +499,7 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
     chatRoomAgents?: ChatRoomAgentInfo[],
     llmProvider?: LlmProvider,
     imageGenerationProvider?: LlmProvider | null,
+    thinkingMode?: AgentThinkingMode | null,
     chatRoomRules?: string,
   ) {
     this.name = name;
@@ -529,6 +511,7 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
     this.chatRoomAgents = chatRoomAgents || [];
     this.llmProvider = llmProvider;
     this.imageGenerationProvider = imageGenerationProvider;
+    this.thinkingMode = thinkingMode || DEFAULT_AGENT_THINKING_MODE;
     this.workDir = resolveAgentWorkDir({
       chatRoomId,
       sessionDir,
@@ -841,7 +824,7 @@ When you perform file operations or run commands, operate in this directory by d
       optionSessionId: this.hasStartedSession ? undefined : this.sessionId,
       optionResume: this.hasStartedSession ? this.sessionId : undefined,
       maxTurns: getClaudeMaxTurns(),
-      thinking: getClaudeThinkingOptions(this.llmProvider),
+      thinking: getClaudeThinkingOptions(this.llmProvider, this.thinkingMode),
       model: this.llmProvider?.model,
       provider: this.llmProvider
         ? {
@@ -883,51 +866,7 @@ When you perform file operations or run commands, operate in this directory by d
   }
 
   private buildHooks(): Partial<Record<HookEvent, HookCallbackMatcher[]>> {
-    return {
-      PreToolUse: [
-        {
-          hooks: [
-            async (input) => {
-              if (
-                input.hook_event_name !== 'PreToolUse' ||
-                input.tool_name !== 'Bash'
-              ) {
-                return {continue: true};
-              }
-
-              const toolInput = input.tool_input;
-              if (!toolInput || typeof toolInput !== 'object') {
-                return {continue: true};
-              }
-
-              const command = (toolInput as {command?: unknown}).command;
-              if (
-                typeof command !== 'string' ||
-                !shouldRunBashInBackground(command)
-              ) {
-                return {continue: true};
-              }
-
-              this.hasBackgroundedLongRunningCommand = true;
-
-              return {
-                continue: true,
-                hookSpecificOutput: {
-                  hookEventName: 'PreToolUse' as const,
-                  updatedInput: {
-                    ...(toolInput as Record<string, unknown>),
-                    timeout: getLongRunningBashTimeoutMs(),
-                    run_in_background: true,
-                  },
-                  additionalContext:
-                    'TeamAgentX detected a long-running service command and started it in the background so the conversation can continue.',
-                },
-              };
-            },
-          ],
-        },
-      ],
-    };
+    return {};
   }
 
   private buildFullMessage(
@@ -1058,6 +997,9 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     this.thinking = '';
     this.toolCalls = [];
     this.hasBackgroundedLongRunningCommand = false;
+    this.waitingForTaskOutput = false;
+    this.waitingForAssistantAfterToolResult = false;
+    this.receivedAssistantEndTurn = false;
   }
 
   private resetSession(): void {
@@ -1325,6 +1267,8 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
   private handleAssistantMessage(message: any): void {
     const content = message.message?.content;
     if (!Array.isArray(content)) return;
+    this.waitingForAssistantAfterToolResult = false;
+    const stopReason = message.message?.stop_reason;
 
     for (const block of content) {
       if (block?.type === 'thinking' && typeof block.thinking === 'string') {
@@ -1332,8 +1276,12 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       }
 
       if (block?.type === 'tool_use') {
+        const toolName = this.stripMcpTaxPrefix(block.name || 'tool_call');
+        if (toolName === 'TaskOutput') {
+          this.waitingForTaskOutput = true;
+        }
         this.upsertToolCall({
-          name: this.stripMcpTaxPrefix(block.name || 'tool_call'),
+          name: toolName,
           input: block.input || {},
           toolCallId: block.id || randomUUID(),
           status: 'completed',
@@ -1346,6 +1294,10 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       const text = extractTextFromContent(content);
       if (text) this.content = text;
     }
+
+    if (stopReason === 'end_turn' && this.content.trim()) {
+      this.receivedAssistantEndTurn = true;
+    }
   }
 
   private handleUserMessage(message: any): void {
@@ -1354,6 +1306,8 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
 
     for (const block of content) {
       if (block?.type === 'tool_result') {
+        this.waitingForTaskOutput = false;
+        this.waitingForAssistantAfterToolResult = true;
         const toolUseId = block.tool_use_id || message.uuid || randomUUID();
         const output = extractTextFromContent(block.content);
         const status = block.is_error ? 'error' : 'completed';
@@ -1481,7 +1435,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
   ): Promise<TokenUsage | undefined> {
     const env = this.buildEnv();
     const maxTurns = getClaudeMaxTurns();
-    const thinking = getClaudeThinkingOptions(this.llmProvider);
+    const thinking = getClaudeThinkingOptions(this.llmProvider, this.thinkingMode);
     this.lastClaudeStderr = '';
     this.logQueryStart(env);
     const settingSources: SettingSource[] = this.llmProvider
@@ -1537,7 +1491,10 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
 
       const nextMessage = iterator.next();
       const result =
-        this.hasBackgroundedLongRunningCommand && this.content.trim()
+        this.hasBackgroundedLongRunningCommand &&
+        !this.waitingForTaskOutput &&
+        !this.waitingForAssistantAfterToolResult &&
+        this.content.trim()
           ? await Promise.race([
               nextMessage,
               new Promise<{done: true; value: undefined; timedOut: true}>(
@@ -1566,6 +1523,11 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       const sdkMessage = result.value;
       const usage = this.handleSdkMessage(sdkMessage);
       if (usage) tokenUsage = usage;
+
+      if (this.receivedAssistantEndTurn && this.content.trim()) {
+        abortController.abort('assistant-end-turn');
+        return tokenUsage;
+      }
     }
     return tokenUsage;
   }
@@ -1753,6 +1715,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
 export function clearClaudeSdkFileSystemContext(
   agentId: string,
   chatRoomId: string,
+  workDirOverride?: string | null,
 ): void {
   const claudeConfigDir = path.join(
     os.homedir(),
@@ -1779,7 +1742,7 @@ export function clearClaudeSdkFileSystemContext(
           const sessionId = sessionState.sessionId;
 
           // 删除 conversation 文件
-          const workDir = getDefaultChatRoomWorkDir(chatRoomId);
+          const workDir = workDirOverride?.trim() || getDefaultChatRoomWorkDir(chatRoomId);
           const conversationPath = path.join(
             claudeConfigDir,
             'projects',
@@ -1811,7 +1774,7 @@ export function clearClaudeSdkFileSystemContext(
   // 删除 projects 目录下与该 chatRoomId workDir 相关的所有 conversation 文件
   const projectsDir = path.join(claudeConfigDir, 'projects');
   if (fs.existsSync(projectsDir)) {
-    const workDir = getDefaultChatRoomWorkDir(chatRoomId);
+    const workDir = workDirOverride?.trim() || getDefaultChatRoomWorkDir(chatRoomId);
     const sanitizedWorkDir = sanitizeClaudeProjectPath(workDir);
     const projectDir = path.join(projectsDir, sanitizedWorkDir);
 

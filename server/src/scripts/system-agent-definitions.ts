@@ -5,29 +5,33 @@ import {
   CHATROOM_HELPER_ID,
   CRON_TASK_HELPER_ID,
   EXTERNAL_PLATFORM_HELPER_ID,
+  GROUP_COORDINATOR_ID,
   GROUP_ASSISTANT_ID,
   LEGACY_SYSTEM_AGENT_IDS,
   SKILL_MANAGER_ID,
   SYSTEM_AGENT_IDS,
 } from '../core/agent/system-assistant.constants.js';
+import { buildInternalCoordinatorPrompt, INTERNAL_COORDINATOR_AGENT_NAME } from '../core/agent/internal-coordinator-agent.js';
 
 export {
   AGENT_CREATOR_ID,
   CHATROOM_HELPER_ID,
   CRON_TASK_HELPER_ID,
   EXTERNAL_PLATFORM_HELPER_ID,
+  GROUP_COORDINATOR_ID,
   GROUP_ASSISTANT_ID,
   LEGACY_SYSTEM_AGENT_IDS,
   SKILL_MANAGER_ID,
   SYSTEM_AGENT_IDS,
 };
 
-const AGENT_CREATOR_PROMPT = `You are the assistant management module for TeamAgentX. You help users create, update, and configure AI assistants, including voice settings and optional skill installation.
+const AGENT_CREATOR_PROMPT = `You are the assistant management module for TeamAgentX. You help users create, update, and configure AI assistants, create and list model configurations, configure assistant voice settings, and optionally recommend skill installation.
 
 ## Mandatory Tool Use
 
 - When the user asks to create an assistant directly, you must call \`create_agent\` or \`create_agents\`. Do not only output configuration text.
 - When the user asks to update assistants, use \`update_agent\` for one assistant and \`update_agents\` for multiple assistants.
+- When the user asks to create a model configuration directly, gather the required fields, show the full proposed configuration, ask for confirmation, then call \`create_llm_provider\`. Do not only output setup instructions.
 - For requests generated from chat history, do not create anything until the user has explicitly confirmed the proposed configuration.
 
 ## Assistant Types
@@ -37,6 +41,32 @@ const AGENT_CREATOR_PROMPT = `You are the assistant management module for TeamAg
 - If the user explicitly asks for Claude, use \`type: "acp"\`, \`acpTool: "claude"\`.
 - Only use \`builtin\` when the user explicitly asks for a system LLM Provider or legacy built-in assistant. Built-in assistants require \`llmProviderId\`.
 - Do not create unsupported ACP tools such as cursor, gemini, or qwen.
+
+## Model Configuration
+
+Use \`create_llm_provider\` for model configuration creation after explicit user confirmation.
+
+Required fields:
+- \`name\`: unique display name.
+- \`apiKey\`: full API key; never use a masked key.
+- \`model\`: model ID.
+
+Optional/common fields:
+- \`modelType\`: \`text\`, \`image\`, \`audio\`, or \`video\`; default \`text\`.
+- \`apiProtocol\`: \`anthropic\` or \`openai\`; use \`anthropic\` for Anthropic-compatible text models and \`openai\` for OpenAI-compatible APIs, image, audio, or video models unless the user says otherwise.
+- \`apiUrl\`: provider endpoint when needed.
+- \`isActive\`: default true.
+- \`isDefault\`: ask before setting true.
+
+Image model fields:
+- \`imageProvider\`: provider key such as \`openai\`, \`apimart\`, \`openrouter\`, or \`gemini\`.
+- \`imageApiType\`: \`sync\`, \`async\`, or \`auto\`; default \`sync\`.
+
+Audio model fields:
+- \`audioUsage\`: \`tts\`, \`stt\`, or \`both\`; default \`both\`.
+- \`sttModel\`: optional speech recognition model; omit when it is the same as \`model\`.
+
+If required fields are missing, ask only for the missing values. Never echo the full API key back after saving.
 
 ## create_agent Parameters
 
@@ -346,6 +376,7 @@ function buildGroupAssistantPrompt(): string {
 ## Intent Routing
 
 - Create/edit/list assistants, generate assistants from chat history, configure assistant voice, or recommend skill installation: use the Assistant Management module.
+- Create/list model configurations or add text/image/audio/video model providers: use the Assistant Management module's model configuration tools.
 - Generate/list/install Skills: use the Skill Management module.
 - Create/list/enable/disable/update/delete scheduled chatroom tasks: use the Scheduled Task module.
 - Create/list/delete chatrooms, add/remove assistants, or configure group rules: use the Chatroom Management module.
@@ -354,6 +385,8 @@ function buildGroupAssistantPrompt(): string {
 ## Assistant Management Module
 
 ${AGENT_CREATOR_PROMPT}
+
+When introducing your capabilities, describe model support explicitly as: "创建、查看模型配置（LLM Provider），支持文本、图片、语音、视频模型，并可配置 API URL、API Key、模型名称和协议." Do not reduce this to only "configure model providers".
 
 ## Skill Management Module
 
@@ -389,6 +422,22 @@ export function getGroupAssistantDefinition(
   };
 }
 
+export function getGroupCoordinatorDefinition(
+  llmProviderId?: string | null,
+): SystemAgentDefinition {
+  return {
+    id: GROUP_COORDINATOR_ID,
+    name: INTERNAL_COORDINATOR_AGENT_NAME,
+    avatar: 'Route',
+    avatarColor: 'bg-slate-500',
+    description: '隐藏的群聊协调模式调度执行器，只负责自动路由任务。',
+    prompt: buildInternalCoordinatorPrompt(),
+    type: 'acp',
+    acpTool: 'claude',
+    llmProviderId: null,
+  };
+}
+
 export function getAgentCreatorDefinition(
   llmProviderId?: string | null,
 ): SystemAgentDefinition {
@@ -398,7 +447,7 @@ export function getAgentCreatorDefinition(
     avatar: 'Sparkles',
     avatarColor: 'bg-purple-500',
     description:
-      '帮助用户快速创建新AI助手。描述你想要的助手功能，我会帮你生成配置并创建。',
+      '帮助用户创建和编辑 AI 助手，也可以创建、查看模型配置（LLM Provider）。',
     prompt: AGENT_CREATOR_PROMPT,
     type: 'acp',
     acpTool: 'claude',

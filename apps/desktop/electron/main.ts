@@ -507,6 +507,126 @@ async function openFolderInTerminal(
   });
 }
 
+function quotePowerShellString(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+function buildKeepAliveShellCommand(shellPath: string): string {
+  const shellName = path.basename(shellPath);
+  if (shellName === 'zsh') {
+    return `exec ${shellQuote(shellPath)} -f`;
+  }
+
+  return `exec ${shellQuote(shellPath)}`;
+}
+
+async function runCommandInTerminal(
+  folderPath: string,
+  command: string,
+  terminalTarget: TerminalOpenTarget = 'terminal-app',
+): Promise<void> {
+  const defaultShell = process.env.SHELL || '/bin/bash';
+  const shellCommand = [
+    `cd ${shellQuote(folderPath)} && ${command}`,
+    buildKeepAliveShellCommand(defaultShell),
+  ].join('; ');
+
+  if (process.platform === 'darwin') {
+    if (terminalTarget === 'iterm2') {
+      const escaped = escapeAppleScriptString(shellCommand);
+      await execFilePromise('osascript', [
+        '-e', 'tell application "iTerm2"',
+        '-e', 'activate',
+        '-e', 'if (count of windows) = 0 then create window with default profile',
+        '-e', `tell current session of current window to write text "${escaped}"`,
+        '-e', 'end tell',
+      ]);
+      return;
+    }
+
+    if (terminalTarget === 'terminal-app') {
+      await execFilePromise('osascript', [
+        '-e', 'tell application "Terminal"',
+        '-e', 'activate',
+        '-e', `do script "${escapeAppleScriptString(shellCommand)}"`,
+        '-e', 'end tell',
+      ]);
+      return;
+    }
+
+    const shellPath = process.env.SHELL || '/bin/zsh';
+    const candidates = (() => {
+      switch (terminalTarget) {
+        case 'alacritty':
+          return [{ appName: 'Alacritty', args: ['--args', '--working-directory', folderPath, '-e', shellPath, '-lc', shellCommand] }];
+        case 'kitty':
+          return [
+            { appName: 'kitty', args: ['--args', '--directory', folderPath, shellPath, '-lc', shellCommand] },
+            { appName: 'Kitty', args: ['--args', '--directory', folderPath, shellPath, '-lc', shellCommand] },
+          ];
+        case 'ghostty':
+          return [{ appName: 'Ghostty', args: ['--args', `--working-directory=${folderPath}`, '-e', shellPath, '-lc', shellCommand] }];
+        case 'wezterm':
+          return [{ appName: 'WezTerm', args: ['--args', 'start', '--cwd', folderPath, '--', shellPath, '-lc', shellCommand] }];
+        default:
+          return getDarwinTerminalOpenCandidates(terminalTarget, folderPath);
+      }
+    })();
+    const errors: string[] = [];
+
+    for (const candidate of candidates) {
+      try {
+        await execFilePromise('open', ['-n', '-a', candidate.appName, ...candidate.args]);
+        return;
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : String(error));
+      }
+    }
+
+    throw new Error(errors[0] || `${TERMINAL_APP_NAMES[terminalTarget]} not found`);
+  }
+
+  if (process.platform === 'win32') {
+    const powerShellCommand = [
+      `Set-Location -LiteralPath ${quotePowerShellString(folderPath)}`,
+      `& ${command}`,
+    ].join('; ');
+    const child = spawn('powershell.exe', ['-NoProfile', '-Command', `Start-Process powershell.exe -ArgumentList '-NoExit', '-Command', ${quotePowerShellString(powerShellCommand)}`], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: false,
+    });
+    child.unref();
+    return;
+  }
+
+  const shellPath = process.env.SHELL || '/bin/bash';
+  const candidates = [
+    { command: 'gnome-terminal', args: ['--working-directory', folderPath, '--', shellPath, '-lc', shellCommand] },
+    { command: 'konsole', args: ['--workdir', folderPath, '-e', shellPath, '-lc', shellCommand] },
+    { command: 'xfce4-terminal', args: ['--working-directory', folderPath, '-e', `${shellPath} -lc ${shellQuote(shellCommand)}`] },
+    { command: 'xterm', args: ['-e', shellPath, '-lc', shellCommand] },
+    { command: 'x-terminal-emulator', args: ['-e', shellPath, '-lc', shellCommand] },
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      execFileSync('which', [candidate.command], { stdio: 'ignore' });
+      const child = spawn(candidate.command, candidate.args, {
+        cwd: folderPath,
+        detached: true,
+        stdio: 'ignore',
+      });
+      child.unref();
+      return;
+    } catch {
+      // Try the next terminal candidate.
+    }
+  }
+
+  throw new Error('Terminal not found');
+}
+
 function resolveExistingAppPath(candidates: string[]): string | null {
   for (const candidate of candidates) {
     const resolvedPath = resolveFolderPath(candidate);
@@ -2081,6 +2201,25 @@ app.whenReady().then(async () => {
         }
         await openFolderInApp(resolvedPath, appPath);
       }
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: String(error) };
+    }
+  });
+
+  ipcMain.handle('terminal:run-command', async (_event, payload: { path: string; command: string; terminalTarget?: TerminalOpenTarget }) => {
+    const resolvedPath = resolveFolderPath(payload.path);
+
+    try {
+      if (!fs.existsSync(resolvedPath)) {
+        return { success: false, error: '目录不存在' };
+      }
+
+      await runCommandInTerminal(
+        resolvedPath,
+        payload.command,
+        payload.terminalTarget || 'terminal-app',
+      );
       return { success: true };
     } catch (error) {
       return { success: false, error: String(error) };

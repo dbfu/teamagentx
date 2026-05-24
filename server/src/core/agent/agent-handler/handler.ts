@@ -9,6 +9,8 @@ import type { ToolCall } from '../executor.interface.js';
 import { parseKnownMentions } from './message-utils.js';
 import { debugLog } from './debug.js';
 import { enqueueAgentTask } from './agent-dispatch.service.js';
+import { GROUP_COORDINATOR_ID } from '../system-assistant.constants.js';
+import { createInternalCoordinatorAgent } from '../internal-coordinator-agent.js';
 // 消息接收事件接口
 interface ReceivedMessageEvent {
   message: Message;
@@ -101,8 +103,13 @@ export function setupAIHandlers(
 
       const chatRoom = await chatRoomService.findById(chatRoomId);
 
+      const agentTriggerMode = chatRoom?.agentTriggerMode ?? 'coordinator';
+
       // 手动模式下，助手消息中的 @ 只作为公开展示。
-      if (!message.isHuman && chatRoom?.agentTriggerMode !== 'auto') {
+      if (
+        !message.isHuman &&
+        agentTriggerMode === 'manual'
+      ) {
         debugLog('assistantMentionTriggerSkipped', {
           chatRoomId,
           messageId: message.id,
@@ -162,6 +169,41 @@ export function setupAIHandlers(
         return;
       }
 
+      // 协调模式：普通助手消息里的 @ 只展示，不直接触发目标助手。
+      // 用户未 @ 和普通助手消息都会交给内置群调度助手；用户 @ 和群调度助手 @ 继续触发目标助手。
+      if (
+        chatRoom &&
+        !chatRoom.isQuickChatRoom &&
+        agentTriggerMode === 'coordinator'
+      ) {
+        if (
+          (message.isHuman && !hasMentions) ||
+          (!message.isHuman && message.agentId !== GROUP_COORDINATOR_ID)
+        ) {
+          const coordinatorAgent = await agentService.findById(GROUP_COORDINATOR_ID);
+
+          if (coordinatorAgent && coordinatorAgent.isActive) {
+            debugLog('coordinatorAgentTrigger', {
+              chatRoomId,
+              agentId: coordinatorAgent.id,
+              agentName: coordinatorAgent.name,
+              triggerMessageId: message.id,
+              sourceAgentId: message.agentId,
+              sourceIsHuman: message.isHuman,
+            });
+
+            await enqueueAgentTask(
+              chatRoomId,
+              message,
+              createInternalCoordinatorAgent(coordinatorAgent),
+            );
+          } else {
+            console.warn(`[coordinatorAgentTrigger] 内置协调助手不存在或未启用: ${GROUP_COORDINATOR_ID}`);
+          }
+          return;
+        }
+      }
+
       // 普通群聊：无 @ 发言时，触发默认接收助手。
       // Socket 入口已校验发送者是群聊成员；这里不再限制必须由群主触发，
       // 避免多人群聊或历史 ownerId 漂移时默认助手静默失效。
@@ -175,7 +217,7 @@ export function setupAIHandlers(
           const agent = await agentService.findById(chatRoom.defaultAgentId);
 
           if (agent && agent.isActive) {
-            // 系统助手（agentLevel: 'system'）是虚拟成员，跳过成员检查
+            // 系统助手（agentLevel: 'system'）是内置执行器，跳过成员检查
             // 普通助手需要检查是否是群聊成员
             if (agent.agentLevel !== 'system') {
               const isMember = await chatRoomService.isAgentMember(
@@ -231,7 +273,7 @@ export function setupAIHandlers(
           continue;
         }
 
-        // 系统助手（agentLevel: 'system'）是虚拟成员，跳过成员检查
+        // 系统助手（agentLevel: 'system'）是内置执行器，跳过成员检查
         // 普通助手需要检查是否是群聊成员
         if (agent.agentLevel !== 'system') {
           const isMember = await chatRoomService.isAgentMember(

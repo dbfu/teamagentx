@@ -1716,7 +1716,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
   )
   const availableAgents = useMemo(
     () => getAvailableAgents(currentAgentIds),
-    [getAvailableAgents, currentAgentIds]
+    [getAvailableAgents, currentAgentIds, allAgents]
   )
   const mentionAgents = useMemo(
     () => getMentionAgents(chatRoomAgents),
@@ -1863,6 +1863,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
 
     if (
       !chatRoom.isQuickChatRoom &&
+      (chatRoom.agentTriggerMode ?? 'coordinator') !== 'coordinator' &&
       !chatRoom.defaultAgentId &&
       mentionedDispatchableAgentNames.length === 0
     ) {

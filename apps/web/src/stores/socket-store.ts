@@ -202,6 +202,23 @@ interface InactiveTasksData {
   }[]
 }
 
+interface PackageScriptsUpdatedData {
+  chatRoomId: string
+  data: {
+    hasPackageJson: boolean
+    workDir: string | null
+    packageManager: string | null
+    scripts: {
+      id: string
+      name: string
+      command: string
+      runCommand: string
+      relativeDir: string
+      workDir: string
+    }[]
+  }
+}
+
 // 群聊创建事件数据类型
 export interface ChatRoomCreatedData {
   chatRoom: {
@@ -257,6 +274,7 @@ interface SocketStore {
   onInactiveTasks: (callback: (data: InactiveTasksData) => void) => () => void
   onChatRoomCreated: (callback: (data: ChatRoomCreatedData) => void) => () => void
   onAgentsUpdated: (callback: (data: { chatRoomId: string }) => void) => () => void
+  onPackageScriptsUpdated: (callback: (data: PackageScriptsUpdatedData) => void) => () => void
 
   // 未读消息相关方法
   markChatRoomRead: (chatRoomId: string) => void
@@ -516,6 +534,13 @@ export const useSocketStore = create<SocketStore>((set, get) => ({
     if (!socket) return () => {}
     socket.on('chatroom:agents-updated', callback)
     return () => socket?.off('chatroom:agents-updated', callback)
+  },
+
+  onPackageScriptsUpdated: (callback) => {
+    const socket = get().socket
+    if (!socket) return () => {}
+    socket.on('chatroom:package-scripts-updated', callback)
+    return () => socket?.off('chatroom:package-scripts-updated', callback)
   },
 
   // 未读消息相关方法

@@ -11,6 +11,7 @@ import {
   clearClaudeSdkFileSystemContext,
   clearCodexSdkFileSystemContext,
 } from '../../core/agent/agent-handler/index.js';
+import { clearInternalCoordinatorContext } from '../../core/agent/agent-handler/internal-coordinator-context.js';
 
 export interface ClearChatRoomResult {
   affectedAgentIds: string[];
@@ -70,6 +71,8 @@ export async function clearChatRoom(chatRoomId: string): Promise<ClearChatRoomRe
     clearExecutorCache(cra.agent.name, chatRoomId);
     await chatRoomService.updateLastInjectedMessageId(chatRoomId, cra.agent.id, null);
   }
+
+  await clearInternalCoordinatorContext(chatRoomId);
 
   // 删除消息
   await messageService.deleteByChatRoomId(chatRoomId);

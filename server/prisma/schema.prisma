@@ -118,6 +118,7 @@ model Agent {
   proxyConfig       String? // ACP 工具代理配置（如 Codex 本地模式代理地址或 export 片段）
   codexModel        String? // Codex 本地配置模式下指定的模型名称
   claudeModel       String? // Claude 本地配置模式下指定的模型名称
+  thinkingMode      String             @default("high") // 思考模式: off | low | medium | high
   isActive          Boolean            @default(true)
   categoryId        String? // 分类 ID
   category          AgentCategory?     @relation(fields: [categoryId], references: [id], onDelete: SetNull)

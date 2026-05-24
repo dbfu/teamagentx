@@ -9,8 +9,8 @@ import {
 } from '../modules/skill/preinstalled-skills.js';
 import { skillInstallService } from '../modules/skill/skill-install.service.js';
 import { createSkillDirectoryLink } from '../modules/skill/skill-link.js';
-import { getGroupAssistantDefinition } from './system-agent-definitions.js';
-import { cleanupLegacySystemAgents, syncSystemAgent } from './system-agent-sync.js';
+import { getGroupAssistantDefinition, getGroupCoordinatorDefinition } from './system-agent-definitions.js';
+import { cleanupLegacySystemAgents, syncSystemAgent, syncSystemAgents } from './system-agent-sync.js';
 
 async function copyPreinstalledSkills(): Promise<void> {
   console.log('[init-group-assistant] 复制预置技能到共享目录...');
@@ -79,6 +79,9 @@ export async function ensureGroupAssistantExists(): Promise<void> {
   }
 
   const agent = await syncSystemAgent(getGroupAssistantDefinition(defaultProvider?.id));
+  await syncSystemAgents([
+    getGroupCoordinatorDefinition(defaultProvider?.id),
+  ]);
   await installDefaultSkillsToGroupAssistant(agent);
   await cleanupLegacySystemAgents();
 

@@ -6,7 +6,7 @@ import { messageService } from '../../../modules/message/message.service.js';
 import { taskQueueService } from '../../../modules/task-queue/task-queue.service.js';
 import type { AttachmentData } from '../../../modules/task-queue/task-queue.service.js';
 import { agentService } from '../agent.service.js';
-import { GROUP_ASSISTANT_ID } from '../system-assistant.constants.js';
+import { GROUP_ASSISTANT_ID, GROUP_COORDINATOR_ID } from '../system-assistant.constants.js';
 import type { Message } from '../../../types/message.js';
 import { getExecutor } from './executor-manager.js';
 import { processQueue } from './processor.js';
@@ -124,6 +124,9 @@ export async function sendMessageToAgent(params: {
   const sourceAgent = await agentService.findById(params.sourceAgentId);
   if (!sourceAgent || !sourceAgent.isActive) {
     throw new Error('来源助手不存在或未启用');
+  }
+  if (chatRoom.agentTriggerMode === 'coordinator' && sourceAgent.id !== GROUP_COORDINATOR_ID) {
+    throw new Error('当前群聊为协调模式，只有内置协调助手可以派发其他助手');
   }
   if (sourceAgent.agentLevel !== 'system') {
     const isSourceMember = await chatRoomService.isAgentMember(params.chatRoomId, sourceAgent.id);

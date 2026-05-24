@@ -1,6 +1,9 @@
 import { getApiBaseUrl } from './config'
 import type { SpeechProfile } from '@/speech'
 
+export type AgentTriggerMode = 'auto' | 'manual' | 'coordinator'
+export type AgentThinkingMode = 'off' | 'low' | 'medium' | 'high'
+
 // 分类相关类型
 export interface AgentCategory {
   id: string
@@ -40,6 +43,7 @@ export interface Agent {
   proxyConfig: string | null
   codexModel: string | null
   claudeModel: string | null
+  thinkingMode: AgentThinkingMode
   speechConfig: AgentSpeechConfig | null
   isActive: boolean
   categoryId: string | null
@@ -109,6 +113,7 @@ export interface CreateAgentRequest {
   proxyConfig?: string | null
   codexModel?: string | null
   claudeModel?: string | null
+  thinkingMode?: AgentThinkingMode | null
   speechConfig?: AgentSpeechConfig | null
   categoryId?: string
   llmProviderId?: string | null
@@ -129,6 +134,7 @@ export interface UpdateAgentRequest {
   proxyConfig?: string | null
   codexModel?: string | null
   claudeModel?: string | null
+  thinkingMode?: AgentThinkingMode | null
   speechConfig?: AgentSpeechConfig | null
   categoryId?: string | null
   llmProviderId?: string | null
@@ -174,7 +180,7 @@ export interface ChatRoom {
   isQuickChatRoom?: boolean
   quickChatAgentId?: string | null
   defaultAgentId?: string | null
-  agentTriggerMode?: 'auto' | 'manual'  // 助手触发模式：auto(自动) | manual(手动)
+  agentTriggerMode?: AgentTriggerMode  // 助手触发模式：auto(自由协作) | manual(手动) | coordinator(协调)
   owner?: {
     id: string
     username: string
@@ -208,6 +214,29 @@ export interface GitCommandResult {
   stdout: string
   stderr: string
   output: string
+}
+
+export interface PackageScriptInfo {
+  id: string
+  name: string
+  command: string
+  runCommand: string
+  relativeDir: string
+  workDir: string
+}
+
+export interface PackageScriptsResult {
+  hasPackageJson: boolean
+  workDir: string | null
+  packageManager: string | null
+  scripts: PackageScriptInfo[]
+}
+
+export interface RunPackageScriptResult {
+  scriptId: string
+  scriptName: string
+  command: string
+  workDir: string
 }
 
 export interface ChatRoomAgent {
@@ -245,6 +274,7 @@ export interface CreateChatRoomRequest {
   rules?: string
   workDir?: string | null
   ownerId?: string
+  agentTriggerMode?: AgentTriggerMode
 }
 
 export interface AddAgentToChatRoomRequest {
@@ -312,7 +342,7 @@ export interface TemplatePackageSnapshot {
     description: string | null
     rules: string | null
     defaultAgentId: string | null
-    agentTriggerMode: 'auto' | 'manual'
+    agentTriggerMode: AgentTriggerMode
   }
   agents: Array<{
     id: string
@@ -325,6 +355,7 @@ export interface TemplatePackageSnapshot {
     proxyConfig: string | null
     codexModel: string | null
     claudeModel: string | null
+    thinkingMode: AgentThinkingMode
     llmProviderId: string | null
     speechConfig: Record<string, unknown> | null
     capabilities: Array<{
@@ -527,7 +558,7 @@ export const chatRoomApi = {
   },
 
   // 更新群组
-  async update(id: string, data: { name?: string; avatar?: string; avatarColor?: string; description?: string; rules?: string; workDir?: string | null; defaultAgentId?: string | null; agentTriggerMode?: 'auto' | 'manual' }): Promise<ApiResponse<ChatRoom>> {
+  async update(id: string, data: { name?: string; avatar?: string; avatarColor?: string; description?: string; rules?: string; workDir?: string | null; defaultAgentId?: string | null; agentTriggerMode?: AgentTriggerMode }): Promise<ApiResponse<ChatRoom>> {
     return request<ChatRoom>(`/chatrooms/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
@@ -549,6 +580,17 @@ export const chatRoomApi = {
     return request<GitCommandResult>(`/chatrooms/${id}/git-command`, {
       method: 'POST',
       body: JSON.stringify(data),
+    })
+  },
+
+  async getPackageScripts(id: string): Promise<ApiResponse<PackageScriptsResult>> {
+    return request<PackageScriptsResult>(`/chatrooms/${id}/package-scripts`)
+  },
+
+  async runPackageScript(id: string, scriptId: string): Promise<ApiResponse<RunPackageScriptResult>> {
+    return request<RunPackageScriptResult>(`/chatrooms/${id}/package-scripts/run`, {
+      method: 'POST',
+      body: JSON.stringify({ scriptId }),
     })
   },
 

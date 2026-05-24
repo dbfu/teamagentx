@@ -24,9 +24,10 @@ describe('template snapshot builder', () => {
         acpTool: 'claude',
         categoryId: 'cat-1',
         workDir: '/Users/demo/agent-workdir',
-        proxyConfig: 'http://127.0.0.1:7890',
+          proxyConfig: 'http://127.0.0.1:7890',
           codexModel: null,
           claudeModel: 'claude-sonnet-4',
+          thinkingMode: 'high',
           llmProviderId: 'provider-text-1',
           speechConfig: {
             behavior: { enabled: true, outputMode: 'manual', autoPlay: false },
@@ -77,6 +78,7 @@ describe('template snapshot builder', () => {
           proxyConfig: null,
           codexModel: null,
           claudeModel: 'claude-sonnet-4',
+          thinkingMode: 'high',
           llmProviderId: null,
           speechConfig: null,
           capabilities: [],
@@ -91,5 +93,24 @@ describe('template snapshot builder', () => {
     assert.equal(snapshot.categories[0]?.name, '客服');
     assert.equal(snapshot.cronTasks[0]?.name, '日报');
     assert.equal(snapshot.agents[0]?.claudeModel, 'claude-sonnet-4');
+  });
+
+  test('keeps coordinator trigger mode in room metadata', () => {
+    const snapshot = buildTemplateSnapshot({
+      room: {
+        id: 'room-1',
+        name: '协作群',
+        description: null,
+        rules: null,
+        workDir: null,
+        defaultAgentId: null,
+        agentTriggerMode: 'coordinator',
+      },
+      agents: [],
+      categories: [],
+      cronTasks: [],
+    });
+
+    assert.equal(snapshot.room.agentTriggerMode, 'coordinator');
   });
 });

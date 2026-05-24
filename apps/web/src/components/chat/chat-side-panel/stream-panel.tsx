@@ -172,6 +172,9 @@ export function StreamPanel({
 
   useEffect(() => {
     prevInProgressKeyRef.current = ''
+    if (todosContainerRef.current) {
+      todosContainerRef.current.scrollTop = 0
+    }
   }, [streamKey])
 
   // 当正在执行的任务变化时，滚动到该任务使其可见
@@ -186,18 +189,23 @@ export function StreamPanel({
     const targetElement = todoElements[inProgressIndex] as HTMLElement
 
     if (targetElement) {
-      // 计算滚动位置：让元素在容器中居中显示
-      const elementTop = targetElement.offsetTop
-      const elementHeight = targetElement.offsetHeight
-      const containerHeight = container.clientHeight
+      const containerRect = container.getBoundingClientRect()
+      const elementRect = targetElement.getBoundingClientRect()
+      const padding = 4
+      let nextScrollTop = container.scrollTop
 
-      // 居中位置 = 元素顶部位置 - (容器高度 - 元素高度) / 2
-      const scrollTop = elementTop - (containerHeight - elementHeight) / 2
+      if (elementRect.top < containerRect.top) {
+        nextScrollTop += elementRect.top - containerRect.top - padding
+      } else if (elementRect.bottom > containerRect.bottom) {
+        nextScrollTop += elementRect.bottom - containerRect.bottom + padding
+      }
 
-      container.scrollTo({
-        top: Math.max(0, scrollTop),
-        behavior: 'smooth'
-      })
+      if (nextScrollTop !== container.scrollTop) {
+        container.scrollTo({
+          top: Math.max(0, nextScrollTop),
+          behavior: 'smooth'
+        })
+      }
       prevInProgressKeyRef.current = inProgressKey
     }
   }, [inProgressIndex, inProgressKey])
@@ -339,7 +347,7 @@ export function StreamPanel({
             // 思考过程
             if (event.type === 'thinking') {
               return (
-                <Collapsible key={event.id} className="rounded border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 text-xs">
+                <Collapsible key={event.id} defaultOpen className="rounded border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 text-xs">
                   <CollapsibleTrigger asChild>
                     <div className="group flex items-center gap-2 p-2 cursor-pointer hover:opacity-80">
                       <CollapsibleStateIcon />

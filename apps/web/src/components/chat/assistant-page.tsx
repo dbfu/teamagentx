@@ -36,7 +36,7 @@ import {
   Check,
   X,
 } from 'lucide-react'
-import { agentApi, categoryApi, Agent, AgentCategory, AgentSpeechConfig, AgentsGrouped } from '@/lib/agent-api'
+import { agentApi, categoryApi, Agent, AgentCategory, AgentSpeechConfig, AgentsGrouped, type AgentThinkingMode } from '@/lib/agent-api'
 import { cn } from '@/lib/utils'
 import { CreateAssistantModal } from './create-assistant-modal'
 import { EditAssistantModal } from './edit-assistant-modal'
@@ -313,7 +313,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
       const allAgents = [
         ...groupedResponse.data.categories.flatMap(cg => cg.agents),
         ...groupedResponse.data.uncategorized
-      ]
+      ].filter(agent => agent.agentLevel !== 'system')
       setAssistants(allAgents)
       // 默认展开所有分类（包括未分类）
       const allCategoryIds = [...groupedResponse.data.categories.map(cg => cg.category.id), '__uncategorized__']
@@ -352,6 +352,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     proxyConfig?: string | null
     codexModel?: string | null
     claudeModel?: string | null
+    thinkingMode?: AgentThinkingMode | null
     categoryId: string | null
     llmProviderId: string | null
     speechConfig: AgentSpeechConfig | null
@@ -367,6 +368,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
       proxyConfig: data.proxyConfig || null,
       codexModel: data.codexModel || null,
       claudeModel: data.claudeModel || null,
+      thinkingMode: data.thinkingMode || 'high',
       categoryId: data.categoryId || undefined,
       llmProviderId: data.llmProviderId,
       speechConfig: data.speechConfig,
@@ -394,6 +396,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     proxyConfig?: string | null
     codexModel?: string | null
     claudeModel?: string | null
+    thinkingMode?: AgentThinkingMode | null
     categoryId: string | null
     llmProviderId: string | null
     speechConfig: AgentSpeechConfig | null
@@ -410,6 +413,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
       proxyConfig: data.proxyConfig || null,
       codexModel: data.codexModel || null,
       claudeModel: data.claudeModel || null,
+      thinkingMode: data.thinkingMode || 'high',
       categoryId: data.categoryId,
       llmProviderId: data.llmProviderId,
       speechConfig: data.speechConfig,
@@ -455,18 +459,23 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     closeMenu()
   }
 
-  const openEditModal = (assistant: Agent) => {
-    setEditingAssistant(assistant)
-    setEditMode('edit')
-    setIsEditModalOpen(true)
-    closeMenu()
+  const loadAssistantForModal = async (assistant: Agent): Promise<Agent> => {
+    const response = await agentApi.getById(assistant.id)
+    return response.success && response.data ? response.data : assistant
   }
 
-  const openCopyModal = (assistant: Agent) => {
-    setEditingAssistant(assistant)
-    setEditMode('copy')
-    setIsEditModalOpen(true)
+  const openEditModal = async (assistant: Agent) => {
+    setEditMode('edit')
     closeMenu()
+    setEditingAssistant(await loadAssistantForModal(assistant))
+    setIsEditModalOpen(true)
+  }
+
+  const openCopyModal = async (assistant: Agent) => {
+    setEditMode('copy')
+    closeMenu()
+    setEditingAssistant(await loadAssistantForModal(assistant))
+    setIsEditModalOpen(true)
   }
 
   // 打开 Skills 安装对话框
@@ -887,11 +896,10 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
   // Filter helpers for grouped display
   const displayedGroupedData = dragPreviewGroupedData || groupedData
 
-  // 分离系统分类（sortOrder = -1000）和普通分类
-  const { normalCategories, systemCategory } = displayedGroupedData ? {
+  // 系统协调助手是内置执行器，不作为可管理助手展示。
+  const { normalCategories } = displayedGroupedData ? {
     normalCategories: displayedGroupedData.categories.filter(cg => cg.category.sortOrder !== -1000),
-    systemCategory: displayedGroupedData.categories.find(cg => cg.category.sortOrder === -1000),
-  } : { normalCategories: [], systemCategory: null }
+  } : { normalCategories: [] }
 
   const filteredGroupedData = displayedGroupedData ? {
     categories: normalCategories
@@ -902,13 +910,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
           a.description?.toLowerCase().includes(searchQuery.toLowerCase())
         )
       })),
-    systemCategory: systemCategory ? {
-      category: systemCategory.category,
-      agents: systemCategory.agents.filter(a =>
-        a.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        a.description?.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-    } : null,
+    systemCategory: null as { category: AgentCategory; agents: Agent[] } | null,
     uncategorized: displayedGroupedData.uncategorized.filter(a =>
       a.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       a.description?.toLowerCase().includes(searchQuery.toLowerCase())
@@ -1279,6 +1281,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
       />
 
       <EditAssistantModal
+        key={`${editingAssistant?.id ?? 'none'}-${editMode}`}
         isOpen={isEditModalOpen}
         onClose={() => {
           setIsEditModalOpen(false)

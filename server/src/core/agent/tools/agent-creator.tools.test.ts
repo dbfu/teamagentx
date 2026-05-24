@@ -93,6 +93,34 @@ test('list_categories returns category ids and names', async () => {
   assert.match(text, /名称: Agent Creator Tool Test Audit/);
 });
 
+test('create_llm_provider supports image model configuration fields', async () => {
+  const result = await getTool('create_llm_provider').invoke({
+    name: 'Agent Creator Tool Test Image Provider',
+    modelType: 'image',
+    apiProtocol: 'openai',
+    apiUrl: 'https://api.openai.com/v1',
+    apiKey: 'test-key',
+    model: 'gpt-image-1',
+    imageProvider: 'openai',
+    imageApiType: 'sync',
+    isActive: true,
+  });
+  const parsed = JSON.parse(String(result));
+
+  assert.equal(parsed.success, true);
+  assert.equal(parsed.provider.modelType, 'image');
+  assert.equal(parsed.provider.imageProvider, 'openai');
+  assert.equal(parsed.provider.imageApiType, 'sync');
+
+  const provider = await prisma.llmProvider.findUnique({
+    where: { name: 'Agent Creator Tool Test Image Provider' },
+  });
+
+  assert.equal(provider?.modelType, 'image');
+  assert.equal(provider?.imageProvider, 'openai');
+  assert.equal(provider?.imageApiType, 'sync');
+});
+
 test('list_voice_catalog returns browser-local and remote voice catalog', async () => {
   upsertBrowserLocalVoiceSnapshot('tool-test-user', 'client-a', [
     {
