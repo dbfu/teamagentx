@@ -24,6 +24,10 @@ import {
   buildInstalledSkillsSignature,
 } from './skill-instructions.js';
 import { getImageGenerationSkillInstructions } from './image-generation-config.js';
+import {
+  DEFAULT_AGENT_THINKING_MODE,
+  type AgentThinkingMode,
+} from './thinking-mode.js';
 import type {
   AgentDebugInfo,
   AgentExecResult,
@@ -78,6 +82,8 @@ const TEAMAGENTX_CODEX_PROVIDER_ID = 'teamagentx_openai';
 const INTERNAL_ORIGINATOR_ENV = 'CODEX_INTERNAL_ORIGINATOR_OVERRIDE';
 const TYPESCRIPT_SDK_ORIGINATOR = 'codex_sdk_ts';
 const CODEX_NPM_NAME = '@openai/codex';
+const DEFAULT_CODEX_SDK_MAX_THREAD_TURNS = 8;
+const DEFAULT_CODEX_SDK_MAX_SESSION_BYTES = 2 * 1024 * 1024;
 const moduleRequire = createRequire(import.meta.url);
 
 const PLATFORM_PACKAGE_BY_TARGET: Record<string, string> = {
@@ -232,6 +238,27 @@ function findExecutableOnPath(commandName: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function getPositiveIntegerEnv(name: string, defaultValue: number): number {
+  const raw = process.env[name];
+  if (!raw) return defaultValue;
+  const value = Number.parseInt(raw, 10);
+  return Number.isFinite(value) && value >= 0 ? value : defaultValue;
+}
+
+type CodexReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+
+function getCodexReasoningEffort(thinkingMode?: AgentThinkingMode | null): CodexReasoningEffort {
+  if (thinkingMode) {
+    return thinkingMode === 'off' ? 'minimal' : thinkingMode;
+  }
+
+  const value = process.env.CODEX_SDK_REASONING_EFFORT?.trim().toLowerCase();
+  if (value && ['minimal', 'low', 'medium', 'high', 'xhigh'].includes(value)) {
+    return value as CodexReasoningEffort;
+  }
+  return DEFAULT_AGENT_THINKING_MODE;
 }
 
 function findGitNexusRepoRoot(startDir: string): string | undefined {
@@ -673,6 +700,7 @@ export class CodexSdkExecutor implements IAgentExecutor {
   readonly imageGenerationProvider?: LlmProvider | null;
   readonly proxyConfig: string | null;
   readonly codexModel: string | null;
+  readonly thinkingMode: AgentThinkingMode;
 
   private _lastInjectedMessageId?: string;
   private systemPrompt: string;
@@ -710,6 +738,7 @@ export class CodexSdkExecutor implements IAgentExecutor {
     imageGenerationProvider?: LlmProvider | null,
     proxyConfig?: string | null,
     codexModel?: string | null,
+    thinkingMode?: AgentThinkingMode | null,
     chatRoomRules?: string,
   ) {
     this.name = name;
@@ -723,6 +752,7 @@ export class CodexSdkExecutor implements IAgentExecutor {
     this.imageGenerationProvider = imageGenerationProvider;
     this.proxyConfig = proxyConfig || null;
     this.codexModel = codexModel || null;
+    this.thinkingMode = thinkingMode || DEFAULT_AGENT_THINKING_MODE;
 
     this.workDir = resolveAgentWorkDir({
       chatRoomId,
@@ -1142,6 +1172,90 @@ process.stdin.on("data", (chunk) => {
     }
   }
 
+  private resetThreadState(reason: string, details: Record<string, unknown> = {}): void {
+    this.currentAbortController?.abort();
+    this.currentAbortController = null;
+    this.thread = null;
+    this.threadId = null;
+    this.lastInjectedSkillsSignature = undefined;
+    this.saveThreadId();
+    debugLog('codexSdkThreadReset', {
+      agentName: this.name,
+      agentId: this.agentId,
+      chatRoomId: this.chatRoomId,
+      reason,
+      ...details,
+    });
+  }
+
+  private findThreadSessionPath(threadId: string): string | undefined {
+    const sessionsDir = path.join(this.getCodexHome(), 'sessions');
+    if (!fs.existsSync(sessionsDir)) return undefined;
+
+    const stack = [sessionsDir];
+    while (stack.length > 0) {
+      const dir = stack.pop()!;
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          stack.push(fullPath);
+          continue;
+        }
+        if (entry.isFile() && entry.name.includes(threadId) && entry.name.endsWith('.jsonl')) {
+          return fullPath;
+        }
+      }
+    }
+
+    return undefined;
+  }
+
+  private getThreadSessionStats(threadId: string): { path?: string; bytes: number; turns: number } {
+    const sessionPath = this.findThreadSessionPath(threadId);
+    if (!sessionPath) return { bytes: 0, turns: 0 };
+
+    try {
+      const text = fs.readFileSync(sessionPath, 'utf-8');
+      const turns = (text.match(/"type":"turn_context"/g) || []).length;
+      return {
+        path: sessionPath,
+        bytes: Buffer.byteLength(text),
+        turns,
+      };
+    } catch {
+      return { path: sessionPath, bytes: 0, turns: 0 };
+    }
+  }
+
+  private resetOvergrownThreadIfNeeded(): void {
+    if (!this.threadId) return;
+
+    const maxTurns = getPositiveIntegerEnv('CODEX_SDK_MAX_THREAD_TURNS', DEFAULT_CODEX_SDK_MAX_THREAD_TURNS);
+    const maxBytes = getPositiveIntegerEnv('CODEX_SDK_MAX_SESSION_BYTES', DEFAULT_CODEX_SDK_MAX_SESSION_BYTES);
+    if (maxTurns === 0 && maxBytes === 0) return;
+
+    const stats = this.getThreadSessionStats(this.threadId);
+    const exceedsTurns = maxTurns > 0 && stats.turns >= maxTurns;
+    const exceedsBytes = maxBytes > 0 && stats.bytes >= maxBytes;
+    if (!exceedsTurns && !exceedsBytes) return;
+
+    this.resetThreadState('sessionLimitExceeded', {
+      previousThreadId: this.threadId,
+      sessionPath: stats.path,
+      sessionTurns: stats.turns,
+      sessionBytes: stats.bytes,
+      maxTurns,
+      maxBytes,
+    });
+  }
+
   private buildEnv(): Record<string, string> {
     if (!this.llmProvider) {
       const authStatus = getDefaultCodexAuthStatus();
@@ -1286,8 +1400,9 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       systemToolsCallEndpoint,
     });
     const config = {
-      hide_agent_reasoning: false,
-      show_raw_agent_reasoning: false,
+      hide_agent_reasoning: this.thinkingMode === 'off',
+      show_raw_agent_reasoning: this.thinkingMode !== 'off',
+      model_reasoning_effort: getCodexReasoningEffort(this.thinkingMode),
       model_reasoning_summary: 'concise',
       skills: {
         include_instructions: false,
@@ -1306,6 +1421,8 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
   }
 
   private getThread(): TeamAgentXCodexThread {
+    if (this.thread) return this.thread;
+
     const runner = this.getCodexRunner();
     const options = {
       model: this.llmProvider?.model || this.codexModel || undefined,
@@ -1316,7 +1433,6 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       networkAccessEnabled: true,
     };
 
-    if (this.thread) return this.thread;
     this.thread = this.threadId
       ? new TeamAgentXCodexThread(runner, this.llmProvider?.apiKey, options, this.threadId)
       : new TeamAgentXCodexThread(runner, this.llmProvider?.apiKey, options);
@@ -1506,6 +1622,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     this.thread = null;
     this.threadId = null;
     this._lastInjectedMessageId = undefined;
+    this.lastInjectedSkillsSignature = undefined;
     if (this.agentId) {
       await agentMemoryService.clear(this.chatRoomId, this.agentId);
     }
@@ -1549,6 +1666,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       return { actions: [{ type: 'message', content: unsupportedMessage }] };
     }
 
+    this.resetOvergrownThreadIfNeeded();
     this.lastContext = this.buildFullMessage(message, history);
     const abortController = new AbortController();
     this.currentAbortController = abortController;
@@ -1556,11 +1674,23 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     signal?.addEventListener('abort', abort, { once: true });
     let tokenUsage: TokenUsage | undefined;
     const { input, cleanup } = this.writeAttachments(attachments);
+    const execStartTime = Date.now();
+    let firstEventLogged = false;
+    let firstVisibleOutputLogged = false;
 
     try {
       if (signal?.aborted) {
         throw new DOMException('执行已被用户中断', 'AbortError');
       }
+
+      debugLog('codexSdkExecStart', {
+        agentName: this.name,
+        agentId: this.agentId,
+        chatRoomId: this.chatRoomId,
+        messageId: originalMessageId,
+        threadId: this.threadId,
+        contextLength: this.lastContext.length,
+      });
 
       const thread = this.getThread();
       const { events } = await thread.runStreamed(input, { signal: abortController.signal });
@@ -1569,8 +1699,33 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
         if (signal?.aborted) {
           throw new DOMException('执行已被用户中断', 'AbortError');
         }
+        if (!firstEventLogged) {
+          firstEventLogged = true;
+          debugLog('codexSdkFirstEvent', {
+            agentName: this.name,
+            agentId: this.agentId,
+            chatRoomId: this.chatRoomId,
+            messageId: originalMessageId,
+            eventType: event.type,
+            elapsedMs: Date.now() - execStartTime,
+          });
+        }
         const usage = this.handleEvent(event);
         if (usage) tokenUsage = usage;
+        if (!firstVisibleOutputLogged && (this.content || this.thinking || this.toolCalls.length > 0)) {
+          firstVisibleOutputLogged = true;
+          debugLog('codexSdkFirstVisibleOutput', {
+            agentName: this.name,
+            agentId: this.agentId,
+            chatRoomId: this.chatRoomId,
+            messageId: originalMessageId,
+            eventType: event.type,
+            elapsedMs: Date.now() - execStartTime,
+            hasContent: !!this.content,
+            hasThinking: !!this.thinking,
+            toolCallCount: this.toolCalls.length,
+          });
+        }
       }
 
       if (thread.id && thread.id !== this.threadId) {

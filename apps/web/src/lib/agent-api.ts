@@ -2,6 +2,7 @@ import { getApiBaseUrl } from './config'
 import type { SpeechProfile } from '@/speech'
 
 export type AgentTriggerMode = 'auto' | 'manual' | 'coordinator'
+export type AgentThinkingMode = 'off' | 'low' | 'medium' | 'high'
 
 // 分类相关类型
 export interface AgentCategory {
@@ -42,6 +43,7 @@ export interface Agent {
   proxyConfig: string | null
   codexModel: string | null
   claudeModel: string | null
+  thinkingMode: AgentThinkingMode
   speechConfig: AgentSpeechConfig | null
   isActive: boolean
   categoryId: string | null
@@ -111,6 +113,7 @@ export interface CreateAgentRequest {
   proxyConfig?: string | null
   codexModel?: string | null
   claudeModel?: string | null
+  thinkingMode?: AgentThinkingMode | null
   speechConfig?: AgentSpeechConfig | null
   categoryId?: string
   llmProviderId?: string | null
@@ -131,6 +134,7 @@ export interface UpdateAgentRequest {
   proxyConfig?: string | null
   codexModel?: string | null
   claudeModel?: string | null
+  thinkingMode?: AgentThinkingMode | null
   speechConfig?: AgentSpeechConfig | null
   categoryId?: string | null
   llmProviderId?: string | null
@@ -339,6 +343,7 @@ export interface TemplatePackageSnapshot {
     proxyConfig: string | null
     codexModel: string | null
     claudeModel: string | null
+    thinkingMode: AgentThinkingMode
     llmProviderId: string | null
     speechConfig: Record<string, unknown> | null
     capabilities: Array<{

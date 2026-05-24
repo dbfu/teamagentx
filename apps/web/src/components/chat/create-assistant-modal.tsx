@@ -1,5 +1,5 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { AcpToolInfo, AgentSpeechConfig, acpToolsApi, AgentCategory, categoryApi } from '@/lib/agent-api';
+import { AcpToolInfo, AgentSpeechConfig, acpToolsApi, AgentCategory, categoryApi, type AgentThinkingMode } from '@/lib/agent-api';
 import { AgentAvatarImage, agentAvatarOptions } from '@/lib/agent-avatars';
 import { AvatarSelector } from './avatar-selector';
 import { getCodexModelOptions } from '@/lib/codex-models';
@@ -25,6 +25,7 @@ interface CreateAssistantModalProps {
     proxyConfig?: string | null
     codexModel?: string | null
     claudeModel?: string | null
+    thinkingMode?: AgentThinkingMode | null
     categoryId: string | null
     llmProviderId: string | null
     imageGeneration?: {
@@ -169,6 +170,7 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
   const [llmProviderId, setLlmProviderId] = useState<string>('')
   const [codexModel, setCodexModel] = useState('')
   const [claudeModel, setClaudeModel] = useState('')
+  const [thinkingMode, setThinkingMode] = useState<AgentThinkingMode>('high')
   const [proxyConfig, setProxyConfig] = useState('')
   const [imageGenerationEnabled, setImageGenerationEnabled] = useState(false)
   const [imageProviderId, setImageProviderId] = useState<string>('')
@@ -257,6 +259,7 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
         proxyConfig: showLocalCodexConfig ? proxyConfig.trim() || null : null,
         codexModel: showLocalCodexConfig ? codexModel.trim() || null : null,
         claudeModel: showLocalClaudeConfig ? claudeModel.trim() || null : null,
+        thinkingMode,
         categoryId: categoryId || null,
         llmProviderId: llmProviderId || null,
         imageGeneration: {
@@ -278,6 +281,7 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
         setLlmProviderId('')
         setCodexModel('')
         setClaudeModel('')
+        setThinkingMode('high')
         setProxyConfig('')
         setImageGenerationEnabled(false)
         setImageProviderId('')
@@ -399,6 +403,25 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
                 {getProviderProtocolHint(assistantType, acpTool)}
               </p>
             </div>
+
+            {assistantType === 'acp' && (acpTool === 'claude' || acpTool === 'codex') && (
+              <div className="mb-4">
+                <label className="mb-1.5 block text-sm font-medium text-foreground">
+                  思考模式
+                </label>
+                <Select value={thinkingMode} onValueChange={(value) => setThinkingMode(value as AgentThinkingMode)}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="选择思考模式" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="high">高（默认）</SelectItem>
+                    <SelectItem value="medium">中</SelectItem>
+                    <SelectItem value="low">低</SelectItem>
+                    <SelectItem value="off">关</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             {showLocalCodexConfig && (
               <div className="mb-4 space-y-3">

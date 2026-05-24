@@ -1,5 +1,5 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { AcpToolInfo, Agent, AgentSpeechConfig, agentApi, AgentCategory, acpToolsApi, categoryApi } from '@/lib/agent-api';
+import { AcpToolInfo, Agent, AgentSpeechConfig, agentApi, AgentCategory, acpToolsApi, categoryApi, type AgentThinkingMode } from '@/lib/agent-api';
 import { AgentAvatarImage, agentAvatarOptions } from '@/lib/agent-avatars';
 import { AvatarSelector } from './avatar-selector';
 import { getCodexModelOptions } from '@/lib/codex-models';
@@ -11,7 +11,7 @@ import { promptOptimizeApi } from '@/lib/prompt-optimize-api';
 import { InstalledSkill, skillApi } from '@/lib/skill-api';
 import { Switch } from '@/components/ui/switch';
 import { Image, Loader2, Maximize2, Sparkles, X } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 interface EditAssistantModalProps {
@@ -27,6 +27,7 @@ interface EditAssistantModalProps {
     proxyConfig?: string | null
     codexModel?: string | null
     claudeModel?: string | null
+    thinkingMode?: AgentThinkingMode | null
     categoryId: string | null
     llmProviderId: string | null
     imageGeneration?: {
@@ -163,7 +164,7 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
   const [selectedAvatar, setSelectedAvatar] = useState('0')
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [assistantType, setAssistantType] = useState<'builtin' | 'acp'>('acp')
-  const [acpTool, setAcpTool] = useState('claude')
+  const [acpTool, setAcpTool] = useState('')
   const [acpTools, setAcpTools] = useState<AcpToolInfo[]>([])
   const [categories, setCategories] = useState<AgentCategory[]>([])
   const [categoryId, setCategoryId] = useState<string>('')
@@ -171,17 +172,19 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
   const [llmProviderId, setLlmProviderId] = useState<string>('')
   const [codexModel, setCodexModel] = useState('')
   const [claudeModel, setClaudeModel] = useState('')
+  const [thinkingMode, setThinkingMode] = useState<AgentThinkingMode>('high')
   const [proxyConfig, setProxyConfig] = useState('')
   const [imageGenerationEnabled, setImageGenerationEnabled] = useState(false)
   const [imageProviderId, setImageProviderId] = useState<string>('')
   const [providerSelectionTouched, setProviderSelectionTouched] = useState(false)
   const [resolvedAssistant, setResolvedAssistant] = useState<Agent | null>(assistant)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const assistantForForm = resolvedAssistant || assistant
+  const assistantForForm = resolvedAssistant?.id === assistant?.id ? resolvedAssistant : assistant
+  const formAcpTool = acpTool || assistantForForm?.acpTool || 'claude'
   const boundLlmProviderId = assistantForForm?.llmProviderId || assistantForForm?.llmProvider?.id || ''
   const effectiveLlmProviderId = providerSelectionTouched ? llmProviderId : (llmProviderId || boundLlmProviderId)
   const compatibleLlmProviders = llmProviders.filter(
-    (provider) => provider.isActive && isProviderCompatibleWithAgent(provider, assistantType, acpTool)
+    (provider) => provider.isActive && isProviderCompatibleWithAgent(provider, assistantType, formAcpTool)
   )
   const selectedProviderFromList = llmProviders.find((provider) => provider.id === effectiveLlmProviderId)
   const selectedProviderInfo = selectedProviderFromList
@@ -194,7 +197,7 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
         isActive: assistantForForm.llmProvider.isActive,
         isDefault: assistantForForm.llmProvider.isDefault,
         apiProtocol: (assistantForForm.llmProvider as { apiProtocol?: LlmProvider['apiProtocol'] }).apiProtocol
-          || getRequiredProviderProtocol(assistantForForm.type, assistantForForm.acpTool || '')
+          || getRequiredProviderProtocol(assistantForForm.type, assistantForForm.acpTool || formAcpTool)
           || 'anthropic',
       }
     : null
@@ -208,13 +211,16 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
     ),
     ...compatibleLlmProviders,
   ]
-  const selectedAcpTool = acpTools.find((tool) => tool.id === acpTool)
+  const selectedAcpTool = acpTools.find((tool) => tool.id === formAcpTool)
+  const selectedAcpToolLabel = selectedAcpTool?.name
+    || (formAcpTool === 'codex' ? 'Codex' : formAcpTool === 'claude' ? 'Claude' : formAcpTool)
+  const hasSelectedAcpToolOption = acpTools.some((tool) => tool.id === formAcpTool)
   const imageProviders = llmProviders.filter(
     (provider) => provider.isActive && provider.modelType === 'image'
   )
   const canUseLocalAcpConfig = assistantType === 'acp' && selectedAcpTool?.localConfigAvailable
-  const showLocalCodexConfig = assistantType === 'acp' && acpTool === 'codex' && !effectiveLlmProviderId
-  const showLocalClaudeConfig = assistantType === 'acp' && acpTool === 'claude' && !effectiveLlmProviderId
+  const showLocalCodexConfig = assistantType === 'acp' && formAcpTool === 'codex' && !effectiveLlmProviderId
+  const showLocalClaudeConfig = assistantType === 'acp' && formAcpTool === 'claude' && !effectiveLlmProviderId
   const providerSelectLabel = selectedProviderInfo
     ? `${selectedProviderInfo.name} · ${selectedProviderInfo.model}`
     : assistantType === 'acp'
@@ -288,13 +294,13 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
     const isOriginalAgentConfig = Boolean(
       assistantForForm
       && assistantType === assistantForForm.type
-      && acpTool === (assistantForForm.acpTool || 'claude')
+      && formAcpTool === (assistantForForm.acpTool || 'claude')
     )
-    if (selectedProvider && !isProviderCompatibleWithAgent(selectedProvider, assistantType, acpTool) && !isOriginalAgentConfig) {
+    if (selectedProvider && !isProviderCompatibleWithAgent(selectedProvider, assistantType, formAcpTool) && !isOriginalAgentConfig) {
       setLlmProviderId('')
       toast.warning('已清除不兼容的 LLM 供应商')
     }
-  }, [assistantForForm, assistantType, acpTool, llmProviderId, llmProviders])
+  }, [assistantForForm, assistantType, formAcpTool, llmProviderId, llmProviders])
 
   // 获取已安装的 Skills
   const fetchInstalledSkills = async () => {
@@ -317,7 +323,7 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
   }, [isOpen, assistantForForm?.id])
 
   // 初始化表单数据 - 当模态框打开或 assistant 变化时
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (isOpen && assistantForForm) {
       // 复制模式下，名称加上"(副本)"后缀
       setName(mode === 'copy' ? `${assistantForForm.name}(副本)` : assistantForForm.name)
@@ -330,6 +336,7 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
       setLlmProviderId(assistantForForm.llmProviderId || assistantForForm.llmProvider?.id || '')
       setCodexModel(assistantForForm.codexModel || '')
       setClaudeModel(assistantForForm.claudeModel || '')
+      setThinkingMode(assistantForForm.thinkingMode || 'high')
       setProxyConfig(assistantForForm.proxyConfig || '')
       const imageCapability = assistantForForm.capabilities?.find((capability) => capability.capabilityType === 'image')
       setImageGenerationEnabled(Boolean(imageCapability?.enabled))
@@ -400,10 +407,11 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
         description: description.trim(),
         prompt: prompt.trim(),
         type: assistantType,
-        acpTool: assistantType === 'acp' ? acpTool : '',
+        acpTool: assistantType === 'acp' ? formAcpTool : '',
         proxyConfig: showLocalCodexConfig ? proxyConfig.trim() || null : null,
         codexModel: showLocalCodexConfig ? codexModel.trim() || null : null,
         claudeModel: showLocalClaudeConfig ? claudeModel.trim() || null : null,
+        thinkingMode,
         categoryId: categoryId || null,
         llmProviderId: submittedLlmProviderId,
         imageGeneration: {
@@ -462,18 +470,25 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
               <label className="mb-1.5 block text-sm font-medium text-foreground">
                 Agent <span className="text-red-500">*</span>
               </label>
-              <Select value={acpTool} onValueChange={setAcpTool}>
+              <Select value={formAcpTool} onValueChange={setAcpTool}>
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="选择 Agent" />
+                  <SelectValue placeholder="选择 Agent">
+                    {selectedAcpToolLabel || '选择 Agent'}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
+                  {!hasSelectedAcpToolOption && formAcpTool && (
+                    <SelectItem value={formAcpTool}>
+                      {selectedAcpToolLabel}
+                    </SelectItem>
+                  )}
                   {acpTools.length === 0 ? (
-                    <SelectItem value="claude" disabled>
+                    <SelectItem value="__loading__" disabled>
                       加载中...
                     </SelectItem>
                   ) : (
                     acpTools.map((tool) => (
-                      <SelectItem key={tool.id} value={tool.id} disabled={!tool.installed}>
+                      <SelectItem key={tool.id} value={tool.id} disabled={!tool.installed && tool.id !== formAcpTool}>
                         <span className="flex items-center gap-2">
                           {tool.name}
                           {!tool.installed && (
@@ -551,10 +566,29 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
               )}
               {!selectedProviderInfo && (
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {getProviderProtocolHint(assistantType, acpTool)}
+                  {getProviderProtocolHint(assistantType, formAcpTool)}
                 </p>
               )}
             </div>
+
+            {assistantType === 'acp' && (formAcpTool === 'claude' || formAcpTool === 'codex') && (
+              <div className="mb-4">
+                <label className="mb-1.5 block text-sm font-medium text-foreground">
+                  思考模式
+                </label>
+                <Select value={thinkingMode} onValueChange={(value) => setThinkingMode(value as AgentThinkingMode)}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="选择思考模式" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="high">高（默认）</SelectItem>
+                    <SelectItem value="medium">中</SelectItem>
+                    <SelectItem value="low">低</SelectItem>
+                    <SelectItem value="off">关</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             {showLocalCodexConfig && (
               <div className="mb-4 space-y-3">

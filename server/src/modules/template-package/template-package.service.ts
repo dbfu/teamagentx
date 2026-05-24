@@ -114,6 +114,7 @@ export const templatePackageService = {
         proxyConfig: agent.proxyConfig,
         codexModel: agent.codexModel,
         claudeModel: agent.claudeModel,
+        thinkingMode: agent.thinkingMode,
         llmProviderId: agent.llmProviderId,
         speechConfig: agent.speechConfig
           ? deserializeAgentSpeechConfig(agent.speechConfig)
@@ -223,6 +224,7 @@ export const templatePackageService = {
         proxyConfig: string | null;
         codexModel: string | null;
         claudeModel: string | null;
+        thinkingMode: string;
         llmProviderId: string | null;
         speechConfig: Record<string, unknown> | null;
         capabilities: Array<{
@@ -332,6 +334,7 @@ export const templatePackageService = {
             proxyConfig: null,
             codexModel: agent.codexModel,
             claudeModel: agent.claudeModel,
+            thinkingMode: agent.thinkingMode || 'high',
             llmProviderId: resolvedTextProvider?.providerId ?? null,
             speechConfig: serializeAgentSpeechConfig(agent.speechConfig as any),
             categoryId: matchedCategoryId,

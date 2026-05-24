@@ -48,6 +48,10 @@ import {
 } from './skill-instructions.js';
 import { syncGlobalClaudeLocalConfig } from './claude-local-config.js';
 import { getSystemAssistantTools } from './tools/index.js';
+import {
+  DEFAULT_AGENT_THINKING_MODE,
+  type AgentThinkingMode,
+} from './thinking-mode.js';
 import { getDefaultChatRoomWorkDir, resolveAgentWorkDir } from './work-dir.js';
 
 function shortHash(input: string): string {
@@ -169,15 +173,30 @@ function getClaudeMaxTurns(): number {
 
 function getClaudeThinkingOptions(
   provider?: LlmProvider,
+  thinkingMode?: AgentThinkingMode | null,
 ):
   | {type: 'adaptive'}
   | {type: 'enabled'; budgetTokens?: number}
   | {type: 'disabled'}
   | undefined {
+  if ((provider as any)?.supportsThinking === false) {
+    return {type: 'disabled'};
+  }
+
+  if (thinkingMode) {
+    const mode = thinkingMode || DEFAULT_AGENT_THINKING_MODE;
+    if (mode === 'off') return {type: 'disabled'};
+    const budgetTokensByMode: Record<Exclude<AgentThinkingMode, 'off'>, number> = {
+      low: 4000,
+      medium: 10000,
+      high: 16000,
+    };
+    return {type: 'enabled', budgetTokens: budgetTokensByMode[mode]};
+  }
+
   const mode = (process.env.CLAUDE_AGENT_THINKING || 'enabled').toLowerCase();
 
   if (
-    (provider as any)?.supportsThinking === false ||
     mode === 'disabled' ||
     mode === 'off' ||
     mode === '0'
@@ -434,6 +453,7 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
   readonly chatRoomAgents: ChatRoomAgentInfo[];
   readonly llmProvider?: LlmProvider;
   readonly imageGenerationProvider?: LlmProvider | null;
+  readonly thinkingMode: AgentThinkingMode;
 
   private _lastInjectedMessageId?: string;
   private systemPrompt: string;
@@ -479,6 +499,7 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
     chatRoomAgents?: ChatRoomAgentInfo[],
     llmProvider?: LlmProvider,
     imageGenerationProvider?: LlmProvider | null,
+    thinkingMode?: AgentThinkingMode | null,
     chatRoomRules?: string,
   ) {
     this.name = name;
@@ -490,6 +511,7 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
     this.chatRoomAgents = chatRoomAgents || [];
     this.llmProvider = llmProvider;
     this.imageGenerationProvider = imageGenerationProvider;
+    this.thinkingMode = thinkingMode || DEFAULT_AGENT_THINKING_MODE;
     this.workDir = resolveAgentWorkDir({
       chatRoomId,
       sessionDir,
@@ -802,7 +824,7 @@ When you perform file operations or run commands, operate in this directory by d
       optionSessionId: this.hasStartedSession ? undefined : this.sessionId,
       optionResume: this.hasStartedSession ? this.sessionId : undefined,
       maxTurns: getClaudeMaxTurns(),
-      thinking: getClaudeThinkingOptions(this.llmProvider),
+      thinking: getClaudeThinkingOptions(this.llmProvider, this.thinkingMode),
       model: this.llmProvider?.model,
       provider: this.llmProvider
         ? {
@@ -1413,7 +1435,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
   ): Promise<TokenUsage | undefined> {
     const env = this.buildEnv();
     const maxTurns = getClaudeMaxTurns();
-    const thinking = getClaudeThinkingOptions(this.llmProvider);
+    const thinking = getClaudeThinkingOptions(this.llmProvider, this.thinkingMode);
     this.lastClaudeStderr = '';
     this.logQueryStart(env);
     const settingSources: SettingSource[] = this.llmProvider

@@ -347,7 +347,7 @@ export function StreamPanel({
             // 思考过程
             if (event.type === 'thinking') {
               return (
-                <Collapsible key={event.id} className="rounded border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 text-xs">
+                <Collapsible key={event.id} defaultOpen className="rounded border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 text-xs">
                   <CollapsibleTrigger asChild>
                     <div className="group flex items-center gap-2 p-2 cursor-pointer hover:opacity-80">
                       <CollapsibleStateIcon />

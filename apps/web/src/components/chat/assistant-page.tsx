@@ -36,7 +36,7 @@ import {
   Check,
   X,
 } from 'lucide-react'
-import { agentApi, categoryApi, Agent, AgentCategory, AgentSpeechConfig, AgentsGrouped } from '@/lib/agent-api'
+import { agentApi, categoryApi, Agent, AgentCategory, AgentSpeechConfig, AgentsGrouped, type AgentThinkingMode } from '@/lib/agent-api'
 import { cn } from '@/lib/utils'
 import { CreateAssistantModal } from './create-assistant-modal'
 import { EditAssistantModal } from './edit-assistant-modal'
@@ -352,6 +352,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     proxyConfig?: string | null
     codexModel?: string | null
     claudeModel?: string | null
+    thinkingMode?: AgentThinkingMode | null
     categoryId: string | null
     llmProviderId: string | null
     speechConfig: AgentSpeechConfig | null
@@ -367,6 +368,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
       proxyConfig: data.proxyConfig || null,
       codexModel: data.codexModel || null,
       claudeModel: data.claudeModel || null,
+      thinkingMode: data.thinkingMode || 'high',
       categoryId: data.categoryId || undefined,
       llmProviderId: data.llmProviderId,
       speechConfig: data.speechConfig,
@@ -394,6 +396,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     proxyConfig?: string | null
     codexModel?: string | null
     claudeModel?: string | null
+    thinkingMode?: AgentThinkingMode | null
     categoryId: string | null
     llmProviderId: string | null
     speechConfig: AgentSpeechConfig | null
@@ -410,6 +413,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
       proxyConfig: data.proxyConfig || null,
       codexModel: data.codexModel || null,
       claudeModel: data.claudeModel || null,
+      thinkingMode: data.thinkingMode || 'high',
       categoryId: data.categoryId,
       llmProviderId: data.llmProviderId,
       speechConfig: data.speechConfig,
@@ -455,18 +459,23 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     closeMenu()
   }
 
-  const openEditModal = (assistant: Agent) => {
-    setEditingAssistant(assistant)
-    setEditMode('edit')
-    setIsEditModalOpen(true)
-    closeMenu()
+  const loadAssistantForModal = async (assistant: Agent): Promise<Agent> => {
+    const response = await agentApi.getById(assistant.id)
+    return response.success && response.data ? response.data : assistant
   }
 
-  const openCopyModal = (assistant: Agent) => {
-    setEditingAssistant(assistant)
-    setEditMode('copy')
-    setIsEditModalOpen(true)
+  const openEditModal = async (assistant: Agent) => {
+    setEditMode('edit')
     closeMenu()
+    setEditingAssistant(await loadAssistantForModal(assistant))
+    setIsEditModalOpen(true)
+  }
+
+  const openCopyModal = async (assistant: Agent) => {
+    setEditMode('copy')
+    closeMenu()
+    setEditingAssistant(await loadAssistantForModal(assistant))
+    setIsEditModalOpen(true)
   }
 
   // 打开 Skills 安装对话框
@@ -1272,6 +1281,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
       />
 
       <EditAssistantModal
+        key={`${editingAssistant?.id ?? 'none'}-${editMode}`}
         isOpen={isEditModalOpen}
         onClose={() => {
           setIsEditModalOpen(false)
