@@ -12,6 +12,7 @@ describe('System assistant tools', () => {
       .map((tool) => tool.name);
 
     assert.ok(toolNames.includes('create_agent'));
+    assert.ok(toolNames.includes('create_llm_provider'));
     assert.ok(toolNames.includes('create_skill'));
     assert.ok(toolNames.includes('create_cron_task'));
     assert.ok(toolNames.includes('create_chatroom'));

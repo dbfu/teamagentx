@@ -474,7 +474,7 @@ function getDefaultCodexAuthStatus(): { available: boolean; path: string } {
       typeof data.tokens === 'object' &&
       typeof data.tokens.access_token === 'string' &&
       typeof data.tokens.refresh_token === 'string';
-    return { available: Boolean(data.auth_mode && (hasApiKey || hasChatGptTokens)), path: authPath };
+    return { available: hasApiKey || hasChatGptTokens, path: authPath };
   } catch {
     return { available: false, path: authPath };
   }

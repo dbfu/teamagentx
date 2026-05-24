@@ -6,7 +6,7 @@ import { createExecutor } from '../executor.factory.js';
 import { resolveAgentImageProvider } from '../image-generation.service.js';
 import { clearAgentLog } from '../agent-log.js';
 import { agentService } from '../agent.service.js';
-import { GROUP_ASSISTANT_ID } from '../system-assistant.constants.js';
+import { GROUP_COORDINATOR_ID } from '../system-assistant.constants.js';
 import {
   createInternalCoordinatorAgent,
   isInternalCoordinatorAgentName,
@@ -53,11 +53,10 @@ export async function getExecutor(
     return executorCache.get(cacheKey)!;
   }
 
-  // Load from database. The internal coordinator reuses the system agent runtime,
-  // but with a dedicated name and prompt so it is not the public group assistant.
+  // Load from database. The internal coordinator has its own hidden system agent.
   const isInternalCoordinator = isInternalCoordinatorAgentName(agentName);
   const baseAgent = isInternalCoordinator
-    ? await agentService.findById(GROUP_ASSISTANT_ID)
+    ? await agentService.findById(GROUP_COORDINATOR_ID)
     : await agentService.findByName(agentName);
   const agent = isInternalCoordinator && baseAgent
     ? createInternalCoordinatorAgent(baseAgent, { executorOnly: true })

@@ -133,13 +133,47 @@ async function normalizeDefaultAgentId(chatRoomId: string, defaultAgentId: strin
   return normalizedAgentId;
 }
 
-// 系统协调助手仅作为内部执行器使用，不作为群成员返回给前端。
+// 为群聊添加可见的虚拟系统助手。隐藏系统助手（如群调度）不在缓存结果中。
 function addVirtualSystemAgents<T extends { id: string; chatRoomAgents: any[] }>(
   chatRoom: T,
   systemAgents: SystemAgentInfo[]
 ): T {
-  void systemAgents;
-  return chatRoom;
+  const existingAgentIds = new Set(
+    chatRoom.chatRoomAgents
+      .filter((ra: any) => ra.agentId)
+      .map((ra: any) => ra.agentId)
+  );
+
+  const virtualSystemAgents = systemAgents
+    .filter((agent: SystemAgentInfo) => !existingAgentIds.has(agent.id))
+    .map((agent: SystemAgentInfo) => ({
+      id: `system-${agent.id}`,
+      chatRoomId: chatRoom.id,
+      userId: null,
+      agentId: agent.id,
+      role: 'MEMBER',
+      injectGroupHistory: true,
+      customWorkDir: null,
+      joinedAt: new Date(),
+      lastReadAt: new Date(),
+      user: null,
+      agent: {
+        id: agent.id,
+        name: agent.name,
+        avatar: agent.avatar,
+        avatarColor: agent.avatarColor,
+        description: agent.description,
+        type: agent.type,
+        agentLevel: agent.agentLevel,
+        workDir: agent.workDir,
+        speechConfig: agent.speechConfig,
+      },
+    }));
+
+  return {
+    ...chatRoom,
+    chatRoomAgents: [...chatRoom.chatRoomAgents, ...virtualSystemAgents],
+  };
 }
 
 function syncQuickChatRoomAvatar<T extends {

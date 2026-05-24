@@ -9,7 +9,7 @@ import type { ToolCall } from '../executor.interface.js';
 import { parseKnownMentions } from './message-utils.js';
 import { debugLog } from './debug.js';
 import { enqueueAgentTask } from './agent-dispatch.service.js';
-import { GROUP_ASSISTANT_ID } from '../system-assistant.constants.js';
+import { GROUP_COORDINATOR_ID } from '../system-assistant.constants.js';
 import { createInternalCoordinatorAgent } from '../internal-coordinator-agent.js';
 // 消息接收事件接口
 interface ReceivedMessageEvent {
@@ -178,9 +178,9 @@ export function setupAIHandlers(
       ) {
         if (
           (message.isHuman && !hasMentions) ||
-          (!message.isHuman && message.agentId !== GROUP_ASSISTANT_ID)
+          (!message.isHuman && message.agentId !== GROUP_COORDINATOR_ID)
         ) {
-          const coordinatorAgent = await agentService.findById(GROUP_ASSISTANT_ID);
+          const coordinatorAgent = await agentService.findById(GROUP_COORDINATOR_ID);
 
           if (coordinatorAgent && coordinatorAgent.isActive) {
             debugLog('coordinatorAgentTrigger', {
@@ -198,7 +198,7 @@ export function setupAIHandlers(
               createInternalCoordinatorAgent(coordinatorAgent),
             );
           } else {
-            console.warn(`[coordinatorAgentTrigger] 内置协调助手不存在或未启用: ${GROUP_ASSISTANT_ID}`);
+            console.warn(`[coordinatorAgentTrigger] 内置协调助手不存在或未启用: ${GROUP_COORDINATOR_ID}`);
           }
           return;
         }

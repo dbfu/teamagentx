@@ -23,6 +23,8 @@ import { messageService } from '../modules/message/message.service.js';
 import { agentMemoryService } from '../modules/agent-memory/agent-memory.service.js';
 import { deserializeAgentSpeechConfig } from '../modules/speech/speech-config.js';
 import { gitBranchService } from '../modules/chatroom/git-branch.service.js';
+import { packageScriptService } from '../modules/chatroom/package-script.service.js';
+import { getDefaultChatRoomWorkDir } from '../core/agent/work-dir.js';
 
 // Schema definitions
 const lastMessageSchema = {
@@ -235,6 +237,11 @@ interface UpdateGitBranchBody {
   branch: string;
 }
 
+interface RunPackageScriptBody {
+  scriptId?: string;
+  scriptName?: string;
+}
+
 interface AddAgentBody {
   userId?: string;
   agentId?: string;
@@ -432,6 +439,133 @@ export async function chatRoomGateway(app: FastifyInstance) {
       return reply.send({ success: true, data: status });
     } catch (error: any) {
       return reply.code(400).send({ success: false, error: error.message || '切换分支失败' });
+    }
+  });
+
+  app.get<{ Params: ChatRoomParams }>('/chatrooms/:id/package-scripts', {
+    schema: {
+      description: '获取群聊工作目录 package.json scripts',
+      tags: ['ChatRooms'],
+      params: {
+        type: 'object',
+        properties: { id: { type: 'string' } },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: {
+              type: 'object',
+              properties: {
+                hasPackageJson: { type: 'boolean' },
+                workDir: { type: 'string', nullable: true },
+                packageManager: { type: 'string', nullable: true },
+                scripts: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      id: { type: 'string' },
+                      name: { type: 'string' },
+                      command: { type: 'string' },
+                      runCommand: { type: 'string' },
+                      relativeDir: { type: 'string' },
+                      workDir: { type: 'string' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        404: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const chatRoom = await chatRoomService.findById(id);
+
+    if (!chatRoom) {
+      return reply.code(404).send({ success: false, error: '群聊不存在' });
+    }
+
+    const workDir = chatRoom.workDir?.trim() || getDefaultChatRoomWorkDir(chatRoom.id);
+    const result = await packageScriptService.getScripts(workDir);
+    return reply.send({ success: true, data: result });
+  });
+
+  app.post<{ Params: ChatRoomParams; Body: RunPackageScriptBody }>('/chatrooms/:id/package-scripts/run', {
+    schema: {
+      description: '执行群聊工作目录 package.json script',
+      tags: ['ChatRooms'],
+      params: {
+        type: 'object',
+        properties: { id: { type: 'string' } },
+      },
+      body: {
+        type: 'object',
+        properties: {
+          scriptId: { type: 'string' },
+          scriptName: { type: 'string' },
+        },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: {
+              type: 'object',
+              properties: {
+                scriptId: { type: 'string' },
+                scriptName: { type: 'string' },
+                command: { type: 'string' },
+                workDir: { type: 'string' },
+              },
+            },
+          },
+        },
+        400: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+        404: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const chatRoom = await chatRoomService.findById(id);
+
+    if (!chatRoom) {
+      return reply.code(404).send({ success: false, error: '群聊不存在' });
+    }
+
+    try {
+      const result = await packageScriptService.runScript({
+        chatRoomId: chatRoom.id,
+        workDir: chatRoom.workDir,
+        scriptId: request.body.scriptId,
+        scriptName: request.body.scriptName,
+      });
+      return reply.send({ success: true, data: result });
+    } catch (error: any) {
+      return reply.code(400).send({ success: false, error: error.message || '执行脚本失败' });
     }
   });
 

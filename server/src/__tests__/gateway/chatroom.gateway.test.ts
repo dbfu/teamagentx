@@ -6,10 +6,11 @@ import os from 'node:os';
 import path from 'node:path';
 import Fastify, { FastifyInstance } from 'fastify';
 import { agentService } from '../../core/agent/agent.service.js';
-import { GROUP_ASSISTANT_ID } from '../../core/agent/system-assistant.constants.js';
+import { getDefaultChatRoomWorkDir } from '../../core/agent/work-dir.js';
+import { GROUP_ASSISTANT_ID, GROUP_COORDINATOR_ID } from '../../core/agent/system-assistant.constants.js';
 import { chatRoomGateway } from '../../gateway/chatroom.gateway.js';
-import { getGroupAssistantDefinition } from '../../scripts/system-agent-definitions.js';
-import { syncSystemAgent } from '../../scripts/system-agent-sync.js';
+import { getGroupAssistantDefinition, getGroupCoordinatorDefinition } from '../../scripts/system-agent-definitions.js';
+import { syncSystemAgent, syncSystemAgents } from '../../scripts/system-agent-sync.js';
 
 // Helper to build test app
 function buildTestApp(): FastifyInstance {
@@ -219,8 +220,11 @@ describe('ChatRoom Gateway API', () => {
       });
     });
 
-    test('不应该把内置协调助手作为群成员返回', async () => {
+    test('应该返回可见群助手但不返回内置协调助手', async () => {
       const systemAgent = await syncSystemAgent(getGroupAssistantDefinition());
+      await syncSystemAgents([
+        getGroupCoordinatorDefinition(),
+      ]);
 
       await agentService.update(systemAgent.id, {
         speechConfig: {
@@ -257,7 +261,33 @@ describe('ChatRoom Gateway API', () => {
       assert.strictEqual(response.statusCode, 200);
       const body = response.json();
       const roomAgent = body.data.chatRoomAgents.find((item: any) => item.agent?.id === GROUP_ASSISTANT_ID);
-      assert.strictEqual(roomAgent, undefined);
+      assert.ok(roomAgent);
+      assert.deepStrictEqual(roomAgent.agent.speechConfig, {
+        behavior: {
+          enabled: true,
+          outputMode: 'manual',
+          autoPlay: false,
+        },
+        profile: {
+          provider: 'browser-local',
+          model: null,
+          voice: null,
+          fallbackProvider: null,
+          speed: 1,
+          volume: 1,
+          pitch: null,
+          emotion: null,
+          style: 'professional',
+          format: null,
+          sampleRate: null,
+          temperature: null,
+          prompt: null,
+          vendorOptions: null,
+        },
+      });
+
+      const coordinatorAgent = body.data.chatRoomAgents.find((item: any) => item.agent?.id === GROUP_COORDINATOR_ID);
+      assert.strictEqual(coordinatorAgent, undefined);
     });
   });
 
@@ -401,6 +431,54 @@ describe('ChatRoom Gateway API', () => {
         execFileSync('git', ['branch', '--show-current'], { cwd: repoDir, encoding: 'utf8' }).trim(),
         'feature/chat-branch'
       );
+    });
+  });
+
+  describe('Package scripts', () => {
+    test('群聊未设置工作目录时应使用默认目录扫描 package scripts', async () => {
+      const originalHome = process.env.HOME;
+      const tempHome = path.join(workDirRoot, 'home');
+      process.env.HOME = tempHome;
+
+      try {
+        const chatRoomResponse = await app.inject({
+          method: 'POST',
+          url: '/chatrooms',
+          payload: {
+            name: 'Default Scripts Room ' + Date.now(),
+            workDir: null,
+          },
+        });
+        const createdRoom = chatRoomResponse.json();
+        const defaultWorkDir = getDefaultChatRoomWorkDir(createdRoom.data.id);
+
+        fs.mkdirSync(defaultWorkDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(defaultWorkDir, 'package.json'),
+          JSON.stringify({ scripts: { dev: 'vite --host 0.0.0.0' } }),
+        );
+
+        const response = await app.inject({
+          method: 'GET',
+          url: `/chatrooms/${createdRoom.data.id}/package-scripts`,
+        });
+
+        assert.strictEqual(response.statusCode, 200);
+        const body = response.json();
+        assert.strictEqual(body.success, true);
+        assert.strictEqual(body.data.workDir, defaultWorkDir);
+        assert.strictEqual(body.data.hasPackageJson, true);
+        assert.deepStrictEqual(
+          body.data.scripts.map((script: { name: string }) => script.name),
+          ['dev'],
+        );
+      } finally {
+        if (originalHome === undefined) {
+          delete process.env.HOME;
+        } else {
+          process.env.HOME = originalHome;
+        }
+      }
     });
   });
 

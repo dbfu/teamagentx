@@ -1,7 +1,8 @@
 import type { AgentWithRelations } from './agent.service.js';
+import { GROUP_COORDINATOR_ID } from './system-assistant.constants.js';
 
 export const INTERNAL_COORDINATOR_AGENT_NAME = '群调度助手';
-export const INTERNAL_COORDINATOR_EXECUTOR_AGENT_ID = 'internal-room-coordinator';
+export const INTERNAL_COORDINATOR_EXECUTOR_AGENT_ID = GROUP_COORDINATOR_ID;
 
 export function isInternalCoordinatorAgentName(agentName: string): boolean {
   return agentName === INTERNAL_COORDINATOR_AGENT_NAME;

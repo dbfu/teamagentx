@@ -173,7 +173,7 @@ function checkCodexLocalConfig(): { available: boolean; path: string; label: str
       typeof data.tokens.access_token === 'string' &&
       typeof data.tokens.refresh_token === 'string';
 
-    const available = Boolean(data.auth_mode && (hasApiKey || hasChatGptTokens));
+    const available = hasApiKey || hasChatGptTokens;
     const models = readCodexConfigModels(authPath);
 
     return {

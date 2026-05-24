@@ -6,7 +6,7 @@ import {
   INTERNAL_COORDINATOR_AGENT_NAME,
   INTERNAL_COORDINATOR_EXECUTOR_AGENT_ID,
 } from '../internal-coordinator-agent.js';
-import { GROUP_ASSISTANT_ID } from '../system-assistant.constants.js';
+import { GROUP_ASSISTANT_ID, GROUP_COORDINATOR_ID } from '../system-assistant.constants.js';
 import { clearClaudeSdkFileSystemContext } from '../claude-sdk.executor.js';
 import {
   abortControllers,
@@ -16,10 +16,10 @@ import {
   processingMap,
 } from './cache.js';
 
-const INTERNAL_COORDINATOR_AGENT_IDS = [
-  GROUP_ASSISTANT_ID,
+const INTERNAL_COORDINATOR_AGENT_IDS = Array.from(new Set([
+  GROUP_COORDINATOR_ID,
   INTERNAL_COORDINATOR_EXECUTOR_AGENT_ID,
-];
+]));
 
 interface ClearInternalCoordinatorContextOptions {
   abortRunning?: boolean;

@@ -7,6 +7,7 @@ import {
 } from '../../modules/speech/speech-config.js';
 import { invalidateSystemAgentsCache } from '../../modules/chatroom/system-agents-cache.js';
 import { normalizeAgentProxyConfig } from './proxy-config.js';
+import { HIDDEN_SYSTEM_AGENT_IDS } from './system-assistant.constants.js';
 
 // 包含关联的 Agent 类型
 export type AgentWithRelations = Agent & {
@@ -240,6 +241,9 @@ export const agentService = {
 
   async findAll(): Promise<AgentWithRelations[]> {
     return prisma.agent.findMany({
+      where: {
+        id: { notIn: HIDDEN_SYSTEM_AGENT_IDS },
+      },
       orderBy: { createdAt: 'desc' },
       include: {
         ...agentInclude,
@@ -249,7 +253,10 @@ export const agentService = {
 
   async findActive(): Promise<AgentWithRelations[]> {
     return prisma.agent.findMany({
-      where: { isActive: true },
+      where: {
+        isActive: true,
+        id: { notIn: HIDDEN_SYSTEM_AGENT_IDS },
+      },
       orderBy: { createdAt: 'desc' },
       include: {
         ...agentInclude,
@@ -401,6 +408,9 @@ export const agentService = {
 
     // 获取所有助手
     const agents = await prisma.agent.findMany({
+      where: {
+        id: { notIn: HIDDEN_SYSTEM_AGENT_IDS },
+      },
       orderBy: { createdAt: 'desc' },
       include: {
         ...agentInclude,

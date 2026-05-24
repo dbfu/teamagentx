@@ -200,6 +200,29 @@ export interface GitBranchStatus {
   branches: GitBranchInfo[]
 }
 
+export interface PackageScriptInfo {
+  id: string
+  name: string
+  command: string
+  runCommand: string
+  relativeDir: string
+  workDir: string
+}
+
+export interface PackageScriptsResult {
+  hasPackageJson: boolean
+  workDir: string | null
+  packageManager: string | null
+  scripts: PackageScriptInfo[]
+}
+
+export interface RunPackageScriptResult {
+  scriptId: string
+  scriptName: string
+  command: string
+  workDir: string
+}
+
 export interface ChatRoomAgent {
   id: string
   userId: string | null
@@ -533,6 +556,17 @@ export const chatRoomApi = {
     return request<GitBranchStatus>(`/chatrooms/${id}/git-branch`, {
       method: 'POST',
       body: JSON.stringify({ branch }),
+    })
+  },
+
+  async getPackageScripts(id: string): Promise<ApiResponse<PackageScriptsResult>> {
+    return request<PackageScriptsResult>(`/chatrooms/${id}/package-scripts`)
+  },
+
+  async runPackageScript(id: string, scriptId: string): Promise<ApiResponse<RunPackageScriptResult>> {
+    return request<RunPackageScriptResult>(`/chatrooms/${id}/package-scripts/run`, {
+      method: 'POST',
+      body: JSON.stringify({ scriptId }),
     })
   },
 
