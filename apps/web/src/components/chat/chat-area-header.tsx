@@ -1,10 +1,14 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { ChatRoom, Message } from '@/lib/agent-api';
+import { chatRoomApi, ChatRoom, Message, type PackageScriptsResult } from '@/lib/agent-api';
 import { AgentAvatarImage } from '@/lib/agent-avatars';
 import { GroupAvatarImage } from '@/lib/group-avatars';
 import { cn } from '@/lib/utils';
-import { Camera, ClipboardList, Clock, Eraser, Scroll, Settings, Square, UserPlus, Users } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Camera, ClipboardList, Clock, Eraser, Loader2, MoreHorizontal, Play, Scroll, Settings, Square, TerminalSquare, UserPlus, Users } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
+import { useUIStore } from '@/stores';
 import { ChatRoomOpenMenu } from './chat-room-open-menu';
 
 interface ChatAreaHeaderProps {
@@ -42,6 +46,134 @@ export function ChatAreaHeader({
   const isElectron = window.electronAPI?.isElectron ?? false
   // 检测是否在移动端
   const isMobile = useIsMobile()
+  const terminalOpenTarget = useUIStore((state) => state.terminalOpenTarget)
+  const [packageScripts, setPackageScripts] = useState<PackageScriptsResult | null>(null)
+  const [loadingScripts, setLoadingScripts] = useState(false)
+  const [runningScript, setRunningScript] = useState<string | null>(null)
+  const packageScriptsRequestRef = useRef(0)
+  const visibleScripts = packageScripts?.scripts ?? []
+  const shouldShowPackageScriptsMenu = packageScripts?.hasPackageJson === true
+
+  const loadPackageScripts = useCallback(async (options?: { reset?: boolean }) => {
+    const requestId = packageScriptsRequestRef.current + 1
+    packageScriptsRequestRef.current = requestId
+    const shouldReset = options?.reset === true
+    if (shouldReset) {
+      setPackageScripts(null)
+    }
+
+    setLoadingScripts(true)
+    try {
+      const response = await chatRoomApi.getPackageScripts(chatRoom.id)
+      if (packageScriptsRequestRef.current !== requestId) return
+      if (response.success && response.data) {
+        setPackageScripts(response.data)
+      }
+    } catch {
+      if (packageScriptsRequestRef.current !== requestId) return
+      if (shouldReset) {
+        setPackageScripts(null)
+      }
+    } finally {
+      if (packageScriptsRequestRef.current === requestId) {
+        setLoadingScripts(false)
+      }
+    }
+  }, [chatRoom.id, chatRoom.workDir])
+
+  useEffect(() => {
+    void loadPackageScripts({ reset: true })
+    return () => {
+      packageScriptsRequestRef.current += 1
+    }
+  }, [loadPackageScripts])
+
+  const handleRunPackageScript = useCallback(async (scriptId: string, scriptName: string) => {
+    setRunningScript(scriptId)
+    try {
+      if (!window.electronAPI?.isElectron || !window.electronAPI.runCommandInTerminal) {
+        toast.error('执行脚本需要在桌面客户端中打开终端')
+        return
+      }
+
+      const response = await chatRoomApi.runPackageScript(chatRoom.id, scriptId)
+      if (response.success && response.data) {
+        const result = await window.electronAPI.runCommandInTerminal(
+          response.data.workDir,
+          response.data.command,
+          terminalOpenTarget,
+        )
+        if (result?.success) {
+          toast.success(`已在终端执行脚本：${scriptName}`)
+        } else {
+          toast.error(result?.error || '打开终端失败')
+        }
+      } else {
+        toast.error(response.error || '执行脚本失败')
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '执行脚本失败')
+    } finally {
+      setRunningScript(null)
+    }
+  }, [chatRoom.id, terminalOpenTarget])
+
+  const packageScriptsMenu = (
+    <DropdownMenu onOpenChange={(open) => {
+      if (open) void loadPackageScripts()
+    }}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <button
+              className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary disabled:opacity-50"
+              type="button"
+              disabled={runningScript !== null}
+            >
+              {runningScript ? (
+                <Loader2 className="size-5 animate-spin" />
+              ) : (
+                <TerminalSquare className="size-5" />
+              )}
+            </button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">执行 package 脚本</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent align="end" className="max-h-[420px] w-80 overflow-y-auto">
+        <DropdownMenuLabel className="text-xs text-muted-foreground">
+          {packageScripts?.packageManager ?? 'npm'} scripts
+        </DropdownMenuLabel>
+        {loadingScripts ? (
+          <div className="flex items-center gap-2 px-2 py-2 text-sm text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" />
+            正在刷新
+          </div>
+        ) : visibleScripts.length > 0 ? (
+          visibleScripts.map((script) => (
+            <DropdownMenuItem
+              key={script.id}
+              disabled={runningScript !== null}
+              onClick={() => void handleRunPackageScript(script.id, script.name)}
+              title={script.command}
+            >
+              <Play className="size-4" />
+              <div className="min-w-0">
+                <div className="truncate font-medium">
+                  {script.relativeDir ? `${script.relativeDir} / ${script.name}` : script.name}
+                </div>
+                <div className="truncate text-xs text-muted-foreground">{script.command}</div>
+              </div>
+            </DropdownMenuItem>
+          ))
+        ) : (
+          <div className="px-2 py-2 text-sm text-muted-foreground">
+            未发现 package scripts
+          </div>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
 
   return (
     <div
@@ -94,6 +226,7 @@ export function ChatAreaHeader({
         {/* 移动端只显示任务看板和清空消息 */}
         {isMobile ? (
           <>
+            {shouldShowPackageScriptsMenu && packageScriptsMenu}
             {/* 停止所有任务按钮 */}
             <Tooltip>
               <TooltipTrigger asChild>
@@ -144,6 +277,7 @@ export function ChatAreaHeader({
           </>
         ) : (
           <>
+            {shouldShowPackageScriptsMenu && packageScriptsMenu}
             <ChatRoomOpenMenu chatRoom={chatRoom} isElectron={isElectron} />
             {/* 快速对话群聊不允许添加新助手 */}
             {!chatRoom.isQuickChatRoom && (
@@ -194,54 +328,40 @@ export function ChatAreaHeader({
               </TooltipTrigger>
               <TooltipContent side="bottom">任务看板</TooltipContent>
             </Tooltip>
-            {/* 群规则按钮 */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  className="rounded-lg p-2 text-muted-foreground hover:bg-accent"
-                  onClick={onOpenRoomRules}
-                >
-                  <Scroll className="size-5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">群规则</TooltipContent>
-            </Tooltip>
-            {/* 截图按钮 */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  className="rounded-lg p-2 text-muted-foreground hover:text-primary hover:bg-primary/10"
-                  onClick={onScreenshot}
-                >
-                  <Camera className="size-5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">截图聊天记录</TooltipContent>
-            </Tooltip>
-            {/* 定时任务按钮 */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  className="rounded-lg p-2 text-muted-foreground hover:text-primary hover:bg-primary/10"
-                  onClick={onOpenCronTasks}
-                >
-                  <Clock className="size-5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">定时任务</TooltipContent>
-            </Tooltip>
-            {/* 清空消息按钮 */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  className="rounded-lg p-2 text-muted-foreground hover:text-orange-500 hover:bg-orange-500/10"
-                  onClick={onClearMessages}
-                >
-                  <Eraser className="size-5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">清空消息</TooltipContent>
-            </Tooltip>
+            {/* 更多按钮 */}
+            <DropdownMenu>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                      type="button"
+                    >
+                      <MoreHorizontal className="size-5" />
+                    </button>
+                  </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">更多</TooltipContent>
+              </Tooltip>
+              <DropdownMenuContent align="end" className="w-44">
+                <DropdownMenuItem onClick={onOpenRoomRules}>
+                  <Scroll className="size-4" />
+                  群规则
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={onScreenshot}>
+                  <Camera className="size-4" />
+                  截图聊天记录
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={onOpenCronTasks}>
+                  <Clock className="size-4" />
+                  定时任务
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={onClearMessages}>
+                  <Eraser className="size-4" />
+                  清空消息
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             {/* 群设置按钮 */}
             <Tooltip>
               <TooltipTrigger asChild>

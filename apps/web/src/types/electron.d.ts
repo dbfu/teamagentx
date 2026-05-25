@@ -32,6 +32,11 @@ declare global {
       target?: 'system' | 'terminal' | 'vscode' | 'cursor' | 'trae' | 'trae-cn',
       terminalTarget?: 'terminal-app' | 'iterm2' | 'alacritty' | 'kitty' | 'ghostty' | 'wezterm' | 'kaku'
     ) => Promise<{ success: boolean; error?: string }>;
+    runCommandInTerminal?: (
+      path: string,
+      command: string,
+      terminalTarget?: 'terminal-app' | 'iterm2' | 'alacritty' | 'kitty' | 'ghostty' | 'wezterm' | 'kaku'
+    ) => Promise<{ success: boolean; error?: string }>;
     selectFolder: () => Promise<{ success: boolean; path: string | null }>;
     openExternal: (url: string) => Promise<{ success: boolean; error?: string }>;
     windowMinimize: () => Promise<void>;

@@ -1,6 +1,6 @@
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ChatRoom, chatRoomApi } from '@/lib/agent-api'
+import { ChatRoom, chatRoomApi, type AgentTriggerMode } from '@/lib/agent-api'
 import { bridgeApi, BridgeBot } from '@/lib/bridge-api'
 import { groupAvatarOptions, GroupAvatarImage, normalizeGroupAvatarIndex } from '@/lib/group-avatars'
 import { cn } from '@/lib/utils'
@@ -31,7 +31,7 @@ export function RoomSettingsPanel({
   const [rules, setRules] = useState(chatRoom.rules || '')
   const [workDir, setWorkDir] = useState(chatRoom.workDir || '')
   const [defaultAgentId, setDefaultAgentId] = useState(chatRoom.defaultAgentId || '')
-  const [agentTriggerMode, setAgentTriggerMode] = useState(chatRoom.agentTriggerMode || 'auto')
+  const [agentTriggerMode, setAgentTriggerMode] = useState<AgentTriggerMode>(chatRoom.agentTriggerMode || 'coordinator')
   const [selectedIconIndex, setSelectedIconIndex] = useState(currentIconIndex)
   const [saving, setSaving] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
@@ -52,6 +52,7 @@ export function RoomSettingsPanel({
   const rulesInputRef = useRef<HTMLTextAreaElement>(null)
   const selectableAgents = (chatRoom.chatRoomAgents || []).filter((roomAgent) => roomAgent.agent)
   const hasSelectedDefaultAgent = selectableAgents.some((roomAgent) => roomAgent.agent?.id === defaultAgentId)
+  const isCoordinatorMode = agentTriggerMode === 'coordinator'
 
   useEffect(() => {
     setName(chatRoom.name)
@@ -60,7 +61,7 @@ export function RoomSettingsPanel({
     setWorkDir(chatRoom.workDir || '')
     setWorkDirDraft(chatRoom.workDir || '')
     setDefaultAgentId(chatRoom.defaultAgentId || '')
-    setAgentTriggerMode(chatRoom.agentTriggerMode || 'auto')
+    setAgentTriggerMode(chatRoom.agentTriggerMode || 'coordinator')
     setSelectedIconIndex(normalizeGroupAvatarIndex(chatRoom.avatar))
   }, [chatRoom.id, chatRoom.name, chatRoom.description, chatRoom.rules, chatRoom.workDir, chatRoom.defaultAgentId, chatRoom.agentTriggerMode, chatRoom.avatar])
 
@@ -88,7 +89,7 @@ export function RoomSettingsPanel({
     }).catch(() => {})
   }, [chatRoom.id])
 
-  const handleSave = async (updates: { name?: string; avatar?: string; description?: string; rules?: string; workDir?: string | null; defaultAgentId?: string | null; agentTriggerMode?: 'auto' | 'manual' }) => {
+  const handleSave = async (updates: { name?: string; avatar?: string; description?: string; rules?: string; workDir?: string | null; defaultAgentId?: string | null; agentTriggerMode?: AgentTriggerMode }) => {
     setSaving(true)
     try {
       const response = await chatRoomApi.update(chatRoom.id, updates)
@@ -133,8 +134,13 @@ export function RoomSettingsPanel({
     handleSave({ defaultAgentId: nextAgentId || null })
   }
 
-  const handleTriggerModeChange = (value: 'auto' | 'manual') => {
+  const handleTriggerModeChange = (value: AgentTriggerMode) => {
     setAgentTriggerMode(value)
+    if (value === 'coordinator') {
+      setDefaultAgentId('')
+      handleSave({ agentTriggerMode: value, defaultAgentId: null })
+      return
+    }
     handleSave({ agentTriggerMode: value })
   }
 
@@ -332,7 +338,7 @@ export function RoomSettingsPanel({
         </div>
 
         {/* 默认接收助手 */}
-        {!chatRoom.isQuickChatRoom && (
+        {!chatRoom.isQuickChatRoom && !isCoordinatorMode && (
           <div>
             <label className="mb-1.5 block text-sm font-medium text-muted-foreground">默认接收助手</label>
             <div className="text-xs text-muted-foreground mb-2">
@@ -366,19 +372,21 @@ export function RoomSettingsPanel({
           <div>
             <label className="mb-1.5 block text-sm font-medium text-muted-foreground">助手触发模式</label>
             <div className="text-xs text-muted-foreground mb-2">
-              自动模式：助手消息中的 @ 会触发其他助手执行任务。<br />
-              手动模式：助手消息中的 @ 不会触发其他助手，仅作提及。
+              协调模式：系统内置协调助手会接收未 @ 的消息并派发助手。<br />
+              自由协作：助手消息中的 @ 会触发其他助手。<br />
+              手动模式：助手消息中的 @ 仅作提及。
             </div>
             <Select
               value={agentTriggerMode}
-              onValueChange={(v) => handleTriggerModeChange(v as 'auto' | 'manual')}
+              onValueChange={(v) => handleTriggerModeChange(v as AgentTriggerMode)}
               disabled={saving}
             >
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="auto">自动模式（推荐）</SelectItem>
+                <SelectItem value="coordinator">协调模式</SelectItem>
+                <SelectItem value="auto">自由协作</SelectItem>
                 <SelectItem value="manual">手动模式</SelectItem>
               </SelectContent>
             </Select>
@@ -427,50 +435,48 @@ export function RoomSettingsPanel({
         )}
 
         {/* 外部平台接入 */}
-        {!chatRoom.isQuickChatRoom && (
-          <div className="border-t border-border pt-4 mt-4">
-            <label className="mb-2 block text-sm font-medium text-muted-foreground">外部平台机器人绑定</label>
-            <p className="mb-3 text-xs text-muted-foreground">机器人只负责外部平台通信。当前群聊可以同时连接多个平台机器人，消息会同步到这些已连接机器人。</p>
-            {roomBots.length > 0 ? (
-              <div className="space-y-2">
-                {roomBots.map((bot) => (
-                  <div key={bot.id} className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm">
-                    <div className="flex min-w-0 flex-1 items-center gap-3">
-                      <div className={cn(
-                        'flex size-9 shrink-0 items-center justify-center rounded-lg',
-                        bot.enabled ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-500',
-                      )}>
-                        <Bot className="size-4" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-medium text-foreground">{bot.name}</div>
-                        <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                          <span className="rounded-full bg-blue-50 px-2 py-0.5 font-medium text-blue-700">{bot.platform}</span>
-                          <span className="text-gray-300">•</span>
-                          <span className={cn('inline-flex items-center gap-1', bot.enabled ? 'text-green-600' : 'text-gray-500')}>
-                            <span className={cn('size-1.5 rounded-full', bot.enabled ? 'bg-green-500' : 'bg-gray-400')} />
-                            {bot.enabled ? '启用中' : '已停用'}
-                          </span>
-                        </div>
+        <div className="border-t border-border pt-4 mt-4">
+          <label className="mb-2 block text-sm font-medium text-muted-foreground">外部平台机器人绑定</label>
+          <p className="mb-3 text-xs text-muted-foreground">机器人只负责外部平台通信。当前群聊可以同时连接多个平台机器人，消息会同步到这些已连接机器人。</p>
+          {roomBots.length > 0 ? (
+            <div className="space-y-2">
+              {roomBots.map((bot) => (
+                <div key={bot.id} className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm">
+                  <div className="flex min-w-0 flex-1 items-center gap-3">
+                    <div className={cn(
+                      'flex size-9 shrink-0 items-center justify-center rounded-lg',
+                      bot.enabled ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-500',
+                    )}>
+                      <Bot className="size-4" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium text-foreground">{bot.name}</div>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                        <span className="rounded-full bg-blue-50 px-2 py-0.5 font-medium text-blue-700">{bot.platform}</span>
+                        <span className="text-gray-300">•</span>
+                        <span className={cn('inline-flex items-center gap-1', bot.enabled ? 'text-green-600' : 'text-gray-500')}>
+                          <span className={cn('size-1.5 rounded-full', bot.enabled ? 'bg-green-500' : 'bg-gray-400')} />
+                          {bot.enabled ? '启用中' : '已停用'}
+                        </span>
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteChannel(bot)}
-                      className="shrink-0 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
-                    >
-                      解绑
-                    </button>
                   </div>
-                ))}
-              </div>
-            ) : (
-              <div className="rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
-                当前群聊还没有绑定机器人。你可以在频道页创建机器人实例后直接绑定到这里，或者在群里让“外部平台接入助手”拿到凭证后自动绑定当前群聊。
-              </div>
-            )}
-          </div>
-        )}
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteChannel(bot)}
+                    className="shrink-0 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                  >
+                    解绑
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
+              当前群聊还没有绑定机器人。你可以在频道页创建机器人实例后直接绑定到这里，或者在群里让“外部平台接入助手”拿到凭证后自动绑定当前群聊。
+            </div>
+          )}
+        </div>
       </div>
 
       {/* 固定在底部的按钮 */}

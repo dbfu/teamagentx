@@ -212,7 +212,7 @@ Socket 连接时需在 `auth.token` 中传 JWT token，服务端 `auth middlewar
 `cron-scheduler.service.ts`：
 - 服务启动时加载所有 `enabled=true` 的 `CronTask`
 - 支持 `cron`（cron 表达式）、`interval`（固定分钟）、`once`（一次性）三种类型
-- 到期时将 `payload` 注入指定 `agentIds` 的群聊，行为等同于用户发送消息
+- 到期时将 `payload` 注入指定 `agentIds` 的群聊；多个助手会拆成多条消息逐个触发，行为等同于用户分别发送消息
 - 执行结果写入 `CronTaskExecution`，失败自动重试（`maxRetries`）
 
 ---

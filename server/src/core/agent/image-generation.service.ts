@@ -555,11 +555,11 @@ async function llmFallbackExtractTaskId(responseData: unknown): Promise<string> 
     const client = createLlmClient(defaultProvider as LlmProvider, { maxTokens: 64, temperature: 0 });
     const responseJson = JSON.stringify(responseData).slice(0, 1500);
     const answer = await client.invoke(
-      `你是一个 JSON 解析助手。下面是一个图片生成接口的响应 JSON，该接口是异步任务模式，会返回一个任务 ID 用于后续轮询结果。
-请找出其中代表"任务 ID"的字段值，直接输出该值，不要输出任何其他内容，不要加引号或解释。
-如果找不到任务 ID，输出空字符串。
+      `You are a JSON parsing assistant. Below is a JSON response from an image generation API in asynchronous-task mode. It should return a task ID that will be used to poll for results.
+Find the field value that represents the task ID. Output only that value, with no quotes or explanation.
+If no task ID can be found, output an empty string.
 
-响应 JSON：
+Response JSON:
 ${responseJson}`,
     );
 

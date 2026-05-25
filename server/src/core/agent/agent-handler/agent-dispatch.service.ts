@@ -6,7 +6,7 @@ import { messageService } from '../../../modules/message/message.service.js';
 import { taskQueueService } from '../../../modules/task-queue/task-queue.service.js';
 import type { AttachmentData } from '../../../modules/task-queue/task-queue.service.js';
 import { agentService } from '../agent.service.js';
-import { SKILLS_HELPER_AGENT_ID } from '../tools/index.js';
+import { GROUP_ASSISTANT_ID, GROUP_COORDINATOR_ID } from '../system-assistant.constants.js';
 import type { Message } from '../../../types/message.js';
 import { getExecutor } from './executor-manager.js';
 import { processQueue } from './processor.js';
@@ -64,9 +64,9 @@ export async function enqueueAgentTask(
   }))?.filter(att => att.base64);
 
   let processedMessageContent = message.content;
-  if (agent.id === SKILLS_HELPER_AGENT_ID && quickChatTargetAgent) {
+  if (agent.id === GROUP_ASSISTANT_ID && quickChatTargetAgent) {
     processedMessageContent = `[默认目标助手: ${quickChatTargetAgent.name} (ID: ${quickChatTargetAgent.id})]\n${message.content}`;
-    console.log(`[agent.dispatch] 技能安装助手在快速对话中被调用，注入默认目标: ${quickChatTargetAgent.name}`);
+    console.log(`[agent.dispatch] 群助手在快速对话中被调用，注入默认目标: ${quickChatTargetAgent.name}`);
   }
 
   const task = await taskQueueService.enqueue({
@@ -124,6 +124,9 @@ export async function sendMessageToAgent(params: {
   const sourceAgent = await agentService.findById(params.sourceAgentId);
   if (!sourceAgent || !sourceAgent.isActive) {
     throw new Error('来源助手不存在或未启用');
+  }
+  if (chatRoom.agentTriggerMode === 'coordinator' && sourceAgent.id !== GROUP_COORDINATOR_ID) {
+    throw new Error('当前群聊为协调模式，只有内置协调助手可以派发其他助手');
   }
   if (sourceAgent.agentLevel !== 'system') {
     const isSourceMember = await chatRoomService.isAgentMember(params.chatRoomId, sourceAgent.id);

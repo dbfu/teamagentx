@@ -160,7 +160,7 @@ function AgentItem({
         </button>
       )}
       {/* Remove button for non-owner agents */}
-      {info.type === 'agent' && info.role !== 'OWNER' && (
+      {info.type === 'agent' && info.role !== 'OWNER' && info.agentLevel !== 'system' && (
         <button
           onClick={(e) => onOpenRemove(roomAgent, e)}
           className="rounded p-1 text-red-400 hover:bg-destructive/10 hover:text-destructive"

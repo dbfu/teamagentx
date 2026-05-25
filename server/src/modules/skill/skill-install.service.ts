@@ -3,6 +3,11 @@ import * as path from 'path';
 import * as os from 'os';
 import { execSync } from 'child_process';
 import type { Agent } from '@prisma/client';
+import {
+  copySkillDirectory,
+  removePathIfExists,
+  replaceWithSkillDirectoryLink,
+} from './skill-link.js';
 
 // 已安装 Skill 信息
 export interface InstalledSkill {
@@ -936,7 +941,7 @@ export const skillInstallService = {
   /**
    * 导入外部技能到共享目录
    * 支持 symlink（自动同步）或 copy（独立管理）两种方式
-   * 注意：Windows 不支持 symlink，会自动降级为 copy
+   * 注意：Windows 会优先使用 junction，失败后降级为 copy
    */
   importExternalSkill(
     sourcePath: string,
@@ -973,40 +978,27 @@ export const skillInstallService = {
 
     const slug = generateSkillSlug(skill.name);
     const targetPath = path.join(sharedSkillsDir, slug);
-
-    // 如果已存在，先删除
-    if (fs.existsSync(targetPath)) {
-      const stats = fs.lstatSync(targetPath);
-      if (stats.isSymbolicLink()) {
-        fs.unlinkSync(targetPath);
-      } else {
-        fs.rmSync(targetPath, { recursive: true, force: true });
-      }
-    }
-
-    // Windows 不支持 symlink，自动降级为 copy
-    const isWindows = process.platform === 'win32';
-    const actualMethod = isWindows && method === 'symlink' ? 'copy' : method;
+    let actualMethod: 'symlink' | 'copy' = method;
+    let importMethodDetail: string = method;
 
     try {
-      if (actualMethod === 'symlink') {
-        // 创建 symlink
-        fs.symlinkSync(sourcePath, targetPath, 'dir');
-        console.log(`[skillInstall] Created symlink: ${targetPath} -> ${sourcePath}`);
+      if (method === 'symlink') {
+        const linkResult = replaceWithSkillDirectoryLink(sourcePath, targetPath);
+        actualMethod = linkResult.method === 'copy' ? 'copy' : 'symlink';
+        importMethodDetail = linkResult.method;
+        console.log(
+          `[skillInstall] Linked skill (${linkResult.method}): ${targetPath} -> ${sourcePath}`,
+        );
       } else {
-        // 复制目录
-        fs.cpSync(sourcePath, targetPath, {
-          recursive: true,
-          filter: (src) => {
-            const relative = path.relative(sourcePath, src);
-            return !relative.startsWith('.git');
-          },
-        });
+        removePathIfExists(targetPath);
+        copySkillDirectory(sourcePath, targetPath);
+        actualMethod = 'copy';
+        importMethodDetail = 'copy';
         console.log(`[skillInstall] Copied skill to: ${targetPath}`);
       }
 
       // 写入 origin.json 元数据（仅对 copy 方式，symlink 不需要）
-      if (method === 'copy') {
+      if (actualMethod === 'copy') {
         const originDir = path.join(targetPath, '.skills');
         const originPath = path.join(originDir, 'origin.json');
         fs.mkdirSync(originDir, { recursive: true });
@@ -1027,7 +1019,7 @@ export const skillInstallService = {
           version: 1,
           source: `external:${path.basename(sourcePath).split('/')[0]}`,
           sourcePath: sourcePath.replace(homeDir, '~'),
-          importMethod: actualMethod,
+          importMethod: importMethodDetail,
           slug,
           installedAt: Date.now(),
           skillName: skill.name,

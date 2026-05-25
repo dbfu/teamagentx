@@ -47,18 +47,11 @@ import {
     buildInstalledSkillsSignature,
 } from './skill-instructions.js';
 import { syncGlobalClaudeLocalConfig } from './claude-local-config.js';
+import { getSystemAssistantTools } from './tools/index.js';
 import {
-    AGENT_CREATOR_AGENT_ID,
-    agentCreatorTools,
-    CHATROOM_HELPER_AGENT_ID,
-    chatroomHelperTools,
-    createExternalPlatformHelperTools,
-    CRON_TASK_HELPER_AGENT_ID,
-    cronTaskHelperTools,
-    EXTERNAL_PLATFORM_HELPER_AGENT_ID,
-    SKILL_MANAGER_AGENT_ID,
-    skillManagerTools,
-} from './tools/index.js';
+  DEFAULT_AGENT_THINKING_MODE,
+  type AgentThinkingMode,
+} from './thinking-mode.js';
 import { getDefaultChatRoomWorkDir, resolveAgentWorkDir } from './work-dir.js';
 
 function shortHash(input: string): string {
@@ -180,15 +173,30 @@ function getClaudeMaxTurns(): number {
 
 function getClaudeThinkingOptions(
   provider?: LlmProvider,
+  thinkingMode?: AgentThinkingMode | null,
 ):
   | {type: 'adaptive'}
   | {type: 'enabled'; budgetTokens?: number}
   | {type: 'disabled'}
   | undefined {
+  if ((provider as any)?.supportsThinking === false) {
+    return {type: 'disabled'};
+  }
+
+  if (thinkingMode) {
+    const mode = thinkingMode || DEFAULT_AGENT_THINKING_MODE;
+    if (mode === 'off') return {type: 'disabled'};
+    const budgetTokensByMode: Record<Exclude<AgentThinkingMode, 'off'>, number> = {
+      low: 4000,
+      medium: 10000,
+      high: 16000,
+    };
+    return {type: 'enabled', budgetTokens: budgetTokensByMode[mode]};
+  }
+
   const mode = (process.env.CLAUDE_AGENT_THINKING || 'enabled').toLowerCase();
 
   if (
-    (provider as any)?.supportsThinking === false ||
     mode === 'disabled' ||
     mode === 'off' ||
     mode === '0'
@@ -224,31 +232,7 @@ function isRecoverableSessionError(message: string): boolean {
   );
 }
 
-const DEFAULT_LONG_RUNNING_BASH_TIMEOUT_MS = 15 * 1000;
-const DEFAULT_BACKGROUND_IDLE_FINISH_MS = 20 * 1000;
-
-const LONG_RUNNING_COMMAND_PATTERNS = [
-  /\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:dev|serve|preview|start)\b/i,
-  /\b(?:vite|next|nuxt|astro|remix|webpack-dev-server|storybook)\b/i,
-  /\b(?:tsx|ts-node|node)\b.*\b(?:dev|serve|server|watch)\b/i,
-  /\b(?:python|python3)\s+-m\s+(?:http\.server|uvicorn)\b/i,
-  /\b(?:uvicorn|fastapi\s+dev|flask\s+run|django-admin\s+runserver)\b/i,
-  /\b(?:rails|bin\/rails)\s+(?:s|server)\b/i,
-  /\b(?:php\s+-S|air|reflex)\b/i,
-  /\b(?:docker\s+compose|docker-compose)\s+up\b/i,
-] as const;
-
-function getLongRunningBashTimeoutMs(): number {
-  const rawValue = process.env.CLAUDE_AGENT_LONG_RUNNING_BASH_TIMEOUT_MS;
-  if (!rawValue) return DEFAULT_LONG_RUNNING_BASH_TIMEOUT_MS;
-
-  const parsed = Number.parseInt(rawValue, 10);
-  if (!Number.isFinite(parsed) || parsed < 1000) {
-    return DEFAULT_LONG_RUNNING_BASH_TIMEOUT_MS;
-  }
-
-  return parsed;
-}
+const DEFAULT_BACKGROUND_IDLE_FINISH_MS = 60 * 1000;
 
 function getBackgroundIdleFinishMs(): number {
   const rawValue = process.env.CLAUDE_AGENT_BACKGROUND_IDLE_FINISH_MS;
@@ -262,23 +246,22 @@ function getBackgroundIdleFinishMs(): number {
   return parsed;
 }
 
-function normalizeBashCommand(command: string): string {
-  return command.replace(/^\s*(?:cd\s+[^;&|]+\s*&&\s*)+/i, '').trim();
-}
-
-function shouldRunBashInBackground(command: string): boolean {
-  const normalizedCommand = normalizeBashCommand(command);
-  if (
-    !normalizedCommand ||
-    /(?:^|\s)(?:&|nohup|disown)(?:\s|$)/.test(normalizedCommand)
-  ) {
-    return false;
-  }
-
-  return LONG_RUNNING_COMMAND_PATTERNS.some((pattern) =>
-    pattern.test(normalizedCommand),
+function shouldApplyBackgroundIdleFinish(state: {
+  hasBackgroundedLongRunningCommand: boolean;
+  waitingForTaskOutput: boolean;
+  waitingForAssistantAfterToolResult: boolean;
+}): boolean {
+  return (
+    state.hasBackgroundedLongRunningCommand &&
+    !state.waitingForTaskOutput &&
+    !state.waitingForAssistantAfterToolResult
   );
 }
+
+export const __claudeSdkTestUtils = {
+  getBackgroundIdleFinishMs,
+  shouldApplyBackgroundIdleFinish,
+};
 
 function resolveClaudeCodeExecutable(): string | undefined {
   const isWindows = process.platform === 'win32';
@@ -487,6 +470,7 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
   readonly chatRoomAgents: ChatRoomAgentInfo[];
   readonly llmProvider?: LlmProvider;
   readonly imageGenerationProvider?: LlmProvider | null;
+  readonly thinkingMode: AgentThinkingMode;
 
   private _lastInjectedMessageId?: string;
   private systemPrompt: string;
@@ -501,6 +485,9 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
   private thinking = '';
   private toolCalls: ToolCall[] = [];
   private hasBackgroundedLongRunningCommand = false;
+  private waitingForTaskOutput = false;
+  private waitingForAssistantAfterToolResult = false;
+  private receivedAssistantEndTurn = false;
 
   private lastContext: string | null = null;
   private lastResponse: string | null = null;
@@ -529,6 +516,8 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
     chatRoomAgents?: ChatRoomAgentInfo[],
     llmProvider?: LlmProvider,
     imageGenerationProvider?: LlmProvider | null,
+    thinkingMode?: AgentThinkingMode | null,
+    chatRoomRules?: string,
   ) {
     this.name = name;
     this.chatRoomId = chatRoomId;
@@ -539,6 +528,7 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
     this.chatRoomAgents = chatRoomAgents || [];
     this.llmProvider = llmProvider;
     this.imageGenerationProvider = imageGenerationProvider;
+    this.thinkingMode = thinkingMode || DEFAULT_AGENT_THINKING_MODE;
     this.workDir = resolveAgentWorkDir({
       chatRoomId,
       sessionDir,
@@ -552,20 +542,27 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
 
     const modelInfo = this.llmProvider
       ? `
-## 当前模型
-你正在使用 ${this.llmProvider.name} 提供的模型服务。
-- 模型名称：${this.llmProvider.model}
-- 供应商类型：${this.llmProvider.type}`
+## Current Model
+You are using the model service provided by ${this.llmProvider.name}.
+- Model name: ${this.llmProvider.model}
+- Provider type: ${this.llmProvider.type}`
+      : '';
+    const chatRoomRulesSection = chatRoomRules?.trim()
+      ? `
+## Group Rules
+The following rules come from the current chatroom and apply to all assistants in this chatroom. You must follow them in replies and collaboration in this chatroom:
+${chatRoomRules.trim()}`
       : '';
 
     this.systemPrompt = `${modelInfo}
 ${systemPrompt}
+${chatRoomRulesSection}
 
 ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
 
-## 工作目录
-你的工作目录是：${this.workDir}
-执行文件操作和命令时，默认在此目录下操作。使用相对路径时，基于此目录解析。`;
+## Working Directory
+Your working directory is: ${this.workDir}
+When you perform file operations or run commands, operate in this directory by default. Resolve relative paths from this directory.`;
 
     this.ensureWorkDirectory();
   }
@@ -844,7 +841,7 @@ ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
       optionSessionId: this.hasStartedSession ? undefined : this.sessionId,
       optionResume: this.hasStartedSession ? this.sessionId : undefined,
       maxTurns: getClaudeMaxTurns(),
-      thinking: getClaudeThinkingOptions(this.llmProvider),
+      thinking: getClaudeThinkingOptions(this.llmProvider, this.thinkingMode),
       model: this.llmProvider?.model,
       provider: this.llmProvider
         ? {
@@ -886,51 +883,7 @@ ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
   }
 
   private buildHooks(): Partial<Record<HookEvent, HookCallbackMatcher[]>> {
-    return {
-      PreToolUse: [
-        {
-          hooks: [
-            async (input) => {
-              if (
-                input.hook_event_name !== 'PreToolUse' ||
-                input.tool_name !== 'Bash'
-              ) {
-                return {continue: true};
-              }
-
-              const toolInput = input.tool_input;
-              if (!toolInput || typeof toolInput !== 'object') {
-                return {continue: true};
-              }
-
-              const command = (toolInput as {command?: unknown}).command;
-              if (
-                typeof command !== 'string' ||
-                !shouldRunBashInBackground(command)
-              ) {
-                return {continue: true};
-              }
-
-              this.hasBackgroundedLongRunningCommand = true;
-
-              return {
-                continue: true,
-                hookSpecificOutput: {
-                  hookEventName: 'PreToolUse' as const,
-                  updatedInput: {
-                    ...(toolInput as Record<string, unknown>),
-                    timeout: getLongRunningBashTimeoutMs(),
-                    run_in_background: true,
-                  },
-                  additionalContext:
-                    'TeamAgentX detected a long-running service command and started it in the background so the conversation can continue.',
-                },
-              };
-            },
-          ],
-        },
-      ],
-    };
+    return {};
   }
 
   private buildFullMessage(
@@ -940,7 +893,7 @@ ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
     let fullMessage = '';
 
     if (this.systemPrompt) {
-      fullMessage += `【系统指令】\n${this.systemPrompt}\n\n`;
+      fullMessage += `[System Instructions]\n${this.systemPrompt}\n\n`;
     }
 
     const longTermMemorySection = buildAgentLongTermMemorySection(
@@ -966,7 +919,7 @@ ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
       );
 
       if (memorySummary) {
-        fullMessage += `【群聊长期记忆摘要】
+        fullMessage += `[Group Chat Long-Term Memory Summary]
 ${memorySummary}
 
 `;
@@ -977,7 +930,8 @@ ${memorySummary}
           .map((msg) => `[${msg.senderName}]: ${msg.content}`)
           .join('\n');
 
-        fullMessage += `【最近群聊消息】以下是当前消息之前最近的群聊消息（共 ${recentHistory.length} 条）：
+        fullMessage += `[Recent Group Chat Messages]
+The following are the most recent group-chat messages before the current message (${recentHistory.length} total):
 ${historyText}
 
 `;
@@ -987,27 +941,27 @@ ${historyText}
     if (this.chatRoomAgents.length > 0) {
       const agentsInfo = this.chatRoomAgents
         .map((agent) => agent.name)
-        .join('、');
+        .join(', ');
       const otherAgents = this.chatRoomAgents.filter(
         (agent) => agent.name !== this.name,
       );
-      const otherAgentsList = otherAgents.map((agent) => agent.name).join('、');
-      const othersInfo = otherAgents.length > 0 ? otherAgentsList : '无';
+      const otherAgentsList = otherAgents.map((agent) => agent.name).join(', ');
+      const othersInfo = otherAgents.length > 0 ? otherAgentsList : 'none';
       const mentionTip =
         otherAgents.length > 0
-          ? '\n【提示】\n需要给其他助手发任意消息时，必须调用 mcp__tax__send_message 工具生成消息草稿，并把工具返回的 @助手消息放入你的最终回复。工具本身不会直接发送消息；最终回复中的 @助手消息会在自动模式下触发目标助手。如果用户只是要求你给某个助手发消息，最终回复只输出这条 @助手消息，不要添加解释、寒暄、总结，也不要擅自扩写成协作邀请。再发消息之前，你需要判断一下是否真的需要发消息给某个助手。'
+          ? '\n[Tip]\nWhen you need to message another assistant, write "@assistant_name message content" directly in your final reply. You may also mention an assistant in body text when the @ is preceded by a space. A target assistant is triggered only when @ is at the start of a line or the previous character is a space; @ immediately after punctuation will not trigger. A single message may mention at most one assistant. If the user only asks you to send a message to another assistant, output only that @assistant message in the final reply, with no explanation, pleasantries, summary, or expanded collaboration invitation. Before sending such a message, decide whether triggering another assistant is actually necessary.'
           : '';
 
-      fullMessage += `【群聊成员信息】
-群聊工作目录：${this.workDir}
-当前群聊中的助手有：${agentsInfo}
-你是：${this.name}
-其他助手：${othersInfo}${mentionTip}
+      fullMessage += `[Group Chat Member Info]
+Chatroom working directory: ${this.workDir}
+Assistants in the current chatroom: ${agentsInfo}
+You are: ${this.name}
+Other assistants: ${othersInfo}${mentionTip}
 
 `;
     }
 
-    fullMessage += `【当前消息】\n${message}`;
+    fullMessage += `[Current Message]\n${message}`;
     return fullMessage;
   }
 
@@ -1019,7 +973,7 @@ ${historyText}
 
     this.lastInjectedSkillsSignature = currentSignature;
     this.saveSessionId();
-    return `【技能清单更新】
+    return `[Installed Skills Update]
 ${buildInstalledSkillsInstructions(this.agentId)}`;
   }
 
@@ -1060,6 +1014,9 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     this.thinking = '';
     this.toolCalls = [];
     this.hasBackgroundedLongRunningCommand = false;
+    this.waitingForTaskOutput = false;
+    this.waitingForAssistantAfterToolResult = false;
+    this.receivedAssistantEndTurn = false;
   }
 
   private resetSession(): void {
@@ -1092,20 +1049,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
   }
 
   private getSystemAssistantTools(): any[] {
-    switch (this.agentId) {
-      case AGENT_CREATOR_AGENT_ID:
-        return agentCreatorTools;
-      case SKILL_MANAGER_AGENT_ID:
-        return skillManagerTools;
-      case CRON_TASK_HELPER_AGENT_ID:
-        return cronTaskHelperTools;
-      case CHATROOM_HELPER_AGENT_ID:
-        return chatroomHelperTools;
-      case EXTERNAL_PLATFORM_HELPER_AGENT_ID:
-        return createExternalPlatformHelperTools(this.chatRoomId);
-      default:
-        return [];
-    }
+    return getSystemAssistantTools(this.agentId, this.chatRoomId);
   }
 
   private buildSystemAssistantMcpTools(): any[] {
@@ -1129,7 +1073,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
                 {
                   type: 'text' as const,
                   text:
-                    error instanceof Error ? error.message : '工具执行失败。',
+                    error instanceof Error ? error.message : 'Tool execution failed.',
                 },
               ],
               isError: true,
@@ -1149,7 +1093,6 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       );
 
     return [
-      'mcp__tax__send_message',
       ...(this.imageGenerationProvider ? ['mcp__tax__generate_image'] : []),
       ...systemToolNames.map((name) => `mcp__tax__${name}`),
     ];
@@ -1161,158 +1104,22 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       version: '1.0.0',
       alwaysLoad: true,
       tools: [
-        sdkTool(
-          'send_message',
-          '生成一段要放入最终回复的 TeamAgentX 助手消息草稿。消息内容可以是用户要求转达的任意内容，不一定是协作请求。工具支持一个或多个目标助手；不会直接发送消息，也不会直接触发任务。你必须把返回的 @目标助手 消息内容放入最终回复，最终回复落入群聊后才会在自动模式下触发目标助手。如果用户只是要求你给某个或多个助手发消息，最终回复只输出这条 @助手消息，不要添加解释、寒暄、总结，也不要擅自扩写成协作邀请。',
-          {
-            targetAgentId: z
-              .string()
-              .optional()
-              .describe('目标助手 ID。已知 ID 时优先使用。'),
-            targetAgentName: z
-              .string()
-              .optional()
-              .describe('目标助手名称。未提供 ID 时使用。'),
-            targetAgentIds: z
-              .array(z.string())
-              .optional()
-              .describe('多个目标助手 ID。已知 ID 时优先使用。'),
-            targetAgentNames: z
-              .array(z.string())
-              .optional()
-              .describe('多个目标助手名称。未提供 ID 时使用。'),
-            content: z
-              .string()
-              .describe(
-                '给目标助手的消息内容，不要包含 @目标助手名前缀。多个目标会自动生成 @助手1 @助手2 前缀。',
-              ),
-          },
-          async (args) => {
-            if (!this.agentId) {
-              return {
-                content: [
-                  {
-                    type: 'text',
-                    text: '当前助手缺少 agentId，无法生成消息草稿。',
-                  },
-                ],
-                isError: true,
-              };
-            }
-
-            try {
-              const content = args.content.trim();
-              const normalizeStringArray = (
-                value: string | string[] | undefined,
-              ) => {
-                if (Array.isArray(value)) {
-                  return value.map((item) => item.trim()).filter(Boolean);
-                }
-                return value?.trim() ? [value.trim()] : [];
-              };
-              const targetAgentIds = [
-                ...normalizeStringArray(args.targetAgentIds),
-                ...normalizeStringArray(args.targetAgentId),
-              ];
-              const targetAgentNames = [
-                ...normalizeStringArray(args.targetAgentNames),
-                ...normalizeStringArray(args.targetAgentName),
-              ];
-              const targets: {agentId?: string; agentName: string}[] = [];
-              const seen = new Set<string>();
-
-              for (const targetAgentId of targetAgentIds) {
-                const targetAgent = this.chatRoomAgents.find(
-                  (agent) => agent.agentId === targetAgentId,
-                );
-                if (!targetAgent?.name || seen.has(targetAgent.name)) continue;
-                seen.add(targetAgent.name);
-                targets.push({
-                  agentId: targetAgent.agentId,
-                  agentName: targetAgent.name,
-                });
-              }
-
-              for (const targetAgentName of targetAgentNames) {
-                const targetAgent = this.chatRoomAgents.find(
-                  (agent) => agent.name === targetAgentName,
-                );
-                const resolvedName = targetAgent?.name || targetAgentName;
-                if (seen.has(resolvedName)) continue;
-                seen.add(resolvedName);
-                targets.push({
-                  agentId: targetAgent?.agentId,
-                  agentName: resolvedName,
-                });
-              }
-
-              if (!content || targets.length === 0) {
-                return {
-                  content: [
-                    {
-                      type: 'text',
-                      text: '参数错误：必须提供 content，以及至少一个可解析的 targetAgentId/targetAgentName 或 targetAgentIds/targetAgentNames。',
-                    },
-                  ],
-                  isError: true,
-                };
-              }
-
-              const mentionPrefix = targets
-                .map((agent) => `@${agent.agentName}`)
-                .join(' ');
-              const draftContent = `${mentionPrefix} ${content}`;
-
-              return {
-                content: [
-                  {
-                    type: 'text',
-                    text: `最终回复请只输出下面这段消息，不要添加其他内容：\n${draftContent}`,
-                  },
-                ],
-                structuredContent: {
-                  targetAgentIds: targets
-                    .map((agent) => agent.agentId)
-                    .filter(Boolean),
-                  targetAgentNames: targets.map((agent) => agent.agentName),
-                  targetAgents: targets,
-                  content,
-                  draftContent,
-                },
-              };
-            } catch (error) {
-              return {
-                content: [
-                  {
-                    type: 'text',
-                    text:
-                      error instanceof Error
-                        ? error.message
-                        : '生成消息草稿失败。',
-                  },
-                ],
-                isError: true,
-              };
-            }
-          },
-          {alwaysLoad: true},
-        ),
         ...(this.imageGenerationProvider
           ? [
               sdkTool(
                 'generate_image',
-                '通过 TeamAgentX 服务端受控图片模型生成图片。API Key 只在服务端使用。用户明确要求生成图片、海报、插画、产品图或视觉稿时使用。',
+                'Generate images through the TeamAgentX server-controlled image model. API keys are used only on the server. Use this when the user explicitly asks for an image, poster, illustration, product visual, or visual draft.',
                 {
                   prompt: z
                     .string()
                     .describe(
-                      '详细图片提示词。应包含主体、风格、构图、色彩、用途等。',
+                      'Detailed image prompt. Include subject, style, composition, colors, intended use, and other relevant details.',
                     ),
                   size: z
                     .string()
                     .optional()
                     .describe(
-                      '图片尺寸或比例，例如 1024x1024、1024x1792、1:1。',
+                      'Image size or aspect ratio, for example 1024x1024, 1024x1792, or 1:1.',
                     ),
                   n: z
                     .number()
@@ -1320,15 +1127,15 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
                     .min(1)
                     .max(4)
                     .optional()
-                    .describe('生成图片数量，默认 1，最多 4。'),
+                    .describe('Number of images to generate. Default 1, maximum 4.'),
                   filename: z
                     .string()
                     .optional()
-                    .describe('可选文件名，不要包含路径。'),
+                    .describe('Optional filename. Do not include a path.'),
                   extraJson: z
                     .record(z.string(), z.unknown())
                     .optional()
-                    .describe('供应商特定额外参数。'),
+                    .describe('Provider-specific extra parameters.'),
                 },
                 async (args) => {
                   if (!this.agentId) {
@@ -1336,7 +1143,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
                       content: [
                         {
                           type: 'text',
-                          text: '当前助手缺少 agentId，无法生成图片。',
+                          text: 'The current assistant is missing agentId and cannot generate images.',
                         },
                       ],
                       isError: true,
@@ -1355,7 +1162,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
                       content: [
                         {
                           type: 'text',
-                          text: `图片生成成功：${result.urls.join(', ') || result.files.join(', ')}`,
+                          text: `Image generation succeeded: ${result.urls.join(', ') || result.files.join(', ')}`,
                         },
                       ],
                       structuredContent: result as unknown as Record<
@@ -1371,7 +1178,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
                           text:
                             error instanceof Error
                               ? error.message
-                              : '图片生成失败。',
+                              : 'Image generation failed.',
                         },
                       ],
                       isError: true,
@@ -1477,6 +1284,8 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
   private handleAssistantMessage(message: any): void {
     const content = message.message?.content;
     if (!Array.isArray(content)) return;
+    this.waitingForAssistantAfterToolResult = false;
+    const stopReason = message.message?.stop_reason;
 
     for (const block of content) {
       if (block?.type === 'thinking' && typeof block.thinking === 'string') {
@@ -1484,8 +1293,12 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       }
 
       if (block?.type === 'tool_use') {
+        const toolName = this.stripMcpTaxPrefix(block.name || 'tool_call');
+        if (toolName === 'TaskOutput') {
+          this.waitingForTaskOutput = true;
+        }
         this.upsertToolCall({
-          name: this.stripMcpTaxPrefix(block.name || 'tool_call'),
+          name: toolName,
           input: block.input || {},
           toolCallId: block.id || randomUUID(),
           status: 'completed',
@@ -1498,6 +1311,10 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       const text = extractTextFromContent(content);
       if (text) this.content = text;
     }
+
+    if (stopReason === 'end_turn' && this.content.trim()) {
+      this.receivedAssistantEndTurn = true;
+    }
   }
 
   private handleUserMessage(message: any): void {
@@ -1506,6 +1323,8 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
 
     for (const block of content) {
       if (block?.type === 'tool_result') {
+        this.waitingForTaskOutput = false;
+        this.waitingForAssistantAfterToolResult = true;
         const toolUseId = block.tool_use_id || message.uuid || randomUUID();
         const output = extractTextFromContent(block.content);
         const status = block.is_error ? 'error' : 'completed';
@@ -1633,12 +1452,13 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
   ): Promise<TokenUsage | undefined> {
     const env = this.buildEnv();
     const maxTurns = getClaudeMaxTurns();
-    const thinking = getClaudeThinkingOptions(this.llmProvider);
+    const thinking = getClaudeThinkingOptions(this.llmProvider, this.thinkingMode);
     this.lastClaudeStderr = '';
     this.logQueryStart(env);
     const settingSources: SettingSource[] = this.llmProvider
       ? []
       : ['user', 'project', 'local'];
+    const allowedTaxTools = this.getAllowedTaxTools();
     const q = query({
       prompt: this.buildPrompt(fullMessage, attachments),
       options: {
@@ -1650,10 +1470,14 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
         thinking,
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
-        mcpServers: {
-          tax: this.buildTeamAgentXMcpServer(),
-        },
-        allowedTools: this.getAllowedTaxTools(),
+        ...(allowedTaxTools.length > 0
+          ? {
+              mcpServers: {
+                tax: this.buildTeamAgentXMcpServer(),
+              },
+              allowedTools: allowedTaxTools,
+            }
+          : {}),
         settingSources,
         hooks: this.buildHooks(),
         sessionId: this.hasStartedSession ? undefined : this.sessionId,
@@ -1684,7 +1508,13 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
 
       const nextMessage = iterator.next();
       const result =
-        this.hasBackgroundedLongRunningCommand && this.content.trim()
+        shouldApplyBackgroundIdleFinish({
+          hasBackgroundedLongRunningCommand:
+            this.hasBackgroundedLongRunningCommand,
+          waitingForTaskOutput: this.waitingForTaskOutput,
+          waitingForAssistantAfterToolResult:
+            this.waitingForAssistantAfterToolResult,
+        })
           ? await Promise.race([
               nextMessage,
               new Promise<{done: true; value: undefined; timedOut: true}>(
@@ -1713,6 +1543,11 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       const sdkMessage = result.value;
       const usage = this.handleSdkMessage(sdkMessage);
       if (usage) tokenUsage = usage;
+
+      if (this.receivedAssistantEndTurn && this.content.trim()) {
+        abortController.abort('assistant-end-turn');
+        return tokenUsage;
+      }
     }
     return tokenUsage;
   }
@@ -1900,6 +1735,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
 export function clearClaudeSdkFileSystemContext(
   agentId: string,
   chatRoomId: string,
+  workDirOverride?: string | null,
 ): void {
   const claudeConfigDir = path.join(
     os.homedir(),
@@ -1926,7 +1762,7 @@ export function clearClaudeSdkFileSystemContext(
           const sessionId = sessionState.sessionId;
 
           // 删除 conversation 文件
-          const workDir = getDefaultChatRoomWorkDir(chatRoomId);
+          const workDir = workDirOverride?.trim() || getDefaultChatRoomWorkDir(chatRoomId);
           const conversationPath = path.join(
             claudeConfigDir,
             'projects',
@@ -1958,7 +1794,7 @@ export function clearClaudeSdkFileSystemContext(
   // 删除 projects 目录下与该 chatRoomId workDir 相关的所有 conversation 文件
   const projectsDir = path.join(claudeConfigDir, 'projects');
   if (fs.existsSync(projectsDir)) {
-    const workDir = getDefaultChatRoomWorkDir(chatRoomId);
+    const workDir = workDirOverride?.trim() || getDefaultChatRoomWorkDir(chatRoomId);
     const sanitizedWorkDir = sanitizeClaudeProjectPath(workDir);
     const projectDir = path.join(projectsDir, sanitizedWorkDir);
 

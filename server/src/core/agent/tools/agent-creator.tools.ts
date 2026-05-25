@@ -10,6 +10,7 @@ import {
   installDefaultSkillsForNewAgent,
 } from '../../../modules/skill/preinstalled-skills.js';
 import { skillInstallService } from '../../../modules/skill/skill-install.service.js';
+import { createSkillDirectoryLink } from '../../../modules/skill/skill-link.js';
 import { installSkillFromSourceTool } from './skills-helper.tools.js';
 import { getChatHistoryTool, listSharedSkillsTool } from './skill-manager.tools.js';
 import {
@@ -26,6 +27,7 @@ import {
 import {
   buildSpeechVoiceCatalog,
 } from '../../../modules/speech/voice-catalog.js';
+import { clearExecutorCacheEntries } from '../agent-handler/cache.js';
 
 // 助手生成助手的专用 ID
 export const AGENT_CREATOR_AGENT_ID = '29ffb519-82d2-4c32-8bc8-0b8d814a4eee';
@@ -37,6 +39,10 @@ export const ACP_TOOL_VALUES = [
 ] as const;
 
 export type AcpToolValue = (typeof ACP_TOOL_VALUES)[number];
+
+const LLM_MODEL_TYPES = ['text', 'image', 'video', 'audio'] as const;
+const IMAGE_GEN_API_TYPES = ['sync', 'async', 'auto'] as const;
+const AUDIO_USAGE_VALUES = ['tts', 'stt', 'both'] as const;
 
 // 单个助手配置类型
 type AgentConfig = {
@@ -174,7 +180,7 @@ async function installModelSelectedSkills(
     }
 
     try {
-      fs.symlinkSync(skill.sourceDir, targetSymlink, 'dir');
+      createSkillDirectoryLink(skill.sourceDir, targetSymlink);
       installedSkills.push(skill.slug);
       console.log(`[agent-creator] 已根据模型选择为「${agent.name}」安装技能: ${skill.slug}`);
     } catch (error) {
@@ -469,15 +475,25 @@ export const createLlmProviderTool = tool(
     apiUrl,
     apiKey,
     model,
+    modelType,
     apiProtocol,
+    sttModel,
+    audioUsage,
+    imageProvider,
+    imageApiType,
     isActive,
     isDefault,
   }: {
     name: string;
-    apiUrl: string;
+    apiUrl?: string;
     apiKey: string;
     model: string;
+    modelType?: (typeof LLM_MODEL_TYPES)[number];
     apiProtocol?: 'anthropic' | 'openai';
+    sttModel?: string | null;
+    audioUsage?: (typeof AUDIO_USAGE_VALUES)[number] | null;
+    imageProvider?: string | null;
+    imageApiType?: (typeof IMAGE_GEN_API_TYPES)[number] | null;
     isActive?: boolean;
     isDefault?: boolean;
   }) => {
@@ -497,18 +513,29 @@ export const createLlmProviderTool = tool(
         apiUrl,
         apiKey,
         model,
+        modelType: modelType || 'text',
         apiProtocol: apiProtocol || 'anthropic',
+        sttModel,
+        audioUsage,
+        imageProvider,
+        imageApiType,
         isActive: isActive ?? true,
         isDefault: isDefault ?? false,
       });
+      clearExecutorCacheEntries();
 
       return JSON.stringify({
         success: true,
         provider: {
           id: provider.id,
           name: provider.name,
+          modelType: provider.modelType,
           apiUrl: provider.apiUrl,
           model: provider.model,
+          sttModel: provider.sttModel,
+          audioUsage: provider.audioUsage,
+          imageProvider: provider.imageProvider,
+          imageApiType: provider.imageApiType,
           apiProtocol: provider.apiProtocol,
           isDefault: provider.isDefault,
         },
@@ -523,13 +550,18 @@ export const createLlmProviderTool = tool(
   },
   {
     name: 'create_llm_provider',
-    description: '【必须用户确认后才能调用】创建一个新的LLM模型配置。⚠️ 重要：调用此工具前，必须先向用户展示模型配置信息（名称、API URL、API Key、模型名称），并明确询问"是否确认创建？"等待用户回复确认后才能调用。如果用户提出修改，调整配置后再次确认。',
+    description: '【必须用户确认后才能调用】创建一个新的模型配置，支持文本、图片、语音、视频模型。⚠️ 重要：调用此工具前，必须先向用户展示模型配置信息（名称、模型类型、协议、API URL、API Key、模型名称，以及图片/语音专用字段），并明确询问"是否确认创建？"等待用户回复确认后才能调用。如果用户提出修改，调整配置后再次确认。',
     schema: z.object({
       name: z.string().describe('模型配置名称，必须唯一，例如"我的Claude API"'),
-      apiUrl: z.string().describe('API 端点 URL，例如 https://api.anthropic.com'),
+      modelType: z.enum(LLM_MODEL_TYPES).optional().describe('模型类型，默认 text。text=文本，image=图片，audio=语音，video=视频'),
+      apiUrl: z.string().optional().describe('API 端点 URL，例如 https://api.anthropic.com 或 https://api.openai.com/v1'),
       apiKey: z.string().describe('API Key'),
       model: z.string().describe('模型名称，例如 claude-sonnet-4-20250514'),
       apiProtocol: z.enum(['anthropic', 'openai']).optional().describe('API 协议类型，anthropic 支持 thinking/prompt caching，openai 兼容更多模型，默认 anthropic'),
+      sttModel: z.string().nullable().optional().describe('语音识别模型，仅 audio 类型需要；留空则与 model 共用'),
+      audioUsage: z.enum(AUDIO_USAGE_VALUES).nullable().optional().describe('语音模型用途，仅 audio 类型需要：tts、stt 或 both，默认 both'),
+      imageProvider: z.string().nullable().optional().describe('图片模型供应商，仅 image 类型需要，例如 openai、apimart、openrouter、gemini'),
+      imageApiType: z.enum(IMAGE_GEN_API_TYPES).nullable().optional().describe('图片模型调用方式，仅 image 类型需要：sync、async 或 auto，默认 sync'),
       isActive: z.boolean().optional().describe('是否激活，默认 true'),
       isDefault: z.boolean().optional().describe('是否设为默认模型，默认 false'),
     }),

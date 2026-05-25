@@ -36,3 +36,5 @@ export {
   EXTERNAL_PLATFORM_HELPER_AGENT_ID,
   createExternalPlatformHelperTools,
 } from './external-platform-helper.tools.js';
+
+export { getSystemAssistantTools } from './system-assistant.tools.js';

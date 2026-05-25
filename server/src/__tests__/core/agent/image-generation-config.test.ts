@@ -44,7 +44,7 @@ describe('Image generation config', () => {
 
   test('未配置图片模型时返回空环境并提示需要配置', () => {
     assert.deepStrictEqual(buildImageGenerationEnv(null), {});
-    assert.match(getImageGenerationSkillInstructions(null), /未开启图片生成能力/);
+    assert.equal(getImageGenerationSkillInstructions(null), '');
   });
 
   test('图片技能说明包含当前供应商文档和参数指导', () => {
@@ -54,9 +54,9 @@ describe('Image generation config', () => {
       apiUrl: 'https://openrouter.ai/api/v1',
     }));
 
-    assert.match(instructions, /当前供应商参数手册/);
+    assert.match(instructions, /Current Provider Parameter Guide/);
     assert.match(instructions, /openrouter\.ai\/docs\/guides\/overview\/multimodal\/image-generation/);
     assert.match(instructions, /extraJson\.image_config/i);
-    assert.match(instructions, /语义化尺寸/);
+    assert.match(instructions, /semantic size/i);
   });
 });

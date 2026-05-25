@@ -38,7 +38,17 @@
       "Bash(git -C /Users/zhangyang/spark_ai_project/teamagentx status)",
       "Bash(git -C /Users/zhangyang/spark_ai_project/teamagentx diff --stat)",
       "Bash(git -C /Users/zhangyang/spark_ai_project/teamagentx log --oneline -5)",
-      "Bash(git -C /Users/zhangyang/spark_ai_project/teamagentx add apps/desktop/electron-builder.yml apps/desktop/electron/main.ts apps/web/src/types/electron.d.ts apps/website/.env.example apps/website/Dockerfile apps/website/build-image.sh apps/website/docker-entrypoint.sh apps/website/public/update.json apps/website/src/App.tsx apps/website/src/docs-page.tsx apps/website/src/env.d.ts apps/website/src/site-config.ts apps/website/src/styles.css)"
+      "Bash(git -C /Users/zhangyang/spark_ai_project/teamagentx add apps/desktop/electron-builder.yml apps/desktop/electron/main.ts apps/web/src/types/electron.d.ts apps/website/.env.example apps/website/Dockerfile apps/website/build-image.sh apps/website/docker-entrypoint.sh apps/website/public/update.json apps/website/src/App.tsx apps/website/src/docs-page.tsx apps/website/src/env.d.ts apps/website/src/site-config.ts apps/website/src/styles.css)",
+      "Bash(ls -la ~/.claude/ 2>&1 | head -30 && echo \"---\" && ls -la ~/.claude.json 2>&1)",
+      "Bash(security find-generic-password *)",
+      "Bash(CLAUDE_CONFIG_DIR=/tmp/claude-test-cfg mkdir -p /tmp/claude-test-cfg)",
+      "Bash(cp ~/.claude.json /tmp/claude-test-cfg/.claude.json)",
+      "Bash(CLAUDE_CONFIG_DIR=/tmp/claude-test-cfg claude --help)",
+      "Bash(CLAUDE_CONFIG_DIR=/tmp/claude-test-cfg claude -p \"say hi\")",
+      "Bash(claude -p \"say hi\")",
+      "Bash(chmod 600 /tmp/claude-test-cfg/.credentials.json)",
+      "Bash(CLAUDE_CONFIG_DIR=/tmp/claude-test-cfg claude -p \"say hi briefly\")",
+      "Bash(kill 44825 *)"
     ]
   }
 }

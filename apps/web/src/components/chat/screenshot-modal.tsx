@@ -31,7 +31,7 @@ interface ScreenshotModalProps {
   messages: Message[]
   roomName: string
   roomAvatar?: string | null
-  roomAvatarColor?: string | null
+  isQuickChatRoom?: boolean
   mentionAgents: MentionAgent[]
   currentUser: CurrentUser
 }
@@ -42,7 +42,7 @@ export function ScreenshotModal({
   messages,
   roomName,
   roomAvatar,
-  roomAvatarColor,
+  isQuickChatRoom,
   mentionAgents,
   currentUser,
 }: ScreenshotModalProps) {
@@ -251,7 +251,7 @@ export function ScreenshotModal({
           messages={messages}
           roomName={roomName}
           roomAvatar={roomAvatar}
-          roomAvatarColor={roomAvatarColor}
+          isQuickChatRoom={isQuickChatRoom}
           mentionAgents={mentionAgents}
           currentUser={currentUser}
           onReady={handleRendererReady}

@@ -15,7 +15,7 @@ const cronTaskSchema = {
     intervalMinutes: { type: 'integer', nullable: true },
     scheduledAt: { type: 'string', nullable: true },
     payload: { type: 'string' },
-    agentIds: { type: 'array', items: { type: 'string' }, nullable: true }, // 助手 ID 数组，["*"] 表示所有助手
+    agentIds: { type: 'array', items: { type: 'string' }, nullable: true }, // 助手 ID 数组，["*"] 表示所有助手；执行时逐个发送
     enabled: { type: 'boolean' },
     maxRetries: { type: 'integer' },
     retryCount: { type: 'integer' },
@@ -146,7 +146,7 @@ export async function cronTaskGateway(app: FastifyInstance) {
           intervalMinutes: { type: 'integer' },
           scheduledAt: { type: 'string', format: 'date-time' },
           payload: { type: 'string' },
-          agentIds: { type: 'array', items: { type: 'string' }, description: '选中的助手 ID 列表，["*"] 表示所有助手' },
+          agentIds: { type: 'array', items: { type: 'string' }, description: '选中的助手 ID 列表，["*"] 表示所有助手；多个助手会在执行时拆成多条消息逐个触发' },
           enabled: { type: 'boolean' },
           maxRetries: { type: 'integer' },
         },
@@ -261,7 +261,7 @@ export async function cronTaskGateway(app: FastifyInstance) {
           intervalMinutes: { type: 'integer' },
           scheduledAt: { type: 'string', format: 'date-time' },
           payload: { type: 'string' },
-          agentIds: { type: 'array', items: { type: 'string' } },
+          agentIds: { type: 'array', items: { type: 'string' }, description: '选中的助手 ID 列表，多个助手会在执行时拆成多条消息逐个触发' },
           enabled: { type: 'boolean' },
           maxRetries: { type: 'integer' },
         },

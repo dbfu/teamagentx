@@ -10,7 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { agentApi, AgentSpeechConfig } from '@/lib/agent-api'
+import { agentApi, AgentSpeechConfig, type AgentThinkingMode } from '@/lib/agent-api'
 import { openExternalUrl, TEAMAGENTX_DOCS_URL } from '@/lib/site-links'
 import { updateManager } from '@/lib/update-manager'
 import { cn } from '@/lib/utils'
@@ -89,6 +89,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
     proxyConfig?: string | null
     codexModel?: string | null
     claudeModel?: string | null
+    thinkingMode?: AgentThinkingMode | null
     categoryId: string | null
     llmProviderId: string | null
     speechConfig: AgentSpeechConfig | null
@@ -104,6 +105,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
       proxyConfig: data.proxyConfig || null,
       codexModel: data.codexModel || null,
       claudeModel: data.claudeModel || null,
+      thinkingMode: data.thinkingMode || 'high',
       categoryId: data.categoryId || undefined,
       llmProviderId: data.llmProviderId || undefined,
       speechConfig: data.speechConfig,

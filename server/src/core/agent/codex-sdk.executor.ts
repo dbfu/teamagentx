@@ -24,6 +24,10 @@ import {
   buildInstalledSkillsSignature,
 } from './skill-instructions.js';
 import { getImageGenerationSkillInstructions } from './image-generation-config.js';
+import {
+  DEFAULT_AGENT_THINKING_MODE,
+  type AgentThinkingMode,
+} from './thinking-mode.js';
 import type {
   AgentDebugInfo,
   AgentExecResult,
@@ -78,6 +82,8 @@ const TEAMAGENTX_CODEX_PROVIDER_ID = 'teamagentx_openai';
 const INTERNAL_ORIGINATOR_ENV = 'CODEX_INTERNAL_ORIGINATOR_OVERRIDE';
 const TYPESCRIPT_SDK_ORIGINATOR = 'codex_sdk_ts';
 const CODEX_NPM_NAME = '@openai/codex';
+const DEFAULT_CODEX_SDK_MAX_THREAD_TURNS = 8;
+const DEFAULT_CODEX_SDK_MAX_SESSION_BYTES = 2 * 1024 * 1024;
 const moduleRequire = createRequire(import.meta.url);
 
 const PLATFORM_PACKAGE_BY_TARGET: Record<string, string> = {
@@ -117,6 +123,12 @@ interface CodexBuiltinMcpServerContext {
   agentName: string;
   chatRoomAgents: ChatRoomAgentInfo[];
   generateImageEndpoint?: string;
+  systemToolsListEndpoint?: string;
+  systemToolsCallEndpoint?: string;
+  backgroundCommandStartEndpoint?: string;
+  backgroundCommandReadEndpoint?: string;
+  backgroundCommandStopEndpoint?: string;
+  backgroundCommandListEndpoint?: string;
 }
 
 interface CodexBuiltinMcpServerDefinition {
@@ -232,6 +244,27 @@ function findExecutableOnPath(commandName: string): string | undefined {
   }
 }
 
+function getPositiveIntegerEnv(name: string, defaultValue: number): number {
+  const raw = process.env[name];
+  if (!raw) return defaultValue;
+  const value = Number.parseInt(raw, 10);
+  return Number.isFinite(value) && value >= 0 ? value : defaultValue;
+}
+
+type CodexReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+
+function getCodexReasoningEffort(thinkingMode?: AgentThinkingMode | null): CodexReasoningEffort {
+  if (thinkingMode) {
+    return thinkingMode === 'off' ? 'minimal' : thinkingMode;
+  }
+
+  const value = process.env.CODEX_SDK_REASONING_EFFORT?.trim().toLowerCase();
+  if (value && ['minimal', 'low', 'medium', 'high', 'xhigh'].includes(value)) {
+    return value as CodexReasoningEffort;
+  }
+  return DEFAULT_AGENT_THINKING_MODE;
+}
+
 function findGitNexusRepoRoot(startDir: string): string | undefined {
   let current = path.resolve(startDir);
   while (true) {
@@ -260,29 +293,38 @@ const BUILTIN_CODEX_MCP_SERVERS: CodexBuiltinMcpServerDefinition[] = [
   {
     name: 'tax',
     build: ({
+      workDir,
       teamAgentXMcpServerPath,
       chatRoomId,
       agentId,
-      agentName,
-      chatRoomAgents,
       generateImageEndpoint,
-    }) => ({
-      command: process.execPath,
-      args: [teamAgentXMcpServerPath],
-      env: {
-        TEAMAGENTX_CHAT_ROOM_ID: chatRoomId,
-        TEAMAGENTX_SOURCE_AGENT_ID: agentId || '',
-        TEAMAGENTX_SOURCE_AGENT_NAME: agentName,
-        TEAMAGENTX_CHAT_ROOM_AGENTS: JSON.stringify(chatRoomAgents.map((agent) => ({
-          agentId: agent.agentId,
-          name: agent.name,
-        }))),
-        ...(generateImageEndpoint ? {
+      systemToolsListEndpoint,
+      systemToolsCallEndpoint,
+      backgroundCommandStartEndpoint,
+      backgroundCommandReadEndpoint,
+      backgroundCommandStopEndpoint,
+      backgroundCommandListEndpoint,
+    }) => {
+      if (!generateImageEndpoint && !systemToolsListEndpoint && !backgroundCommandStartEndpoint) return undefined;
+
+      return {
+        command: process.execPath,
+        args: [teamAgentXMcpServerPath],
+        env: {
+          TEAMAGENTX_CHAT_ROOM_ID: chatRoomId,
+          TEAMAGENTX_SOURCE_AGENT_ID: agentId || '',
+          TEAMAGENTX_WORK_DIR: workDir,
           TEAMAGENTX_GENERATE_IMAGE_ENDPOINT: generateImageEndpoint,
+          TEAMAGENTX_SYSTEM_TOOLS_LIST_ENDPOINT: systemToolsListEndpoint,
+          TEAMAGENTX_SYSTEM_TOOLS_CALL_ENDPOINT: systemToolsCallEndpoint,
+          TEAMAGENTX_BACKGROUND_COMMAND_START_ENDPOINT: backgroundCommandStartEndpoint,
+          TEAMAGENTX_BACKGROUND_COMMAND_READ_ENDPOINT: backgroundCommandReadEndpoint,
+          TEAMAGENTX_BACKGROUND_COMMAND_STOP_ENDPOINT: backgroundCommandStopEndpoint,
+          TEAMAGENTX_BACKGROUND_COMMAND_LIST_ENDPOINT: backgroundCommandListEndpoint,
           TEAMAGENTX_INTERNAL_TOOL_TOKEN: getInternalAgentToolToken(),
-        } : {}),
-      },
-    }),
+        },
+      };
+    },
   },
 ];
 
@@ -473,7 +515,7 @@ function getDefaultCodexAuthStatus(): { available: boolean; path: string } {
       typeof data.tokens === 'object' &&
       typeof data.tokens.access_token === 'string' &&
       typeof data.tokens.refresh_token === 'string';
-    return { available: Boolean(data.auth_mode && (hasApiKey || hasChatGptTokens)), path: authPath };
+    return { available: hasApiKey || hasChatGptTokens, path: authPath };
   } catch {
     return { available: false, path: authPath };
   }
@@ -672,6 +714,7 @@ export class CodexSdkExecutor implements IAgentExecutor {
   readonly imageGenerationProvider?: LlmProvider | null;
   readonly proxyConfig: string | null;
   readonly codexModel: string | null;
+  readonly thinkingMode: AgentThinkingMode;
 
   private _lastInjectedMessageId?: string;
   private systemPrompt: string;
@@ -709,6 +752,8 @@ export class CodexSdkExecutor implements IAgentExecutor {
     imageGenerationProvider?: LlmProvider | null,
     proxyConfig?: string | null,
     codexModel?: string | null,
+    thinkingMode?: AgentThinkingMode | null,
+    chatRoomRules?: string,
   ) {
     this.name = name;
     this.chatRoomId = chatRoomId;
@@ -721,6 +766,7 @@ export class CodexSdkExecutor implements IAgentExecutor {
     this.imageGenerationProvider = imageGenerationProvider;
     this.proxyConfig = proxyConfig || null;
     this.codexModel = codexModel || null;
+    this.thinkingMode = thinkingMode || DEFAULT_AGENT_THINKING_MODE;
 
     this.workDir = resolveAgentWorkDir({
       chatRoomId,
@@ -731,20 +777,30 @@ export class CodexSdkExecutor implements IAgentExecutor {
 
     const modelInfo = this.llmProvider
       ? `
-## 当前模型
-你正在使用 ${this.llmProvider.name} 提供的模型服务。
-- 模型名称：${this.llmProvider.model}
-- 供应商类型：${this.llmProvider.type}`
+## Current Model
+You are using the model service provided by ${this.llmProvider.name}.
+- Model name: ${this.llmProvider.model}
+- Provider type: ${this.llmProvider.type}`
+      : '';
+    const chatRoomRulesSection = chatRoomRules?.trim()
+      ? `
+## Group Rules
+The following rules come from the current chatroom and apply to all assistants in this chatroom. You must follow them in replies and collaboration in this chatroom:
+${chatRoomRules.trim()}`
       : '';
 
     this.systemPrompt = `${modelInfo}
 ${systemPrompt}
+${chatRoomRulesSection}
 
 ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
 
-## 工作目录
-你的工作目录是：${this.workDir}
-执行文件操作和命令时，默认在此目录下操作。使用相对路径时，基于此目录解析。`;
+## Working Directory
+Your working directory is: ${this.workDir}
+When you perform file operations or run commands, operate in this directory by default. Resolve relative paths from this directory.
+
+## Background Commands
+For long-running services or commands that should keep running after this turn, such as \`pnpm dev\`, \`npm run dev\`, \`vite\`, \`next dev\`, watch modes, servers, listeners, and \`tail -f\`, use the MCP tool \`start_background_command\` instead of running the command directly in the shell. Use \`read_background_command_output\` to inspect logs, \`list_background_commands\` to find existing tasks, and \`stop_background_command\` when the user asks to stop one. Do not block the turn waiting for a dev server to exit.`;
 
     this.ensureWorkDirectory();
     this.threadId = this.loadThreadId();
@@ -843,10 +899,16 @@ ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
     const serverPath = this.getTeamAgentXMcpServerPath();
     const script = `#!/usr/bin/env node
 const generateImageEndpoint = process.env.TEAMAGENTX_GENERATE_IMAGE_ENDPOINT;
+const systemToolsListEndpoint = process.env.TEAMAGENTX_SYSTEM_TOOLS_LIST_ENDPOINT;
+const systemToolsCallEndpoint = process.env.TEAMAGENTX_SYSTEM_TOOLS_CALL_ENDPOINT;
+const backgroundCommandStartEndpoint = process.env.TEAMAGENTX_BACKGROUND_COMMAND_START_ENDPOINT;
+const backgroundCommandReadEndpoint = process.env.TEAMAGENTX_BACKGROUND_COMMAND_READ_ENDPOINT;
+const backgroundCommandStopEndpoint = process.env.TEAMAGENTX_BACKGROUND_COMMAND_STOP_ENDPOINT;
+const backgroundCommandListEndpoint = process.env.TEAMAGENTX_BACKGROUND_COMMAND_LIST_ENDPOINT;
 const token = process.env.TEAMAGENTX_INTERNAL_TOOL_TOKEN;
-const chatRoomId = process.env.TEAMAGENTX_CHAT_ROOM_ID;
 const sourceAgentId = process.env.TEAMAGENTX_SOURCE_AGENT_ID;
-const chatRoomAgents = JSON.parse(process.env.TEAMAGENTX_CHAT_ROOM_AGENTS || "[]");
+const chatRoomId = process.env.TEAMAGENTX_CHAT_ROOM_ID;
+const workDir = process.env.TEAMAGENTX_WORK_DIR;
 
 function write(message) {
   process.stdout.write(JSON.stringify(message) + "\\n");
@@ -860,76 +922,27 @@ function toolResult(text, structuredContent, isError = false) {
   };
 }
 
-async function callSendMessage(args) {
-  if (!chatRoomId || !sourceAgentId) {
-    return toolResult("TeamAgentX 工具环境不完整，无法生成消息草稿。", {}, true);
+function stringifyPayload(value) {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
   }
-
-  const content = typeof args?.content === "string" ? args.content.trim() : "";
-
-  function normalizeStringArray(value) {
-    if (Array.isArray(value)) {
-      return value.filter((item) => typeof item === "string").map((item) => item.trim()).filter(Boolean);
-    }
-    if (typeof value === "string" && value.trim()) {
-      return [value.trim()];
-    }
-    return [];
-  }
-
-  const targetAgentIds = [
-    ...normalizeStringArray(args?.targetAgentIds),
-    ...normalizeStringArray(args?.targetAgentId),
-  ];
-  const targetAgentNames = [
-    ...normalizeStringArray(args?.targetAgentNames),
-    ...normalizeStringArray(args?.targetAgentName),
-  ];
-  const targets = [];
-  const seen = new Set();
-
-  for (const targetAgentId of targetAgentIds) {
-    const targetAgent = chatRoomAgents.find((agent) => agent.agentId === targetAgentId);
-    if (!targetAgent?.name || seen.has(targetAgent.name)) continue;
-    seen.add(targetAgent.name);
-    targets.push({ agentId: targetAgent.agentId, agentName: targetAgent.name });
-  }
-
-  for (const targetAgentName of targetAgentNames) {
-    const targetAgent = chatRoomAgents.find((agent) => agent.name === targetAgentName);
-    const resolvedName = targetAgent?.name || targetAgentName;
-    if (seen.has(resolvedName)) continue;
-    seen.add(resolvedName);
-    targets.push({ agentId: targetAgent?.agentId, agentName: resolvedName });
-  }
-
-  if (!content || targets.length === 0) {
-    return toolResult("参数错误：必须提供 content，以及至少一个可解析的 targetAgentId/targetAgentName 或 targetAgentIds/targetAgentNames。", {}, true);
-  }
-
-  const mentionPrefix = targets.map((agent) => "@" + agent.agentName).join(" ");
-  const draftContent = mentionPrefix + " " + content;
-  return toolResult("最终回复请只输出下面这段消息，不要添加其他内容：\\n" + draftContent, {
-    targetAgentIds: targets.map((agent) => agent.agentId).filter(Boolean),
-    targetAgentNames: targets.map((agent) => agent.agentName),
-    targetAgents: targets,
-    content,
-    draftContent,
-  }, false);
 }
 
 async function callGenerateImage(args) {
   if (!generateImageEndpoint || !token || !sourceAgentId) {
-    return toolResult("当前助手未开启图片生成能力。", {}, true);
+    return toolResult("The current assistant does not have image generation enabled.", {}, true);
   }
 
   const prompt = typeof args?.prompt === "string" ? args.prompt.trim() : "";
   const n = Number.isInteger(args?.n) ? args.n : undefined;
   if (!prompt) {
-    return toolResult("参数错误：必须提供 prompt。", {}, true);
+    return toolResult("Parameter error: prompt is required.", {}, true);
   }
   if (n !== undefined && (n < 1 || n > 4)) {
-    return toolResult("参数错误：n 必须在 1 到 4 之间。", {}, true);
+    return toolResult("Parameter error: n must be between 1 and 4.", {}, true);
   }
 
   try {
@@ -950,14 +963,89 @@ async function callGenerateImage(args) {
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || payload.success === false) {
-      return toolResult(payload.error || "图片生成失败。", payload, true);
+      return toolResult(payload.error || "Image generation failed.", payload, true);
     }
     const result = payload.data || payload;
     const urls = Array.isArray(result.urls) ? result.urls : [];
     const files = Array.isArray(result.files) ? result.files : [];
-    return toolResult("图片生成成功：" + (urls.join(", ") || files.join(", ")), result, false);
+    return toolResult("Image generation succeeded: " + (urls.join(", ") || files.join(", ")), result, false);
   } catch (error) {
-    return toolResult(error instanceof Error ? error.message : "图片生成失败。", {}, true);
+    return toolResult(error instanceof Error ? error.message : "Image generation failed.", {}, true);
+  }
+}
+
+async function listSystemTools() {
+  if (!systemToolsListEndpoint || !token || !sourceAgentId || !chatRoomId) return [];
+
+  try {
+    const response = await fetch(systemToolsListEndpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer " + token,
+      },
+      body: JSON.stringify({ sourceAgentId, chatRoomId }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.success === false) return [];
+    return Array.isArray(payload.data?.tools) ? payload.data.tools : [];
+  } catch {
+    return [];
+  }
+}
+
+async function callSystemTool(name, args) {
+  if (!systemToolsCallEndpoint || !token || !sourceAgentId || !chatRoomId) {
+    return toolResult("The current assistant has no available system tools.", {}, true);
+  }
+
+  try {
+    const response = await fetch(systemToolsCallEndpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer " + token,
+      },
+      body: JSON.stringify({ sourceAgentId, chatRoomId, name, args }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.success === false) {
+      return toolResult(payload.error || "Tool execution failed.", payload, true);
+    }
+    const result = payload.data ?? payload;
+    return toolResult(stringifyPayload(result), result, false);
+  } catch (error) {
+    return toolResult(error instanceof Error ? error.message : "Tool execution failed.", {}, true);
+  }
+}
+
+async function callBackgroundCommand(endpoint, args) {
+  if (!endpoint || !token || !sourceAgentId || !chatRoomId) {
+    return toolResult("Background command tools are not available.", {}, true);
+  }
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer " + token,
+      },
+      body: JSON.stringify({
+        sourceAgentId,
+        chatRoomId,
+        workDir,
+        ...args,
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.success === false) {
+      return toolResult(payload.error || "Background command operation failed.", payload, true);
+    }
+    const result = payload.data ?? payload;
+    return toolResult(stringifyPayload(result), result, false);
+  } catch (error) {
+    return toolResult(error instanceof Error ? error.message : "Background command operation failed.", {}, true);
   }
 }
 
@@ -983,38 +1071,80 @@ async function handle(request) {
   }
 
   if (method === "tools/list") {
-    const tools = [{
-      name: "send_message",
-      description: "生成一段要放入最终回复的 TeamAgentX 助手消息草稿。消息内容可以是用户要求转达的任意内容，不一定是协作请求。工具支持一个或多个目标助手；不会直接发送消息，也不会直接触发任务。你必须把返回的 @目标助手 消息内容放入最终回复，最终回复落入群聊后才会在自动模式下触发目标助手。如果用户只是要求你给某个或多个助手发消息，最终回复只输出这条 @助手消息，不要添加解释、寒暄、总结，也不要擅自扩写成协作邀请。",
-      inputSchema: {
-        type: "object",
-        properties: {
-          targetAgentId: { type: "string", description: "目标助手 ID。已知 ID 时优先使用。" },
-          targetAgentName: { type: "string", description: "目标助手名称。未提供 ID 时使用。" },
-          targetAgentIds: { type: "array", items: { type: "string" }, description: "多个目标助手 ID。已知 ID 时优先使用。" },
-          targetAgentNames: { type: "array", items: { type: "string" }, description: "多个目标助手名称。未提供 ID 时使用。" },
-          content: { type: "string", description: "给目标助手的消息内容，不要包含 @目标助手名前缀。多个目标会自动生成 @助手1 @助手2 前缀。" },
-        },
-        required: ["content"],
-        additionalProperties: false,
-      },
-    }];
+    const tools = [];
     if (generateImageEndpoint) {
       tools.push({
         name: "generate_image",
-        description: "通过 TeamAgentX 服务端受控图片模型生成图片。API Key 只在服务端使用。",
+        description: "Generate images through the TeamAgentX server-controlled image model. API keys are used only on the server.",
         inputSchema: {
           type: "object",
           properties: {
-            prompt: { type: "string", description: "详细图片提示词。应包含主体、风格、构图、色彩、用途等。" },
-            size: { type: "string", description: "图片尺寸或比例，例如 1024x1024、1024x1792、1:1。" },
-            n: { type: "number", description: "生成图片数量，默认 1，最多 4。" },
-            filename: { type: "string", description: "可选文件名，不要包含路径。" },
-            extraJson: { type: "object", description: "供应商特定额外参数。" },
+            prompt: { type: "string", description: "Detailed image prompt. Include subject, style, composition, colors, intended use, and other relevant details." },
+            size: { type: "string", description: "Image size or aspect ratio, for example 1024x1024, 1024x1792, or 1:1." },
+            n: { type: "number", description: "Number of images to generate. Default 1, maximum 4." },
+            filename: { type: "string", description: "Optional filename. Do not include a path." },
+            extraJson: { type: "object", description: "Provider-specific extra parameters." },
           },
           required: ["prompt"],
           additionalProperties: false,
         },
+      });
+    }
+    if (backgroundCommandStartEndpoint) {
+      tools.push({
+        name: "start_background_command",
+        description: "Start a long-running shell command in the TeamAgentX background task manager. Use this for dev servers, watch commands, tail -f, and services that should keep running after this turn.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            command: { type: "string", description: "Shell command to run in the current working directory." },
+          },
+          required: ["command"],
+          additionalProperties: false,
+        },
+      });
+      tools.push({
+        name: "read_background_command_output",
+        description: "Read the latest stdout and stderr from a background command started with start_background_command.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            taskId: { type: "string", description: "Background task ID returned by start_background_command." },
+            tailBytes: { type: "number", description: "Maximum bytes to read from the end of each output stream. Default 12288." },
+          },
+          required: ["taskId"],
+          additionalProperties: false,
+        },
+      });
+      tools.push({
+        name: "stop_background_command",
+        description: "Stop a running background command by task ID.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            taskId: { type: "string", description: "Background task ID returned by start_background_command." },
+          },
+          required: ["taskId"],
+          additionalProperties: false,
+        },
+      });
+      tools.push({
+        name: "list_background_commands",
+        description: "List recent background commands started by this assistant in this chatroom.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+          additionalProperties: false,
+        },
+      });
+    }
+    const systemTools = await listSystemTools();
+    for (const systemTool of systemTools) {
+      if (!systemTool?.name || tools.some((tool) => tool.name === systemTool.name)) continue;
+      tools.push({
+        name: systemTool.name,
+        description: systemTool.description || systemTool.name,
+        inputSchema: systemTool.inputSchema || { type: "object", additionalProperties: true },
       });
     }
     write({
@@ -1030,21 +1160,33 @@ async function handle(request) {
   if (method === "tools/call") {
     const name = params?.name;
     const args = params?.arguments || {};
-    if (name === "send_message") {
-      const result = await callSendMessage(args);
-      write({ jsonrpc: "2.0", id, result });
-      return;
-    }
     if (name === "generate_image") {
       const result = await callGenerateImage(args);
       write({ jsonrpc: "2.0", id, result });
       return;
     }
-    write({
-      jsonrpc: "2.0",
-      id,
-      result: toolResult("未知工具：" + name, {}, true),
-    });
+    if (name === "start_background_command") {
+      const result = await callBackgroundCommand(backgroundCommandStartEndpoint, args);
+      write({ jsonrpc: "2.0", id, result });
+      return;
+    }
+    if (name === "read_background_command_output") {
+      const result = await callBackgroundCommand(backgroundCommandReadEndpoint, args);
+      write({ jsonrpc: "2.0", id, result });
+      return;
+    }
+    if (name === "stop_background_command") {
+      const result = await callBackgroundCommand(backgroundCommandStopEndpoint, args);
+      write({ jsonrpc: "2.0", id, result });
+      return;
+    }
+    if (name === "list_background_commands") {
+      const result = await callBackgroundCommand(backgroundCommandListEndpoint, args);
+      write({ jsonrpc: "2.0", id, result });
+      return;
+    }
+    const result = await callSystemTool(name, args);
+    write({ jsonrpc: "2.0", id, result });
     return;
   }
 
@@ -1150,6 +1292,90 @@ process.stdin.on("data", (chunk) => {
     }
   }
 
+  private resetThreadState(reason: string, details: Record<string, unknown> = {}): void {
+    this.currentAbortController?.abort();
+    this.currentAbortController = null;
+    this.thread = null;
+    this.threadId = null;
+    this.lastInjectedSkillsSignature = undefined;
+    this.saveThreadId();
+    debugLog('codexSdkThreadReset', {
+      agentName: this.name,
+      agentId: this.agentId,
+      chatRoomId: this.chatRoomId,
+      reason,
+      ...details,
+    });
+  }
+
+  private findThreadSessionPath(threadId: string): string | undefined {
+    const sessionsDir = path.join(this.getCodexHome(), 'sessions');
+    if (!fs.existsSync(sessionsDir)) return undefined;
+
+    const stack = [sessionsDir];
+    while (stack.length > 0) {
+      const dir = stack.pop()!;
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          stack.push(fullPath);
+          continue;
+        }
+        if (entry.isFile() && entry.name.includes(threadId) && entry.name.endsWith('.jsonl')) {
+          return fullPath;
+        }
+      }
+    }
+
+    return undefined;
+  }
+
+  private getThreadSessionStats(threadId: string): { path?: string; bytes: number; turns: number } {
+    const sessionPath = this.findThreadSessionPath(threadId);
+    if (!sessionPath) return { bytes: 0, turns: 0 };
+
+    try {
+      const text = fs.readFileSync(sessionPath, 'utf-8');
+      const turns = (text.match(/"type":"turn_context"/g) || []).length;
+      return {
+        path: sessionPath,
+        bytes: Buffer.byteLength(text),
+        turns,
+      };
+    } catch {
+      return { path: sessionPath, bytes: 0, turns: 0 };
+    }
+  }
+
+  private resetOvergrownThreadIfNeeded(): void {
+    if (!this.threadId) return;
+
+    const maxTurns = getPositiveIntegerEnv('CODEX_SDK_MAX_THREAD_TURNS', DEFAULT_CODEX_SDK_MAX_THREAD_TURNS);
+    const maxBytes = getPositiveIntegerEnv('CODEX_SDK_MAX_SESSION_BYTES', DEFAULT_CODEX_SDK_MAX_SESSION_BYTES);
+    if (maxTurns === 0 && maxBytes === 0) return;
+
+    const stats = this.getThreadSessionStats(this.threadId);
+    const exceedsTurns = maxTurns > 0 && stats.turns >= maxTurns;
+    const exceedsBytes = maxBytes > 0 && stats.bytes >= maxBytes;
+    if (!exceedsTurns && !exceedsBytes) return;
+
+    this.resetThreadState('sessionLimitExceeded', {
+      previousThreadId: this.threadId,
+      sessionPath: stats.path,
+      sessionTurns: stats.turns,
+      sessionBytes: stats.bytes,
+      maxTurns,
+      maxBytes,
+    });
+  }
+
   private buildEnv(): Record<string, string> {
     if (!this.llmProvider) {
       const authStatus = getDefaultCodexAuthStatus();
@@ -1195,7 +1421,7 @@ process.stdin.on("data", (chunk) => {
     let fullMessage = '';
 
     if (this.systemPrompt) {
-      fullMessage += `【系统指令】\n${this.systemPrompt}\n\n`;
+      fullMessage += `[System Instructions]\n${this.systemPrompt}\n\n`;
     }
 
     const longTermMemorySection = buildAgentLongTermMemorySection(this.chatRoomId, this.agentId, this.name);
@@ -1213,7 +1439,7 @@ process.stdin.on("data", (chunk) => {
       const recentHistory = history.filter((msg) => msg.kind !== 'memory_summary');
 
       if (memorySummary) {
-        fullMessage += `【群聊长期记忆摘要】
+        fullMessage += `[Group Chat Long-Term Memory Summary]
 ${memorySummary}
 
 `;
@@ -1224,7 +1450,8 @@ ${memorySummary}
           .map((msg) => `[${msg.senderName}]: ${msg.content}`)
           .join('\n');
 
-        fullMessage += `【最近群聊消息】以下是当前消息之前最近的群聊消息（共 ${recentHistory.length} 条）：
+        fullMessage += `[Recent Group Chat Messages]
+The following are the most recent group-chat messages before the current message (${recentHistory.length} total):
 ${historyText}
 
 `;
@@ -1232,24 +1459,24 @@ ${historyText}
     }
 
     if (this.chatRoomAgents.length > 0) {
-      const agentsInfo = this.chatRoomAgents.map((agent) => agent.name).join('、');
+      const agentsInfo = this.chatRoomAgents.map((agent) => agent.name).join(', ');
       const otherAgents = this.chatRoomAgents.filter((agent) => agent.name !== this.name);
-      const otherAgentsList = otherAgents.map((agent) => agent.name).join('、');
-      const othersInfo = otherAgents.length > 0 ? otherAgentsList : '无';
+      const otherAgentsList = otherAgents.map((agent) => agent.name).join(', ');
+      const othersInfo = otherAgents.length > 0 ? otherAgentsList : 'none';
       const mentionTip = otherAgents.length > 0
-        ? '\n【提示】\n需要给其他助手发任意消息时，调用 tax.send_message 工具生成消息草稿，并把工具返回的 @助手消息放入你的最终回复。工具本身不会直接发送消息；最终回复中的 @助手消息会在自动模式下触发目标助手。如果用户只是要求你给某个助手发消息，最终回复只输出这条 @助手消息，不要添加解释、寒暄、总结，也不要擅自扩写成协作邀请。'
+        ? '\n[Tip]\nWhen you need to message another assistant, write "@assistant_name message content" directly in your final reply. You may also mention an assistant in body text when the @ is preceded by a space. A target assistant is triggered only when @ is at the start of a line or the previous character is a space; @ immediately after punctuation will not trigger. A single message may mention at most one assistant. If the user only asks you to send a message to another assistant, output only that @assistant message in the final reply, with no explanation, pleasantries, summary, or expanded collaboration invitation.'
         : '';
 
-      fullMessage += `【群聊成员信息】
-群聊工作目录：${this.workDir}
-当前群聊中的助手有：${agentsInfo}
-你是：${this.name}
-其他助手：${othersInfo}${mentionTip}
+      fullMessage += `[Group Chat Member Info]
+Chatroom working directory: ${this.workDir}
+Assistants in the current chatroom: ${agentsInfo}
+You are: ${this.name}
+Other assistants: ${othersInfo}${mentionTip}
 
 `;
     }
 
-    fullMessage += `【当前消息】\n${message}`;
+    fullMessage += `[Current Message]\n${message}`;
     return fullMessage;
   }
 
@@ -1263,7 +1490,7 @@ ${historyText}
     if (this.threadId) {
       this.saveThreadId();
     }
-    return `【技能清单更新】
+    return `[Installed Skills Update]
 ${buildInstalledSkillsInstructions(this.agentId)}`;
   }
 
@@ -1279,6 +1506,12 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     const generateImageEndpoint = this.imageGenerationProvider
       ? `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/generate-image`
       : undefined;
+    const systemToolsListEndpoint = `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/system-tools/list`;
+    const systemToolsCallEndpoint = `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/system-tools/call`;
+    const backgroundCommandStartEndpoint = `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/background-command/start`;
+    const backgroundCommandReadEndpoint = `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/background-command/read`;
+    const backgroundCommandStopEndpoint = `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/background-command/stop`;
+    const backgroundCommandListEndpoint = `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/background-command/list`;
     const builtinMcpServers = buildBuiltinCodexMcpServerConfigs({
       workDir: this.workDir,
       teamAgentXMcpServerPath: mcpServerPath,
@@ -1287,10 +1520,17 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       agentName: this.name,
       chatRoomAgents: this.chatRoomAgents,
       generateImageEndpoint,
+      systemToolsListEndpoint,
+      systemToolsCallEndpoint,
+      backgroundCommandStartEndpoint,
+      backgroundCommandReadEndpoint,
+      backgroundCommandStopEndpoint,
+      backgroundCommandListEndpoint,
     });
     const config = {
-      hide_agent_reasoning: false,
-      show_raw_agent_reasoning: false,
+      hide_agent_reasoning: this.thinkingMode === 'off',
+      show_raw_agent_reasoning: this.thinkingMode !== 'off',
+      model_reasoning_effort: getCodexReasoningEffort(this.thinkingMode),
       model_reasoning_summary: 'concise',
       skills: {
         include_instructions: false,
@@ -1309,6 +1549,8 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
   }
 
   private getThread(): TeamAgentXCodexThread {
+    if (this.thread) return this.thread;
+
     const runner = this.getCodexRunner();
     const options = {
       model: this.llmProvider?.model || this.codexModel || undefined,
@@ -1319,7 +1561,6 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       networkAccessEnabled: true,
     };
 
-    if (this.thread) return this.thread;
     this.thread = this.threadId
       ? new TeamAgentXCodexThread(runner, this.llmProvider?.apiKey, options, this.threadId)
       : new TeamAgentXCodexThread(runner, this.llmProvider?.apiKey, options);
@@ -1509,6 +1750,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     this.thread = null;
     this.threadId = null;
     this._lastInjectedMessageId = undefined;
+    this.lastInjectedSkillsSignature = undefined;
     if (this.agentId) {
       await agentMemoryService.clear(this.chatRoomId, this.agentId);
     }
@@ -1552,6 +1794,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       return { actions: [{ type: 'message', content: unsupportedMessage }] };
     }
 
+    this.resetOvergrownThreadIfNeeded();
     this.lastContext = this.buildFullMessage(message, history);
     const abortController = new AbortController();
     this.currentAbortController = abortController;
@@ -1559,11 +1802,23 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     signal?.addEventListener('abort', abort, { once: true });
     let tokenUsage: TokenUsage | undefined;
     const { input, cleanup } = this.writeAttachments(attachments);
+    const execStartTime = Date.now();
+    let firstEventLogged = false;
+    let firstVisibleOutputLogged = false;
 
     try {
       if (signal?.aborted) {
         throw new DOMException('执行已被用户中断', 'AbortError');
       }
+
+      debugLog('codexSdkExecStart', {
+        agentName: this.name,
+        agentId: this.agentId,
+        chatRoomId: this.chatRoomId,
+        messageId: originalMessageId,
+        threadId: this.threadId,
+        contextLength: this.lastContext.length,
+      });
 
       const thread = this.getThread();
       const { events } = await thread.runStreamed(input, { signal: abortController.signal });
@@ -1572,8 +1827,33 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
         if (signal?.aborted) {
           throw new DOMException('执行已被用户中断', 'AbortError');
         }
+        if (!firstEventLogged) {
+          firstEventLogged = true;
+          debugLog('codexSdkFirstEvent', {
+            agentName: this.name,
+            agentId: this.agentId,
+            chatRoomId: this.chatRoomId,
+            messageId: originalMessageId,
+            eventType: event.type,
+            elapsedMs: Date.now() - execStartTime,
+          });
+        }
         const usage = this.handleEvent(event);
         if (usage) tokenUsage = usage;
+        if (!firstVisibleOutputLogged && (this.content || this.thinking || this.toolCalls.length > 0)) {
+          firstVisibleOutputLogged = true;
+          debugLog('codexSdkFirstVisibleOutput', {
+            agentName: this.name,
+            agentId: this.agentId,
+            chatRoomId: this.chatRoomId,
+            messageId: originalMessageId,
+            eventType: event.type,
+            elapsedMs: Date.now() - execStartTime,
+            hasContent: !!this.content,
+            hasThinking: !!this.thinking,
+            toolCallCount: this.toolCalls.length,
+          });
+        }
       }
 
       if (thread.id && thread.id !== this.threadId) {

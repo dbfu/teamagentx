@@ -11,6 +11,7 @@ import {promptOptimizeService} from '../modules/prompt-optimize/prompt-optimize.
 import {spawnAcpToolInstall} from '../core/agent/acp-tool-install.service.js';
 import { deserializeAgentSpeechConfig } from '../modules/speech/speech-config.js';
 import { installDefaultSkillsForNewAgent } from '../modules/skill/preinstalled-skills.js';
+import type { AgentThinkingMode } from '../core/agent/thinking-mode.js';
 
 // 所有支持的 LLM 供应商类型（与 Prisma 保持一致）
 const LLM_PROVIDER_TYPES = [
@@ -38,6 +39,7 @@ function isAgentValidationError(error: unknown): error is Error {
     '图片模型供应商不存在',
     '代理配置',
     '代理地址',
+    '思考模式',
   ].some((prefix) => error.message.startsWith(prefix));
 }
 
@@ -73,6 +75,7 @@ const agentResponseSchema = {
     proxyConfig: { type: 'string', nullable: true },
     codexModel: { type: 'string', nullable: true },
     claudeModel: { type: 'string', nullable: true },
+    thinkingMode: { type: 'string', enum: ['off', 'low', 'medium', 'high'] },
     speechConfig: {
       type: 'object',
       nullable: true,
@@ -177,6 +180,7 @@ const createAgentBodySchema = {
     proxyConfig: { type: 'string', nullable: true, description: 'ACP 工具代理配置（支持代理地址或 export 片段）' },
     codexModel: { type: 'string', nullable: true, description: 'Codex 本地配置模式下指定的模型名称' },
     claudeModel: { type: 'string', nullable: true, description: 'Claude 本地配置模式下指定的模型名称' },
+    thinkingMode: { type: 'string', enum: ['off', 'low', 'medium', 'high'], description: '思考模式，默认 high' },
     speechConfig: {
       type: 'object',
       nullable: true,
@@ -240,6 +244,7 @@ const updateAgentBodySchema = {
     proxyConfig: { type: 'string', nullable: true },
     codexModel: { type: 'string', nullable: true },
     claudeModel: { type: 'string', nullable: true },
+    thinkingMode: { type: 'string', enum: ['off', 'low', 'medium', 'high'] },
     speechConfig: {
       type: 'object',
       nullable: true,
@@ -307,6 +312,7 @@ interface CreateAgentBody {
   proxyConfig?: string | null;
   codexModel?: string | null;
   claudeModel?: string | null;
+  thinkingMode?: AgentThinkingMode | null;
   speechConfig?: UpdateAgentInput['speechConfig'];
   categoryId?: string;
   llmProviderId?: string;
@@ -325,6 +331,7 @@ interface UpdateAgentBody {
   proxyConfig?: string | null;
   codexModel?: string | null;
   claudeModel?: string | null;
+  thinkingMode?: AgentThinkingMode | null;
   speechConfig?: UpdateAgentInput['speechConfig'];
   isActive?: boolean;
   categoryId?: string | null;
@@ -602,7 +609,7 @@ export async function agentGateway(app: FastifyInstance) {
       },
     },
     async (request, reply) => {
-      const {name, avatar, avatarColor, description, prompt, type, acpTool, workDir, proxyConfig, codexModel, claudeModel, speechConfig, categoryId, llmProviderId, imageGeneration} = request.body;
+      const {name, avatar, avatarColor, description, prompt, type, acpTool, workDir, proxyConfig, codexModel, claudeModel, thinkingMode, speechConfig, categoryId, llmProviderId, imageGeneration} = request.body;
 
       try {
         const agent = await agentService.create({
@@ -617,6 +624,7 @@ export async function agentGateway(app: FastifyInstance) {
           proxyConfig,
           codexModel,
           claudeModel,
+          thinkingMode,
           speechConfig,
           categoryId,
           llmProviderId,

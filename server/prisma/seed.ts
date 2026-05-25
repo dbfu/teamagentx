@@ -6,13 +6,8 @@
  */
 import prisma from '../src/lib/prisma.js';
 import { llmProviderService } from '../src/modules/llm-provider/llm-provider.service.js';
-import {
-  getAgentCreatorDefinition,
-  getChatroomHelperDefinition,
-  getCronTaskHelperDefinition,
-  getSkillsHelperDefinition,
-} from '../src/scripts/system-agent-definitions.js';
-import { syncSystemAgents } from '../src/scripts/system-agent-sync.js';
+import { getGroupAssistantDefinition, getGroupCoordinatorDefinition } from '../src/scripts/system-agent-definitions.js';
+import { cleanupLegacySystemAgents, syncSystemAgents } from '../src/scripts/system-agent-sync.js';
 
 async function seed() {
   console.log('开始系统助手种子数据同步...');
@@ -20,11 +15,10 @@ async function seed() {
   try {
     const defaultProvider = await llmProviderService.findDefault();
     await syncSystemAgents([
-      getAgentCreatorDefinition(defaultProvider?.id),
-      getSkillsHelperDefinition(defaultProvider?.id),
-      getCronTaskHelperDefinition(defaultProvider?.id),
-      getChatroomHelperDefinition(defaultProvider?.id),
+      getGroupAssistantDefinition(defaultProvider?.id),
+      getGroupCoordinatorDefinition(defaultProvider?.id),
     ]);
+    await cleanupLegacySystemAgents();
     console.log('\n系统助手种子数据同步完成！');
   } catch (error) {
     console.error('系统助手种子数据同步失败:', error);

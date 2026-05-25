@@ -266,7 +266,7 @@ export function getImageProviderProfile(
   model: string | null | undefined,
 ): ImageProviderProfile {
   const provider = normalizeProviderType(providerType);
-  const modelText = model || '(未配置模型)';
+  const modelText = model || '(model not configured)';
 
   switch (provider) {
     case 'openai':
@@ -274,18 +274,18 @@ export function getImageProviderProfile(
         provider,
         displayName: 'OpenAI Images API',
         docs: ['https://developers.openai.com/api/docs/guides/image-generation'],
-        summary: `当前模型 ${modelText} 走 /images/generations，常用字段是 size、quality、background、output_format。`,
+        summary: `Current model ${modelText} uses /images/generations. Common fields are size, quality, background, and output_format.`,
         sizeGuidance: [
-          '优先使用 OpenAI 官方支持的像素尺寸，例如 1024x1024、1024x1536、1536x1024。',
-          '如果用户只说“横版/竖版/方图”，先推断成合适的像素尺寸再调用。',
+          'Prefer officially supported OpenAI pixel sizes, such as 1024x1024, 1024x1536, and 1536x1024.',
+          'If the user only says landscape, portrait, or square, infer an appropriate pixel size before calling the tool.',
         ],
         extraFieldGuidance: [
-          '可通过 extraJson 传 quality、background、output_format、output_compression。',
-          'gpt-image-2 支持 auto/low/medium/high 质量和较灵活的像素尺寸。',
+          'Use extraJson for quality, background, output_format, and output_compression.',
+          'gpt-image-2 supports auto/low/medium/high quality and relatively flexible pixel sizes.',
         ],
         examples: [
-          '横版 banner: size=1536x1024',
-          '竖版海报: size=1024x1536, extraJson={"quality":"high"}',
+          'Landscape banner: size=1536x1024',
+          'Portrait poster: size=1024x1536, extraJson={"quality":"high"}',
         ],
       };
     case 'openrouter':
@@ -296,18 +296,18 @@ export function getImageProviderProfile(
           'https://openrouter.ai/docs/guides/overview/multimodal/image-generation',
           'https://openrouter.ai/docs/guides/overview/models',
         ],
-        summary: `当前模型 ${modelText} 通过 /chat/completions 生成图片。先确认模型 output modalities 包含 image，再根据模型能力选择 modalities。`,
+        summary: `Current model ${modelText} generates images through /chat/completions. First confirm the model output modalities include image, then choose modalities based on model capability.`,
         sizeGuidance: [
-          '优先把语义尺寸转成 image_config.aspect_ratio，例如 1:1、9:16、16:9、21:9。',
-          '需要更高分辨率时，再在 extraJson.image_config.image_size 里补 1K/2K/4K。',
+          'Prefer translating semantic sizes into image_config.aspect_ratio, such as 1:1, 9:16, 16:9, or 21:9.',
+          'For higher resolution, add 1K/2K/4K in extraJson.image_config.image_size when supported.',
         ],
         extraFieldGuidance: [
-          'Gemini 类模型通常用 modalities=["image","text"]；Flux/Sourceful/Recraft 常见为 ["image"]。',
-          '可通过 extraJson.image_config 传 aspect_ratio、image_size，部分模型还支持 style、strength 等字段。',
+          'Gemini-like models usually use modalities=["image","text"]; Flux/Sourceful/Recraft commonly use ["image"].',
+          'Use extraJson.image_config for aspect_ratio and image_size. Some models also support fields such as style and strength.',
         ],
         examples: [
-          '竖版封面: extraJson={"image_config":{"aspect_ratio":"9:16","image_size":"2K"}}',
-          '超宽横幅: extraJson={"image_config":{"aspect_ratio":"21:9"}}',
+          'Portrait cover: extraJson={"image_config":{"aspect_ratio":"9:16","image_size":"2K"}}',
+          'Ultra-wide banner: extraJson={"image_config":{"aspect_ratio":"21:9"}}',
         ],
       };
     case 'gemini':
@@ -318,18 +318,18 @@ export function getImageProviderProfile(
           'https://ai.google.dev/gemini-api/docs/image-generation',
           'https://ai.google.dev/gemini-api/docs/imagen',
         ],
-        summary: `当前模型 ${modelText} 更适合用 aspectRatio 和 imageSize 这类语义字段表达尺寸，而不是死记像素。`,
+        summary: `Current model ${modelText} is better controlled with semantic fields such as aspectRatio and imageSize instead of fixed pixel sizes.`,
         sizeGuidance: [
-          '优先使用 1:1、3:4、4:3、9:16、16:9 这些比例。',
-          '高分辨率需求可配合 imageSize=1K/2K；并非所有模型都支持任意像素尺寸。',
+          'Prefer ratios such as 1:1, 3:4, 4:3, 9:16, and 16:9.',
+          'For high-resolution requests, combine with imageSize=1K/2K when supported. Not every model supports arbitrary pixel sizes.',
         ],
         extraFieldGuidance: [
-          '可通过 extraJson 传 aspectRatio / aspect_ratio、imageSize / image_size、personGeneration。',
-          '如果用户只描述“竖版海报”“横版封面”，先推断比例，再决定是否补 imageSize。',
+          'Use extraJson for aspectRatio / aspect_ratio, imageSize / image_size, and personGeneration.',
+          'If the user only describes a portrait poster or landscape cover, infer the aspect ratio first, then decide whether to add imageSize.',
         ],
         examples: [
-          '竖版宣传图: size=9:16, extraJson={"imageSize":"2K"}',
-          '方图草稿: size=1:1, extraJson={"imageSize":"1K"}',
+          'Portrait promo image: size=9:16, extraJson={"imageSize":"2K"}',
+          'Square draft: size=1:1, extraJson={"imageSize":"1K"}',
         ],
       };
     case 'zhipu':
@@ -338,20 +338,20 @@ export function getImageProviderProfile(
         displayName: 'Zhipu GLM Image API',
         docs: [
           'https://docs.bigmodel.cn/cn/guide/models/image-generation/glm-image',
-          'https://docs.bigmodel.cn/api-reference/模型-api/图像生成异步',
+          'https://docs.bigmodel.cn/api-reference/%E6%A8%A1%E5%9E%8B-api/%E5%9B%BE%E5%83%8F%E7%94%9F%E6%88%90%E5%BC%82%E6%AD%A5',
         ],
-        summary: `当前模型 ${modelText} 可通过智谱图片生成接口直接生成图片，推荐传像素尺寸，适合海报、PPT、科普图等文字密集场景。`,
+        summary: `Current model ${modelText} can generate images through the Zhipu image generation API. Pixel sizes are recommended, especially for posters, slides, science explainers, and other text-heavy scenes.`,
         sizeGuidance: [
-          '优先使用推荐像素尺寸，如 1280x1280、1568x1056、1056x1568、1728x960、960x1728。',
-          '如果用户只说“横版/竖版/方图”，先映射到智谱推荐像素尺寸，再调用。',
+          'Prefer recommended pixel sizes such as 1280x1280, 1568x1056, 1056x1568, 1728x960, and 960x1728.',
+          'If the user only says landscape, portrait, or square, map it to a recommended Zhipu pixel size before calling the tool.',
         ],
         extraFieldGuidance: [
-          'GLM-Image 以 size 像素字符串为主，长宽需在 512-2048 间且为 32 的整数倍。',
-          '若走异步接口，可复用 task_id + tasks 查询流程。',
+          'GLM-Image mainly uses size pixel strings. Width and height must be between 512 and 2048 and multiples of 32.',
+          'For async APIs, reuse the task_id + tasks polling flow.',
         ],
         examples: [
-          '横版海报: size=1728x960',
-          '竖版封面: size=960x1728',
+          'Landscape poster: size=1728x960',
+          'Portrait cover: size=960x1728',
         ],
       };
     case 'apimart':
@@ -362,18 +362,18 @@ export function getImageProviderProfile(
           'https://docs.apimart.ai/en/api-reference/images/gpt-image-2/official',
           'https://docs.apimart.ai/en/api-reference/images/gpt-image-1/generation',
         ],
-        summary: `当前模型 ${modelText} 通常走异步 /images/generations，size 常用比例字符串，resolution 单独控制 1k/2k/4k。`,
+        summary: `Current model ${modelText} usually uses async /images/generations. size commonly uses aspect-ratio strings, while resolution controls 1k/2k/4k separately.`,
         sizeGuidance: [
-          '优先使用比例 size，例如 1:1、16:9、9:16、2:3；部分模型也接受像素字符串。',
-          '当用户描述“海报/壁纸/高清 banner”时，通常要额外给 resolution=2k 或 4k。',
+          'Prefer aspect-ratio size values such as 1:1, 16:9, 9:16, and 2:3. Some models also accept pixel strings.',
+          'For poster, wallpaper, or HD banner requests, usually add resolution=2k or 4k.',
         ],
         extraFieldGuidance: [
-          '可通过 extraJson 传 resolution、quality、output_format、output_compression、image_urls、mask_url。',
-          'GPT-Image-2 Official 文档给了明确的 size × resolution 映射，可据此推断高清输出参数。',
+          'Use extraJson for resolution, quality, output_format, output_compression, image_urls, and mask_url.',
+          'GPT-Image-2 Official docs provide clear size x resolution mappings; use them to infer HD output parameters.',
         ],
         examples: [
-          '高清横版海报: size=16:9, extraJson={"resolution":"2k","quality":"high"}',
-          '4K 壁纸: size=16:9, extraJson={"resolution":"4k"}',
+          'HD landscape poster: size=16:9, extraJson={"resolution":"2k","quality":"high"}',
+          '4K wallpaper: size=16:9, extraJson={"resolution":"4k"}',
         ],
       };
     case 'bailian':
@@ -384,18 +384,18 @@ export function getImageProviderProfile(
           'https://help.aliyun.com/zh/model-studio/text-to-image-v2-api-reference',
           'https://help.aliyun.com/zh/model-studio/text-to-image-api-reference',
         ],
-        summary: `当前模型 ${modelText} 建议优先使用万相 wan2.6 的新版接口；同步与异步都走阿里百炼自定义消息体，不是标准 OpenAI Images body。`,
+        summary: `For current model ${modelText}, prefer the newer Wanxiang wan2.6 API. Both sync and async modes use Alibaba Bailian's custom request body, not the standard OpenAI Images body.`,
         sizeGuidance: [
-          'wan2.6 使用 宽*高 格式，例如 1280*1280、1696*960、960*1696。',
-          '如果用户只说“竖版海报”“横版 banner”，先映射为推荐的宽*高尺寸。',
+          'wan2.6 uses width*height format, such as 1280*1280, 1696*960, and 960*1696.',
+          'If the user only says portrait poster or landscape banner, map it to a recommended width*height size.',
         ],
         extraFieldGuidance: [
-          '可通过 extraJson 传 negative_prompt、prompt_extend、watermark、seed。',
-          '异步模式需要任务轮询；wan2.6 推荐使用 /image-generation/generation + X-DashScope-Async。',
+          'Use extraJson for negative_prompt, prompt_extend, watermark, and seed.',
+          'Async mode requires task polling. For wan2.6, prefer /image-generation/generation + X-DashScope-Async.',
         ],
         examples: [
-          '方图: size=1280*1280, extraJson={"watermark":false}',
-          '横版海报: size=1696*960, extraJson={"prompt_extend":true}',
+          'Square image: size=1280*1280, extraJson={"watermark":false}',
+          'Landscape poster: size=1696*960, extraJson={"prompt_extend":true}',
         ],
       };
     case 'xai':
@@ -406,18 +406,18 @@ export function getImageProviderProfile(
           'https://docs.x.ai/developers/model-capabilities/images/generation',
           'https://docs.x.ai/developers/models/grok-imagine-image',
         ],
-        summary: `当前模型 ${modelText} 走 /images/generations，支持 aspect_ratio、resolution、response_format，官方推荐使用 grok-imagine-image-quality。`,
+        summary: `Current model ${modelText} uses /images/generations and supports aspect_ratio, resolution, and response_format. Official docs recommend grok-imagine-image-quality.`,
         sizeGuidance: [
-          '优先把语义尺寸翻译成 aspect_ratio，例如 1:1、16:9、9:16、3:4、2:3。',
-          '高清需求可通过 extraJson.resolution 传 1k 或 2k。',
+          'Prefer translating semantic sizes into aspect_ratio, such as 1:1, 16:9, 9:16, 3:4, and 2:3.',
+          'For HD requests, pass 1k or 2k through extraJson.resolution.',
         ],
         extraFieldGuidance: [
-          '可通过 extraJson 传 aspect_ratio、resolution、response_format。',
-          'xAI 默认返回 URL；如果要内联 base64，可使用 response_format=b64_json。',
+          'Use extraJson for aspect_ratio, resolution, and response_format.',
+          'xAI returns URLs by default. Use response_format=b64_json for inline base64.',
         ],
         examples: [
-          '横版头图: extraJson={"aspect_ratio":"16:9"}',
-          '高清方图: extraJson={"aspect_ratio":"1:1","resolution":"2k"}',
+          'Landscape header: extraJson={"aspect_ratio":"16:9"}',
+          'HD square image: extraJson={"aspect_ratio":"1:1","resolution":"2k"}',
         ],
       };
     case 'volcengine':
@@ -428,18 +428,18 @@ export function getImageProviderProfile(
           'https://www.volcengine.com/docs/82379/1666945',
           'https://www.volcengine.com/docs/6492/2221472',
         ],
-        summary: `当前模型 ${modelText} 可通过火山方舟图片生成 API 或豆包图像能力接入。建议优先使用方舟的 API Key + endpoint 方式，并按具体模型文档传 size、response_format 等字段。`,
+        summary: `Current model ${modelText} can connect through Volcengine Ark image generation APIs or Doubao image capabilities. Prefer Ark API key + endpoint configuration, and pass fields such as size and response_format according to the specific model docs.`,
         sizeGuidance: [
-          '不同模型对 size 的要求不同，常见是像素尺寸或 2K 这类分辨率档位。',
-          '如果用户只给语义尺寸，先转成清晰的像素尺寸，再视模型支持情况补充分辨率字段。',
+          'Different models have different size requirements. Common values are pixel sizes or resolution tiers such as 2K.',
+          'If the user only gives a semantic size, translate it into a clear pixel size first, then add resolution fields when supported.',
         ],
         extraFieldGuidance: [
-          '常见字段包括 response_format、reference_images、optimize_prompt_options、watermark。',
-          '实际可用字段以所选 endpoint/model 文档为准，不要臆造。',
+          'Common fields include response_format, reference_images, optimize_prompt_options, and watermark.',
+          'Use only fields supported by the selected endpoint/model docs. Do not invent fields.',
         ],
         examples: [
-          '方图草稿: size=2048x2048',
-          '多参考创作: extraJson={"response_format":"url"}',
+          'Square draft: size=2048x2048',
+          'Multi-reference creation: extraJson={"response_format":"url"}',
         ],
       };
     default:
@@ -447,15 +447,15 @@ export function getImageProviderProfile(
         provider,
         displayName: 'Generic image provider',
         docs: [],
-        summary: `当前模型 ${modelText} 没有专门的供应商手册，优先使用 size、n 和最少量的 extraJson。`,
+        summary: `Current model ${modelText} has no provider-specific guide. Prefer size, n, and the smallest possible extraJson.`,
         sizeGuidance: [
-          '优先传明确的像素尺寸或比例字符串。',
+          'Prefer explicit pixel sizes or aspect-ratio strings.',
         ],
         extraFieldGuidance: [
-          '只有在你确定该供应商支持时，才传额外字段。',
+          'Pass extra fields only when you are sure this provider supports them.',
         ],
         examples: [
-          '方图: size=1024x1024',
+          'Square image: size=1024x1024',
         ],
       };
   }

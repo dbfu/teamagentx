@@ -1,0 +1,619 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TeamAgentX 使用说明：新手快速上手</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --paper: #ffffff;
+      --text: #172033;
+      --muted: #64748b;
+      --border: #dbe3ef;
+      --soft: #eef5ff;
+      --primary: #2563eb;
+      --primary-dark: #1d4ed8;
+      --code-bg: #0f172a;
+      --code-text: #e2e8f0;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      line-height: 1.75;
+    }
+
+    a {
+      color: var(--primary);
+      text-decoration: none;
+    }
+
+    a:hover {
+      color: var(--primary-dark);
+      text-decoration: underline;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      gap: 28px;
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 28px;
+    }
+
+    .toc {
+      position: sticky;
+      top: 24px;
+      align-self: start;
+      max-height: calc(100vh - 48px);
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--paper);
+      padding: 18px;
+      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+    }
+
+    .toc h2 {
+      margin: 0 0 12px;
+      font-size: 15px;
+    }
+
+    .toc ol {
+      margin: 0;
+      padding-left: 20px;
+    }
+
+    .toc li {
+      margin: 5px 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    main {
+      min-width: 0;
+    }
+
+    .paper {
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: var(--paper);
+      padding: 44px;
+      box-shadow: 0 16px 44px rgba(15, 23, 42, 0.08);
+    }
+
+    .hero {
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 28px;
+      padding-bottom: 28px;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: 34px;
+      line-height: 1.22;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin: 0;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    h2 {
+      margin: 40px 0 14px;
+      padding-top: 10px;
+      font-size: 24px;
+      line-height: 1.35;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 28px 0 10px;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 10px 0;
+    }
+
+    ul,
+    ol {
+      padding-left: 24px;
+    }
+
+    li {
+      margin: 5px 0;
+    }
+
+    table {
+      width: 100%;
+      margin: 16px 0 24px;
+      border-collapse: collapse;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      font-size: 14px;
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid var(--border);
+      padding: 11px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f8fafc;
+      color: #334155;
+      font-weight: 650;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    code {
+      border-radius: 5px;
+      background: #eaf1fb;
+      color: #0f3f9c;
+      padding: 2px 5px;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 0.92em;
+    }
+
+    pre {
+      overflow: auto;
+      border-radius: 12px;
+      background: var(--code-bg);
+      color: var(--code-text);
+      padding: 16px 18px;
+      line-height: 1.65;
+    }
+
+    pre code {
+      background: transparent;
+      color: inherit;
+      padding: 0;
+    }
+
+    .callout {
+      border-left: 4px solid var(--primary);
+      border-radius: 10px;
+      background: var(--soft);
+      padding: 14px 16px;
+      color: #1e3a8a;
+    }
+
+    .footer {
+      margin-top: 36px;
+      border-top: 1px solid var(--border);
+      padding-top: 18px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 940px) {
+      .layout {
+        display: block;
+        padding: 16px;
+      }
+
+      .toc {
+        position: static;
+        margin-bottom: 18px;
+        max-height: none;
+      }
+
+      .paper {
+        padding: 24px;
+      }
+
+      h1 {
+        font-size: 28px;
+      }
+
+      h2 {
+        font-size: 21px;
+      }
+
+      table {
+        display: block;
+        overflow-x: auto;
+        white-space: nowrap;
+      }
+    }
+
+    @media print {
+      body {
+        background: #fff;
+      }
+
+      .layout {
+        display: block;
+        max-width: none;
+        padding: 0;
+      }
+
+      .toc {
+        display: none;
+      }
+
+      .paper {
+        border: 0;
+        box-shadow: none;
+        padding: 0;
+      }
+
+      a {
+        color: inherit;
+      }
+
+      h2 {
+        break-after: avoid;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="toc">
+      <h2>目录</h2>
+      <ol>
+        <li><a href="#concepts">先理解 5 个概念</a></li>
+        <li><a href="#path">推荐上手路径</a></li>
+        <li><a href="#setup">首次设置</a></li>
+        <li><a href="#navigation">主界面导航</a></li>
+        <li><a href="#models">配置模型</a></li>
+        <li><a href="#agents">创建助手</a></li>
+        <li><a href="#skills">管理技能</a></li>
+        <li><a href="#groups">创建群组</a></li>
+        <li><a href="#rules">配置群规则</a></li>
+        <li><a href="#trigger-mode">选择助手触发模式</a></li>
+        <li><a href="#collaboration">发起一次群聊协作</a></li>
+        <li><a href="#quick-chat">使用快速对话</a></li>
+        <li><a href="#execution">查看任务与执行过程</a></li>
+        <li><a href="#cron">创建定时任务</a></li>
+        <li><a href="#workdir">工作目录使用建议</a></li>
+        <li><a href="#mobile">移动端连接</a></li>
+        <li><a href="#faq">常见问题</a></li>
+        <li><a href="#starter">新手推荐配置</a></li>
+      </ol>
+    </aside>
+
+    <main>
+      <article class="paper">
+        <header class="hero">
+          <h1>TeamAgentX 使用说明：新手快速上手</h1>
+          <p class="subtitle">面向第一次使用 TeamAgentX 的用户。读完本文，你应该能完成初始化、创建助手和群组，并用 <code>@助手名</code> 发起一次可追踪的多 Agent 协作。</p>
+        </header>
+
+        <section id="concepts">
+          <h2>1. 先理解 5 个概念</h2>
+          <p>TeamAgentX 的使用方式接近“把多个 AI 同事拉进一个项目群”。</p>
+          <table>
+            <thead>
+              <tr><th>概念</th><th>通俗理解</th><th>你需要做什么</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>模型</td><td>AI 的大脑，如 Claude、OpenAI 兼容模型、DeepSeek 等</td><td>配置 API Key / API URL / 模型名，或使用本地 Claude/Codex 配置</td></tr>
+              <tr><td>技能</td><td>助手的专项能力包，如代码审查、写文档、处理图片</td><td>给需要的助手安装技能</td></tr>
+              <tr><td>助手</td><td>一个有角色、有模型、有提示词、有技能的 AI 成员</td><td>创建或编辑助手，例如“工程师”“质检”“文档员”</td></tr>
+              <tr><td>群组</td><td>一个项目工作空间，包含成员、规则、工作目录和消息历史</td><td>为一个项目建一个群，把相关助手拉进去</td></tr>
+              <tr><td>工作目录</td><td>助手实际读写文件的本地目录</td><td>创建群时选择项目目录，避免助手改错地方</td></tr>
+            </tbody>
+          </table>
+          <p class="callout">最常用的交互只有一个：在群里输入 <code>@助手名 任务内容</code>。</p>
+        </section>
+
+        <section id="path">
+          <h2>2. 推荐上手路径</h2>
+          <p>第一次使用建议按下面顺序完成：</p>
+          <ol>
+            <li>打开应用，完成首次设置。</li>
+            <li>配置或确认默认 AI 工具 / 模型。</li>
+            <li>创建至少一个助手。</li>
+            <li>创建一个群组，选择工作目录并添加助手。</li>
+            <li>在群里 <code>@助手名</code> 下达任务。</li>
+            <li>通过任务看板、执行记录、上下文面板查看进度和问题。</li>
+          </ol>
+          <p>如果只是临时问一个助手问题，可以跳过建群，直接使用“快速对话”。</p>
+        </section>
+
+        <section id="setup">
+          <h2>3. 首次设置</h2>
+          <p>第一次进入系统会看到初始化向导：</p>
+          <ol>
+            <li>点击“开始设置”。</li>
+            <li>在“工具检测”中选择默认引擎。系统会检测本机 Claude / Codex 等 AI 工具。</li>
+            <li>在“模型配置”中选择使用本地配置，或手动填写 API 配置。</li>
+            <li>创建本地账号，填写用户名、密码和头像。</li>
+            <li>完成后进入主界面。</li>
+          </ol>
+          <p>如果没有检测到本地 AI 工具，可以先安装工具，或稍后在“模型”页面手动添加 API 模型。</p>
+        </section>
+
+        <section id="navigation">
+          <h2>4. 主界面导航</h2>
+          <table>
+            <thead>
+              <tr><th>入口</th><th>用途</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>群聊</td><td>查看项目群、创建群组、聊天协作</td></tr>
+              <tr><td>助手</td><td>创建、编辑、分类管理助手，发起快速对话</td></tr>
+              <tr><td>技能</td><td>查看共享技能、导入外部技能、安装技能到助手</td></tr>
+              <tr><td>模型</td><td>管理文本、图片、语音等模型配置</td></tr>
+              <tr><td>设置</td><td>修改个人信息、主题、提示音、移动端连接和本地工具运行方式</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="models">
+          <h2>5. 配置模型</h2>
+          <p>进入“模型”页面后，可以：</p>
+          <ul>
+            <li>点击“新增模型”手动添加模型配置。</li>
+            <li>点击“AI创建”，把 API 信息用自然语言粘贴进去，让系统自动解析表单。</li>
+            <li>导入 / 导出 JSON，批量迁移模型配置。</li>
+            <li>测试连接，确认 API Key、API URL 和模型名可用。</li>
+            <li>设置默认模型，供新助手或系统助手优先使用。</li>
+          </ul>
+          <table>
+            <thead>
+              <tr><th>字段</th><th>说明</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>名称</td><td>自己识别用，例如“DeepSeek Chat”</td></tr>
+              <tr><td>协议</td><td>Claude 选 Anthropic；OpenAI 兼容服务选 OpenAI</td></tr>
+              <tr><td>API URL</td><td>服务商提供的接口地址</td></tr>
+              <tr><td>API Key</td><td>服务商密钥</td></tr>
+              <tr><td>模型</td><td>模型 ID，例如 <code>deepseek-chat</code>、<code>gpt-4.1</code> 等</td></tr>
+            </tbody>
+          </table>
+          <p>如果你使用本机 Claude Code / Codex，可以在助手配置里选择“不绑定模型供应商，使用本地 Agent 配置”。</p>
+        </section>
+
+        <section id="agents">
+          <h2>6. 创建助手</h2>
+          <p>进入“助手”页面，点击“创建助手”。建议先创建 3 类助手：</p>
+          <table>
+            <thead>
+              <tr><th>助手</th><th>适合做什么</th><th>提示词重点</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>总控</td><td>理解需求、拆任务、协调其他助手</td><td>先澄清目标，再拆解步骤，必要时 @ 其他助手</td></tr>
+              <tr><td>工程师</td><td>写代码、改文件、跑命令</td><td>严格遵守工作目录，完成后说明改了什么和怎么验证</td></tr>
+              <tr><td>质检</td><td>审查实现、找问题、给验收意见</td><td>优先找 bug、风险、遗漏测试，不直接改代码</td></tr>
+            </tbody>
+          </table>
+          <p>创建助手时重点填写名称、模型供应商、描述、提示词、技能和工作目录。提示词可以先写简单版本，再用“AI 优化”改写。</p>
+        </section>
+
+        <section id="skills">
+          <h2>7. 管理技能</h2>
+          <p>进入“技能”页面可以查看已安装技能。常见操作包括：</p>
+          <ul>
+            <li>“导入外部技能”：扫描外部技能目录并导入。</li>
+            <li>“创建符号链接”：适合复用外部技能目录，外部更新会同步。</li>
+            <li>“完全复制”：适合固定保存一份技能，不受外部目录影响。</li>
+            <li>“安装到助手”：把某个技能分配给一个或多个助手。</li>
+            <li>在群聊中 <code>@技能管理</code>：让系统助手协助创建新技能。</li>
+          </ul>
+          <p>不要给所有助手安装所有技能。技能越多，助手越容易偏离角色。</p>
+        </section>
+
+        <section id="groups">
+          <h2>8. 创建群组</h2>
+          <p>进入“群聊”，点击“创建群组”。</p>
+          <table>
+            <thead>
+              <tr><th>字段</th><th>建议</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>群组名称</td><td>使用项目或任务名称，例如“官网重构”</td></tr>
+              <tr><td>群组描述</td><td>写清这个群的目标</td></tr>
+              <tr><td>工作目录</td><td>选择项目根目录。桌面端可以直接选择文件夹</td></tr>
+              <tr><td>选择助手</td><td>添加总控、工程师、质检等成员</td></tr>
+              <tr><td>注入群历史消息</td><td>默认开启。需要让新助手理解上下文时开启；只想让助手看新任务时关闭</td></tr>
+            </tbody>
+          </table>
+          <p>群组创建后，群内所有助手共享群工作目录。建议一个项目一个群，不要把多个无关项目放在同一个群里。</p>
+        </section>
+
+        <section id="rules">
+          <h2>9. 配置群规则</h2>
+          <p>打开群顶部的设置或“群规则”，可以编辑群规则。群规则会注入到群内所有助手上下文中。</p>
+          <pre><code>- 所有回复使用中文。
+- 执行前先说明计划，执行后总结修改内容和验证结果。
+- 不确定需求时先提问，不要自行扩大范围。
+- 修改代码必须优先遵守当前仓库已有风格。
+- 遇到需要用户决策、权限不足、命令失败或测试无法通过时，明确说明阻塞原因。
+- 质检只做审查和建议，除非用户明确要求，不直接修改代码。</code></pre>
+        </section>
+
+        <section id="trigger-mode">
+          <h2>10. 选择助手触发模式</h2>
+          <table>
+            <thead>
+              <tr><th>模式</th><th>行为</th><th>适合场景</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>协调模式</td><td>系统内置协调助手接收未 <code>@</code> 的消息并派发助手</td><td>新手推荐，适合多数群组</td></tr>
+              <tr><td>自由协作</td><td>助手消息中的 <code>@</code> 会触发其他助手</td><td>熟悉后使用，适合多助手自动接力</td></tr>
+              <tr><td>手动模式</td><td>助手消息中的 <code>@</code> 只显示提及，不触发执行</td><td>想完全由用户控制调度时使用</td></tr>
+            </tbody>
+          </table>
+          <p>新手建议使用“协调模式”。如果你发现助手之间互相触发太多，切到“手动模式”。</p>
+        </section>
+
+        <section id="collaboration">
+          <h2>11. 发起一次群聊协作</h2>
+          <p>在群输入框中输入：</p>
+          <pre><code>@总控 请帮我检查这个项目的启动方式，整理出本地开发步骤，并让工程师验证能否启动。</code></pre>
+          <p>更直接的任务可以这样写：</p>
+          <pre><code>@工程师 请阅读 README 和 package.json，告诉我如何启动 Web 和后端服务。不要修改文件。</code></pre>
+          <p>如果群设置了默认接收助手，未 <code>@</code> 的消息也会自动交给该助手。但为了减少歧义，重要任务建议明确 <code>@</code>。</p>
+          <p>发送后你可以观察消息气泡里的流式输出、工具调用过程、助手执行状态，以及右侧面板里的任务队列、执行记录和上下文。</p>
+        </section>
+
+        <section id="quick-chat">
+          <h2>12. 使用快速对话</h2>
+          <p>快速对话适合 1v1 临时问题，不需要创建正式群。</p>
+          <ol>
+            <li>进入“助手”页面。</li>
+            <li>找到目标助手。</li>
+            <li>点击“快速对话”。</li>
+            <li>可选择工作目录；留空时系统会创建独立会话目录。</li>
+            <li>进入对话后直接发送消息，不需要 <code>@</code>。</li>
+          </ol>
+          <p>它适合问概念、临时分析文本、测试助手提示词；不适合多助手协作或长期项目上下文。</p>
+        </section>
+
+        <section id="execution">
+          <h2>13. 查看任务与执行过程</h2>
+          <table>
+            <thead>
+              <tr><th>功能</th><th>用途</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>成员</td><td>查看群内助手，进入助手详情</td></tr>
+              <tr><td>添加助手</td><td>给当前群添加新助手</td></tr>
+              <tr><td>任务看板</td><td>查看待处理、执行中、已完成、失败/取消、待恢复任务</td></tr>
+              <tr><td>停止所有任务</td><td>有任务失控或不想继续时停止当前群执行</td></tr>
+              <tr><td>定时任务</td><td>创建和管理群级自动任务</td></tr>
+              <tr><td>截图聊天记录</td><td>导出当前聊天记录图片</td></tr>
+              <tr><td>清空消息</td><td>清理当前群消息</td></tr>
+              <tr><td>群设置</td><td>修改名称、工作目录、触发模式、默认助手、群规则</td></tr>
+            </tbody>
+          </table>
+          <p>在助手详情中，可以查看上下文、执行历史、任务队列，也可以清空该助手在当前群的上下文。</p>
+        </section>
+
+        <section id="cron">
+          <h2>14. 创建定时任务</h2>
+          <p>群级定时任务可以定时向群里发送消息并触发助手。</p>
+          <ol>
+            <li>打开群顶部“定时任务”。</li>
+            <li>点击“创建任务”。</li>
+            <li>填写任务名称和描述。</li>
+            <li>选择调度类型：Cron 表达式、固定间隔或一次性执行。</li>
+            <li>填写执行内容。</li>
+            <li>选择要触发的助手。不要在执行内容里手写 <code>@助手名</code>，系统会根据选择自动处理。</li>
+            <li>设置最大重试次数和是否立即启用。</li>
+          </ol>
+          <table>
+            <thead>
+              <tr><th>场景</th><th>配置</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>每天早上同步项目状态</td><td>每天 9 点，触发总控，总结昨日进展和今日待办</td></tr>
+              <tr><td>每周写变更总结</td><td>每周五 18 点，触发文档员，生成 changelog 草稿</td></tr>
+              <tr><td>定期巡检服务</td><td>固定间隔，触发监控助手，检查服务状态</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="workdir">
+          <h2>15. 工作目录使用建议</h2>
+          <p>工作目录决定助手能在哪个项目里运行命令、读写文件。</p>
+          <ul>
+            <li>一个项目建一个群，并把工作目录设为项目根目录。</li>
+            <li>不要把工作目录设为用户主目录或过大的父目录。</li>
+            <li>多个助手需要协作同一项目时，放在同一个群里。</li>
+            <li>临时实验使用快速对话的独立目录，避免污染正式项目。</li>
+            <li>桌面端可以复制、打开工作目录；Web 版受浏览器限制，目录能力会少一些。</li>
+          </ul>
+        </section>
+
+        <section id="mobile">
+          <h2>16. 移动端连接</h2>
+          <ol>
+            <li>确认电脑和手机在同一局域网。</li>
+            <li>在“设置”的“移动端连接”中选择可用的局域网地址。</li>
+            <li>生成二维码。</li>
+            <li>用手机 TeamAgentX App 或扫码入口扫描。</li>
+            <li>手机端会自动登录并连接对应服务。</li>
+          </ol>
+          <p>如果扫码后连接失败，优先检查网络、局域网 IP、防火墙和桌面端服务状态。</p>
+        </section>
+
+        <section id="faq">
+          <h2>17. 常见问题</h2>
+
+          <h3>助手没有响应</h3>
+          <ul>
+            <li>是否明确 <code>@助手名</code>。</li>
+            <li>群里是否已经添加该助手。</li>
+            <li>模型配置是否启用且连接测试通过。</li>
+            <li>当前是否有任务排队。</li>
+            <li>Socket / 服务端连接是否正常。</li>
+          </ul>
+
+          <h3>助手用错项目目录</h3>
+          <p>检查群设置里的“工作目录”。如果目录为空，系统会使用默认群目录。正式项目建议明确选择项目根目录。</p>
+
+          <h3>助手互相触发太多</h3>
+          <p>把群设置里的“助手触发模式”改为“手动模式”，然后由用户显式 <code>@</code> 每个助手。</p>
+
+          <h3>助手上下文混乱</h3>
+          <p>进入助手详情，先“查看上下文”确认它看到了什么；必要时点击“清空上下文”。如果是新加入的助手，按需关闭“注入群历史消息”。</p>
+
+          <h3>模型不可用</h3>
+          <ul>
+            <li>API URL 是否正确。</li>
+            <li>API Key 是否有效。</li>
+            <li>模型 ID 是否拼写正确。</li>
+            <li>协议是否选对，Claude 用 Anthropic，OpenAI 兼容服务用 OpenAI。</li>
+            <li>是否已启用该模型配置。</li>
+          </ul>
+
+          <h3>桌面端打不开目录</h3>
+          <p>目录打开能力只在 Electron 桌面端完整支持。Web 版受浏览器限制，可能只能复制路径。</p>
+        </section>
+
+        <section id="starter">
+          <h2>18. 新手推荐配置</h2>
+          <table>
+            <thead>
+              <tr><th>项</th><th>推荐</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>模型</td><td>配一个稳定的文本模型，设为默认</td></tr>
+              <tr><td>助手</td><td>总控 + 工程师 + 质检</td></tr>
+              <tr><td>群组</td><td>一个项目一个群</td></tr>
+              <tr><td>触发模式</td><td>协调模式</td></tr>
+              <tr><td>群规则</td><td>使用第 9 节模板</td></tr>
+              <tr><td>工作目录</td><td>项目根目录</td></tr>
+            </tbody>
+          </table>
+          <p>第一次验证可以发送：</p>
+          <pre><code>@总控 请熟悉当前项目，说明它是什么、如何启动、主要目录有什么。先不要修改任何文件。</code></pre>
+          <p>确认助手能正确读取项目、回答启动方式后，再让它执行更具体的开发任务。</p>
+        </section>
+
+        <footer class="footer">
+          <p>对应 Markdown 文档：<a href="./12-user-guide.md">12-user-guide.md</a></p>
+        </footer>
+      </article>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { Message } from '@/lib/agent-api'
+import { AgentAvatarImage } from '@/lib/agent-avatars'
+import { GroupAvatarImage } from '@/lib/group-avatars'
 import { ChatMessage } from './chat-message'
 
 interface MentionAgent {
@@ -20,7 +22,7 @@ interface ScreenshotRendererProps {
   messages: Message[]
   roomName: string
   roomAvatar?: string | null
-  roomAvatarColor?: string | null
+  isQuickChatRoom?: boolean
   mentionAgents: MentionAgent[]
   currentUser: CurrentUser
   onReady?: (element: HTMLElement) => void
@@ -49,7 +51,7 @@ export function ScreenshotRenderer({
   messages,
   roomName,
   roomAvatar,
-  roomAvatarColor,
+  isQuickChatRoom,
   mentionAgents,
   currentUser,
   onReady,
@@ -100,15 +102,11 @@ export function ScreenshotRenderer({
     >
       {/* 头部信息 */}
       <div className="flex items-center gap-3 px-6 py-4 border-b bg-muted/50">
-        <div
-          className={`flex size-10 items-center justify-center rounded-full bg-gradient-to-br text-white shadow-sm ${roomAvatarColor ?? 'from-gray-400 to-gray-500'}`}
-        >
-          {roomAvatar ? (
-            <span className="text-lg">{roomAvatar}</span>
-          ) : (
-            <span className="text-lg">💬</span>
-          )}
-        </div>
+        {isQuickChatRoom ? (
+          <AgentAvatarImage avatar={roomAvatar ?? null} alt={roomName} className="size-10 rounded-full shadow-sm" />
+        ) : (
+          <GroupAvatarImage avatar={roomAvatar ?? null} alt={roomName} className="size-10 rounded-full shadow-sm" />
+        )}
         <div>
           <div className="text-lg font-semibold text-foreground">
             {roomName}

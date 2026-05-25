@@ -34,7 +34,7 @@ export function CreateGroupModal({ isOpen, onClose, onSuccess, ownerId }: Create
   const loadAgents = async () => {
     const response = await agentApi.getActive()
     if (response.success && response.data) {
-      setAgents(response.data)
+      setAgents(response.data.filter((agent) => agent.agentLevel !== 'system'))
     }
   }
 
@@ -81,6 +81,7 @@ export function CreateGroupModal({ isOpen, onClose, onSuccess, ownerId }: Create
         description: description.trim() || undefined,
         workDir: workDir.trim() || null,
         ownerId,
+        agentTriggerMode: 'coordinator',
       })
 
       if (!createResponse.success || !createResponse.data) {

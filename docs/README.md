@@ -17,8 +17,9 @@
 ## 阅读路径
 
 ### 🆕 第一次接触本平台
-推荐顺序：**01 → 02 → 03**
-- 先读 [01 产品概览](01-overview.md) 了解定位
+推荐顺序：**12 → 01 → 02 → 03**
+- 先读 [12 使用说明](12-user-guide.md) 按步骤完成上手
+- 再读 [01 产品概览](01-overview.md) 了解定位
 - 再读 [02 功能清单](02-features.md) 看现有能力盘点
 - 最后读 [03 工作流程](03-workflows.md) 理解协作机制
 
@@ -52,8 +53,9 @@
 | [08-server-architecture.md](08-server-architecture.md) | 服务端代码架构 · Agent 执行系统 · Socket 事件 | ⭐⭐⭐ | 约 4k |
 | [09-api-reference.md](09-api-reference.md) | 完整 REST API 速查（所有路由） | ⭐⭐⭐ | 约 3k |
 | [10-frontend-architecture.md](10-frontend-architecture.md) | 前端目录 · Stores · 面板系统 · Electron 集成 | ⭐⭐ | 约 3k |
+| [12-user-guide.md](12-user-guide.md) | 新手使用说明 · 初始化 · 模型/助手/技能 · 群聊协作 | ⭐⭐⭐ | 约 7k |
 
-总计约 55k 字。
+总计约 62k 字。
 
 ## 一图速览
 
@@ -62,6 +64,8 @@
 │           TeamAgentX 主文档结构                              │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
+│   12 使用说明       ← 新手初始化 / 配置 / 群聊协作           │
+│        │                                                    │
 │   01 产品概览       ← 定位 / 隐喻 / 团队配置 / 架构          │
 │        │                                                    │
 │        ├── 02 功能清单     ← v0.1.0 9 大功能域 实测盘点      │

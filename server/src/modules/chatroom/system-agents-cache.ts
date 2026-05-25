@@ -1,6 +1,7 @@
 // 系统助手列表缓存（30 秒 TTL）
 // 单独提取为模块以避免 chatroom.service 与 agent.service 之间的循环依赖
 import prisma from '../../lib/prisma.js';
+import { VISIBLE_SYSTEM_AGENT_IDS } from '../../core/agent/system-assistant.constants.js';
 
 export type SystemAgentInfo = {
   id: string;
@@ -10,6 +11,7 @@ export type SystemAgentInfo = {
   description: string | null;
   type: string;
   agentLevel: string;
+  workDir: string | null;
   speechConfig: string | null;
 };
 
@@ -27,7 +29,11 @@ export async function getSystemAgentsCached(): Promise<SystemAgentInfo[]> {
     return cache;
   }
   const agents = await prisma.agent.findMany({
-    where: { agentLevel: 'system', isActive: true },
+    where: {
+      id: { in: VISIBLE_SYSTEM_AGENT_IDS },
+      agentLevel: 'system',
+      isActive: true,
+    },
     select: {
       id: true,
       name: true,
@@ -36,6 +42,7 @@ export async function getSystemAgentsCached(): Promise<SystemAgentInfo[]> {
       description: true,
       type: true,
       agentLevel: true,
+      workDir: true,
       speechConfig: true,
     },
   });

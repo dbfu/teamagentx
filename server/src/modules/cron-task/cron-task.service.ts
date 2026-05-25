@@ -11,7 +11,7 @@ export interface CreateCronTaskData {
   intervalMinutes?: number;
   scheduledAt?: Date;
   payload: string;
-  agentIds?: string[]; // 选中的助手 ID 列表，["*"] 表示所有助手
+  agentIds?: string[]; // 选中的助手 ID 列表，["*"] 表示所有助手；执行时逐个发送
   enabled?: boolean;
   maxRetries?: number;
   createdBy?: string;

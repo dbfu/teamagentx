@@ -28,6 +28,7 @@ import { getExecutor } from './executor-manager.js';
 import { buildAIMessage } from './message-utils.js';
 import { debugLog } from './debug.js';
 import { notifySourceAgentOnFailure } from './task-failure-notification.js';
+import { shouldSuppressInternalCoordinatorMessage } from '../internal-coordinator-agent.js';
 
 // 处理队列中的任务
 export async function processQueue(chatRoomId: string, agentId: string) {
@@ -106,6 +107,11 @@ export async function processQueue(chatRoomId: string, agentId: string) {
 
           // 创建 emit 回调，在 tool 调用时直接广播消息
           const emitCallback = async (content: string, replyMessageId?: string) => {
+            const shouldSuppressGroupMessage = shouldSuppressInternalCoordinatorMessage(
+              task.agentId,
+              content,
+            );
+
             // 合并连续的 output 事件
             const lastEvent = executionEvents[executionEvents.length - 1];
             if (lastEvent && lastEvent.type === 'output') {
@@ -118,6 +124,16 @@ export async function processQueue(chatRoomId: string, agentId: string) {
                 timestamp: Date.now(),
                 data: { content, type: 'message' },
               });
+            }
+
+            if (shouldSuppressGroupMessage) {
+              debugLog('internalCoordinatorNoDispatchSuppressed', {
+                chatRoomId,
+                agentId: task.agentId,
+                agentName: task.agentName,
+                triggerMessageId: task.messageId,
+              });
+              return;
             }
 
             const aiMessage = buildAIMessage(

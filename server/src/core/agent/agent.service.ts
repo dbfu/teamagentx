@@ -7,6 +7,12 @@ import {
 } from '../../modules/speech/speech-config.js';
 import { invalidateSystemAgentsCache } from '../../modules/chatroom/system-agents-cache.js';
 import { normalizeAgentProxyConfig } from './proxy-config.js';
+import { HIDDEN_SYSTEM_AGENT_IDS } from './system-assistant.constants.js';
+import {
+  DEFAULT_AGENT_THINKING_MODE,
+  normalizeAgentThinkingMode,
+  type AgentThinkingMode,
+} from './thinking-mode.js';
 
 // 包含关联的 Agent 类型
 export type AgentWithRelations = Agent & {
@@ -35,6 +41,7 @@ export type CreateAgentInput = {
   proxyConfig?: string | null;
   codexModel?: string | null;
   claudeModel?: string | null;
+  thinkingMode?: AgentThinkingMode | null;
   categoryId?: string;
   llmProviderId?: string;
   imageGeneration?: AgentCapabilityInput;
@@ -221,6 +228,7 @@ export const agentService = {
           proxyConfig: normalizeAgentProxyConfig(data.proxyConfig),
           codexModel: normalizeNullableString(data.codexModel),
           claudeModel: normalizeNullableString(data.claudeModel),
+          thinkingMode: normalizeAgentThinkingMode(data.thinkingMode) ?? DEFAULT_AGENT_THINKING_MODE,
           categoryId,
           llmProviderId,
           speechConfig: serializeAgentSpeechConfig(data.speechConfig),
@@ -240,6 +248,9 @@ export const agentService = {
 
   async findAll(): Promise<AgentWithRelations[]> {
     return prisma.agent.findMany({
+      where: {
+        id: { notIn: HIDDEN_SYSTEM_AGENT_IDS },
+      },
       orderBy: { createdAt: 'desc' },
       include: {
         ...agentInclude,
@@ -249,7 +260,10 @@ export const agentService = {
 
   async findActive(): Promise<AgentWithRelations[]> {
     return prisma.agent.findMany({
-      where: { isActive: true },
+      where: {
+        isActive: true,
+        id: { notIn: HIDDEN_SYSTEM_AGENT_IDS },
+      },
       orderBy: { createdAt: 'desc' },
       include: {
         ...agentInclude,
@@ -309,12 +323,13 @@ export const agentService = {
     }
 
     // 处理外键字段：空字符串转换为 undefined（表示不更新），'null' 字符串转换为 null（表示移除）
-    const { categoryId, llmProviderId, speechConfig, imageGeneration, proxyConfig, codexModel, claudeModel, ...restData } = effectiveData;
+    const { categoryId, llmProviderId, speechConfig, imageGeneration, proxyConfig, codexModel, claudeModel, thinkingMode, ...restData } = effectiveData;
     const processedCategoryId = categoryId === '' ? undefined : categoryId === 'null' ? null : categoryId;
     const processedLlmProviderId = llmProviderId === '' ? undefined : llmProviderId === 'null' ? null : llmProviderId;
     const processedProxyConfig = normalizeAgentProxyConfig(proxyConfig);
     const processedCodexModel = normalizeNullableString(codexModel);
     const processedClaudeModel = normalizeNullableString(claudeModel);
+    const processedThinkingMode = normalizeAgentThinkingMode(thinkingMode);
     const currentAgent = await prisma.agent.findUnique({
       where: { id },
       select: { type: true, acpTool: true, llmProviderId: true },
@@ -347,6 +362,7 @@ export const agentService = {
           ...(processedProxyConfig !== undefined && { proxyConfig: processedProxyConfig }),
           ...(processedCodexModel !== undefined && { codexModel: processedCodexModel }),
           ...(processedClaudeModel !== undefined && { claudeModel: processedClaudeModel }),
+          ...(processedThinkingMode !== undefined && { thinkingMode: processedThinkingMode }),
           ...(speechConfig !== undefined && { speechConfig: serializeAgentSpeechConfig(speechConfig) }),
           updatedAt: new Date(),
         },
@@ -401,6 +417,9 @@ export const agentService = {
 
     // 获取所有助手
     const agents = await prisma.agent.findMany({
+      where: {
+        id: { notIn: HIDDEN_SYSTEM_AGENT_IDS },
+      },
       orderBy: { createdAt: 'desc' },
       include: {
         ...agentInclude,

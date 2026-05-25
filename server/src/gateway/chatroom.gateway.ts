@@ -22,6 +22,9 @@ import { taskQueueService } from '../modules/task-queue/task-queue.service.js';
 import { messageService } from '../modules/message/message.service.js';
 import { agentMemoryService } from '../modules/agent-memory/agent-memory.service.js';
 import { deserializeAgentSpeechConfig } from '../modules/speech/speech-config.js';
+import { gitBranchService, type GitCommandAction } from '../modules/chatroom/git-branch.service.js';
+import { packageScriptService } from '../modules/chatroom/package-script.service.js';
+import { getDefaultChatRoomWorkDir } from '../core/agent/work-dir.js';
 
 // Schema definitions
 const lastMessageSchema = {
@@ -67,7 +70,7 @@ const chatRoomSchema = {
     isQuickChatRoom: { type: 'boolean' },
     quickChatAgentId: { type: 'string', nullable: true },
     defaultAgentId: { type: 'string', nullable: true },
-    agentTriggerMode: { type: 'string' },
+    agentTriggerMode: { type: 'string', enum: ['auto', 'manual', 'coordinator'] },
     isPinned: { type: 'boolean' },
     pinnedAt: { type: 'string', nullable: true },
     createdAt: { type: 'string' },
@@ -190,6 +193,7 @@ const createChatRoomBodySchema = {
     rules: { type: 'string', description: '群规则/指南，注入到群内所有 Agent 的上下文' },
     workDir: { type: 'string', nullable: true, description: '群聊工作目录，留空使用默认目录' },
     ownerId: { type: 'string', description: 'Owner user ID' },
+    agentTriggerMode: { type: 'string', enum: ['auto', 'manual', 'coordinator'], description: '助手触发模式' },
   },
 };
 
@@ -211,6 +215,7 @@ interface CreateChatRoomBody {
   rules?: string;
   workDir?: string | null;
   ownerId?: string;
+  agentTriggerMode?: 'auto' | 'manual' | 'coordinator';
 }
 
 interface DuplicateChatRoomBody {
@@ -225,7 +230,21 @@ interface UpdateChatRoomBody {
   rules?: string;
   workDir?: string | null;
   defaultAgentId?: string | null;
-  agentTriggerMode?: 'auto' | 'manual';
+  agentTriggerMode?: 'auto' | 'manual' | 'coordinator';
+}
+
+interface UpdateGitBranchBody {
+  branch: string;
+}
+
+interface ExecuteGitCommandBody {
+  action: GitCommandAction;
+  message?: string;
+}
+
+interface RunPackageScriptBody {
+  scriptId?: string;
+  scriptName?: string;
 }
 
 interface AddAgentBody {
@@ -302,6 +321,334 @@ export async function chatRoomGateway(app: FastifyInstance) {
     return reply.send({ success: true, data: serializeChatRoomForResponse(chatRoom) });
   });
 
+  app.get<{ Params: ChatRoomParams }>('/chatrooms/:id/git-status', {
+    schema: {
+      description: '获取群聊工作目录 git 分支状态',
+      tags: ['ChatRooms'],
+      params: {
+        type: 'object',
+        properties: { id: { type: 'string' } },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: {
+              type: 'object',
+              properties: {
+                isGitRepo: { type: 'boolean' },
+                workDir: { type: 'string' },
+                currentBranch: { type: 'string', nullable: true },
+                branches: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      name: { type: 'string' },
+                      current: { type: 'boolean' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        404: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const chatRoom = await chatRoomService.findById(id);
+
+    if (!chatRoom) {
+      return reply.code(404).send({ success: false, error: '群聊不存在' });
+    }
+
+    const status = await gitBranchService.getStatus(chatRoom.id, chatRoom.workDir);
+    return reply.send({ success: true, data: status });
+  });
+
+  app.post<{ Params: ChatRoomParams; Body: UpdateGitBranchBody }>('/chatrooms/:id/git-branch', {
+    schema: {
+      description: '切换群聊工作目录 git 分支',
+      tags: ['ChatRooms'],
+      params: {
+        type: 'object',
+        properties: { id: { type: 'string' } },
+      },
+      body: {
+        type: 'object',
+        required: ['branch'],
+        properties: {
+          branch: { type: 'string' },
+        },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: {
+              type: 'object',
+              properties: {
+                isGitRepo: { type: 'boolean' },
+                workDir: { type: 'string' },
+                currentBranch: { type: 'string', nullable: true },
+                branches: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      name: { type: 'string' },
+                      current: { type: 'boolean' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        400: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+        404: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const chatRoom = await chatRoomService.findById(id);
+
+    if (!chatRoom) {
+      return reply.code(404).send({ success: false, error: '群聊不存在' });
+    }
+
+    try {
+      const status = await gitBranchService.switchBranch(chatRoom.id, chatRoom.workDir, request.body.branch);
+      return reply.send({ success: true, data: status });
+    } catch (error: any) {
+      return reply.code(400).send({ success: false, error: error.message || '切换分支失败' });
+    }
+  });
+
+  app.post<{ Params: ChatRoomParams; Body: ExecuteGitCommandBody }>('/chatrooms/:id/git-command', {
+    schema: {
+      description: '执行群聊工作目录的白名单 Git 快捷指令',
+      tags: ['ChatRooms'],
+      params: {
+        type: 'object',
+        properties: { id: { type: 'string' } },
+      },
+      body: {
+        type: 'object',
+        required: ['action'],
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['init', 'status', 'diff', 'add_all', 'commit', 'log', 'branch'],
+          },
+          message: { type: 'string' },
+        },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: {
+              type: 'object',
+              properties: {
+                action: { type: 'string' },
+                command: { type: 'string' },
+                workDir: { type: 'string' },
+                exitCode: { type: 'number' },
+                stdout: { type: 'string' },
+                stderr: { type: 'string' },
+                output: { type: 'string' },
+              },
+            },
+          },
+        },
+        400: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+        404: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const chatRoom = await chatRoomService.findById(id);
+
+    if (!chatRoom) {
+      return reply.code(404).send({ success: false, error: '群聊不存在' });
+    }
+
+    try {
+      const result = await gitBranchService.executeCommand(
+        chatRoom.id,
+        chatRoom.workDir,
+        request.body.action,
+        request.body.message,
+      );
+      return reply.send({ success: true, data: result });
+    } catch (error: any) {
+      return reply.code(400).send({ success: false, error: error.message || 'Git 命令执行失败' });
+    }
+  });
+
+  app.get<{ Params: ChatRoomParams }>('/chatrooms/:id/package-scripts', {
+    schema: {
+      description: '获取群聊工作目录 package.json scripts',
+      tags: ['ChatRooms'],
+      params: {
+        type: 'object',
+        properties: { id: { type: 'string' } },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: {
+              type: 'object',
+              properties: {
+                hasPackageJson: { type: 'boolean' },
+                workDir: { type: 'string', nullable: true },
+                packageManager: { type: 'string', nullable: true },
+                scripts: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      id: { type: 'string' },
+                      name: { type: 'string' },
+                      command: { type: 'string' },
+                      runCommand: { type: 'string' },
+                      relativeDir: { type: 'string' },
+                      workDir: { type: 'string' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        404: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const chatRoom = await chatRoomService.findById(id);
+
+    if (!chatRoom) {
+      return reply.code(404).send({ success: false, error: '群聊不存在' });
+    }
+
+    const workDir = chatRoom.workDir?.trim() || getDefaultChatRoomWorkDir(chatRoom.id);
+    const result = await packageScriptService.getScripts(workDir);
+    return reply.send({ success: true, data: result });
+  });
+
+  app.post<{ Params: ChatRoomParams; Body: RunPackageScriptBody }>('/chatrooms/:id/package-scripts/run', {
+    schema: {
+      description: '执行群聊工作目录 package.json script',
+      tags: ['ChatRooms'],
+      params: {
+        type: 'object',
+        properties: { id: { type: 'string' } },
+      },
+      body: {
+        type: 'object',
+        properties: {
+          scriptId: { type: 'string' },
+          scriptName: { type: 'string' },
+        },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: {
+              type: 'object',
+              properties: {
+                scriptId: { type: 'string' },
+                scriptName: { type: 'string' },
+                command: { type: 'string' },
+                workDir: { type: 'string' },
+              },
+            },
+          },
+        },
+        400: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+        404: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const chatRoom = await chatRoomService.findById(id);
+
+    if (!chatRoom) {
+      return reply.code(404).send({ success: false, error: '群聊不存在' });
+    }
+
+    try {
+      const result = await packageScriptService.runScript({
+        chatRoomId: chatRoom.id,
+        workDir: chatRoom.workDir,
+        scriptId: request.body.scriptId,
+        scriptName: request.body.scriptName,
+      });
+      return reply.send({ success: true, data: result });
+    } catch (error: any) {
+      return reply.code(400).send({ success: false, error: error.message || '执行脚本失败' });
+    }
+  });
+
   // Create chatRoom
   app.post<{ Body: CreateChatRoomBody }>('/chatrooms', {
     schema: {
@@ -319,7 +666,7 @@ export async function chatRoomGateway(app: FastifyInstance) {
       },
     },
   }, async (request, reply) => {
-    const { name, avatar, avatarColor, description, rules, workDir, ownerId } = request.body;
+    const { name, avatar, avatarColor, description, rules, workDir, ownerId, agentTriggerMode } = request.body;
 
     // If ownerId is provided, use createWithOwner to auto-add OWNER agent
     const chatRoom = ownerId
@@ -331,6 +678,7 @@ export async function chatRoomGateway(app: FastifyInstance) {
           rules,
           workDir,
           ownerId,
+          agentTriggerMode,
         })
       : await chatRoomService.create({
           name,
@@ -339,6 +687,7 @@ export async function chatRoomGateway(app: FastifyInstance) {
           description,
           rules,
           workDir,
+          agentTriggerMode,
         });
 
     // 广播给所有已连接客户端（通知其他端有新群聊创建）
@@ -1140,7 +1489,7 @@ export async function chatRoomGateway(app: FastifyInstance) {
           rules: { type: 'string' },
           workDir: { type: 'string', nullable: true },
           defaultAgentId: { type: 'string', nullable: true },
-          agentTriggerMode: { type: 'string' },
+          agentTriggerMode: { type: 'string', enum: ['auto', 'manual', 'coordinator'] },
         },
       },
       response: {
@@ -1166,7 +1515,7 @@ export async function chatRoomGateway(app: FastifyInstance) {
 
     try {
       const chatRoom = await chatRoomService.update(id, data);
-      if (data.workDir !== undefined) {
+      if (data.workDir !== undefined || data.rules !== undefined) {
         clearExecutorCache(undefined, id);
       }
       return reply.send({ success: true, data: chatRoom });
@@ -1174,7 +1523,11 @@ export async function chatRoomGateway(app: FastifyInstance) {
       if (error.code === 'P2025') {
         return reply.code(404).send({ success: false, error: '群聊不存在' });
       }
-      if (error.message === '默认助手不存在或未启用' || error.message === '默认助手必须是群聊成员') {
+      if (
+        error.message === '默认助手不存在或未启用' ||
+        error.message === '默认助手必须是群聊成员' ||
+        error.message === '系统助手不能设为默认接收助手'
+      ) {
         return reply.code(400).send({ success: false, error: error.message });
       }
       throw error;

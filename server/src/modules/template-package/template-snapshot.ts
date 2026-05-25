@@ -7,7 +7,7 @@ interface SnapshotRoomInput {
   rules: string | null;
   workDir: string | null;
   defaultAgentId: string | null;
-  agentTriggerMode: 'auto' | 'manual';
+  agentTriggerMode: 'auto' | 'manual' | 'coordinator';
 }
 
 interface SnapshotAgentCapabilityInput {
@@ -27,6 +27,7 @@ interface SnapshotAgentInput {
   proxyConfig: string | null;
   codexModel: string | null;
   claudeModel: string | null;
+  thinkingMode: string;
   llmProviderId: string | null;
   speechConfig: Record<string, unknown> | null;
   capabilities: SnapshotAgentCapabilityInput[];
@@ -69,6 +70,7 @@ export function buildTemplateSnapshot(input: BuildTemplateSnapshotInput) {
       proxyConfig: null,
       codexModel: agent.codexModel,
       claudeModel: agent.claudeModel,
+      thinkingMode: agent.thinkingMode,
       llmProviderId: null,
       speechConfig: agent.speechConfig,
       capabilities: agent.capabilities.map((capability) => ({

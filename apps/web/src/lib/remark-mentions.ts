@@ -10,8 +10,8 @@
 
 import { visit } from 'unist-util-visit'
 
-// 允许出现在 @ 前面的 markdown 特殊字符
-const MARKDOWN_SPECIAL_CHARS = '*_>#`-'
+// 允许出现在 @ 前面的 markdown 特殊字符和常见标点
+const MENTION_PREFIX_BOUNDARY_CHARS = '*_>#`!?.,:;！？。，；：-'
 const END_BOUNDARY_CHARS = '*_>#`!?.,:;！？。，；：'
 const NAME_CHARS_PATTERN = '[\\u4e00-\\u9fa5a-zA-Z0-9_]'
 
@@ -110,16 +110,16 @@ export function remarkMentions(opts: Options) {
             // 文档开头，有效
             isBoundaryValid = true
           } else if (originalText.length > 0) {
-            // 检查原始文本中前面一个字符是否是空白或 markdown 特殊字符
+            // 检查原始文本中前面一个字符是否是空白或边界字符
             const prevChar = originalText[absoluteOffset - 1]
-            if (/\s/.test(prevChar) || MARKDOWN_SPECIAL_CHARS.includes(prevChar)) {
+            if (/\s/.test(prevChar) || MENTION_PREFIX_BOUNDARY_CHARS.includes(prevChar)) {
               isBoundaryValid = true
             }
           }
         } else {
           // @ 在 text 节点中间，检查 text 节点内前面是否是空白或 markdown 特殊字符
           const prevCharInNode = content[matchIndex - 1]
-          if (/\s/.test(prevCharInNode) || MARKDOWN_SPECIAL_CHARS.includes(prevCharInNode)) {
+          if (/\s/.test(prevCharInNode) || MENTION_PREFIX_BOUNDARY_CHARS.includes(prevCharInNode)) {
             isBoundaryValid = true
           }
         }

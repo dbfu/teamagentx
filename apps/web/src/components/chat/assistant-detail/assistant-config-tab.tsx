@@ -3,6 +3,7 @@ import { Badge } from '@/components/ui/badge'
 import { cn, formatDateTime } from '@/lib/utils'
 import {
   Sparkles,
+  Brain,
   Cpu,
   Globe,
   Folder,
@@ -18,6 +19,13 @@ import {
 import { useState, useRef, useEffect } from 'react'
 import { toast } from 'sonner'
 import { promptOptimizeApi } from '@/lib/prompt-optimize-api'
+
+const thinkingModeLabels: Record<Agent['thinkingMode'], string> = {
+  high: '高',
+  medium: '中',
+  low: '低',
+  off: '关',
+}
 
 function FullscreenPromptModal({
   isOpen,
@@ -223,6 +231,18 @@ export function AssistantConfigTab({ agent, onUpdate }: AssistantConfigTabProps)
                 <div>
                   <p className="text-sm text-muted-foreground">ACP 工具</p>
                   <p className="font-medium text-foreground">{agent.acpTool}</p>
+                </div>
+              </div>
+            )}
+
+            {agent.type === 'acp' && (agent.acpTool === 'claude' || agent.acpTool === 'codex') && (
+              <div className="flex items-center gap-4">
+                <div className="flex size-10 items-center justify-center rounded-lg bg-blue-500/10">
+                  <Brain className="size-5 text-blue-500" />
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">思考模式</p>
+                  <p className="font-medium text-foreground">{thinkingModeLabels[agent.thinkingMode || 'high']}</p>
                 </div>
               </div>
             )}

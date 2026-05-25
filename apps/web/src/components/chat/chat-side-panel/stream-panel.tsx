@@ -70,6 +70,39 @@ function TimeIndicator({ event, isCompleted }: { event: StreamEvent; isCompleted
   )
 }
 
+function TotalTimeIndicator({ events, isRunning, startTime }: { events: StreamEvent[]; isRunning: boolean; startTime?: number }) {
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (!isRunning) return
+
+    const timer = setInterval(() => {
+      setNow(Date.now())
+    }, 1000)
+
+    return () => clearInterval(timer)
+  }, [isRunning])
+
+  if (!startTime && events.length === 0) return null
+
+  const firstEventTime = events.length > 0
+    ? Math.min(...events.map(event => event.timestamp))
+    : undefined
+  const totalStartTime = startTime ?? firstEventTime
+  if (!totalStartTime) return null
+
+  const completedEndTime = events.length > 0
+    ? Math.max(...events.map(event => event.endTime ?? event.timestamp))
+    : totalStartTime
+  const endTime = isRunning ? now : completedEndTime
+
+  return (
+    <span className="text-muted-foreground tabular-nums">
+      · 耗时 {formatDuration(totalStartTime, endTime)}
+    </span>
+  )
+}
+
 function CollapsibleStateIcon({ className }: { className?: string }) {
   return (
     <>
@@ -81,6 +114,7 @@ function CollapsibleStateIcon({ className }: { className?: string }) {
 
 interface StreamPanelProps {
   streamingViewAgent: { messageId: string; agentId: string; name: string } | null
+  messageStartTime?: number
   completedAgents: Set<string>
   streamEvents: Map<string, StreamEvent[]>
   chatRoomId?: string
@@ -89,6 +123,7 @@ interface StreamPanelProps {
 
 export function StreamPanel({
   streamingViewAgent,
+  messageStartTime,
   completedAgents,
   streamEvents,
   chatRoomId,
@@ -137,6 +172,9 @@ export function StreamPanel({
 
   useEffect(() => {
     prevInProgressKeyRef.current = ''
+    if (todosContainerRef.current) {
+      todosContainerRef.current.scrollTop = 0
+    }
   }, [streamKey])
 
   // 当正在执行的任务变化时，滚动到该任务使其可见
@@ -151,18 +189,23 @@ export function StreamPanel({
     const targetElement = todoElements[inProgressIndex] as HTMLElement
 
     if (targetElement) {
-      // 计算滚动位置：让元素在容器中居中显示
-      const elementTop = targetElement.offsetTop
-      const elementHeight = targetElement.offsetHeight
-      const containerHeight = container.clientHeight
+      const containerRect = container.getBoundingClientRect()
+      const elementRect = targetElement.getBoundingClientRect()
+      const padding = 4
+      let nextScrollTop = container.scrollTop
 
-      // 居中位置 = 元素顶部位置 - (容器高度 - 元素高度) / 2
-      const scrollTop = elementTop - (containerHeight - elementHeight) / 2
+      if (elementRect.top < containerRect.top) {
+        nextScrollTop += elementRect.top - containerRect.top - padding
+      } else if (elementRect.bottom > containerRect.bottom) {
+        nextScrollTop += elementRect.bottom - containerRect.bottom + padding
+      }
 
-      container.scrollTo({
-        top: Math.max(0, scrollTop),
-        behavior: 'smooth'
-      })
+      if (nextScrollTop !== container.scrollTop) {
+        container.scrollTo({
+          top: Math.max(0, nextScrollTop),
+          behavior: 'smooth'
+        })
+      }
       prevInProgressKeyRef.current = inProgressKey
     }
   }, [inProgressIndex, inProgressKey])
@@ -233,6 +276,7 @@ export function StreamPanel({
             <div className="flex items-center gap-2 text-xs text-primary">
               <Loader2 className="size-3 animate-spin" />
               <span>处理中...</span>
+              <TotalTimeIndicator events={events} isRunning={Boolean(isExecuting)} startTime={messageStartTime} />
             </div>
             {isExecuting && onStop && chatRoomId && (
               <button
@@ -303,7 +347,7 @@ export function StreamPanel({
             // 思考过程
             if (event.type === 'thinking') {
               return (
-                <Collapsible key={event.id} className="rounded border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 text-xs">
+                <Collapsible key={event.id} defaultOpen className="rounded border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 text-xs">
                   <CollapsibleTrigger asChild>
                     <div className="group flex items-center gap-2 p-2 cursor-pointer hover:opacity-80">
                       <CollapsibleStateIcon />

@@ -32,6 +32,7 @@ describe('template export service', () => {
           proxyConfig: 'http://127.0.0.1:7890',
           codexModel: null,
           claudeModel: 'claude-sonnet-4',
+          thinkingMode: 'high',
           llmProviderId: 'provider-1',
           speechConfig: null,
           capabilities: [],
@@ -78,6 +79,7 @@ describe('template export service', () => {
           proxyConfig: null,
           codexModel: null,
           claudeModel: 'claude-sonnet-4',
+          thinkingMode: 'high',
           llmProviderId: 'provider-1',
           speechConfig: null,
           capabilities: [],
@@ -130,6 +132,7 @@ describe('template export service', () => {
           proxyConfig: null,
           codexModel: null,
           claudeModel: null,
+          thinkingMode: 'high',
           llmProviderId: null,
           speechConfig: {
             behavior: {
@@ -194,6 +197,7 @@ describe('template export service', () => {
           proxyConfig: null,
           codexModel: null,
           claudeModel: null,
+          thinkingMode: 'high',
           llmProviderId: null,
           speechConfig: {
             behavior: {

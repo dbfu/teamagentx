@@ -34,6 +34,7 @@ interface ChatSidePanelProps {
   setSidePanelMode: (mode: SidePanelMode) => void
   setStreamingViewAgent: (agent: { messageId: string; agentId: string; name: string } | null) => void
   streamingViewAgent: { messageId: string; agentId: string; name: string } | null
+  streamingMessageStartTime?: number
   completedAgents: Set<string>
   streamEvents: Map<string, StreamEvent[]>
   agentStatuses?: Map<string, AgentStatus>
@@ -68,6 +69,7 @@ export function ChatSidePanel({
   setSidePanelMode,
   setStreamingViewAgent,
   streamingViewAgent,
+  streamingMessageStartTime,
   completedAgents,
   streamEvents,
   agentStatuses,
@@ -451,6 +453,7 @@ export function ChatSidePanel({
       {sidePanelMode === 'stream' && (
         <StreamPanel
           streamingViewAgent={streamingViewAgent}
+          messageStartTime={streamingMessageStartTime}
           completedAgents={completedAgents}
           streamEvents={streamEvents}
           chatRoomId={chatRoom.id}

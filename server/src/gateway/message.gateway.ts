@@ -14,6 +14,7 @@ import {
   clearClaudeSdkFileSystemContext,
   clearCodexSdkFileSystemContext,
 } from '../core/agent/agent-handler/index.js';
+import { clearInternalCoordinatorContext } from '../core/agent/agent-handler/internal-coordinator-context.js';
 import { chatRoomService } from '../modules/chatroom/chatroom.service.js';
 import { formatBridgeConversationSender } from '../modules/bridge/bridge-platform-display.js';
 import prisma from '../lib/prisma.js';
@@ -260,6 +261,11 @@ export async function messageGateway(app: FastifyInstance) {
 
           clearExecutorCache(chatRoomAgent.agent.name, chatRoomId);
         }
+
+        await clearInternalCoordinatorContext(chatRoomId, {
+          abortRunning: false,
+          deleteTasksAndExecutions: false,
+        });
       }
     } catch (error) {
       console.error('[MessageGateway] 批量删除消息后清理上下文失败:', error);
@@ -502,6 +508,8 @@ export async function messageGateway(app: FastifyInstance) {
         clearExecutorCache(chatRoomAgent.agent.name, chatRoomId);
         await chatRoomService.updateLastInjectedMessageId(chatRoomId, chatRoomAgent.agent.id, null);
       }
+
+      await clearInternalCoordinatorContext(chatRoomId);
 
       console.log(`[MessageGateway] 已清空群聊 ${chatRoomId} 的所有助手上下文`);
     } catch (error) {

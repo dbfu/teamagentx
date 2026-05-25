@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils'
 import { Image, Loader2, Maximize2, Mic, Minimize2, Send, Square } from 'lucide-react'
-import { MentionInput } from './mention-input'
+import { MentionInput, MentionInputRef } from './mention-input'
 import { ImagePreviewList, PendingImage } from './image-preview-list'
 import { useRef, useState, useEffect, DragEvent, ChangeEvent, ClipboardEvent, memo } from 'react'
 import { useChatStore } from '@/stores/chat-store'
@@ -9,6 +9,7 @@ import { toast } from 'sonner'
 import { getApiBaseUrl } from '@/lib/config'
 import { llmProviderApi } from '@/lib/llm-provider-api'
 import { isLargeInputContent } from './chat-input-collapse'
+import { GitBranchSwitcher } from './git-branch-switcher'
 
 interface MentionAgent {
   id: string
@@ -19,6 +20,8 @@ interface MentionAgent {
 }
 
 interface ChatInputAreaProps {
+  chatRoomId: string
+  chatRoomWorkDir?: string | null
   chatRoomName: string
   handleKeyDown: (e: React.KeyboardEvent) => void
   handleSend: () => void
@@ -30,6 +33,8 @@ interface ChatInputAreaProps {
 }
 
 export const ChatInputArea = memo(function ChatInputArea({
+  chatRoomId,
+  chatRoomWorkDir,
   chatRoomName,
   handleKeyDown,
   handleSend,
@@ -42,6 +47,7 @@ export const ChatInputArea = memo(function ChatInputArea({
   const inputValue = useChatStore((s) => s.inputValue)
   const setInputValue = useChatStore((s) => s.setInputValue)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const mentionInputRef = useRef<MentionInputRef>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const mediaStreamRef = useRef<MediaStream | null>(null)
@@ -53,6 +59,15 @@ export const ChatInputArea = memo(function ChatInputArea({
   const [isInputExpanded, setIsInputExpanded] = useState(false)
   const isMountedRef = useRef(true)   // #31: 组件挂载状态跟踪
   const isMobile = useIsMobile()
+
+  // 切换群聊时自动聚焦输入框
+  useEffect(() => {
+    // 延迟聚焦，等待 DOM 更新完成
+    const timer = setTimeout(() => {
+      mentionInputRef.current?.focus()
+    }, 100)
+    return () => clearTimeout(timer)
+  }, [chatRoomId])
 
   // #30: 组件卸载时清理 MediaRecorder 和媒体流
   useEffect(() => {
@@ -322,6 +337,7 @@ export const ChatInputArea = memo(function ChatInputArea({
 
   const inputEditor = (
     <MentionInput
+      ref={mentionInputRef}
       value={inputValue}
       onChange={setInputValue}
       onKeyDown={handleKeyDown}
@@ -415,6 +431,12 @@ export const ChatInputArea = memo(function ChatInputArea({
           <ImagePreviewList images={pendingImages} onRemove={onImageRemove} />
         </div>
       )}
+
+      <GitBranchSwitcher
+        chatRoomId={chatRoomId}
+        workDir={chatRoomWorkDir}
+        className="mb-1.5 justify-end pr-1"
+      />
 
       <div
         className={cn(
