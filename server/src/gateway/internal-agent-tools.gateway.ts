@@ -3,6 +3,8 @@ import { sendMessageToAgent } from '../core/agent/agent-handler/agent-dispatch.s
 import { isValidInternalAgentToolToken } from '../core/agent/agent-handler/internal-agent-tool-auth.js';
 import { generateImageForAgent } from '../core/agent/image-generation.service.js';
 import { getSystemAssistantTools } from '../core/agent/tools/index.js';
+import { backgroundCommandService } from '../core/shell/background-command.service.js';
+import prisma from '../lib/prisma.js';
 import { z } from 'zod/v4';
 
 interface SendMessageBody {
@@ -34,6 +36,25 @@ interface CallSystemToolBody {
   args?: unknown;
 }
 
+interface StartBackgroundCommandBody {
+  sourceAgentId: string;
+  chatRoomId: string;
+  command: string;
+  workDir: string;
+}
+
+interface BackgroundCommandTaskBody {
+  sourceAgentId: string;
+  chatRoomId: string;
+  taskId: string;
+  tailBytes?: number;
+}
+
+interface ListBackgroundCommandsBody {
+  sourceAgentId: string;
+  chatRoomId: string;
+}
+
 function getInternalToolToken(authorization?: string): string | undefined {
   return authorization?.startsWith('Bearer ')
     ? authorization.slice('Bearer '.length)
@@ -47,6 +68,14 @@ function schemaToJsonSchema(schema: unknown): Record<string, unknown> {
   } catch {
     return { type: 'object', additionalProperties: true };
   }
+}
+
+async function getAgentName(agentId: string): Promise<string> {
+  const agent = await prisma.agent.findUnique({
+    where: {id: agentId},
+    select: {name: true},
+  });
+  return agent?.name || agentId;
 }
 
 export async function internalAgentToolsGateway(app: FastifyInstance) {
@@ -148,6 +177,141 @@ export async function internalAgentToolsGateway(app: FastifyInstance) {
     } catch (error) {
       const message = error instanceof Error ? error.message : '工具执行失败';
       return reply.code(400).send({ success: false, error: message });
+    }
+  });
+
+  app.post<{ Body: StartBackgroundCommandBody }>('/internal/agent-tools/background-command/start', {
+    schema: {
+      description: '内部接口：启动助手后台 shell 命令',
+      tags: ['Internal Agent Tools'],
+      body: {
+        type: 'object',
+        required: ['sourceAgentId', 'chatRoomId', 'command', 'workDir'],
+        properties: {
+          sourceAgentId: {type: 'string'},
+          chatRoomId: {type: 'string'},
+          command: {type: 'string'},
+          workDir: {type: 'string'},
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const token = getInternalToolToken(request.headers.authorization);
+    if (!isValidInternalAgentToolToken(token)) {
+      return reply.code(401).send({success: false, error: 'Unauthorized'});
+    }
+
+    try {
+      const task = await backgroundCommandService.start({
+        chatRoomId: request.body.chatRoomId,
+        agentId: request.body.sourceAgentId,
+        agentName: await getAgentName(request.body.sourceAgentId),
+        command: request.body.command,
+        workDir: request.body.workDir,
+      });
+      return reply.send({success: true, data: task});
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '后台命令启动失败';
+      return reply.code(400).send({success: false, error: message});
+    }
+  });
+
+  app.post<{ Body: BackgroundCommandTaskBody }>('/internal/agent-tools/background-command/read', {
+    schema: {
+      description: '内部接口：读取助手后台 shell 命令输出',
+      tags: ['Internal Agent Tools'],
+      body: {
+        type: 'object',
+        required: ['sourceAgentId', 'chatRoomId', 'taskId'],
+        properties: {
+          sourceAgentId: {type: 'string'},
+          chatRoomId: {type: 'string'},
+          taskId: {type: 'string'},
+          tailBytes: {type: 'integer', minimum: 1},
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const token = getInternalToolToken(request.headers.authorization);
+    if (!isValidInternalAgentToolToken(token)) {
+      return reply.code(401).send({success: false, error: 'Unauthorized'});
+    }
+
+    try {
+      const task = await backgroundCommandService.read(
+        request.body.taskId,
+        request.body.chatRoomId,
+        request.body.sourceAgentId,
+        request.body.tailBytes,
+      );
+      return reply.send({success: true, data: task});
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '读取后台命令失败';
+      return reply.code(400).send({success: false, error: message});
+    }
+  });
+
+  app.post<{ Body: BackgroundCommandTaskBody }>('/internal/agent-tools/background-command/stop', {
+    schema: {
+      description: '内部接口：停止助手后台 shell 命令',
+      tags: ['Internal Agent Tools'],
+      body: {
+        type: 'object',
+        required: ['sourceAgentId', 'chatRoomId', 'taskId'],
+        properties: {
+          sourceAgentId: {type: 'string'},
+          chatRoomId: {type: 'string'},
+          taskId: {type: 'string'},
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const token = getInternalToolToken(request.headers.authorization);
+    if (!isValidInternalAgentToolToken(token)) {
+      return reply.code(401).send({success: false, error: 'Unauthorized'});
+    }
+
+    try {
+      const task = await backgroundCommandService.stop(
+        request.body.taskId,
+        request.body.chatRoomId,
+        request.body.sourceAgentId,
+      );
+      return reply.send({success: true, data: task});
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '停止后台命令失败';
+      return reply.code(400).send({success: false, error: message});
+    }
+  });
+
+  app.post<{ Body: ListBackgroundCommandsBody }>('/internal/agent-tools/background-command/list', {
+    schema: {
+      description: '内部接口：列出助手后台 shell 命令',
+      tags: ['Internal Agent Tools'],
+      body: {
+        type: 'object',
+        required: ['sourceAgentId', 'chatRoomId'],
+        properties: {
+          sourceAgentId: {type: 'string'},
+          chatRoomId: {type: 'string'},
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const token = getInternalToolToken(request.headers.authorization);
+    if (!isValidInternalAgentToolToken(token)) {
+      return reply.code(401).send({success: false, error: 'Unauthorized'});
+    }
+
+    try {
+      const tasks = await backgroundCommandService.list(
+        request.body.chatRoomId,
+        request.body.sourceAgentId,
+      );
+      return reply.send({success: true, data: {tasks}});
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '列出后台命令失败';
+      return reply.code(400).send({success: false, error: message});
     }
   });
 

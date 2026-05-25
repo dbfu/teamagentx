@@ -74,6 +74,10 @@ describe('Codex SDK Executor builtin MCP servers', () => {
           { agentId: 'agent-2', name: 'Claude' },
         ],
         generateImageEndpoint: 'http://127.0.0.1:3001/internal/agent-tools/generate-image',
+        backgroundCommandStartEndpoint: 'http://127.0.0.1:3001/internal/agent-tools/background-command/start',
+        backgroundCommandReadEndpoint: 'http://127.0.0.1:3001/internal/agent-tools/background-command/read',
+        backgroundCommandStopEndpoint: 'http://127.0.0.1:3001/internal/agent-tools/background-command/stop',
+        backgroundCommandListEndpoint: 'http://127.0.0.1:3001/internal/agent-tools/background-command/list',
       }) as Record<string, any>;
 
       assert.strictEqual(mcpServers.gitnexus.command, gitnexusPath);
@@ -84,6 +88,11 @@ describe('Codex SDK Executor builtin MCP servers', () => {
       assert.strictEqual(
         mcpServers.tax.env.TEAMAGENTX_GENERATE_IMAGE_ENDPOINT,
         'http://127.0.0.1:3001/internal/agent-tools/generate-image',
+      );
+      assert.strictEqual(mcpServers.tax.env.TEAMAGENTX_WORK_DIR, repoDir);
+      assert.strictEqual(
+        mcpServers.tax.env.TEAMAGENTX_BACKGROUND_COMMAND_START_ENDPOINT,
+        'http://127.0.0.1:3001/internal/agent-tools/background-command/start',
       );
       assert.ok(mcpServers.tax.env.TEAMAGENTX_INTERNAL_TOOL_TOKEN);
     } finally {

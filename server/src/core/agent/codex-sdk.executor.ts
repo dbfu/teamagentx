@@ -125,6 +125,10 @@ interface CodexBuiltinMcpServerContext {
   generateImageEndpoint?: string;
   systemToolsListEndpoint?: string;
   systemToolsCallEndpoint?: string;
+  backgroundCommandStartEndpoint?: string;
+  backgroundCommandReadEndpoint?: string;
+  backgroundCommandStopEndpoint?: string;
+  backgroundCommandListEndpoint?: string;
 }
 
 interface CodexBuiltinMcpServerDefinition {
@@ -289,14 +293,19 @@ const BUILTIN_CODEX_MCP_SERVERS: CodexBuiltinMcpServerDefinition[] = [
   {
     name: 'tax',
     build: ({
+      workDir,
       teamAgentXMcpServerPath,
       chatRoomId,
       agentId,
       generateImageEndpoint,
       systemToolsListEndpoint,
       systemToolsCallEndpoint,
+      backgroundCommandStartEndpoint,
+      backgroundCommandReadEndpoint,
+      backgroundCommandStopEndpoint,
+      backgroundCommandListEndpoint,
     }) => {
-      if (!generateImageEndpoint && !systemToolsListEndpoint) return undefined;
+      if (!generateImageEndpoint && !systemToolsListEndpoint && !backgroundCommandStartEndpoint) return undefined;
 
       return {
         command: process.execPath,
@@ -304,9 +313,14 @@ const BUILTIN_CODEX_MCP_SERVERS: CodexBuiltinMcpServerDefinition[] = [
         env: {
           TEAMAGENTX_CHAT_ROOM_ID: chatRoomId,
           TEAMAGENTX_SOURCE_AGENT_ID: agentId || '',
+          TEAMAGENTX_WORK_DIR: workDir,
           TEAMAGENTX_GENERATE_IMAGE_ENDPOINT: generateImageEndpoint,
           TEAMAGENTX_SYSTEM_TOOLS_LIST_ENDPOINT: systemToolsListEndpoint,
           TEAMAGENTX_SYSTEM_TOOLS_CALL_ENDPOINT: systemToolsCallEndpoint,
+          TEAMAGENTX_BACKGROUND_COMMAND_START_ENDPOINT: backgroundCommandStartEndpoint,
+          TEAMAGENTX_BACKGROUND_COMMAND_READ_ENDPOINT: backgroundCommandReadEndpoint,
+          TEAMAGENTX_BACKGROUND_COMMAND_STOP_ENDPOINT: backgroundCommandStopEndpoint,
+          TEAMAGENTX_BACKGROUND_COMMAND_LIST_ENDPOINT: backgroundCommandListEndpoint,
           TEAMAGENTX_INTERNAL_TOOL_TOKEN: getInternalAgentToolToken(),
         },
       };
@@ -783,7 +797,10 @@ ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
 
 ## Working Directory
 Your working directory is: ${this.workDir}
-When you perform file operations or run commands, operate in this directory by default. Resolve relative paths from this directory.`;
+When you perform file operations or run commands, operate in this directory by default. Resolve relative paths from this directory.
+
+## Background Commands
+For long-running services or commands that should keep running after this turn, such as \`pnpm dev\`, \`npm run dev\`, \`vite\`, \`next dev\`, watch modes, servers, listeners, and \`tail -f\`, use the MCP tool \`start_background_command\` instead of running the command directly in the shell. Use \`read_background_command_output\` to inspect logs, \`list_background_commands\` to find existing tasks, and \`stop_background_command\` when the user asks to stop one. Do not block the turn waiting for a dev server to exit.`;
 
     this.ensureWorkDirectory();
     this.threadId = this.loadThreadId();
@@ -884,9 +901,14 @@ When you perform file operations or run commands, operate in this directory by d
 const generateImageEndpoint = process.env.TEAMAGENTX_GENERATE_IMAGE_ENDPOINT;
 const systemToolsListEndpoint = process.env.TEAMAGENTX_SYSTEM_TOOLS_LIST_ENDPOINT;
 const systemToolsCallEndpoint = process.env.TEAMAGENTX_SYSTEM_TOOLS_CALL_ENDPOINT;
+const backgroundCommandStartEndpoint = process.env.TEAMAGENTX_BACKGROUND_COMMAND_START_ENDPOINT;
+const backgroundCommandReadEndpoint = process.env.TEAMAGENTX_BACKGROUND_COMMAND_READ_ENDPOINT;
+const backgroundCommandStopEndpoint = process.env.TEAMAGENTX_BACKGROUND_COMMAND_STOP_ENDPOINT;
+const backgroundCommandListEndpoint = process.env.TEAMAGENTX_BACKGROUND_COMMAND_LIST_ENDPOINT;
 const token = process.env.TEAMAGENTX_INTERNAL_TOOL_TOKEN;
 const sourceAgentId = process.env.TEAMAGENTX_SOURCE_AGENT_ID;
 const chatRoomId = process.env.TEAMAGENTX_CHAT_ROOM_ID;
+const workDir = process.env.TEAMAGENTX_WORK_DIR;
 
 function write(message) {
   process.stdout.write(JSON.stringify(message) + "\\n");
@@ -997,6 +1019,36 @@ async function callSystemTool(name, args) {
   }
 }
 
+async function callBackgroundCommand(endpoint, args) {
+  if (!endpoint || !token || !sourceAgentId || !chatRoomId) {
+    return toolResult("Background command tools are not available.", {}, true);
+  }
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer " + token,
+      },
+      body: JSON.stringify({
+        sourceAgentId,
+        chatRoomId,
+        workDir,
+        ...args,
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.success === false) {
+      return toolResult(payload.error || "Background command operation failed.", payload, true);
+    }
+    const result = payload.data ?? payload;
+    return toolResult(stringifyPayload(result), result, false);
+  } catch (error) {
+    return toolResult(error instanceof Error ? error.message : "Background command operation failed.", {}, true);
+  }
+}
+
 async function handle(request) {
   const { id, method, params } = request;
   if (!method) return;
@@ -1038,6 +1090,54 @@ async function handle(request) {
         },
       });
     }
+    if (backgroundCommandStartEndpoint) {
+      tools.push({
+        name: "start_background_command",
+        description: "Start a long-running shell command in the TeamAgentX background task manager. Use this for dev servers, watch commands, tail -f, and services that should keep running after this turn.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            command: { type: "string", description: "Shell command to run in the current working directory." },
+          },
+          required: ["command"],
+          additionalProperties: false,
+        },
+      });
+      tools.push({
+        name: "read_background_command_output",
+        description: "Read the latest stdout and stderr from a background command started with start_background_command.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            taskId: { type: "string", description: "Background task ID returned by start_background_command." },
+            tailBytes: { type: "number", description: "Maximum bytes to read from the end of each output stream. Default 12288." },
+          },
+          required: ["taskId"],
+          additionalProperties: false,
+        },
+      });
+      tools.push({
+        name: "stop_background_command",
+        description: "Stop a running background command by task ID.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            taskId: { type: "string", description: "Background task ID returned by start_background_command." },
+          },
+          required: ["taskId"],
+          additionalProperties: false,
+        },
+      });
+      tools.push({
+        name: "list_background_commands",
+        description: "List recent background commands started by this assistant in this chatroom.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+          additionalProperties: false,
+        },
+      });
+    }
     const systemTools = await listSystemTools();
     for (const systemTool of systemTools) {
       if (!systemTool?.name || tools.some((tool) => tool.name === systemTool.name)) continue;
@@ -1062,6 +1162,26 @@ async function handle(request) {
     const args = params?.arguments || {};
     if (name === "generate_image") {
       const result = await callGenerateImage(args);
+      write({ jsonrpc: "2.0", id, result });
+      return;
+    }
+    if (name === "start_background_command") {
+      const result = await callBackgroundCommand(backgroundCommandStartEndpoint, args);
+      write({ jsonrpc: "2.0", id, result });
+      return;
+    }
+    if (name === "read_background_command_output") {
+      const result = await callBackgroundCommand(backgroundCommandReadEndpoint, args);
+      write({ jsonrpc: "2.0", id, result });
+      return;
+    }
+    if (name === "stop_background_command") {
+      const result = await callBackgroundCommand(backgroundCommandStopEndpoint, args);
+      write({ jsonrpc: "2.0", id, result });
+      return;
+    }
+    if (name === "list_background_commands") {
+      const result = await callBackgroundCommand(backgroundCommandListEndpoint, args);
       write({ jsonrpc: "2.0", id, result });
       return;
     }
@@ -1388,6 +1508,10 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       : undefined;
     const systemToolsListEndpoint = `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/system-tools/list`;
     const systemToolsCallEndpoint = `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/system-tools/call`;
+    const backgroundCommandStartEndpoint = `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/background-command/start`;
+    const backgroundCommandReadEndpoint = `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/background-command/read`;
+    const backgroundCommandStopEndpoint = `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/background-command/stop`;
+    const backgroundCommandListEndpoint = `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/background-command/list`;
     const builtinMcpServers = buildBuiltinCodexMcpServerConfigs({
       workDir: this.workDir,
       teamAgentXMcpServerPath: mcpServerPath,
@@ -1398,6 +1522,10 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       generateImageEndpoint,
       systemToolsListEndpoint,
       systemToolsCallEndpoint,
+      backgroundCommandStartEndpoint,
+      backgroundCommandReadEndpoint,
+      backgroundCommandStopEndpoint,
+      backgroundCommandListEndpoint,
     });
     const config = {
       hide_agent_reasoning: this.thinkingMode === 'off',
