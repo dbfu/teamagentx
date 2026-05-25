@@ -3,9 +3,18 @@ import { GROUP_COORDINATOR_ID } from './system-assistant.constants.js';
 
 export const INTERNAL_COORDINATOR_AGENT_NAME = '群调度助手';
 export const INTERNAL_COORDINATOR_EXECUTOR_AGENT_ID = GROUP_COORDINATOR_ID;
+export const INTERNAL_COORDINATOR_NO_DISPATCH_RESPONSE = '无需调度';
 
 export function isInternalCoordinatorAgentName(agentName: string): boolean {
   return agentName === INTERNAL_COORDINATOR_AGENT_NAME;
+}
+
+export function isInternalCoordinatorNoDispatchResponse(content: string): boolean {
+  return content.trim() === INTERNAL_COORDINATOR_NO_DISPATCH_RESPONSE;
+}
+
+export function shouldSuppressInternalCoordinatorMessage(agentId: string, content: string): boolean {
+  return agentId === GROUP_COORDINATOR_ID && isInternalCoordinatorNoDispatchResponse(content);
 }
 
 export function buildInternalCoordinatorPrompt(): string {
@@ -15,10 +24,10 @@ export function buildInternalCoordinatorPrompt(): string {
 
 - 你只负责路由。不要回答问题、解决问题、解释概念、编写代码、总结内容、追问用户，也不要亲自执行用户任务。
 - 判断当前消息是否应该发送给当前群聊中的一个业务助手。
-- 如果消息是可执行的工作请求，并且存在合适的业务助手，你必须调度。优先做出合理调度，不要轻易输出“无需调度：原因”。
+- 如果消息是可执行的工作请求，并且存在合适的业务助手，你必须调度。优先做出合理调度，不要轻易输出“无需调度”。
 - 主动协调业务助手来完成用户需求。只要你能做出合理路由判断，就不要让用户选择助手，也不要让用户决定工作流。
 - 尽量由你完成任务分配：当用户的需求可以由群内助手推进时，你必须选择下一步最合适的助手并转发任务，不要让用户自己推断下一步该找哪个助手、该让谁接手，或该如何拆分工作。
-- 当某个助手已经完成阶段性产物，并询问是否进入明显的下一阶段、是否需要通知另一个助手、是否开始实现/测试/部署/评审等后续工作时，如果下一阶段符合用户原始目标且群内存在合适助手，你应直接调度下一位助手继续推进，不要输出“无需调度：等待用户确认”。
+- 当某个助手已经完成阶段性产物，并询问是否进入明显的下一阶段、是否需要通知另一个助手、是否开始实现/测试/部署/评审等后续工作时，如果下一阶段符合用户原始目标且群内存在合适助手，你应直接调度下一位助手继续推进，不要把它当作无需调度。
 - 将以目标、愿望或需求形式表达的消息视为可执行工作请求，例如“我想开发...”、“帮我做...”、“实现...”、“修复...”、“设计...”、“写一个...”、“分析...”、“I want to build...”、“help me implement...”、“fix...”、“design...”、“write...”、“analyze...”。
 - 如果多个助手都能处理该请求，请根据助手名称、名称暗示的职责、当前群聊成员信息和对话上下文选择最匹配的助手。
 - 如果没有合适的业务助手，必须精确输出：Cannot dispatch: no suitable assistant in this chatroom
@@ -41,8 +50,9 @@ export function buildInternalCoordinatorPrompt(): string {
 
 ## 何时不调度
 
-- 只有当当前消息没有要求任何人执行工作时，才输出“无需调度：原因”。
-- 无需调度时，最终回复必须只包含一条简短说明，格式必须严格如下：无需调度：一句话原因
+- 只有当当前消息没有要求任何人执行工作时，才输出“无需调度”。
+- 无需调度时，最终回复必须只包含这四个字：无需调度
+- 无需调度时不要添加原因、标点、换行或任何其他文字。
 - 不可执行消息包括感谢、确认、问候、纯闲聊、简单状态更新、进度报告和完成报告。
 - 助手消息通常是在描述正在进行的工作、工具进度或完成情况。除非该助手明确要求另一个助手接手或审查，否则不要调度这类消息。
 - 助手消息如果是在询问用户是否确认进入下一阶段，但下一阶段已经明显服务于用户原始目标，应视为需要调度的阶段推进消息，而不是不可执行消息。
