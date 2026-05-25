@@ -60,7 +60,8 @@ export function MobileTabBar({ messageBadge }: MobileTabBarProps) {
       {tabs.map((tab) => {
         const Icon = tab.icon
         const isActive = activeTab === tab.id
-        const showBadge = tab.id === 'message' && messageBadge !== undefined && messageBadge > 0
+        const badge = tab.id === 'message' ? messageBadge : undefined
+        const showBadge = badge !== undefined && badge > 0
 
         return (
           <button
@@ -74,8 +75,11 @@ export function MobileTabBar({ messageBadge }: MobileTabBarProps) {
             <div className="relative">
               <Icon className="size-6" />
               {showBadge && (
-                <span className="absolute -right-2 -top-1.5 flex size-5 items-center justify-center rounded-full bg-red-500 text-[11px] font-medium text-white">
-                  {messageBadge! > 99 ? '99+' : messageBadge}
+                <span className={cn(
+                  'absolute -right-2 -top-1.5 flex size-5 items-center justify-center rounded-full text-[11px] font-medium text-white',
+                  'bg-red-500'
+                )}>
+                  {badge! > 99 ? '99+' : badge}
                 </span>
               )}
             </div>

@@ -31,6 +31,9 @@ export let globalEmitThinking:
 export let globalEmitStatus:
   | ((data: { chatRoomId: string; statuses: Record<string, AgentStatus>; queueCounts?: Record<string, number> }, chatRoomId2: string) => void)
   | null = null;
+export let globalEmitTodoCreated:
+  | ((todo: any, userId: string) => void)
+  | null = null;
 
 // 广播群聊创建的回调
 export let globalEmitChatRoomCreated:
@@ -71,6 +74,7 @@ export function setGlobalCallbacks(callbacks: {
   emitToolCall: (data: { messageId: string; agentId: string; agentName: string; toolCall: any }, chatRoomId: string) => void;
   emitThinking: (data: { messageId: string; agentId: string; agentName: string; thinking: string }, chatRoomId: string) => void;
   emitStatus: (data: { chatRoomId: string; statuses: Record<string, AgentStatus>; queueCounts?: Record<string, number> }, chatRoomId2: string) => void;
+  emitTodoCreated: (todo: any, userId: string) => void;
   broadcastTaskQueue: (chatRoomId: string, agentId: string, tasks: { id: string; messageId: string; messageContent: string; status: string; createdAt: string }[]) => void;
   emitChatRoomCreated: (chatRoom: any) => void;
   emitAgentsUpdated: (chatRoomId: string) => void;
@@ -82,6 +86,7 @@ export function setGlobalCallbacks(callbacks: {
   globalEmitToolCall = callbacks.emitToolCall;
   globalEmitThinking = callbacks.emitThinking;
   globalEmitStatus = callbacks.emitStatus;
+  globalEmitTodoCreated = callbacks.emitTodoCreated;
   globalBroadcastTaskQueue = callbacks.broadcastTaskQueue;
   globalEmitChatRoomCreated = callbacks.emitChatRoomCreated;
   globalEmitAgentsUpdated = callbacks.emitAgentsUpdated;

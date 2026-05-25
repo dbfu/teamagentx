@@ -5,6 +5,7 @@ import { executionRecordService, type ExecutionEvent } from '../../../modules/ex
 import { recoveryService } from '../../../modules/recovery/recovery.service.js';
 import { stopTypingLoop } from '../../../modules/bridge/typing-loop.js';
 import { messageService } from '../../../modules/message/message.service.js';
+import { todoService } from '../../../modules/todo/todo.service.js';
 import { agentService } from '../agent.service.js';
 import {
   processingMap,
@@ -20,6 +21,7 @@ import {
   globalEmitToolCall,
   globalEmitThinking,
   globalEmitStatus,
+  globalEmitTodoCreated,
   globalBroadcastTaskQueue,
   broadcastAgentStatus,
   broadcastAgentTaskQueue,
@@ -193,6 +195,29 @@ export async function processQueue(chatRoomId: string, agentId: string) {
                 agentId: task.agentId,
                 agentName: task.agentName,
               });
+            }
+
+            try {
+              const todo = await todoService.createFromMentionedUser({
+                chatRoomId,
+                messageId: aiMessage.id,
+                messageTime: aiMessage.time,
+                triggerAgentId: task.agentId,
+                triggerAgentName: task.agentName,
+                content,
+              });
+
+              if (todo?.ownerUserId && globalEmitTodoCreated) {
+                globalEmitTodoCreated(todo, todo.ownerUserId);
+                debugLog('todoCreated', {
+                  chatRoomId,
+                  messageId: aiMessage.id,
+                  todoId: todo.id,
+                  ownerUserId: todo.ownerUserId,
+                });
+              }
+            } catch (todoError) {
+              console.error('Failed to check/create todo:', todoError);
             }
 
             // 更新恢复服务状态（Agent 发送了消息）

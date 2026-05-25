@@ -66,6 +66,15 @@ describe('internal coordinator no-dispatch handling', () => {
     assert.match(prompt, /不得添加、删除、改写任何内容/);
   });
 
+  test('prompt requires mentioning the chatroom owner for human answers', () => {
+    const prompt = buildInternalCoordinatorPrompt();
+
+    assert.match(prompt, /需要人类用户回答问题或确认事项/);
+    assert.match(prompt, /最终回复必须提及群主/);
+    assert.match(prompt, /不要为了提问或确认而 @其他人类成员/);
+    assert.match(prompt, /不要把需要用户回答或确认的问题输出为“无需调度”/);
+  });
+
   test('suppresses only exact internal coordinator no-dispatch output', () => {
     assert.equal(
       shouldSuppressInternalCoordinatorMessage(

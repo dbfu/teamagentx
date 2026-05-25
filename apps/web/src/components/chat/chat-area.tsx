@@ -10,8 +10,10 @@ import { RoomRulesDialog } from './dialogs/room-rules-dialog'
 import { StopAllTasksDialog } from './dialogs/stop-all-tasks-dialog'
 import { ScreenshotModal } from './screenshot-modal'
 import { useSocketStore, useChatRoomStore } from '@/stores'
-import { useMemo, useState } from 'react'
+import { useChatStore } from '@/stores/chat-store'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
+import { AtSign } from 'lucide-react'
 
 interface ChatAreaProps {
   chatRoom?: ChatRoom
@@ -21,12 +23,16 @@ interface ChatAreaProps {
 }
 
 export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobile }: ChatAreaProps) {
-  const { user: currentUser, stopAgent } = useSocketStore()
+  const { user: currentUser, stopAgent, completeTodo } = useSocketStore()
+  const todos = useSocketStore((s) => s.todos)
+  const setScrollToMessageId = useChatStore((s) => s.setScrollToMessageId)
   const selectRoom = useChatRoomStore((s) => s.selectRoom)
   const [showRoomRules, setShowRoomRules] = useState(false)
   const [showScreenshot, setShowScreenshot] = useState(false)
   const [showStopAllConfirm, setShowStopAllConfirm] = useState(false)
   const [stopAllTargetAgentIds, setStopAllTargetAgentIds] = useState<string[]>([])
+  const [visibleOwnerMentionTodoIds, setVisibleOwnerMentionTodoIds] = useState<Set<string>>(new Set())
+  const completingVisibleTodoIdsRef = useRef<Set<string>>(new Set())
   const {
     inputValue,
     setInputValue,
@@ -120,6 +126,89 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
     const timestamp = new Date(message.time).getTime()
     return Number.isFinite(timestamp) ? timestamp : undefined
   }, [messages, streamingViewAgent])
+
+  const pendingOwnerMentionTodos = useMemo(() => {
+    if (!chatRoom) return []
+    return todos
+      .filter((todo) => todo.chatRoomId === chatRoom.id && todo.status === 'pending')
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+  }, [chatRoom, todos])
+  const ownerMentionTodos = useMemo(
+    () => pendingOwnerMentionTodos.filter((todo) => !visibleOwnerMentionTodoIds.has(todo.id)),
+    [pendingOwnerMentionTodos, visibleOwnerMentionTodoIds],
+  )
+  const ownerMentionTodo = ownerMentionTodos[0] ?? null
+
+  useEffect(() => {
+    if (!chatRoom || pendingOwnerMentionTodos.length === 0) {
+      setVisibleOwnerMentionTodoIds(new Set())
+      return
+    }
+
+    let frameId: number | null = null
+
+    const isMessageVisible = (messageId: string) => {
+      const escapedId = typeof CSS !== 'undefined' && CSS.escape
+        ? CSS.escape(messageId)
+        : messageId.replace(/"/g, '\\"')
+      const element = document.querySelector(`[data-message-id="${escapedId}"]`)
+      if (!element) return false
+
+      const rect = element.getBoundingClientRect()
+      const topLimit = isMobile ? 56 : 72
+      const bottomLimit = window.innerHeight - (isMobile ? 96 : 112)
+      return rect.bottom > topLimit && rect.top < bottomLimit
+    }
+
+    const checkVisibleMentions = () => {
+      frameId = null
+      const visibleIds = new Set<string>()
+
+      for (const todo of pendingOwnerMentionTodos) {
+        if (!isMessageVisible(todo.messageId)) continue
+
+        visibleIds.add(todo.id)
+        if (!completingVisibleTodoIdsRef.current.has(todo.id)) {
+          completingVisibleTodoIdsRef.current.add(todo.id)
+          completeTodo(todo.id)
+        }
+      }
+
+      setVisibleOwnerMentionTodoIds((previousIds) => {
+        if (
+          previousIds.size === visibleIds.size
+          && [...visibleIds].every((id) => previousIds.has(id))
+        ) {
+          return previousIds
+        }
+        return visibleIds
+      })
+    }
+
+    const scheduleCheck = () => {
+      if (frameId !== null) return
+      frameId = requestAnimationFrame(checkVisibleMentions)
+    }
+
+    scheduleCheck()
+    document.addEventListener('scroll', scheduleCheck, true)
+    window.addEventListener('resize', scheduleCheck)
+
+    return () => {
+      if (frameId !== null) {
+        cancelAnimationFrame(frameId)
+      }
+      document.removeEventListener('scroll', scheduleCheck, true)
+      window.removeEventListener('resize', scheduleCheck)
+    }
+  }, [chatRoom, completeTodo, isMobile, pendingOwnerMentionTodos])
+
+  const handleOwnerMentionClick = () => {
+    if (!ownerMentionTodo) return
+
+    setScrollToMessageId(ownerMentionTodo.messageId)
+    completeTodo(ownerMentionTodo.id)
+  }
 
   const handleStopAllTasks = () => {
     if (!chatRoom || activeTaskAgentIds.length === 0) return
@@ -238,7 +327,24 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
       <div className={cn("flex flex-1", isMobile ? "min-h-0" : "overflow-hidden")}>
         {/* Messages and Input area */}
         {!isTaskBoardOpen && (
-          <div className="flex flex-1 flex-col min-w-0 bg-background">
+          <div className="relative flex flex-1 flex-col min-w-0 bg-background">
+            {ownerMentionTodo && (
+              <div className="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2">
+                <button
+                  type="button"
+                  onClick={handleOwnerMentionClick}
+                  className="pointer-events-auto flex items-center gap-2 rounded-full border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-medium text-orange-700 shadow-lg shadow-orange-500/10 transition-colors hover:bg-orange-100 dark:border-orange-900/60 dark:bg-orange-950/80 dark:text-orange-200 dark:hover:bg-orange-900/80"
+                >
+                  <AtSign className="size-3.5" />
+                  <span>
+                    {ownerMentionTodos.length > 1
+                      ? `${ownerMentionTodos.length} 条 @群主`
+                      : `${ownerMentionTodo.triggerAgentName} @群主`}
+                  </span>
+                </button>
+              </div>
+            )}
+
             {/* Messages */}
             <ChatMessagesList
               chatRoomId={chatRoom.id}

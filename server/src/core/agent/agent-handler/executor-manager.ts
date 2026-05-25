@@ -75,7 +75,22 @@ export async function getExecutor(
 
   // 获取群聊配置
   const chatRoom = await chatRoomService.findById(chatRoomId);
-  const chatRoomRules = chatRoom?.rules ?? undefined;
+  const roomHumanNames = new Set<string>();
+  const roomOwnerUsername = chatRoom?.owner?.username;
+  if (chatRoom?.owner?.username) {
+    roomHumanNames.add(chatRoom.owner.username);
+  }
+  for (const member of chatRoom?.chatRoomAgents ?? []) {
+    if (member.user?.username) {
+      roomHumanNames.add(member.user.username);
+    }
+  }
+  const humanMentionInstruction = roomOwnerUsername
+    ? `When you need a human user to answer a question or confirm something, mention the chatroom owner in your final reply as @${roomOwnerUsername}. Do not mention other human members for questions or confirmations unless the user explicitly asked you to contact a different person. Mentionable human users in this chatroom: ${[...roomHumanNames].join(', ')}. A mentioned user will receive a todo reminder.`
+    : '';
+  const chatRoomRules = [chatRoom?.rules?.trim(), humanMentionInstruction]
+    .filter((rule): rule is string => Boolean(rule))
+    .join('\n\n') || undefined;
   const chatRoomWorkDir = chatRoom?.workDir ?? undefined;
 
   // Get all agents in this chatRoom

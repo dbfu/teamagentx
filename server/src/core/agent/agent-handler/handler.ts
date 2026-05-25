@@ -69,6 +69,7 @@ export function setupAIHandlers(
     data: { chatRoomId: string; statuses: Record<string, AgentStatus>; queueCounts?: Record<string, number> },
     chatRoomId2: string,
   ) => void,
+  emitTodoCreated: (todo: any, userId: string) => void,
   broadcastTaskQueue: (
     chatRoomId: string,
     agentId: string,
@@ -86,6 +87,7 @@ export function setupAIHandlers(
     emitToolCall,
     emitThinking,
     emitStatus,
+    emitTodoCreated,
     broadcastTaskQueue,
     emitChatRoomCreated,
     emitAgentsUpdated,

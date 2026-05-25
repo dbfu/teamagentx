@@ -34,6 +34,8 @@ import { ChatRoom, Message } from './lib/agent-api'
 import { getVisibleChatRoomId, isActivelyViewingChatRoom } from './lib/chat-room-presence'
 import { useAuthStore, useChatRoomStore, useSocketStore, useUIStore } from './stores'
 import { useChatStore } from './stores/chat-store'
+import { TodoData } from './stores/socket-store'
+import { toast } from 'sonner'
 
 const EMPTY_MESSAGES: Message[] = []
 
@@ -364,7 +366,7 @@ function AppContent() {
   const updateUnreadCount = useChatStore((s) => s.updateUnreadCount)
   const executingChatRooms = useChatStore((s) => s.executingChatRooms)
   const setScrollToMessageId = useChatStore((s) => s.setScrollToMessageId)
-  const { isConnected, onUnreadUpdate, requestUnreadCounts, markChatRoomRead, onMessage, onChatRoomCreated, onAgentsUpdated, onAgentStatus, user: socketUser } = useSocketStore()
+  const { isConnected, onUnreadUpdate, requestUnreadCounts, markChatRoomRead, onMessage, onChatRoomCreated, onAgentsUpdated, onAgentStatus, requestTodos, onTodoList, onTodoCreated, onTodoUpdated, completeTodo, user: socketUser } = useSocketStore()
   const { user } = useAuthStore()
   const visibleChatRoomId = useMemo(() => {
     return getVisibleChatRoomId(location.pathname, isMobile ? null : selectedRoomId)
@@ -585,9 +587,49 @@ function AppContent() {
   useEffect(() => {
     if (isConnected) {
       requestUnreadCounts()
+      requestTodos()
       updateManager.checkForUpdates({ silent: true, reason: 'socket-connected' })
     }
-  }, [isConnected, requestUnreadCounts])
+  }, [isConnected, requestTodos, requestUnreadCounts])
+
+  // 监听待办事件
+  useEffect(() => {
+    if (!isConnected) return
+
+    const unsubList = onTodoList((data) => {
+      useSocketStore.setState({ todos: data.todos })
+    })
+    const unsubCreated = onTodoCreated((todo: TodoData) => {
+      const alreadyExists = useSocketStore.getState().todos.some((item) => item.id === todo.id)
+      useSocketStore.setState((state) => {
+        if (state.todos.some((item) => item.id === todo.id)) return state
+        return { todos: [todo, ...state.todos] }
+      })
+      if (!alreadyExists && !isVisibleChatRoomActive(todo.chatRoomId)) {
+        toast.info('有人 @ 你', {
+          description: `${todo.triggerAgentName} 在「${todo.chatRoomName}」提到了你`,
+          action: {
+            label: '查看',
+            onClick: () => {
+              completeTodo(todo.id)
+              navigate(`/?room=${todo.chatRoomId}&msg=${todo.messageId}`)
+            },
+          },
+        })
+      }
+    })
+    const unsubUpdated = onTodoUpdated((data) => {
+      useSocketStore.setState((state) => ({
+        todos: state.todos.filter((todo) => todo.id !== data.todoId),
+      }))
+    })
+
+    return () => {
+      unsubList()
+      unsubCreated()
+      unsubUpdated()
+    }
+  }, [completeTodo, isConnected, isVisibleChatRoomActive, navigate, onTodoCreated, onTodoList, onTodoUpdated])
 
   // Electron 运行中低频补充检查更新：窗口聚焦、页面可见、网络恢复。
   useEffect(() => {
@@ -618,7 +660,6 @@ function AppContent() {
 
   // 计算总未读数
   const totalUnreadCount = Object.values(unreadCounts).reduce((sum, count) => sum + count, 0)
-
   // 移动端导航到群聊
   const handleMobileNavigateToChatRoom = (roomId: string) => {
     selectRoomAndClearUnread(roomId)
