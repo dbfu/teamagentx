@@ -31,7 +31,7 @@ import { SetupWizard } from './components/setup/setup-wizard'
 import { UpdateNotification } from './components/update/update-notification'
 import { isElectron, waitForServer } from './lib/config'
 import { ChatRoom, Message } from './lib/agent-api'
-import { getVisibleChatRoomId } from './lib/chat-room-presence'
+import { getVisibleChatRoomId, isActivelyViewingChatRoom } from './lib/chat-room-presence'
 import { useAuthStore, useChatRoomStore, useSocketStore, useUIStore } from './stores'
 import { useChatStore } from './stores/chat-store'
 
@@ -357,13 +357,21 @@ function AppContent() {
   const updateUnreadCount = useChatStore((s) => s.updateUnreadCount)
   const executingChatRooms = useChatStore((s) => s.executingChatRooms)
   const setScrollToMessageId = useChatStore((s) => s.setScrollToMessageId)
-  const { isConnected, onUnreadUpdate, requestUnreadCounts, onMessage, onChatRoomCreated, onAgentsUpdated, onAgentStatus, user: socketUser } = useSocketStore()
+  const { isConnected, onUnreadUpdate, requestUnreadCounts, markChatRoomRead, onMessage, onChatRoomCreated, onAgentsUpdated, onAgentStatus, user: socketUser } = useSocketStore()
   const { user } = useAuthStore()
   const visibleChatRoomId = useMemo(() => {
     return getVisibleChatRoomId(location.pathname, isMobile ? null : selectedRoomId)
   }, [isMobile, location.pathname, selectedRoomId])
   const visibleChatRoomIdRef = useRef<string | null>(visibleChatRoomId)
   visibleChatRoomIdRef.current = visibleChatRoomId
+
+  const isVisibleChatRoomActive = useCallback((roomId: string) => {
+    return isActivelyViewingChatRoom({
+      isSelected: roomId === visibleChatRoomIdRef.current,
+      isDocumentVisible: typeof document === 'undefined' || document.visibilityState === 'visible',
+      hasWindowFocus: typeof document === 'undefined' || typeof document.hasFocus !== 'function' || document.hasFocus(),
+    })
+  }, [])
 
   const selectRoomAndClearUnread = useCallback((roomId: string) => {
     if (roomId) {
@@ -509,16 +517,19 @@ function AppContent() {
 
     const unsubscribe = onUnreadUpdate((data) => {
       const currentVisibleChatRoomId = visibleChatRoomIdRef.current
+      const shouldClearVisibleRoom = currentVisibleChatRoomId
+        ? isVisibleChatRoomActive(currentVisibleChatRoomId)
+        : false
 
       if (data.unreadCounts) {
-        // 批量更新所有未读数
-        setUnreadCounts(currentVisibleChatRoomId
+        // 只有用户正在前台查看当前群聊时，才把可见群聊本地清零。
+        setUnreadCounts(currentVisibleChatRoomId && shouldClearVisibleRoom
           ? { ...data.unreadCounts, [currentVisibleChatRoomId]: 0 }
           : data.unreadCounts
         )
       } else if (data.chatRoomId && data.count !== undefined) {
-        // 只有当前真正显示的聊天窗口才自动清零；停留在助手/模型等页面时仍显示未读。
-        if (data.chatRoomId === currentVisibleChatRoomId) {
+        // 只有当前真正显示且窗口聚焦的聊天窗口才自动清零；停留在后台或其他页面时仍显示未读。
+        if (isVisibleChatRoomActive(data.chatRoomId)) {
           updateUnreadCount(data.chatRoomId, 0)
         } else {
           updateUnreadCount(data.chatRoomId, data.count)
@@ -526,7 +537,35 @@ function AppContent() {
       }
     })
     return unsubscribe
-  }, [isConnected, onUnreadUpdate, setUnreadCounts, updateUnreadCount])
+  }, [isConnected, isVisibleChatRoomActive, onUnreadUpdate, setUnreadCounts, updateUnreadCount])
+
+  // macOS 切换到其他全屏 Space 时，Electron 页面可能仍保留当前路由。
+  // 回到应用并真正看到当前群聊时，再同步服务端已读时间，避免切群聊后旧未读才出现。
+  useEffect(() => {
+    if (!isConnected) return
+
+    const markVisibleChatRoomReadIfActive = () => {
+      const currentVisibleChatRoomId = visibleChatRoomIdRef.current
+      if (!currentVisibleChatRoomId || !isVisibleChatRoomActive(currentVisibleChatRoomId)) return
+
+      updateUnreadCount(currentVisibleChatRoomId, 0)
+      markChatRoomRead(currentVisibleChatRoomId)
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        markVisibleChatRoomReadIfActive()
+      }
+    }
+
+    window.addEventListener('focus', markVisibleChatRoomReadIfActive)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      window.removeEventListener('focus', markVisibleChatRoomReadIfActive)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [isConnected, isVisibleChatRoomActive, markChatRoomRead, updateUnreadCount])
 
   // 切换群聊时重新请求未读数
   useEffect(() => {
