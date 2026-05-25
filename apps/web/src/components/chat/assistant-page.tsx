@@ -43,6 +43,7 @@ import { EditAssistantModal } from './edit-assistant-modal'
 import { InstallSkillModal } from './install-skill-modal'
 import { CreateCategoryModal } from './create-category-modal'
 import { CategoryToggleButton } from './category-toggle-button'
+import { shouldRenderUncategorizedSection } from './assistant-page-dnd'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { QuickChatStartDialog } from './quick-chat-start-dialog'
 import { AgentCard } from './agent-card'
@@ -102,16 +103,6 @@ function replaceAgentsInCategory(data: AgentsGrouped, categoryId: string | null,
   const categoryGroup = data.categories.find(cg => cg.category.id === categoryId)
   if (categoryGroup) {
     categoryGroup.agents = agents
-  }
-}
-
-function cloneGroupedData(data: AgentsGrouped): AgentsGrouped {
-  return {
-    categories: data.categories.map(categoryGroup => ({
-      category: categoryGroup.category,
-      agents: [...categoryGroup.agents],
-    })),
-    uncategorized: [...data.uncategorized],
   }
 }
 
@@ -287,7 +278,6 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
 
   // dnd-kit 状态
   const [activeAgent, setActiveAgent] = useState<Agent | null>(null)
-  const [dragPreviewGroupedData, setDragPreviewGroupedData] = useState<AgentsGrouped | null>(null)
   const dragPreviewRef = useRef<DragPreview | null>(null)
   const dragSourceCategoryIdRef = useRef<DragSourceCategoryId>(undefined)
 
@@ -619,7 +609,6 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
       || findAgentInGroupedData(groupedData, String(active.id))
       || assistants.find(a => a.id === active.id)
     setActiveAgent(agent || null)
-    setDragPreviewGroupedData(null)
     dragPreviewRef.current = null
     dragSourceCategoryIdRef.current = agent ? agent.categoryId || null : undefined
   }
@@ -628,7 +617,6 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     const { active, over } = event
 
     if (!over) {
-      setDragPreviewGroupedData(null)
       dragPreviewRef.current = null
       return
     }
@@ -641,7 +629,6 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
       || assistants.find(agent => agent.id === activeId)
 
     if (!groupedData || !draggedAgent || draggedAgent.agentLevel === 'system') {
-      setDragPreviewGroupedData(null)
       dragPreviewRef.current = null
       return
     }
@@ -672,15 +659,11 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
       || targetCategoryId === currentCategoryId
       || targetCategoryId === SYSTEM_CATEGORY_ID
     ) {
-      setDragPreviewGroupedData(null)
       dragPreviewRef.current = null
       return
     }
 
-    const nextData = cloneGroupedData(groupedData)
-    const sourceAgentsWithoutDragged = getAgentsInCategory(nextData, currentCategoryId)
-      .filter(agent => agent.id !== activeId)
-    const targetAgents = getAgentsInCategory(nextData, targetCategoryId)
+    const targetAgents = getAgentsInCategory(groupedData, targetCategoryId)
       .filter(agent => agent.id !== activeId)
     const boundedInsertIndex = Math.min(insertIndex, targetAgents.length)
     const targetAgentsWithPreview = [
@@ -688,16 +671,11 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
       { ...draggedAgent, categoryId: targetCategoryId },
       ...targetAgents.slice(boundedInsertIndex),
     ]
-
-    replaceAgentsInCategory(nextData, currentCategoryId, sourceAgentsWithoutDragged)
-    replaceAgentsInCategory(nextData, targetCategoryId, targetAgentsWithPreview)
     dragPreviewRef.current = { targetCategoryId, targetAgents: targetAgentsWithPreview }
-    setDragPreviewGroupedData(nextData)
   }
 
   const handleDragCancel = () => {
     setActiveAgent(null)
-    setDragPreviewGroupedData(null)
     dragPreviewRef.current = null
     dragSourceCategoryIdRef.current = undefined
   }
@@ -715,7 +693,6 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     const sourceCategoryId = dragSourceCategoryIdRef.current
     dragSourceCategoryIdRef.current = undefined
     setActiveAgent(null)
-    setDragPreviewGroupedData(null)
 
     if (!over) return
 
@@ -885,7 +862,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
   }
 
   // Filter helpers for grouped display
-  const displayedGroupedData = dragPreviewGroupedData || groupedData
+  const displayedGroupedData = groupedData
 
   // 分离系统分类（sortOrder = -1000）和普通分类
   const { normalCategories, systemCategory } = displayedGroupedData ? {
@@ -1126,7 +1103,10 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
                 ))}
 
                 {/* Render uncategorized agents */}
-                {filteredGroupedData.uncategorized.length > 0 && (
+                {shouldRenderUncategorizedSection(
+                  filteredGroupedData.uncategorized.length,
+                  activeAgent?.categoryId
+                ) && (
                   <DroppableCategoryArea
                     categoryId={null}
                     isSystemCategory={false}
