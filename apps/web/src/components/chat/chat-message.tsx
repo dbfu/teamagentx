@@ -3,7 +3,7 @@ import { tokenUsageApi } from '@/lib/token-usage-api'
 import { cn, formatDateTime } from '@/lib/utils'
 import { copyToClipboard } from '@/lib/copy-utils'
 import { Bot, CheckSquare, MessageSquareMore, Info, Copy, XCircle, Trash2, Volume2, ChevronDown, ChevronUp, Clock } from 'lucide-react'
-import { memo, useState, useCallback, useMemo } from 'react'
+import { memo, useEffect, useState, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { toast } from 'sonner'
 import { ImageViewerModal } from './image-viewer-modal'
@@ -44,6 +44,7 @@ interface TypingAgent {
   agentId: string
   agentName: string
   status?: 'pending' | 'executing' | 'cancelled'  // 新增状态字段
+  startedAt?: number
 }
 
 interface MentionAgent {
@@ -143,7 +144,19 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
 
   // 图片查看器状态
   const [viewerImage, setViewerImage] = useState<{ url: string; name: string } | null>(null)
+  const [durationTick, setDurationTick] = useState(0)
+  const durationNow = useMemo(() => Date.now(), [durationTick])
   // isSpeaking = isCurrentlyPlaying（通过 store 统一管理，手动和自动播放图标一致）
+
+  useEffect(() => {
+    const hasExecutingAgent = typingAgents?.some((agent) => agent.status !== 'pending' && agent.status !== 'cancelled')
+    if (!hasExecutingAgent) return
+
+    const intervalId = window.setInterval(() => {
+      setDurationTick((value) => value + 1)
+    }, 1000)
+    return () => window.clearInterval(intervalId)
+  }, [typingAgents])
 
   // 处理右键菜单（桌面端）
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
@@ -504,6 +517,9 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
           }
 
           const isPending = agent.status === 'pending'
+          const elapsedText = !isPending && agent.startedAt
+            ? formatDuration(durationNow - agent.startedAt)
+            : null
           return (
             <div
               key={agent.agentId}
@@ -523,7 +539,10 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
                   <span className="animate-[dot-appear_1.5s_0.6s_infinite] -translate-y-0.5">.</span>
                 </span>
               )}
-              <span>{agent.agentName} {isPending ? '等待执行' : '执行中'}</span>
+              <span>
+                {agent.agentName} {isPending ? '等待执行' : '执行中'}
+                {elapsedText && ` 耗时：${elapsedText}`}
+              </span>
             </div>
           )
         })}

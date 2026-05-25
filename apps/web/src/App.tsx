@@ -249,18 +249,25 @@ function MobileChatDetailPage({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
               {/* 移动端只保留任务看板和清空消息 */}
-              <DropdownMenuItem onClick={handleOpenTaskBoard}>
+              <DropdownMenuItem
+                className="hover:bg-primary/10 hover:text-primary hover:[&_svg]:text-primary focus:bg-primary/10 focus:text-primary focus:[&_svg]:text-primary"
+                onClick={handleOpenTaskBoard}
+              >
                 <ClipboardList className="size-4 mr-2" />
                 任务看板
               </DropdownMenuItem>
               <DropdownMenuItem
+                className="hover:bg-primary/10 hover:text-primary hover:[&_svg]:text-primary focus:bg-primary/10 focus:text-primary focus:[&_svg]:text-primary"
                 disabled={activeTaskAgentIds.length === 0}
                 onClick={handleStopAllTasks}
               >
                 <Square className="size-4 mr-2" />
                 停止所有任务
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setShowClearConfirm(true)}>
+              <DropdownMenuItem
+                className="hover:bg-red-500/10 hover:text-red-500 hover:[&_svg]:text-red-500 focus:bg-red-500/10 focus:text-red-500 focus:[&_svg]:text-red-500"
+                onClick={() => setShowClearConfirm(true)}
+              >
                 <Eraser className="size-4 mr-2" />
                 清空消息
               </DropdownMenuItem>

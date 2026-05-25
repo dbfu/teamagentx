@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils'
 import { toVoicePanelConfig, type AgentVoicePanelConfig } from '@/lib/agent-speech'
 import { deleteTtsCache, loadRoomTtsCache, normalizeSpeechText, prewarmTts, speakText, stopSpeechPlayback, supportsSpeechPlayback } from '@/lib/browser-speech'
 import { buildTtsCacheKey, PREWARM_MAX_TEXT_LENGTH } from '@/speech/tts-prefetch-cache'
-import { Check, CheckSquare, Loader2, Trash2, X } from 'lucide-react'
+import { ArrowDown, Check, CheckSquare, Loader2, Trash2, X } from 'lucide-react'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { toast } from 'sonner'
 
@@ -40,7 +40,7 @@ interface ChatMessagesListProps {
   loadingOlderMessages: boolean
   hasOlderMessages: boolean
   messagesEndRef: React.RefObject<HTMLDivElement | null>
-  typingAgents: Map<string, { agentId: string; agentName: string; status?: 'pending' | 'executing' | 'cancelled' }[]>
+  typingAgents: Map<string, { agentId: string; agentName: string; status?: 'pending' | 'executing' | 'cancelled'; startedAt?: number }[]>
   mentionAgents: MentionAgent[]
   onAgentAvatarClick: (agentId: string, agentName: string) => void
   onTypingAgentClick: (messageId: string, agentId: string, agentName: string) => void
@@ -64,7 +64,7 @@ interface MessageRowProps {
   isSelected: boolean
   replyTo?: Message | null
   replyCount: number
-  typingAgents?: { agentId: string; agentName: string; status?: 'pending' | 'executing' | 'cancelled' }[]
+  typingAgents?: { agentId: string; agentName: string; status?: 'pending' | 'executing' | 'cancelled'; startedAt?: number }[]
   mentionAgents: MentionAgent[]
   currentUser?: CurrentUser
   onSetMessageRef: (messageId: string, element: HTMLDivElement | null) => void
@@ -455,6 +455,7 @@ export function ChatMessagesList({
   const [isNearBottom, setIsNearBottom] = useState(true)
   // 是否显示新消息提示
   const [showNewMessageHint, setShowNewMessageHint] = useState(false)
+  const [showScrollToBottomHint, setShowScrollToBottomHint] = useState(false)
   const [isMultiSelectMode, setIsMultiSelectMode] = useState(false)
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set())
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
@@ -769,11 +770,17 @@ export function ChatMessagesList({
       }
     }
 
-    // 如果用户滚动到底部，隐藏新消息提示
-    if (nearBottom && showNewMessageHint) {
-      setShowNewMessageHint(false)
+    if (nearBottom) {
+      if (showNewMessageHint) {
+        setShowNewMessageHint(false)
+      }
+      if (showScrollToBottomHint) {
+        setShowScrollToBottomHint(false)
+      }
+    } else if (hasRecentUserScroll && messages.length > 0 && !showScrollToBottomHint) {
+      setShowScrollToBottomHint(true)
     }
-  }, [captureScrollAnchor, chatRoomId, checkIsNearBottom, messagesBelongToCurrentRoom, saveLatestScrollAnchor, saveScrollPosition, showNewMessageHint, tryLoadOlderMessages])
+  }, [captureScrollAnchor, chatRoomId, checkIsNearBottom, messages.length, messagesBelongToCurrentRoom, saveLatestScrollAnchor, saveScrollPosition, showNewMessageHint, showScrollToBottomHint, tryLoadOlderMessages])
 
   useLayoutEffect(() => {
     if (loadingOlderMessages || prependAnchorRef.current === null) return
@@ -846,6 +853,7 @@ export function ChatMessagesList({
 
     scrollToBottom({ save: true, frames: 14 })
     setShowNewMessageHint(false)
+    setShowScrollToBottomHint(false)
   }, [isNearBottom, isSidePanelOpen, isStreamPanelOpen, messagesBelongToCurrentRoom, scrollToBottom])
 
   const highlightMessage = useCallback((messageId: string) => {
@@ -896,6 +904,7 @@ export function ChatMessagesList({
     if (forceScrollToBottom) {
       scrollToBottom({ save: true })
       setShowNewMessageHint(false)
+      setShowScrollToBottomHint(false)
       setIsNearBottom(true)
       setForceScrollToBottom(false)
     }
@@ -966,6 +975,7 @@ export function ChatMessagesList({
       // 重置底部状态
       setIsNearBottom(true)
       setShowNewMessageHint(false)
+      setShowScrollToBottomHint(false)
       exitMultiSelect()
     }
   }, [chatRoomId, exitMultiSelect, flushLatestScrollAnchor, messages])
@@ -1524,11 +1534,27 @@ export function ChatMessagesList({
           onClick={() => {
             scrollToBottom({ save: true })
             setShowNewMessageHint(false)
+            setShowScrollToBottomHint(false)
           }}
           className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full bg-blue-500 px-4 py-1.5 text-sm text-white shadow-lg hover:bg-blue-600 transition-colors"
         >
-          <span className="animate-bounce">↓</span>
+          <ArrowDown className="size-4 animate-bounce" />
           <span>有新消息</span>
+        </button>
+      )}
+
+      {!showNewMessageHint && showScrollToBottomHint && (
+        <button
+          type="button"
+          aria-label="滚动到底部"
+          onClick={() => {
+            scrollToBottom({ save: true })
+            setShowScrollToBottomHint(false)
+          }}
+          className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full border border-gray-200 bg-background px-3 py-1.5 text-sm text-foreground shadow-lg transition-colors hover:bg-gray-50 dark:border-border dark:hover:bg-muted"
+        >
+          <ArrowDown className="size-4" />
+          <span>到底部</span>
         </button>
       )}
     </div>

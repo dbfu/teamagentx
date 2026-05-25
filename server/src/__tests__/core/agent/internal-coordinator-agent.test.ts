@@ -56,6 +56,16 @@ describe('internal coordinator no-dispatch handling', () => {
     assert.doesNotMatch(prompt, /无需调度：一句话原因/);
   });
 
+  test('prompt forbids expanding human user messages during dispatch', () => {
+    const prompt = buildInternalCoordinatorPrompt();
+
+    assert.match(prompt, /用户原始消息全文/);
+    assert.match(prompt, /不要扩写、总结、解释、拆解、补充验收标准/);
+    assert.match(prompt, /添加分支\/提交\/PR\/发布等操作/);
+    assert.match(prompt, /用户没有明确说出的内容，不能出现在你的调度消息里/);
+    assert.match(prompt, /不得添加、删除、改写任何内容/);
+  });
+
   test('suppresses only exact internal coordinator no-dispatch output', () => {
     assert.equal(
       shouldSuppressInternalCoordinatorMessage(

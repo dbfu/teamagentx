@@ -23,6 +23,7 @@ export {
   broadcastAgentTaskQueue,
   broadcastChatRoomCreated,
   broadcastAgentsUpdated,
+  setGlobalBroadcastMessage,
 } from './status.js';
 
 // 从 executor-manager 导出
@@ -51,6 +52,7 @@ export {
   buildAIMessage,
   broadcastCronTriggerMessage,
   broadcastAgentJoinedMessage,
+  broadcastChatRoomRulesUpdatedMessage,
   parseMentions,
 } from './message-utils.js';
 

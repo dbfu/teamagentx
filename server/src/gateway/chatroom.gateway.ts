@@ -15,6 +15,7 @@ import {
   getCacheKey,
   processingMap,
   broadcastAgentJoinedMessage,
+  broadcastChatRoomRulesUpdatedMessage,
 } from '../core/agent/agent-handler/index.js';
 import { agentService } from '../core/agent/agent.service.js';
 import { executionRecordService } from '../modules/execution-record/execution-record.service.js';
@@ -1514,9 +1515,18 @@ export async function chatRoomGateway(app: FastifyInstance) {
     const data = request.body;
 
     try {
+      const previousChatRoom = data.rules !== undefined
+        ? await chatRoomService.findById(id)
+        : null;
       const chatRoom = await chatRoomService.update(id, data);
       if (data.workDir !== undefined || data.rules !== undefined) {
         clearExecutorCache(undefined, id);
+      }
+      if (
+        data.rules !== undefined &&
+        (previousChatRoom?.rules ?? '') !== (chatRoom.rules ?? '')
+      ) {
+        await broadcastChatRoomRulesUpdatedMessage(id, chatRoom.rules);
       }
       return reply.send({ success: true, data: chatRoom });
     } catch (error: any) {

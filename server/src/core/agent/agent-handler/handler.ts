@@ -17,6 +17,20 @@ interface ReceivedMessageEvent {
   chatRoomId: string;
 }
 
+export function shouldTriggerCoordinatorAgent(params: {
+  agentTriggerMode: string;
+  isQuickChatRoom?: boolean | null | undefined;
+  hasMentions: boolean;
+  messageIsHuman?: boolean | undefined;
+  sourceAgentId?: string | null;
+}) {
+  if (params.agentTriggerMode !== 'coordinator') return false;
+  if (params.isQuickChatRoom) return false;
+  if (params.sourceAgentId === GROUP_COORDINATOR_ID) return false;
+
+  return !params.hasMentions || !params.messageIsHuman;
+}
+
 // 消息事件发射器
 const emitter = new EventEmitter();
 
@@ -121,7 +135,11 @@ export function setupAIHandlers(
       // 先解析 @mentions，判断是否有 @助手
       const activeAgents = await agentService.findActive();
       const activeAgentByName = new Map(activeAgents.map((agent) => [agent.name, agent]));
-      const mentionNames = parseKnownMentions(message.content, activeAgents.map((agent) => agent.name));
+      const mentionNames = parseKnownMentions(
+        message.content,
+        activeAgents.map((agent) => agent.name),
+        { allowInline: true },
+      );
       const triggerMentionNames = mentionNames.slice(0, 1);
       const hasMentions = triggerMentionNames.length > 0;
 
@@ -169,39 +187,39 @@ export function setupAIHandlers(
         return;
       }
 
-      // 协调模式：普通助手消息里的 @ 只展示，不直接触发目标助手。
-      // 用户未 @ 和普通助手消息都会交给内置群调度助手；用户 @ 和群调度助手 @ 继续触发目标助手。
+      // 协调模式：用户显式 @ 仍直接触发；助手消息即使 @ 其他助手，也先交给内置群调度助手裁决。
       if (
         chatRoom &&
-        !chatRoom.isQuickChatRoom &&
-        agentTriggerMode === 'coordinator'
+        shouldTriggerCoordinatorAgent({
+          agentTriggerMode,
+          isQuickChatRoom: chatRoom.isQuickChatRoom,
+          hasMentions,
+          messageIsHuman: message.isHuman,
+          sourceAgentId: message.agentId,
+        })
       ) {
-        if (
-          (message.isHuman && !hasMentions) ||
-          (!message.isHuman && message.agentId !== GROUP_COORDINATOR_ID)
-        ) {
-          const coordinatorAgent = await agentService.findById(GROUP_COORDINATOR_ID);
+        const coordinatorAgent = await agentService.findById(GROUP_COORDINATOR_ID);
 
-          if (coordinatorAgent && coordinatorAgent.isActive) {
-            debugLog('coordinatorAgentTrigger', {
-              chatRoomId,
-              agentId: coordinatorAgent.id,
-              agentName: coordinatorAgent.name,
-              triggerMessageId: message.id,
-              sourceAgentId: message.agentId,
-              sourceIsHuman: message.isHuman,
-            });
+        if (coordinatorAgent && coordinatorAgent.isActive) {
+          debugLog('coordinatorAgentTrigger', {
+            chatRoomId,
+            agentId: coordinatorAgent.id,
+            agentName: coordinatorAgent.name,
+            triggerMessageId: message.id,
+            sourceAgentId: message.agentId,
+            sourceIsHuman: message.isHuman,
+            hasMentions,
+          });
 
-            await enqueueAgentTask(
-              chatRoomId,
-              message,
-              createInternalCoordinatorAgent(coordinatorAgent),
-            );
-          } else {
-            console.warn(`[coordinatorAgentTrigger] 内置协调助手不存在或未启用: ${GROUP_COORDINATOR_ID}`);
-          }
-          return;
+          await enqueueAgentTask(
+            chatRoomId,
+            message,
+            createInternalCoordinatorAgent(coordinatorAgent),
+          );
+        } else {
+          console.warn(`[coordinatorAgentTrigger] 内置协调助手不存在或未启用: ${GROUP_COORDINATOR_ID}`);
         }
+        return;
       }
 
       // 普通群聊：无 @ 发言时，触发默认接收助手。

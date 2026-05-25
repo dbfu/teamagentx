@@ -8,6 +8,7 @@ import {
   getCachedStreamEvents,
   processQueue,
   broadcastAgentStatus,
+  setGlobalBroadcastMessage,
   type AgentStatus,
 } from '../core/agent/agent-handler/index.js';
 import type { ToolCall } from '../core/agent/executor.interface.js';
@@ -73,6 +74,7 @@ export function setupSocket(io: Server) {
     }
   };
   setBridgeInboundMessageBroadcaster(emitMessageToChatRoomMembers);
+  setGlobalBroadcastMessage(emitMessageToChatRoomMembers);
 
   // Emit function for AI responses - broadcasts to specific chatRoom room
   // 同时给群聊里所有用户发送未读更新通知

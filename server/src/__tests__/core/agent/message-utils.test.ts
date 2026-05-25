@@ -1,6 +1,20 @@
-import test from 'node:test';
+import test, { afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseKnownMentions } from '../../../core/agent/agent-handler/message-utils.js';
+import {
+  broadcastAgentJoinedMessage,
+  broadcastChatRoomRulesUpdatedMessage,
+  buildChatRoomRulesUpdatedMessageContent,
+  parseKnownMentions,
+} from '../../../core/agent/agent-handler/message-utils.js';
+import { setGlobalBroadcastMessage } from '../../../core/agent/agent-handler/status.js';
+import { messageService } from '../../../modules/message/message.service.js';
+
+const originalMessageCreate = messageService.create;
+
+afterEach(() => {
+  messageService.create = originalMessageCreate;
+  setGlobalBroadcastMessage(null);
+});
 
 test('parseKnownMentions matches agent names containing slashes', () => {
   const mentions = parseKnownMentions('@Codex/CLI 帮我看一下', [
@@ -52,4 +66,86 @@ test('parseKnownMentions matches mentions at the start of a new line', () => {
   ]);
 
   assert.deepStrictEqual(mentions, ['Codex/CLI']);
+});
+
+test('parseKnownMentions can match inline mentions when enabled', () => {
+  const mentions = parseKnownMentions('请@Codex/CLI 继续', ['Codex/CLI'], {
+    allowInline: true,
+  });
+
+  assert.deepStrictEqual(mentions, ['Codex/CLI']);
+});
+
+test('parseKnownMentions keeps inline mentions as plain text by default', () => {
+  const mentions = parseKnownMentions('请@Codex/CLI 继续', ['Codex/CLI']);
+
+  assert.deepStrictEqual(mentions, []);
+});
+
+test('buildChatRoomRulesUpdatedMessageContent includes updated rules', () => {
+  const content = buildChatRoomRulesUpdatedMessageContent('所有回复使用中文');
+
+  assert.match(content, /群规则已更新/);
+  assert.match(content, /请所有助手从现在开始使用新的群规则/);
+  assert.match(content, /所有回复使用中文/);
+});
+
+test('buildChatRoomRulesUpdatedMessageContent handles cleared rules', () => {
+  const content = buildChatRoomRulesUpdatedMessageContent('');
+
+  assert.match(content, /群规则已清空/);
+  assert.match(content, /不再沿用旧群规则/);
+});
+
+test('broadcastChatRoomRulesUpdatedMessage saves and broadcasts without agent dispatch', async () => {
+  let created: any;
+  const broadcasts: any[] = [];
+
+  messageService.create = (async (data) => {
+    created = data;
+    return data as any;
+  }) as typeof messageService.create;
+  setGlobalBroadcastMessage((message, chatRoomId) => {
+    broadcasts.push({ message, chatRoomId });
+  });
+
+  const messageId = await broadcastChatRoomRulesUpdatedMessage('room-1', '新的规则');
+
+  assert.equal(created.id, messageId);
+  assert.equal(created.chatRoomId, 'room-1');
+  assert.equal(created.userId, null);
+  assert.equal(created.agentId, null);
+  assert.equal(created.isHuman, true);
+  assert.match(created.content, /新的规则/);
+  assert.equal(broadcasts.length, 1);
+  assert.equal(broadcasts[0].chatRoomId, 'room-1');
+  assert.equal(broadcasts[0].message.id, messageId);
+  assert.equal(broadcasts[0].message.user, '系统');
+});
+
+test('broadcastAgentJoinedMessage saves and broadcasts without agent dispatch', async () => {
+  let created: any;
+  const broadcasts: any[] = [];
+
+  messageService.create = (async (data) => {
+    created = data;
+    return data as any;
+  }) as typeof messageService.create;
+  setGlobalBroadcastMessage((message, chatRoomId) => {
+    broadcasts.push({ message, chatRoomId });
+  });
+
+  const messageId = await broadcastAgentJoinedMessage('room-1', '前端开发', '处理前端任务');
+
+  assert.equal(created.id, messageId);
+  assert.equal(created.chatRoomId, 'room-1');
+  assert.equal(created.userId, null);
+  assert.equal(created.agentId, null);
+  assert.equal(created.isHuman, true);
+  assert.match(created.content, /新助手加入群聊/);
+  assert.match(created.content, /前端开发/);
+  assert.equal(broadcasts.length, 1);
+  assert.equal(broadcasts[0].chatRoomId, 'room-1');
+  assert.equal(broadcasts[0].message.id, messageId);
+  assert.equal(broadcasts[0].message.user, '系统');
 });

@@ -118,12 +118,17 @@ function getMentionedKnownAgentNames(content: string, agentNames: string[]): str
 
   const endBoundaryChars = '*_>#`!?.,:;！？。，；：'
   const regex = new RegExp(
-    `(?:^|\\r?\\n| )@(${escapedNames.join('|')})(?=\\s|$|[${endBoundaryChars}]|-(?![\\u4e00-\\u9fa5a-zA-Z0-9_]))`,
+    `@(${escapedNames.join('|')})(?=\\s|$|[${endBoundaryChars}]|-(?![\\u4e00-\\u9fa5a-zA-Z0-9_]))`,
     'g',
   )
 
   let match: RegExpExecArray | null
   while ((match = regex.exec(content)) !== null) {
+    const atIndex = match.index
+    const prevChar = atIndex > 0 ? content[atIndex - 1] : ''
+    if (prevChar && /[A-Za-z0-9._%+-]/.test(prevChar)) {
+      continue
+    }
     if (match[1] && !names.includes(match[1])) {
       names.push(match[1])
     }
@@ -209,7 +214,7 @@ interface ChatStore {
   clearing: boolean
 
   // Socket 状态
-  typingAgents: Map<string, { agentId: string; agentName: string; status?: 'pending' | 'executing' | 'cancelled' }[]>
+  typingAgents: Map<string, { agentId: string; agentName: string; status?: 'pending' | 'executing' | 'cancelled'; startedAt?: number }[]>
   streamingContent: Map<string, string>
   streamingThinking: Map<string, string>
   toolCalls: Map<string, ToolCall[]>
@@ -261,7 +266,7 @@ interface ChatStore {
   setLoadingOlderMessages: (loading: boolean) => void
   setHasOlderMessages: (hasMore: boolean) => void
   setAllAgents: (agents: Agent[]) => void
-  setTypingAgents: (agents: Map<string, { agentId: string; agentName: string; status?: 'pending' | 'executing' | 'cancelled' }[]>) => void
+  setTypingAgents: (agents: Map<string, { agentId: string; agentName: string; status?: 'pending' | 'executing' | 'cancelled'; startedAt?: number }[]>) => void
   setStreamingContent: (content: Map<string, string>) => void
   setStreamingThinking: (thinking: Map<string, string>) => void
   setToolCalls: (calls: Map<string, ToolCall[]>) => void
@@ -1237,14 +1242,26 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
       const existingIndex = existing.findIndex(a => a.agentId === data.agentId)
       if (existingIndex >= 0) {
         const updated = [...existing]
+        const nextStatus = data.status ?? updated[existingIndex].status
         updated[existingIndex] = {
           ...updated[existingIndex],
           agentName: data.agentName,
-          status: data.status ?? updated[existingIndex].status,
+          status: nextStatus,
+          startedAt: nextStatus === 'pending'
+            ? updated[existingIndex].startedAt
+            : (updated[existingIndex].startedAt ?? Date.now()),
         }
         newTypingAgents.set(data.messageId, updated)
       } else {
-        newTypingAgents.set(data.messageId, [...existing, { agentId: data.agentId, agentName: data.agentName, status: data.status }])
+        newTypingAgents.set(data.messageId, [
+          ...existing,
+          {
+            agentId: data.agentId,
+            agentName: data.agentName,
+            status: data.status,
+            startedAt: data.status === 'pending' ? undefined : Date.now(),
+          },
+        ])
       }
 
       const newCompletedAgents = new Set(completedAgents)
@@ -1349,14 +1366,26 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
       const existingIndex = existing.findIndex(a => a.agentId === data.agentId)
       if (existingIndex >= 0) {
         const updated = [...existing]
+        const nextStatus = data.status ?? updated[existingIndex].status
         updated[existingIndex] = {
           ...updated[existingIndex],
           agentName: data.agentName,
-          status: data.status ?? updated[existingIndex].status,
+          status: nextStatus,
+          startedAt: nextStatus === 'pending'
+            ? updated[existingIndex].startedAt
+            : (updated[existingIndex].startedAt ?? Date.now()),
         }
         newTypingAgents.set(data.messageId, updated)
       } else {
-        newTypingAgents.set(data.messageId, [...existing, { agentId: data.agentId, agentName: data.agentName, status: data.status }])
+        newTypingAgents.set(data.messageId, [
+          ...existing,
+          {
+            agentId: data.agentId,
+            agentName: data.agentName,
+            status: data.status,
+            startedAt: data.status === 'pending' ? undefined : Date.now(),
+          },
+        ])
       }
 
       const newCompletedAgents = new Set(completedAgents)

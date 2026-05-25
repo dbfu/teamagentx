@@ -83,7 +83,12 @@ export function ChatAreaHeader({
 
   useEffect(() => {
     void loadPackageScripts({ reset: true })
+    const intervalId = window.setInterval(() => {
+      void loadPackageScripts()
+    }, 10_000)
+
     return () => {
+      window.clearInterval(intervalId)
       packageScriptsRequestRef.current += 1
     }
   }, [loadPackageScripts])
@@ -344,20 +349,32 @@ export function ChatAreaHeader({
                 <TooltipContent side="bottom">更多</TooltipContent>
               </Tooltip>
               <DropdownMenuContent align="end" className="w-44">
-                <DropdownMenuItem onClick={onOpenRoomRules}>
-                  <Scroll className="size-4" />
+                <DropdownMenuItem
+                  className="hover:bg-primary/10 hover:text-primary hover:[&_svg]:text-primary focus:bg-primary/10 focus:text-primary focus:[&_svg]:text-primary"
+                  onClick={onOpenRoomRules}
+                >
+                  <Scroll className="size-4 text-current" />
                   群规则
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={onScreenshot}>
-                  <Camera className="size-4" />
+                <DropdownMenuItem
+                  className="hover:bg-primary/10 hover:text-primary hover:[&_svg]:text-primary focus:bg-primary/10 focus:text-primary focus:[&_svg]:text-primary"
+                  onClick={onScreenshot}
+                >
+                  <Camera className="size-4 text-current" />
                   截图聊天记录
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={onOpenCronTasks}>
-                  <Clock className="size-4" />
+                <DropdownMenuItem
+                  className="hover:bg-primary/10 hover:text-primary hover:[&_svg]:text-primary focus:bg-primary/10 focus:text-primary focus:[&_svg]:text-primary"
+                  onClick={onOpenCronTasks}
+                >
+                  <Clock className="size-4 text-current" />
                   定时任务
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={onClearMessages}>
-                  <Eraser className="size-4" />
+                <DropdownMenuItem
+                  className="hover:bg-red-500/10 hover:text-red-500 hover:[&_svg]:text-red-500 focus:bg-red-500/10 focus:text-red-500 focus:[&_svg]:text-red-500"
+                  onClick={onClearMessages}
+                >
+                  <Eraser className="size-4 text-current" />
                   清空消息
                 </DropdownMenuItem>
               </DropdownMenuContent>

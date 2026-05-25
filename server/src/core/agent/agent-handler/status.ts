@@ -7,6 +7,9 @@ export type AgentStatus = 'idle' | 'executing' | 'busy';
 
 // Global emit callbacks (set by setupAIHandlers)
 export let globalEmit: ((msg: any, chatRoomId: string) => Promise<void> | void) | null = null;
+export let globalBroadcastMessage:
+  | ((msg: any, chatRoomId: string) => Promise<void> | void)
+  | null = null;
 export let globalEmitTyping:
   | ((
       data: {messageId: string; agentId: string; agentName: string; status?: 'pending' | 'executing'},
@@ -51,6 +54,12 @@ export let globalEmitReceivedMessage:
 
 export function setGlobalEmitReceivedMessage(fn: (message: any, chatRoomId: string) => void) {
   globalEmitReceivedMessage = fn;
+}
+
+export function setGlobalBroadcastMessage(
+  fn: ((message: any, chatRoomId: string) => Promise<void> | void) | null,
+) {
+  globalBroadcastMessage = fn;
 }
 
 // 设置全局回调
