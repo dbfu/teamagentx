@@ -54,10 +54,11 @@ export function ChatAreaHeader({
   const visibleScripts = packageScripts?.scripts ?? []
   const shouldShowPackageScriptsMenu = packageScripts?.hasPackageJson === true
 
-  const loadPackageScripts = useCallback(async (options: { reset?: boolean } = {}) => {
+  const loadPackageScripts = useCallback(async (options?: { reset?: boolean }) => {
     const requestId = packageScriptsRequestRef.current + 1
     packageScriptsRequestRef.current = requestId
-    if (options.reset) {
+    const shouldReset = options?.reset === true
+    if (shouldReset) {
       setPackageScripts(null)
     }
 
@@ -70,7 +71,7 @@ export function ChatAreaHeader({
       }
     } catch {
       if (packageScriptsRequestRef.current !== requestId) return
-      if (options.reset) {
+      if (shouldReset) {
         setPackageScripts(null)
       }
     } finally {
