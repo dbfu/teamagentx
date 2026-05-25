@@ -38,6 +38,7 @@ import {
 } from 'lucide-react'
 import { agentApi, categoryApi, Agent, AgentCategory, AgentSpeechConfig, AgentsGrouped, type AgentThinkingMode } from '@/lib/agent-api'
 import { cn } from '@/lib/utils'
+import { isSystemAssistantDetailBlocked } from '@/lib/system-agents'
 import { CreateAssistantModal } from './create-assistant-modal'
 import { EditAssistantModal } from './edit-assistant-modal'
 import { InstallSkillModal } from './install-skill-modal'
@@ -604,6 +605,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
 
   // 点击助手卡片 - 移动端直接快速对话，桌面端跳转详情页
   const handleAgentClick = (agent: Agent) => {
+    if (isSystemAssistantDetailBlocked(agent)) return
     if (isMobile) {
       openQuickChatDialog(agent)
     } else {

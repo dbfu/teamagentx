@@ -8,6 +8,7 @@ import type { ToolCall, StreamEvent, AgentStatus } from './socket-store'
 import { PendingImage } from '@/components/chat/image-preview-list'
 import { compressImage, fileToBase64, createPreviewUrl, revokePreviewUrl, getImageDimensions, isValidImageType, isValidImageSize } from '@/lib/image-utils'
 import { isActivelyViewingChatRoom } from '@/lib/chat-room-presence'
+import { isSystemAssistantDetailBlocked } from '@/lib/system-agents'
 import { toast } from 'sonner'
 
 // 兼容 Android WebView 的 UUID 生成函数
@@ -171,6 +172,7 @@ interface SelectedRoomAgent {
   description?: string | null
   chatRoomAgentId?: string
   agentType?: string
+  agentLevel?: string
   chatRoomId?: string  // 用于计算默认工作目录
   injectGroupHistory?: boolean  // 是否注入群历史
 }
@@ -1984,6 +1986,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
 
   const handleAgentAvatarClick = useCallback((agentId: string, agentName: string) => {
     const found = allAgents.find(a => a.id === agentId || a.name === agentName)
+    if (isSystemAssistantDetailBlocked(found ?? { id: agentId, name: agentName })) return
     if (found) {
       // 从 chatRoom.chatRoomAgents 中查找 chatRoomAgentId 和 agentType
       const roomAgent = chatRoom?.chatRoomAgents?.find(
@@ -1997,6 +2000,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
         description: found.description,
         chatRoomAgentId: roomAgent?.id,
         agentType: roomAgent?.agent?.type,
+        agentLevel: found.agentLevel,
         chatRoomId: chatRoom?.id,
         injectGroupHistory: roomAgent?.injectGroupHistory ?? true,
       })

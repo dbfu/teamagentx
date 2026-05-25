@@ -1,6 +1,7 @@
 import { cn } from '@/lib/utils'
 import { resolveAssetUrl } from '@/lib/asset-url'
 import { MENTION_MARKER_CLASS, remarkMentions } from '@/lib/remark-mentions'
+import { isSystemAssistantDetailBlocked } from '@/lib/system-agents'
 import ReactMarkdown from 'react-markdown'
 import rehypeRaw from 'rehype-raw'
 import remarkGfm from 'remark-gfm'
@@ -102,11 +103,17 @@ export function MarkdownContent({
               const agentName = (props as any).agentName || (props as any)['data-agent-name']
 
               if (agentId && agentName) {
+                const blocksDetail = isSystemAssistantDetailBlocked({ id: agentId, name: agentName })
                 return (
                   <span
-                    className="text-primary cursor-pointer hover:text-primary/80 whitespace-nowrap"
-                    onClick={() => onMentionClick?.(agentId, agentName)}
-                    title={`点击查看 ${agentName} 详情`}
+                    className={cn(
+                      'text-primary whitespace-nowrap',
+                      blocksDetail ? 'cursor-default' : 'cursor-pointer hover:text-primary/80'
+                    )}
+                    onClick={() => {
+                      if (!blocksDetail) onMentionClick?.(agentId, agentName)
+                    }}
+                    title={blocksDetail ? undefined : `点击查看 ${agentName} 详情`}
                   >
                     {children}
                   </span>

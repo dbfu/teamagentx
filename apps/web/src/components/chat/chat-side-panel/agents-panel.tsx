@@ -8,11 +8,12 @@ import { toast } from 'sonner'
 import type { AgentStatus } from '@/stores/socket-store'
 import { AgentAvatar } from '../agent-avatar'
 import { UserAvatar } from '../user-avatar'
+import { isSystemAssistantDetailBlocked } from '@/lib/system-agents'
 
 interface AgentsPanelProps {
   chatRoom: ChatRoom
   agentStatuses?: Map<string, AgentStatus>
-  onSelectAgent: (agent: { id: string; name: string; avatar?: string | null; avatarColor?: string | null; description?: string | null; chatRoomAgentId?: string; agentType?: string; chatRoomId?: string; injectGroupHistory?: boolean }) => void
+  onSelectAgent: (agent: { id: string; name: string; avatar?: string | null; avatarColor?: string | null; description?: string | null; chatRoomAgentId?: string; agentType?: string; agentLevel?: string; chatRoomId?: string; injectGroupHistory?: boolean }) => void
   onAgentSettingsChange?: () => void
   onInsertMention?: (agentId: string, agentName: string) => void
 }
@@ -105,10 +106,16 @@ function AgentItem({
   chatRoomId: string
   onInsertMention?: (agentId: string, agentName: string) => void
 }) {
+  const blocksDetail = info.type === 'agent' && isSystemAssistantDetailBlocked(info)
+
   return (
     <div
-      className="flex items-center gap-2 rounded-lg p-2 hover:bg-accent cursor-pointer"
+      className={cn(
+        'flex items-center gap-2 rounded-lg p-2',
+        blocksDetail ? 'cursor-default' : 'cursor-pointer hover:bg-accent'
+      )}
       onClick={() => {
+        if (blocksDetail) return
         onSelectAgent({
           ...info,
           chatRoomId,

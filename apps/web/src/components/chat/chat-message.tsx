@@ -17,6 +17,7 @@ import { toVoicePanelConfig } from '@/lib/agent-speech'
 import { normalizeSpeechText, prewarmTts, speakText, stopSpeechPlayback, supportsSpeechPlayback } from '@/lib/browser-speech'
 import { resolveAssetUrl } from '@/lib/asset-url'
 import { MarkdownContent } from './markdown-content'
+import { isSystemAssistantDetailBlocked } from '@/lib/system-agents'
 
 function logManualVoice(event: string, details: Record<string, unknown>): void {
   console.debug(`[voice-manual] ${event}`, details)
@@ -367,13 +368,19 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
         }
 
         if (matchedAgent) {
+          const blocksDetail = isSystemAssistantDetailBlocked(matchedAgent)
           // 渲染高亮的 @助手名
           parts.push(
             <span
               key={`mention-${match.index}`}
-              className="text-primary cursor-pointer hover:text-primary/80 whitespace-nowrap"
-              onClick={() => onMentionClick?.(matchedAgent.id, matchedAgent.name)}
-              title={`点击查看 ${matchedAgent.name} 详情`}
+              className={cn(
+                'text-primary whitespace-nowrap',
+                blocksDetail ? 'cursor-default' : 'cursor-pointer hover:text-primary/80'
+              )}
+              onClick={() => {
+                if (!blocksDetail) onMentionClick?.(matchedAgent.id, matchedAgent.name)
+              }}
+              title={blocksDetail ? undefined : `点击查看 ${matchedAgent.name} 详情`}
             >
               @{mentionName}
             </span>
