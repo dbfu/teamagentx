@@ -1,6 +1,7 @@
 import { cn } from '@/lib/utils'
 import { X, Download, Copy, Check } from 'lucide-react'
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { toast } from 'sonner'
 
 interface ImageViewerModalProps {
@@ -22,6 +23,18 @@ export function ImageViewerModal({
 }: ImageViewerModalProps) {
   const [isLoading, setIsLoading] = useState(true)
   const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    if (!isOpen) return
+
+    setIsLoading(true)
+    const originalOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+
+    return () => {
+      document.body.style.overflow = originalOverflow
+    }
+  }, [isOpen, imageUrl])
 
   const handleDownload = () => {
     const link = document.createElement('a')
@@ -50,9 +63,9 @@ export function ImageViewerModal({
 
   if (!isOpen) return null
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
+      className="fixed inset-0 z-[80] flex items-center justify-center p-4"
       onClick={onClose}
     >
       {/* 背景 */}
@@ -64,7 +77,7 @@ export function ImageViewerModal({
         onClick={(e) => e.stopPropagation()}
       >
         {/* 工具栏 */}
-        <div className="flex items-center justify-between mb-2 px-2">
+        <div className="mb-2 flex items-center justify-between px-2">
           <span className="text-white text-sm truncate max-w-[200px]" title={imageName}>
             {imageName}
           </span>
@@ -117,6 +130,7 @@ export function ImageViewerModal({
           />
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
