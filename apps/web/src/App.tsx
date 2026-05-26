@@ -865,11 +865,6 @@ export default function App() {
     return register(username, password, avatar)
   }
 
-  const handleSwitchToRegister = () => {
-    setShowLogin(false)
-    setShowRegister(true)
-  }
-
   const forceSetup = typeof window !== 'undefined' && localStorage.getItem('force_setup_wizard') === 'true'
   const showSetupWizard = isElectron() && state !== 'checking' && (forceSetup || (isFirstUse && !setupCompleted))
 
@@ -1027,7 +1022,6 @@ export default function App() {
       <LoginModal
         isOpen={showLogin}
         onLogin={handleLogin}
-        onSwitchToRegister={handleSwitchToRegister}
       />
 
       {/* Register Modal */}

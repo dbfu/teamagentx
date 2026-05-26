@@ -159,6 +159,7 @@ export interface CachedStreamEventData {
 interface AgentStoppedData {
   chatRoomId: string
   agentId: string
+  messageId?: string
 }
 
 interface AgentTaskQueueData {
@@ -277,7 +278,7 @@ interface SocketStore {
   requestAgentStatus: (chatRoomId: string) => void
   onAgentResume: (callback: (data: AgentResumeData) => void) => () => void
   onCachedEvents: (callback: (data: CachedStreamEventData) => void) => () => void
-  stopAgent: (chatRoomId: string, agentId: string) => void
+  stopAgent: (chatRoomId: string, agentId: string, messageId?: string) => void
   onAgentStopped: (callback: (data: AgentStoppedData) => void) => () => void
   requestAgentTaskQueue: (chatRoomId: string, agentId: string) => void
   onAgentTaskQueue: (callback: (data: AgentTaskQueueData) => void) => () => void
@@ -481,10 +482,10 @@ export const useSocketStore = create<SocketStore>((set, get) => ({
     return () => socket?.off('agent:cached-events', callback)
   },
 
-  stopAgent: (chatRoomId: string, agentId: string) => {
+  stopAgent: (chatRoomId: string, agentId: string, messageId?: string) => {
     const socket = get().socket
     if (!socket) return
-    socket.emit('agent:stop', { chatRoomId, agentId })
+    socket.emit('agent:stop', { chatRoomId, agentId, messageId })
   },
 
   onAgentStopped: (callback) => {

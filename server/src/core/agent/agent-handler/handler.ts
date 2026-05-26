@@ -31,6 +31,20 @@ export function shouldTriggerCoordinatorAgent(params: {
   return !params.hasMentions || !params.messageIsHuman;
 }
 
+export function getTriggerMentionNames(params: {
+  agentTriggerMode: string;
+  sourceAgentId?: string | null;
+  mentionNames: string[];
+}) {
+  const isInternalCoordinatorDispatch =
+    params.agentTriggerMode === 'coordinator' &&
+    params.sourceAgentId === GROUP_COORDINATOR_ID;
+
+  return isInternalCoordinatorDispatch
+    ? params.mentionNames
+    : params.mentionNames.slice(0, 1);
+}
+
 // 消息事件发射器
 const emitter = new EventEmitter();
 
@@ -142,7 +156,11 @@ export function setupAIHandlers(
         activeAgents.map((agent) => agent.name),
         { allowInline: true },
       );
-      const triggerMentionNames = mentionNames.slice(0, 1);
+      const triggerMentionNames = getTriggerMentionNames({
+        agentTriggerMode,
+        sourceAgentId: message.agentId,
+        mentionNames,
+      });
       const hasMentions = triggerMentionNames.length > 0;
 
       // 快速对话群聊：如果没有 @其他助手，则触发快速对话助手
@@ -269,7 +287,7 @@ export function setupAIHandlers(
         chatRoomId,
         mentionNames,
         triggerMentionNames,
-        ignoredMentionNames: mentionNames.slice(1),
+        ignoredMentionNames: mentionNames.filter((name) => !triggerMentionNames.includes(name)),
       });
 
       // 获取快速对话的目标助手信息（用于注入默认目标）
@@ -277,7 +295,7 @@ export function setupAIHandlers(
         ? await agentService.findById(chatRoom.quickChatAgentId)
         : null;
 
-      // 单条消息最多触发一个助手；多个 @ 时只处理第一个有效助手。
+      // 协调模式下只有内置群调度助手可在单条消息中同时触发多个助手；其他来源只处理第一个有效助手。
       for (const agentName of triggerMentionNames) {
         // Find agent by name
         const agent = activeAgentByName.get(agentName);

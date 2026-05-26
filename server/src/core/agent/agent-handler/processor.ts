@@ -587,7 +587,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
       processQueue(chatRoomId, agentId);
     } else {
       // 队列清空，广播状态变化（agent finished executing）
-      broadcastAgentStatus(chatRoomId);
+      broadcastAgentStatus(chatRoomId, [agentId]);
     }
   }
 }

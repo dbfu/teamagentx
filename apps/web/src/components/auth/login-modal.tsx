@@ -3,10 +3,9 @@ import { useState } from 'react'
 interface LoginModalProps {
   isOpen: boolean
   onLogin: (username: string, password: string) => Promise<{ success: boolean; error?: string }>
-  onSwitchToRegister: () => void
 }
 
-export function LoginModal({ isOpen, onLogin, onSwitchToRegister }: LoginModalProps) {
+export function LoginModal({ isOpen, onLogin }: LoginModalProps) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -105,16 +104,6 @@ export function LoginModal({ isOpen, onLogin, onSwitchToRegister }: LoginModalPr
             >
               {loading ? '登录中...' : '登录'}
             </button>
-            <div className="mt-3 text-center text-sm text-muted-foreground">
-              还没有账号？{' '}
-              <button
-                type="button"
-                onClick={onSwitchToRegister}
-                className="text-primary hover:text-primary/80"
-              >
-                立即注册
-              </button>
-            </div>
           </div>
         </form>
       </div>

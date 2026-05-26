@@ -1,6 +1,7 @@
 import { cn } from '@/lib/utils'
 import { resolveAssetUrl } from '@/lib/asset-url'
 import { MENTION_MARKER_CLASS, remarkMentions } from '@/lib/remark-mentions'
+import { remarkTrimUrlPunctuation } from '@/lib/remark-trim-url-punctuation'
 import { isSystemAssistantDetailBlocked } from '@/lib/system-agents'
 import ReactMarkdown from 'react-markdown'
 import rehypeRaw from 'rehype-raw'
@@ -75,7 +76,11 @@ export function MarkdownContent({
       )}
     >
       <ReactMarkdown
-        remarkPlugins={hasMentions ? [remarkGfm, [remarkMentions, { mentionAgents }]] : [remarkGfm]}
+        remarkPlugins={
+          hasMentions
+            ? [remarkGfm, remarkTrimUrlPunctuation, [remarkMentions, { mentionAgents }]]
+            : [remarkGfm, remarkTrimUrlPunctuation]
+        }
         rehypePlugins={hasMentions ? [rehypeRaw] : undefined}
         components={{
           a: ({ href, children }) => (

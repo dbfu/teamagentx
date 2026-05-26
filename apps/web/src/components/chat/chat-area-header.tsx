@@ -50,23 +50,33 @@ export function ChatAreaHeader({
   const [packageScripts, setPackageScripts] = useState<PackageScriptsResult | null>(null)
   const [loadingScripts, setLoadingScripts] = useState(false)
   const [runningScript, setRunningScript] = useState<string | null>(null)
+  const [packageScriptsMenuOpen, setPackageScriptsMenuOpen] = useState(false)
+  const [packageScriptsTooltipOpen, setPackageScriptsTooltipOpen] = useState(false)
+  const [suppressPackageScriptsTooltip, setSuppressPackageScriptsTooltip] = useState(false)
   const [moreMenuOpen, setMoreMenuOpen] = useState(false)
   const [moreTooltipOpen, setMoreTooltipOpen] = useState(false)
   const [suppressMoreTooltip, setSuppressMoreTooltip] = useState(false)
   const packageScriptsRequestRef = useRef(0)
+  const packageScriptsLoadedRef = useRef(false)
+  const packageScriptsTooltipSuppressTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
   const moreTooltipSuppressTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
   const visibleScripts = packageScripts?.scripts ?? []
   const shouldShowPackageScriptsMenu = packageScripts?.hasPackageJson === true
 
-  const loadPackageScripts = useCallback(async (options?: { reset?: boolean }) => {
+  const loadPackageScripts = useCallback(async (options?: { reset?: boolean; showLoading?: boolean }) => {
     const requestId = packageScriptsRequestRef.current + 1
     packageScriptsRequestRef.current = requestId
     const shouldReset = options?.reset === true
     if (shouldReset) {
+      packageScriptsLoadedRef.current = false
       setPackageScripts(null)
     }
 
-    setLoadingScripts(true)
+    const shouldShowLoading = options?.showLoading ?? !packageScriptsLoadedRef.current
+    if (shouldShowLoading) {
+      setLoadingScripts(true)
+    }
+
     try {
       const response = await chatRoomApi.getPackageScripts(chatRoom.id)
       if (packageScriptsRequestRef.current !== requestId) return
@@ -80,15 +90,16 @@ export function ChatAreaHeader({
       }
     } finally {
       if (packageScriptsRequestRef.current === requestId) {
+        packageScriptsLoadedRef.current = true
         setLoadingScripts(false)
       }
     }
   }, [chatRoom.id, chatRoom.workDir])
 
   useEffect(() => {
-    void loadPackageScripts({ reset: true })
+    void loadPackageScripts({ reset: true, showLoading: true })
     const intervalId = window.setInterval(() => {
-      void loadPackageScripts()
+      void loadPackageScripts({ showLoading: false })
     }, 10_000)
 
     return () => {
@@ -99,6 +110,9 @@ export function ChatAreaHeader({
 
   useEffect(() => {
     return () => {
+      if (packageScriptsTooltipSuppressTimerRef.current) {
+        window.clearTimeout(packageScriptsTooltipSuppressTimerRef.current)
+      }
       if (moreTooltipSuppressTimerRef.current) {
         window.clearTimeout(moreTooltipSuppressTimerRef.current)
       }
@@ -134,6 +148,43 @@ export function ChatAreaHeader({
       setRunningScript(null)
     }
   }, [chatRoom.id, terminalOpenTarget])
+
+  const clearPackageScriptsTooltipSuppressTimer = useCallback(() => {
+    if (packageScriptsTooltipSuppressTimerRef.current) {
+      window.clearTimeout(packageScriptsTooltipSuppressTimerRef.current)
+      packageScriptsTooltipSuppressTimerRef.current = null
+    }
+  }, [])
+
+  const suppressPackageScriptsTooltipBriefly = useCallback(() => {
+    clearPackageScriptsTooltipSuppressTimer()
+    setSuppressPackageScriptsTooltip(true)
+    packageScriptsTooltipSuppressTimerRef.current = window.setTimeout(() => {
+      setSuppressPackageScriptsTooltip(false)
+      packageScriptsTooltipSuppressTimerRef.current = null
+    }, 350)
+  }, [clearPackageScriptsTooltipSuppressTimer])
+
+  const handlePackageScriptsMenuOpenChange = useCallback((open: boolean) => {
+    setPackageScriptsMenuOpen(open)
+    setPackageScriptsTooltipOpen(false)
+    if (open) {
+      clearPackageScriptsTooltipSuppressTimer()
+      setSuppressPackageScriptsTooltip(true)
+      void loadPackageScripts()
+    } else {
+      suppressPackageScriptsTooltipBriefly()
+    }
+  }, [clearPackageScriptsTooltipSuppressTimer, loadPackageScripts, suppressPackageScriptsTooltipBriefly])
+
+  const handlePackageScriptsTooltipOpenChange = useCallback((open: boolean) => {
+    setPackageScriptsTooltipOpen(open && !packageScriptsMenuOpen && !suppressPackageScriptsTooltip)
+  }, [packageScriptsMenuOpen, suppressPackageScriptsTooltip])
+
+  const handlePackageScriptsTriggerPointerLeave = useCallback(() => {
+    clearPackageScriptsTooltipSuppressTimer()
+    setSuppressPackageScriptsTooltip(false)
+  }, [clearPackageScriptsTooltipSuppressTimer])
 
   const clearMoreTooltipSuppressTimer = useCallback(() => {
     if (moreTooltipSuppressTimerRef.current) {
@@ -172,16 +223,19 @@ export function ChatAreaHeader({
   }, [clearMoreTooltipSuppressTimer])
 
   const packageScriptsMenu = (
-    <DropdownMenu onOpenChange={(open) => {
-      if (open) void loadPackageScripts()
-    }}>
-      <Tooltip>
+    <DropdownMenu open={packageScriptsMenuOpen} onOpenChange={handlePackageScriptsMenuOpenChange}>
+      <Tooltip
+        open={!packageScriptsMenuOpen && !suppressPackageScriptsTooltip && packageScriptsTooltipOpen}
+        onOpenChange={handlePackageScriptsTooltipOpenChange}
+      >
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
             <button
               className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary disabled:opacity-50"
               type="button"
               disabled={runningScript !== null}
+              onBlur={handlePackageScriptsTriggerPointerLeave}
+              onPointerLeave={handlePackageScriptsTriggerPointerLeave}
             >
               {runningScript ? (
                 <Loader2 className="size-5 animate-spin" />
@@ -193,7 +247,7 @@ export function ChatAreaHeader({
         </TooltipTrigger>
         <TooltipContent side="bottom">执行 package 脚本</TooltipContent>
       </Tooltip>
-      <DropdownMenuContent align="end" className="max-h-[420px] w-80 overflow-y-auto">
+      <DropdownMenuContent align="end" className="max-h-[420px] w-[420px] max-w-[calc(100vw-24px)] overflow-y-auto">
         <DropdownMenuLabel className="text-xs text-muted-foreground">
           {packageScripts?.packageManager ?? 'npm'} scripts
         </DropdownMenuLabel>
@@ -203,22 +257,30 @@ export function ChatAreaHeader({
             正在刷新
           </div>
         ) : visibleScripts.length > 0 ? (
-          visibleScripts.map((script) => (
-            <DropdownMenuItem
-              key={script.id}
-              disabled={runningScript !== null}
-              onClick={() => void handleRunPackageScript(script.id, script.name)}
-              title={script.command}
-            >
-              <Play className="size-4" />
-              <div className="min-w-0">
-                <div className="truncate font-medium">
-                  {script.relativeDir ? `${script.relativeDir} / ${script.name}` : script.name}
+          visibleScripts.map((script) => {
+            const scriptLabel = script.relativeDir ? `${script.relativeDir} / ${script.name}` : script.name
+
+            return (
+              <DropdownMenuItem
+                key={script.id}
+                disabled={runningScript !== null}
+                onClick={() => void handleRunPackageScript(script.id, script.name)}
+              >
+                <Play className="size-4" />
+                <div className="min-w-0">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div className="truncate font-medium">{scriptLabel}</div>
+                    </TooltipTrigger>
+                    <TooltipContent side="left" align="start" className="max-w-[420px] break-all text-xs">
+                      {scriptLabel}
+                    </TooltipContent>
+                  </Tooltip>
+                  <div className="truncate text-xs text-muted-foreground">{script.command}</div>
                 </div>
-                <div className="truncate text-xs text-muted-foreground">{script.command}</div>
-              </div>
-            </DropdownMenuItem>
-          ))
+              </DropdownMenuItem>
+            )
+          })
         ) : (
           <div className="px-2 py-2 text-sm text-muted-foreground">
             未发现 package scripts

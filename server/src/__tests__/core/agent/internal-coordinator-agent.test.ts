@@ -66,6 +66,16 @@ describe('internal coordinator no-dispatch handling', () => {
     assert.match(prompt, /不得添加、删除、改写任何内容/);
   });
 
+  test('prompt allows only the coordinator to dispatch multiple assistants in coordinator mode', () => {
+    const prompt = buildInternalCoordinatorPrompt();
+
+    assert.match(prompt, /只有你（群调度助手）支持在一条调度消息中 @多个助手/);
+    assert.match(prompt, /多个助手同时执行任务/);
+    assert.match(prompt, /其他业务助手在协调模式下不能直接 @助手 触发任务/);
+    assert.match(prompt, /不会直接触发目标助手/);
+    assert.match(prompt, /@assistant_name @assistant_name original_content/);
+  });
+
   test('prompt requires mentioning the chatroom owner for human answers', () => {
     const prompt = buildInternalCoordinatorPrompt();
 
