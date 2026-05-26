@@ -26,6 +26,7 @@ interface EditAssistantModalProps {
     acpTool: string
     proxyConfig?: string | null
     codexModel?: string | null
+    codexFastMode?: boolean
     claudeModel?: string | null
     thinkingMode?: AgentThinkingMode | null
     categoryId: string | null
@@ -171,6 +172,7 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
   const [llmProviders, setLlmProviders] = useState<LlmProvider[]>([])
   const [llmProviderId, setLlmProviderId] = useState<string>('')
   const [codexModel, setCodexModel] = useState('')
+  const [codexFastMode, setCodexFastMode] = useState(false)
   const [claudeModel, setClaudeModel] = useState('')
   const [thinkingMode, setThinkingMode] = useState<AgentThinkingMode>('high')
   const [proxyConfig, setProxyConfig] = useState('')
@@ -220,6 +222,7 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
   )
   const canUseLocalAcpConfig = assistantType === 'acp' && selectedAcpTool?.localConfigAvailable
   const showLocalCodexConfig = assistantType === 'acp' && formAcpTool === 'codex' && !effectiveLlmProviderId
+  const showCodexFastMode = assistantType === 'acp' && formAcpTool === 'codex'
   const showLocalClaudeConfig = assistantType === 'acp' && formAcpTool === 'claude' && !effectiveLlmProviderId
   const providerSelectLabel = selectedProviderInfo
     ? `${selectedProviderInfo.name} · ${selectedProviderInfo.model}`
@@ -335,6 +338,7 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
       setCategoryId(assistantForForm.categoryId || '')
       setLlmProviderId(assistantForForm.llmProviderId || assistantForForm.llmProvider?.id || '')
       setCodexModel(assistantForForm.codexModel || '')
+      setCodexFastMode(Boolean(assistantForForm.codexFastMode))
       setClaudeModel(assistantForForm.claudeModel || '')
       setThinkingMode(assistantForForm.thinkingMode || 'high')
       setProxyConfig(assistantForForm.proxyConfig || '')
@@ -410,6 +414,7 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
         acpTool: assistantType === 'acp' ? formAcpTool : '',
         proxyConfig: showLocalCodexConfig ? proxyConfig.trim() || null : null,
         codexModel: showLocalCodexConfig ? codexModel.trim() || null : null,
+        codexFastMode: showCodexFastMode && codexFastMode,
         claudeModel: showLocalClaudeConfig ? claudeModel.trim() || null : null,
         thinkingMode,
         categoryId: categoryId || null,
@@ -587,6 +592,23 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
                     <SelectItem value="off">关</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+            )}
+
+            {showCodexFastMode && (
+              <div className="mb-4 rounded-lg border border-border p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium text-foreground">Fast 模式</div>
+                    <div className="text-xs text-muted-foreground">
+                      开启后大约能提升 1.5 倍速度，但 token 消耗速度会变快
+                    </div>
+                  </div>
+                  <Switch
+                    checked={codexFastMode}
+                    onCheckedChange={setCodexFastMode}
+                  />
+                </div>
               </div>
             )}
 

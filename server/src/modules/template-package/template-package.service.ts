@@ -120,6 +120,7 @@ export const templatePackageService = {
         workDir: agent.workDir,
         proxyConfig: agent.proxyConfig,
         codexModel: agent.codexModel,
+        codexFastMode: agent.codexFastMode,
         claudeModel: agent.claudeModel,
         thinkingMode: agent.thinkingMode,
         llmProviderId: agent.llmProviderId,
@@ -232,6 +233,7 @@ export const templatePackageService = {
         workDir: string | null;
         proxyConfig: string | null;
         codexModel: string | null;
+        codexFastMode?: boolean;
         claudeModel: string | null;
         thinkingMode: string;
         llmProviderId: string | null;
@@ -339,6 +341,7 @@ export const templatePackageService = {
             workDir: importedAgentWorkDir,
             proxyConfig: null,
             codexModel: agent.codexModel,
+            codexFastMode: Boolean(agent.codexFastMode),
             claudeModel: agent.claudeModel,
             thinkingMode: agent.thinkingMode || 'high',
             llmProviderId: resolvedTextProvider?.providerId ?? null,

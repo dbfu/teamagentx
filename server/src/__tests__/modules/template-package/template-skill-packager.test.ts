@@ -23,7 +23,18 @@ describe('template skill packager', () => {
   test('collects full skill files from agent skills directory', () => {
     const skillDir = path.join(tempDir, 'skills', 'browser-use');
     fs.mkdirSync(path.join(skillDir, '.skills'), { recursive: true });
-    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '---\nname: Browser Use\ndescription: Test\n---\nbody');
+    fs.writeFileSync(
+      path.join(skillDir, 'SKILL.md'),
+      [
+        '---',
+        'name: Browser Use',
+        'description: |',
+        '  Test line',
+        '  with colon: value',
+        '---',
+        'body',
+      ].join('\n'),
+    );
     fs.writeFileSync(path.join(skillDir, 'helper.txt'), 'helper');
     fs.writeFileSync(path.join(skillDir, '.skills', 'origin.json'), JSON.stringify({ source: 'user-created' }));
 
@@ -34,6 +45,7 @@ describe('template skill packager', () => {
 
     assert.equal(result.skills.length, 1);
     assert.equal(result.skills[0]?.slug, 'browser-use');
+    assert.equal(result.skills[0]?.description, 'Test line with colon: value');
     assert.equal(result.skills[0]?.files.some((file) => file.path === 'SKILL.md'), true);
     assert.equal(result.skills[0]?.files.some((file) => file.path === 'helper.txt'), true);
     assert.equal(Buffer.from(result.skills[0]?.files.find((file) => file.path === 'helper.txt')?.content ?? []).toString('utf8'), 'helper');

@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { parseSkillMetadata } from '../skill/skill-metadata.js';
 
 export interface TemplateSkillFile {
   path: string;
@@ -22,26 +23,6 @@ export interface TemplateSkillUsage {
 export interface DegradedTemplateSkill {
   slug: string;
   reason: string;
-}
-
-function parseSkillFrontmatter(skillMd: string): { name: string; description: string } {
-  const match = skillMd.match(/^---\n([\s\S]*?)\n---/);
-  if (!match) {
-    return { name: '', description: '' };
-  }
-
-  let name = '';
-  let description = '';
-  for (const line of match[1].split('\n')) {
-    const parsed = line.match(/^(\w+):\s*(.*)$/);
-    if (!parsed) continue;
-    const [, key, raw] = parsed;
-    const value = raw.replace(/^["']|["']$/g, '').trim();
-    if (key === 'name') name = value;
-    if (key === 'description') description = value;
-  }
-
-  return { name, description };
 }
 
 function collectFilesRecursively(
@@ -99,7 +80,7 @@ export function collectSkillsForTemplate(agentSkillDirs: Array<{ agentId: string
         const files: TemplateSkillFile[] = [];
         collectFilesRecursively(skillDir, skillDir, files);
         const skillMd = fs.readFileSync(skillMdPath, 'utf8');
-        const { name, description } = parseSkillFrontmatter(skillMd);
+        const { name, description } = parseSkillMetadata(skillMd);
         const originPath = path.join(skillDir, '.skills', 'origin.json');
         let origin: Record<string, unknown> | null = null;
         if (fs.existsSync(originPath)) {
@@ -113,7 +94,7 @@ export function collectSkillsForTemplate(agentSkillDirs: Array<{ agentId: string
         skills.set(entry.name, {
           slug: entry.name,
           name: name || entry.name,
-          description,
+          description: description || '',
           files,
           origin,
         });
@@ -173,10 +154,18 @@ export function materializeTemplateSkills(input: {
     }
   } catch (error) {
     for (const createdDir of createdAgentSkillDirs.reverse()) {
-      fs.rmSync(createdDir, { recursive: true, force: true });
+      try {
+        fs.rmSync(createdDir, { recursive: true, force: true });
+      } catch {
+        // Continue rollback for other paths even if an invalid parent path fails.
+      }
     }
     for (const createdDir of createdSharedSkillDirs.reverse()) {
-      fs.rmSync(createdDir, { recursive: true, force: true });
+      try {
+        fs.rmSync(createdDir, { recursive: true, force: true });
+      } catch {
+        // Best-effort cleanup; rethrow the original materialization error below.
+      }
     }
     throw error;
   }

@@ -42,6 +42,7 @@ export interface Agent {
   workDir: string | null
   proxyConfig: string | null
   codexModel: string | null
+  codexFastMode: boolean
   claudeModel: string | null
   thinkingMode: AgentThinkingMode
   speechConfig: AgentSpeechConfig | null
@@ -112,6 +113,7 @@ export interface CreateAgentRequest {
   workDir?: string
   proxyConfig?: string | null
   codexModel?: string | null
+  codexFastMode?: boolean
   claudeModel?: string | null
   thinkingMode?: AgentThinkingMode | null
   speechConfig?: AgentSpeechConfig | null
@@ -133,6 +135,7 @@ export interface UpdateAgentRequest {
   workDir?: string
   proxyConfig?: string | null
   codexModel?: string | null
+  codexFastMode?: boolean
   claudeModel?: string | null
   thinkingMode?: AgentThinkingMode | null
   speechConfig?: AgentSpeechConfig | null
@@ -354,6 +357,7 @@ export interface TemplatePackageSnapshot {
     workDir: string | null
     proxyConfig: string | null
     codexModel: string | null
+    codexFastMode: boolean
     claudeModel: string | null
     thinkingMode: AgentThinkingMode
     llmProviderId: string | null

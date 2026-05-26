@@ -40,6 +40,7 @@ export type CreateAgentInput = {
   workDir?: string;
   proxyConfig?: string | null;
   codexModel?: string | null;
+  codexFastMode?: boolean;
   claudeModel?: string | null;
   thinkingMode?: AgentThinkingMode | null;
   categoryId?: string;
@@ -227,6 +228,7 @@ export const agentService = {
           workDir: data.workDir,
           proxyConfig: normalizeAgentProxyConfig(data.proxyConfig),
           codexModel: normalizeNullableString(data.codexModel),
+          codexFastMode: data.codexFastMode ?? false,
           claudeModel: normalizeNullableString(data.claudeModel),
           thinkingMode: normalizeAgentThinkingMode(data.thinkingMode) ?? DEFAULT_AGENT_THINKING_MODE,
           categoryId,

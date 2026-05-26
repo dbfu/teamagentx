@@ -15,6 +15,7 @@ function testAgent(overrides: Record<string, unknown> = {}) {
     workDir: null,
     proxyConfig: null,
     codexModel: null,
+    codexFastMode: false,
     isActive: true,
     ...overrides,
   } as any;
@@ -37,6 +38,8 @@ describe('createExecutor', () => {
       const debugInfo = executor.getDebugInfo();
       assert.match(debugInfo.systemPrompt, /## Group Rules/);
       assert.match(debugInfo.systemPrompt, /所有回复必须使用中文。/);
+      assert.match(debugInfo.systemPrompt, /## Assistant Mentions/);
+      assert.match(debugInfo.systemPrompt, /at most one triggerable @assistant mention/);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -63,6 +66,32 @@ describe('createExecutor', () => {
       const debugInfo = executor.getDebugInfo();
       assert.match(debugInfo.systemPrompt, /## Group Rules/);
       assert.match(debugInfo.systemPrompt, /输出前先检查群规则。/);
+      assert.match(debugInfo.systemPrompt, /## Assistant Mentions/);
+      assert.match(debugInfo.systemPrompt, /at most one triggerable @assistant mention/);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test('将 Codex Fast 模式传入执行器', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-fast-'));
+    try {
+      const executor = createExecutor({
+        agent: testAgent({
+          id: 'agent-3',
+          name: 'FastCodexAgent',
+          type: 'acp',
+          acpTool: 'codex',
+          codexFastMode: true,
+        }),
+        chatRoomId: 'room-1',
+        threadId: 'room-1_FastCodexAgent',
+        injectGroupHistory: true,
+        chatRoomAgents: [],
+        customWorkDir: tmpDir,
+      });
+
+      assert.strictEqual((executor as any).codexFastMode, true);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

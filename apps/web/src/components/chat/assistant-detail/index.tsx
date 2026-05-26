@@ -293,6 +293,7 @@ export function AssistantDetailPage() {
     acpTool: string
     proxyConfig?: string | null
     codexModel?: string | null
+    codexFastMode?: boolean
     claudeModel?: string | null
     thinkingMode?: AgentThinkingMode | null
     categoryId: string | null
@@ -310,6 +311,7 @@ export function AssistantDetailPage() {
       acpTool: data.acpTool || undefined,
       proxyConfig: data.proxyConfig || null,
       codexModel: data.codexModel || null,
+      codexFastMode: Boolean(data.codexFastMode),
       claudeModel: data.claudeModel || null,
       thinkingMode: data.thinkingMode || 'high',
       categoryId: data.categoryId,

@@ -8,6 +8,7 @@ import {
   removePathIfExists,
   replaceWithSkillDirectoryLink,
 } from './skill-link.js';
+import { readSkillMetadata } from './skill-metadata.js';
 
 // 已安装 Skill 信息
 export interface InstalledSkill {
@@ -326,27 +327,7 @@ function sanitizeSubpath(subpath: string): string {
  */
 function parseSkillMd(skillMdPath: string): DiscoveredSkill | null {
   try {
-    const content = fs.readFileSync(skillMdPath, 'utf-8');
-
-    // 解析 YAML frontmatter
-    const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
-    if (!frontmatterMatch) {
-      return null;
-    }
-
-    const frontmatter = frontmatterMatch[1];
-    const data: Record<string, any> = {};
-
-    // 简单解析 YAML frontmatter
-    const lines = frontmatter.split('\n');
-    for (const line of lines) {
-      const match = line.match(/^(\w+):\s*(.+)$/);
-      if (match) {
-        const [, key, value] = match;
-        // 处理引号包裹的值
-        data[key] = value.replace(/^["']|["']$/g, '');
-      }
-    }
+    const data = readSkillMetadata(skillMdPath);
 
     if (!data.name || !data.description) {
       return null;
@@ -360,7 +341,6 @@ function parseSkillMd(skillMdPath: string): DiscoveredSkill | null {
       name: data.name,
       description: data.description,
       relativePath: path.dirname(skillMdPath),
-      metadata: data.metadata,
     };
   } catch {
     return null;

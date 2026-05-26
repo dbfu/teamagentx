@@ -26,6 +26,7 @@ interface SnapshotAgentInput {
   workDir: string | null;
   proxyConfig: string | null;
   codexModel: string | null;
+  codexFastMode?: boolean;
   claudeModel: string | null;
   thinkingMode: string;
   llmProviderId: string | null;
@@ -69,6 +70,7 @@ export function buildTemplateSnapshot(input: BuildTemplateSnapshotInput) {
       workDir: null,
       proxyConfig: null,
       codexModel: agent.codexModel,
+      codexFastMode: Boolean(agent.codexFastMode),
       claudeModel: agent.claudeModel,
       thinkingMode: agent.thinkingMode,
       llmProviderId: null,

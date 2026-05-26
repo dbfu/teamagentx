@@ -117,6 +117,7 @@ model Agent {
   workDir           String? // 工作目录（适用于所有类型）
   proxyConfig       String? // ACP 工具代理配置（如 Codex 本地模式代理地址或 export 片段）
   codexModel        String? // Codex 本地配置模式下指定的模型名称
+  codexFastMode     Boolean            @default(false) // Codex Fast service tier
   claudeModel       String? // Claude 本地配置模式下指定的模型名称
   thinkingMode      String             @default("high") // 思考模式: off | low | medium | high
   isActive          Boolean            @default(true)
