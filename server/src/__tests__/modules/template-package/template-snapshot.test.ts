@@ -85,13 +85,29 @@ describe('template snapshot builder', () => {
         },
       ],
       categories: [{ id: 'cat-1', name: '客服', description: '客服分类', sortOrder: 1 }],
-      cronTasks: [{ id: 'cron-1', name: '日报', payload: 'send summary' }],
+      cronTasks: [{
+        id: 'cron-1',
+        name: '日报',
+        description: '每天推送日报',
+        scheduleType: 'cron',
+        cronExpression: '0 9 * * *',
+        intervalMinutes: null,
+        scheduledAt: null,
+        payload: 'send summary',
+        agentIds: ['agent-1'],
+        enabled: true,
+        maxRetries: 5,
+      }],
     });
 
     assert.equal(snapshot.room.name, '客服群');
     assert.equal(snapshot.room.agentTriggerMode, 'manual');
     assert.equal(snapshot.categories[0]?.name, '客服');
     assert.equal(snapshot.cronTasks[0]?.name, '日报');
+    assert.equal(snapshot.cronTasks[0]?.scheduleType, 'cron');
+    assert.equal(snapshot.cronTasks[0]?.cronExpression, '0 9 * * *');
+    assert.deepEqual(snapshot.cronTasks[0]?.agentIds, ['agent-1']);
+    assert.equal(snapshot.cronTasks[0]?.enabled, true);
     assert.equal(snapshot.agents[0]?.claudeModel, 'claude-sonnet-4');
   });
 

@@ -417,6 +417,18 @@
     text-rendering: optimizeLegibility;
   }
 
+  html:has(body [class*="fixed"][class*="inset-0"][class*="bg-black/"]),
+  html:has(body [class*="fixed"][class*="inset-0"] [class*="bg-black/"]),
+  body:has([class*="fixed"][class*="inset-0"][class*="bg-black/"]),
+  body:has([class*="fixed"][class*="inset-0"] [class*="bg-black/"]) {
+    overflow: hidden;
+  }
+
+  [class*="fixed"][class*="inset-0"][class*="bg-black/"][class*="overflow-y-auto"],
+  [class*="fixed"][class*="inset-0"][class*="overflow-y-auto"]:has([class*="bg-black/"]) {
+    overflow-y: hidden !important;
+  }
+
   /* Global scrollbar - hidden by default, show on hover */
   * {
     scrollbar-width: thin;

@@ -45,4 +45,35 @@ describe('backgroundCommandService', () => {
       fs.rmSync(workDir, {recursive: true, force: true});
     }
   });
+
+  test('passes custom environment variables to background commands', async () => {
+    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-bg-env-test-'));
+    const code = "console.log(process.env.TEAMAGENTX_ENV_TEST || 'missing')";
+    const command = `${JSON.stringify(process.execPath)} -e ${JSON.stringify(code)}`;
+    let taskId: string | undefined;
+
+    try {
+      const task = await backgroundCommandService.start({
+        chatRoomId: 'test-room',
+        agentId: 'test-agent',
+        agentName: 'Test Agent',
+        command,
+        workDir,
+        env: {
+          ...process.env,
+          TEAMAGENTX_ENV_TEST: 'present',
+        },
+      });
+      taskId = task.id;
+
+      await sleep(150);
+      const output = await backgroundCommandService.read(task.id, 'test-room', 'test-agent');
+      assert.match(output.stdoutTail || '', /present/);
+    } finally {
+      if (taskId) {
+        await prisma.backgroundTask.delete({where: {id: taskId}}).catch(() => undefined);
+      }
+      fs.rmSync(workDir, {recursive: true, force: true});
+    }
+  });
 });

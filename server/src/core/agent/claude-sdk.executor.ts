@@ -44,10 +44,7 @@ import type {
 } from './executor.interface.js';
 import { getImageGenerationSkillInstructions } from './image-generation-config.js';
 import { generateImageForAgent } from './image-generation.service.js';
-import {
-    buildInstalledSkillsInstructions,
-    buildInstalledSkillsSignature,
-} from './skill-instructions.js';
+import { buildInstalledSkillNames } from './skill-instructions.js';
 import { syncGlobalClaudeLocalConfig } from './claude-local-config.js';
 import { getSystemAssistantTools } from './tools/index.js';
 import {
@@ -272,7 +269,12 @@ function shouldApplyBackgroundIdleFinish(state: {
   );
 }
 
+function getClaudeSettingSources(hasLlmProvider: boolean): SettingSource[] {
+  return hasLlmProvider ? ['user'] : ['user', 'project', 'local'];
+}
+
 export const __claudeSdkTestUtils = {
+  getClaudeSettingSources,
   getBackgroundIdleFinishMs,
   shouldApplyBackgroundIdleFinish,
 };
@@ -491,7 +493,6 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
   private agentId: string | null = null;
   private sessionId: string;
   private hasStartedSession = false;
-  private lastInjectedSkillsSignature?: string;
   private acpProviderInfo?: AcpProviderInfo;
   private currentAbortController: AbortController | null = null;
 
@@ -552,7 +553,6 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
     const savedSession = this.loadSessionState();
     this.sessionId = savedSession?.sessionId || randomUUID();
     this.hasStartedSession = savedSession?.hasStartedSession ?? false;
-    this.lastInjectedSkillsSignature = savedSession?.skillsSignature;
 
     const modelInfo = this.llmProvider
       ? `
@@ -573,6 +573,9 @@ ${systemPrompt}
 ${chatRoomRulesSection}
 
 ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
+
+## Assistant Mentions
+In TeamAgentX, an @assistant mention can trigger another assistant task. A single message may contain at most one triggerable @assistant mention. When handing off or asking another assistant, choose one target assistant and mention only that assistant. If multiple assistants could help, choose the best next assistant or ask the user to choose; refer to any additional assistants by name without @.
 
 ## Working Directory
 Your working directory is: ${this.workDir}
@@ -641,7 +644,6 @@ Use TeamAgentX MCP shell tools for shell execution. For normal foreground shell 
   private loadSessionState(): {
     sessionId: string;
     hasStartedSession: boolean;
-    skillsSignature?: string;
   } | null {
     try {
       const statePath = this.getSessionStatePath();
@@ -665,10 +667,6 @@ Use TeamAgentX MCP shell tools for shell execution. For normal foreground shell 
       const loaded = {
         sessionId: state.sessionId,
         hasStartedSession: state.hasStartedSession !== false,
-        skillsSignature:
-          typeof state.skillsSignature === 'string'
-            ? state.skillsSignature
-            : undefined,
       };
       const conversationPath = this.getClaudeConversationPath(loaded.sessionId);
       if (!loaded.hasStartedSession && fs.existsSync(conversationPath)) {
@@ -725,7 +723,6 @@ Use TeamAgentX MCP shell tools for shell execution. For normal foreground shell 
           {
             sessionId: this.sessionId,
             hasStartedSession: this.hasStartedSession,
-            skillsSignature: this.lastInjectedSkillsSignature,
             updatedAt: new Date().toISOString(),
           },
           null,
@@ -899,6 +896,13 @@ Use TeamAgentX MCP shell tools for shell execution. For normal foreground shell 
     });
   }
 
+  private buildMcpCommandEnv(): NodeJS.ProcessEnv {
+    return {
+      ...process.env,
+      CLAUDE_CONFIG_DIR: this.getClaudeConfigDir(),
+    };
+  }
+
   private buildHooks(): Partial<Record<HookEvent, HookCallbackMatcher[]>> {
     return {};
   }
@@ -920,11 +924,6 @@ Use TeamAgentX MCP shell tools for shell execution. For normal foreground shell 
     );
     if (longTermMemorySection) {
       fullMessage += `${longTermMemorySection}\n\n`;
-    }
-
-    const skillsUpdateSection = this.buildSkillsUpdateSection();
-    if (skillsUpdateSection) {
-      fullMessage += `${skillsUpdateSection}\n\n`;
     }
 
     if (this.injectGroupHistory && history && history.length > 0) {
@@ -966,7 +965,7 @@ ${historyText}
       const othersInfo = otherAgents.length > 0 ? otherAgentsList : 'none';
       const mentionTip =
         otherAgents.length > 0
-          ? '\n[Tip]\nWhen you need to message another assistant, write "@assistant_name message content" directly in your final reply. You may also mention an assistant in body text when the @ is preceded by a space. A target assistant is triggered only when @ is at the start of a line or the previous character is a space; @ immediately after punctuation will not trigger. A single message may mention at most one assistant. If the user only asks you to send a message to another assistant, output only that @assistant message in the final reply, with no explanation, pleasantries, summary, or expanded collaboration invitation. Before sending such a message, decide whether triggering another assistant is actually necessary.'
+          ? '\n[Tip]\nWhen you need to message another assistant, write "@assistant_name message content" directly in your final reply. You may also mention an assistant in body text when the @ is preceded by a space. A target assistant is triggered only when @ is at the start of a line or the previous character is a space; @ immediately after punctuation will not trigger. A single message may contain at most one triggerable @assistant mention. If you need to refer to additional assistants, write their names without @. If the user only asks you to send a message to another assistant, output only that @assistant message in the final reply, with no explanation, pleasantries, summary, or expanded collaboration invitation. Before sending such a message, decide whether triggering another assistant is actually necessary.'
           : '';
 
       fullMessage += `[Group Chat Member Info]
@@ -980,18 +979,6 @@ Other assistants: ${othersInfo}${mentionTip}
 
     fullMessage += `[Current Message]\n${message}`;
     return fullMessage;
-  }
-
-  private buildSkillsUpdateSection(): string {
-    const currentSignature = buildInstalledSkillsSignature(this.agentId);
-    if (this.lastInjectedSkillsSignature === currentSignature) {
-      return '';
-    }
-
-    this.lastInjectedSkillsSignature = currentSignature;
-    this.saveSessionId();
-    return `[Installed Skills Update]
-${buildInstalledSkillsInstructions(this.agentId)}`;
   }
 
   private buildPrompt(
@@ -1130,7 +1117,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       const child = spawn(trimmedCommand, [], {
         cwd: this.workDir,
         shell: process.env.SHELL || '/bin/bash',
-        env: process.env,
+        env: this.buildMcpCommandEnv(),
         stdio: ['ignore', 'pipe', 'pipe'],
       });
 
@@ -1268,6 +1255,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
               agentName: this.name,
               command: args.command,
               workDir: this.workDir,
+              env: this.buildMcpCommandEnv(),
             });
             const structuredContent = toStructuredContent(task);
             return {
@@ -1805,11 +1793,10 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     const env = this.buildEnv();
     const maxTurns = getClaudeMaxTurns();
     const thinking = getClaudeThinkingOptions(this.llmProvider, this.thinkingMode);
+    const skills = buildInstalledSkillNames(this.agentId);
     this.lastClaudeStderr = '';
     this.logQueryStart(env);
-    const settingSources: SettingSource[] = this.llmProvider
-      ? []
-      : ['user', 'project', 'local'];
+    const settingSources = getClaudeSettingSources(Boolean(this.llmProvider));
     const allowedTaxTools = this.getAllowedTaxTools();
     const q = query({
       prompt: this.buildPrompt(fullMessage, attachments),
@@ -1820,6 +1807,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
         includePartialMessages: true,
         maxTurns,
         thinking,
+        skills,
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
         ...(allowedTaxTools.length > 0

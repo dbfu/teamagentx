@@ -21,7 +21,6 @@ describe('template preview service', () => {
         },
       },
       desiredGroupName: '客服模板',
-      existingImports: [{ templateId: 'tpl-demo', version: '1.0.0' }],
       existingGroupNames: ['客服模板'],
       capabilityDescriptors: [
         {
@@ -40,6 +39,12 @@ describe('template preview service', () => {
           modelType: 'image',
         },
       ],
+      degradedSkills: [
+        {
+          slug: 'broken-skill',
+          reason: 'SKILL.md not found',
+        },
+      ],
       localProviders: [
         {
           id: 'provider-1',
@@ -53,9 +58,10 @@ describe('template preview service', () => {
     assert.equal(result.manifest.title, '客服模板');
     assert.equal(result.summary.groupName, '客服模板');
     assert.equal(result.summary.skills, 3);
-    assert.equal(result.conflicts.duplicateTemplate, true);
+    assert.equal(result.conflicts.nameConflict, true);
     assert.equal(result.conflicts.suggestedGroupName, '客服模板（导入副本 1）');
     assert.equal(result.compatibility.resolved.length, 1);
     assert.equal(result.compatibility.unresolved.length, 1);
+    assert.deepStrictEqual(result.degradedSkills, [{ slug: 'broken-skill', reason: 'SKILL.md not found' }]);
   });
 });

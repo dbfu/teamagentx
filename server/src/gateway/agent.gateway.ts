@@ -74,6 +74,7 @@ const agentResponseSchema = {
     workDir: { type: 'string', nullable: true },
     proxyConfig: { type: 'string', nullable: true },
     codexModel: { type: 'string', nullable: true },
+    codexFastMode: { type: 'boolean' },
     claudeModel: { type: 'string', nullable: true },
     thinkingMode: { type: 'string', enum: ['off', 'low', 'medium', 'high'] },
     speechConfig: {
@@ -179,6 +180,7 @@ const createAgentBodySchema = {
     workDir: { type: 'string', description: '工作目录（适用于所有类型）' },
     proxyConfig: { type: 'string', nullable: true, description: 'ACP 工具代理配置（支持代理地址或 export 片段）' },
     codexModel: { type: 'string', nullable: true, description: 'Codex 本地配置模式下指定的模型名称' },
+    codexFastMode: { type: 'boolean', description: 'Codex Fast service tier 开关' },
     claudeModel: { type: 'string', nullable: true, description: 'Claude 本地配置模式下指定的模型名称' },
     thinkingMode: { type: 'string', enum: ['off', 'low', 'medium', 'high'], description: '思考模式，默认 high' },
     speechConfig: {
@@ -243,6 +245,7 @@ const updateAgentBodySchema = {
     workDir: { type: 'string' },
     proxyConfig: { type: 'string', nullable: true },
     codexModel: { type: 'string', nullable: true },
+    codexFastMode: { type: 'boolean' },
     claudeModel: { type: 'string', nullable: true },
     thinkingMode: { type: 'string', enum: ['off', 'low', 'medium', 'high'] },
     speechConfig: {
@@ -311,6 +314,7 @@ interface CreateAgentBody {
   workDir?: string;
   proxyConfig?: string | null;
   codexModel?: string | null;
+  codexFastMode?: boolean;
   claudeModel?: string | null;
   thinkingMode?: AgentThinkingMode | null;
   speechConfig?: UpdateAgentInput['speechConfig'];
@@ -330,6 +334,7 @@ interface UpdateAgentBody {
   workDir?: string;
   proxyConfig?: string | null;
   codexModel?: string | null;
+  codexFastMode?: boolean;
   claudeModel?: string | null;
   thinkingMode?: AgentThinkingMode | null;
   speechConfig?: UpdateAgentInput['speechConfig'];
@@ -609,7 +614,7 @@ export async function agentGateway(app: FastifyInstance) {
       },
     },
     async (request, reply) => {
-      const {name, avatar, avatarColor, description, prompt, type, acpTool, workDir, proxyConfig, codexModel, claudeModel, thinkingMode, speechConfig, categoryId, llmProviderId, imageGeneration} = request.body;
+      const {name, avatar, avatarColor, description, prompt, type, acpTool, workDir, proxyConfig, codexModel, codexFastMode, claudeModel, thinkingMode, speechConfig, categoryId, llmProviderId, imageGeneration} = request.body;
 
       try {
         const agent = await agentService.create({
@@ -623,6 +628,7 @@ export async function agentGateway(app: FastifyInstance) {
           workDir,
           proxyConfig,
           codexModel,
+          codexFastMode,
           claudeModel,
           thinkingMode,
           speechConfig,

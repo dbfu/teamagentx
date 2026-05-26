@@ -83,6 +83,7 @@ export function createExecutor(options: CreateExecutorOptions): IAgentExecutor {
           imageGenerationProvider,
           agent.proxyConfig,
           agent.codexModel,
+          agent.codexFastMode,
           thinkingMode,
           chatRoomRules,
         );

@@ -1,18 +1,10 @@
-export interface ExistingTemplateImport {
-  templateId: string;
-  version: string;
-}
-
 export interface DetectTemplateConflictsInput {
-  templateId: string;
-  version: string;
   desiredGroupName: string;
-  existingImports: ExistingTemplateImport[];
   existingGroupNames: string[];
 }
 
 export interface DetectTemplateConflictsResult {
-  duplicateTemplate: boolean;
+  nameConflict: boolean;
   allowedActions: Array<'cancel' | 'create_copy' | 'rename_copy'>;
   suggestedGroupName: string;
 }
@@ -39,16 +31,15 @@ function suggestGroupName(desiredGroupName: string, existingGroupNames: string[]
 export function detectTemplateConflicts(
   input: DetectTemplateConflictsInput,
 ): DetectTemplateConflictsResult {
-  const duplicateTemplate = input.existingImports.some(
-    (item) => item.templateId === input.templateId && item.version === input.version,
+  const suggestedGroupName = suggestGroupName(
+    input.desiredGroupName,
+    input.existingGroupNames,
   );
+  const nameConflict = suggestedGroupName !== input.desiredGroupName;
 
   return {
-    duplicateTemplate,
+    nameConflict,
     allowedActions: [...DUPLICATE_ACTIONS],
-    suggestedGroupName: suggestGroupName(
-      input.desiredGroupName,
-      input.existingGroupNames,
-    ),
+    suggestedGroupName,
   };
 }

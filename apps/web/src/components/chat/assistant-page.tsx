@@ -342,6 +342,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     acpTool: string
     proxyConfig?: string | null
     codexModel?: string | null
+    codexFastMode?: boolean
     claudeModel?: string | null
     thinkingMode?: AgentThinkingMode | null
     categoryId: string | null
@@ -358,6 +359,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
       acpTool: data.acpTool || undefined,
       proxyConfig: data.proxyConfig || null,
       codexModel: data.codexModel || null,
+      codexFastMode: Boolean(data.codexFastMode),
       claudeModel: data.claudeModel || null,
       thinkingMode: data.thinkingMode || 'high',
       categoryId: data.categoryId || undefined,
@@ -386,6 +388,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     acpTool: string
     proxyConfig?: string | null
     codexModel?: string | null
+    codexFastMode?: boolean
     claudeModel?: string | null
     thinkingMode?: AgentThinkingMode | null
     categoryId: string | null
@@ -403,6 +406,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
       acpTool: data.acpTool || undefined,
       proxyConfig: data.proxyConfig || null,
       codexModel: data.codexModel || null,
+      codexFastMode: Boolean(data.codexFastMode),
       claudeModel: data.claudeModel || null,
       thinkingMode: data.thinkingMode || 'high',
       categoryId: data.categoryId,

@@ -24,6 +24,7 @@ export interface StartBackgroundCommandInput {
   agentName: string;
   command: string;
   workDir: string;
+  env?: NodeJS.ProcessEnv;
 }
 
 const DEFAULT_TAIL_BYTES = 12 * 1024;
@@ -103,7 +104,7 @@ class BackgroundCommandService {
       child = spawn(command, [], {
         cwd: workDir,
         shell: process.env.SHELL || '/bin/bash',
-        env: process.env,
+        env: input.env ?? process.env,
         stdio: ['ignore', stdoutFd, stderrFd],
         detached: false,
       });

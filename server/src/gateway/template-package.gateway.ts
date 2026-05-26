@@ -1,28 +1,48 @@
 import { FastifyInstance } from 'fastify';
 import { templatePackageService } from '../modules/template-package/template-package.service.js';
+import { buildTemplateArchive, parseTemplateArchive } from '../modules/template-package/template-archive.js';
 
 interface ExportTemplateBody {
   chatRoomId: string;
   packageTitle?: string;
   packageSummary?: string;
-  includeSkills?: boolean;
-  includeCronTasks?: boolean;
 }
 
-interface PreviewTemplateBody {
-  manifest: unknown;
-  desiredGroupName: string;
-  capabilityDescriptors?: unknown[];
+function buildArchiveFilename(title: string): string {
+  const safeTitle = title.trim().replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, '-');
+  const date = new Date().toISOString().slice(0, 10);
+  return `${safeTitle || 'group-template'}-${date}.zip`;
 }
 
-interface ImportTemplateBody {
-  manifest: unknown;
-  snapshot: unknown;
-  skills?: unknown[];
-  skillUsages?: unknown[];
-  capabilityDescriptors?: unknown[];
-  desiredGroupName: string;
-  duplicateAction: 'cancel' | 'create_copy' | 'rename_copy';
+function buildAttachmentHeader(filename: string): string {
+  return `attachment; filename="group-template.zip"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
+
+async function readTemplateArchiveUpload(request: any) {
+  const parts = request.parts();
+  let archiveBuffer: Buffer | null = null;
+  let desiredGroupName = '';
+
+  for await (const part of parts) {
+    if (part.type === 'file' && part.fieldname === 'template') {
+      archiveBuffer = await part.toBuffer();
+      continue;
+    }
+
+    if (part.type === 'field' && part.fieldname === 'desiredGroupName') {
+      desiredGroupName = String(part.value ?? '').trim();
+    }
+  }
+
+  if (!archiveBuffer) {
+    throw new Error('请上传群组模板文件');
+  }
+
+  const archive = parseTemplateArchive(archiveBuffer);
+  return {
+    archive,
+    desiredGroupName: desiredGroupName || archive.manifest.title,
+  };
 }
 
 export async function templatePackageGateway(app: FastifyInstance) {
@@ -39,20 +59,12 @@ export async function templatePackageGateway(app: FastifyInstance) {
             chatRoomId: { type: 'string' },
             packageTitle: { type: 'string' },
             packageSummary: { type: 'string' },
-            includeSkills: { type: 'boolean' },
-            includeCronTasks: { type: 'boolean' },
           },
         },
       },
     },
     async (request, reply) => {
-      const {
-        chatRoomId,
-        packageTitle,
-        packageSummary,
-        includeSkills,
-        includeCronTasks,
-      } = request.body;
+      const { chatRoomId, packageTitle, packageSummary } = request.body;
 
       try {
         const payload = await templatePackageService.exportChatRoomTemplate({
@@ -62,11 +74,12 @@ export async function templatePackageGateway(app: FastifyInstance) {
           summary: packageSummary?.trim() || null,
           sourceType: 'local',
           sourceAuthor: null,
-          includeSkills,
-          includeCronTasks,
         });
+        const archive = buildTemplateArchive(payload);
 
-        return reply.send({ success: true, data: payload });
+        reply.header('Content-Type', 'application/zip');
+        reply.header('Content-Disposition', buildAttachmentHeader(buildArchiveFilename(payload.manifest.title)));
+        return reply.send(archive);
       } catch (error) {
         const message = error instanceof Error ? error.message : '导出失败';
         const status = message === '群组不存在' ? 404 : 500;
@@ -75,34 +88,23 @@ export async function templatePackageGateway(app: FastifyInstance) {
     },
   );
 
-  app.post<{ Body: PreviewTemplateBody }>(
+  app.post(
     '/template-packages/preview',
     {
       schema: {
-        description: '预检群组模板包（当前接收结构化 manifest + capabilityDescriptors）',
+        description: '预检群组模板（接收 ZIP 文件）',
         tags: ['TemplatePackages'],
-        body: {
-          type: 'object',
-          required: ['manifest', 'desiredGroupName'],
-          properties: {
-            manifest: { type: 'object', additionalProperties: true },
-            desiredGroupName: { type: 'string' },
-            capabilityDescriptors: {
-              type: 'array',
-              items: { type: 'object', additionalProperties: true },
-            },
-          },
-        },
+        consumes: ['multipart/form-data'],
       },
     },
     async (request, reply) => {
-      const { manifest, desiredGroupName, capabilityDescriptors = [] } = request.body;
-
       try {
+        const { archive, desiredGroupName } = await readTemplateArchiveUpload(request);
         const preview = await templatePackageService.previewTemplatePayload({
-          manifestInput: manifest,
+          manifestInput: archive.manifest,
           desiredGroupName,
-          capabilityDescriptors: capabilityDescriptors as any,
+          capabilityDescriptors: archive.capabilityDescriptors,
+          degradedSkills: archive.degradedSkills,
         });
         return reply.send({ success: true, data: preview });
       } catch (error) {
@@ -112,51 +114,20 @@ export async function templatePackageGateway(app: FastifyInstance) {
     },
   );
 
-  app.post<{ Body: ImportTemplateBody }>(
+  app.post(
     '/template-packages/import',
     {
       schema: {
-        description: '导入群组模板包（当前接收结构化 manifest + snapshot）',
+        description: '导入群组模板（接收 ZIP 文件）',
         tags: ['TemplatePackages'],
-        body: {
-          type: 'object',
-          required: ['manifest', 'snapshot', 'desiredGroupName', 'duplicateAction'],
-          properties: {
-            manifest: { type: 'object', additionalProperties: true },
-            snapshot: { type: 'object', additionalProperties: true },
-            skills: {
-              type: 'array',
-              items: { type: 'object', additionalProperties: true },
-            },
-            skillUsages: {
-              type: 'array',
-              items: { type: 'object', additionalProperties: true },
-            },
-            capabilityDescriptors: {
-              type: 'array',
-              items: { type: 'object', additionalProperties: true },
-            },
-            desiredGroupName: { type: 'string' },
-            duplicateAction: {
-              type: 'string',
-              enum: ['cancel', 'create_copy', 'rename_copy'],
-            },
-          },
-        },
+        consumes: ['multipart/form-data'],
       },
     },
     async (request, reply) => {
-      const {
-        manifest,
-        snapshot,
-        skills = [],
-        skillUsages = [],
-        capabilityDescriptors = [],
-        desiredGroupName,
-        duplicateAction,
-      } = request.body;
-
       try {
+        const { archive, desiredGroupName } = await readTemplateArchiveUpload(request);
+        const { manifest, snapshot, skills, skillUsages, capabilityDescriptors } = archive;
+
         if (
           !snapshot ||
           typeof snapshot !== 'object' ||
@@ -170,11 +141,11 @@ export async function templatePackageGateway(app: FastifyInstance) {
         const result = await templatePackageService.importTemplatePayload({
           manifestInput: manifest,
           snapshot: snapshot as any,
-          skills: skills as any,
-          skillUsages: skillUsages as any,
-          capabilityDescriptors: capabilityDescriptors as any,
+          skills,
+          skillUsages,
+          degradedSkills: archive.degradedSkills,
+          capabilityDescriptors,
           desiredGroupName,
-          duplicateAction,
         });
         return reply.send({ success: true, data: result });
       } catch (error) {

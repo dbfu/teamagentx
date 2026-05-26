@@ -1,9 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { parseSkillMetadata } from '../skill/skill-metadata.js';
 
 export interface TemplateSkillFile {
   path: string;
-  content: string;
+  content: Uint8Array;
 }
 
 export interface TemplateSkillPackage {
@@ -24,43 +25,37 @@ export interface DegradedTemplateSkill {
   reason: string;
 }
 
-function parseSkillFrontmatter(skillMd: string): { name: string; description: string } {
-  const match = skillMd.match(/^---\n([\s\S]*?)\n---/);
-  if (!match) {
-    return { name: '', description: '' };
+function collectFilesRecursively(
+  rootDir: string,
+  currentDir: string,
+  results: TemplateSkillFile[],
+  visitedRealPaths = new Set<string>(),
+) {
+  const currentRealPath = fs.realpathSync(currentDir);
+  if (visitedRealPaths.has(currentRealPath)) {
+    return;
   }
+  visitedRealPaths.add(currentRealPath);
 
-  let name = '';
-  let description = '';
-  for (const line of match[1].split('\n')) {
-    const parsed = line.match(/^(\w+):\s*(.*)$/);
-    if (!parsed) continue;
-    const [, key, raw] = parsed;
-    const value = raw.replace(/^["']|["']$/g, '').trim();
-    if (key === 'name') name = value;
-    if (key === 'description') description = value;
-  }
-
-  return { name, description };
-}
-
-function collectFilesRecursively(rootDir: string, currentDir: string, results: TemplateSkillFile[]) {
   const entries = fs.readdirSync(currentDir, { withFileTypes: true });
   for (const entry of entries) {
     if (entry.name === '.git') continue;
     const fullPath = path.join(currentDir, entry.name);
     const relativePath = path.relative(rootDir, fullPath);
-    if (entry.isDirectory()) {
-      collectFilesRecursively(rootDir, fullPath, results);
+    const stat = entry.isSymbolicLink() ? fs.statSync(fullPath) : null;
+    if (entry.isDirectory() || stat?.isDirectory()) {
+      collectFilesRecursively(rootDir, fullPath, results, visitedRealPaths);
       continue;
     }
-    if (entry.isFile()) {
+    if (entry.isFile() || stat?.isFile()) {
       results.push({
         path: relativePath,
-        content: fs.readFileSync(fullPath, 'utf8'),
+        content: fs.readFileSync(fullPath),
       });
     }
   }
+
+  visitedRealPaths.delete(currentRealPath);
 }
 
 export function collectSkillsForTemplate(agentSkillDirs: Array<{ agentId: string; skillsDir: string }>) {
@@ -78,7 +73,6 @@ export function collectSkillsForTemplate(agentSkillDirs: Array<{ agentId: string
       const skillDir = path.join(skillsDir, entry.name);
       const skillMdPath = path.join(skillDir, 'SKILL.md');
       if (!fs.existsSync(skillMdPath)) {
-        degraded.push({ slug: entry.name, reason: 'SKILL.md not found' });
         continue;
       }
 
@@ -86,7 +80,7 @@ export function collectSkillsForTemplate(agentSkillDirs: Array<{ agentId: string
         const files: TemplateSkillFile[] = [];
         collectFilesRecursively(skillDir, skillDir, files);
         const skillMd = fs.readFileSync(skillMdPath, 'utf8');
-        const { name, description } = parseSkillFrontmatter(skillMd);
+        const { name, description } = parseSkillMetadata(skillMd);
         const originPath = path.join(skillDir, '.skills', 'origin.json');
         let origin: Record<string, unknown> | null = null;
         if (fs.existsSync(originPath)) {
@@ -100,7 +94,7 @@ export function collectSkillsForTemplate(agentSkillDirs: Array<{ agentId: string
         skills.set(entry.name, {
           slug: entry.name,
           name: name || entry.name,
-          description,
+          description: description || '',
           files,
           origin,
         });
@@ -142,7 +136,7 @@ export function materializeTemplateSkills(input: {
       for (const file of skill.files) {
         const targetPath = path.join(targetSkillDir, file.path);
         fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-        fs.writeFileSync(targetPath, file.content, 'utf8');
+        fs.writeFileSync(targetPath, Buffer.from(file.content));
       }
     }
 
@@ -160,10 +154,18 @@ export function materializeTemplateSkills(input: {
     }
   } catch (error) {
     for (const createdDir of createdAgentSkillDirs.reverse()) {
-      fs.rmSync(createdDir, { recursive: true, force: true });
+      try {
+        fs.rmSync(createdDir, { recursive: true, force: true });
+      } catch {
+        // Continue rollback for other paths even if an invalid parent path fails.
+      }
     }
     for (const createdDir of createdSharedSkillDirs.reverse()) {
-      fs.rmSync(createdDir, { recursive: true, force: true });
+      try {
+        fs.rmSync(createdDir, { recursive: true, force: true });
+      } catch {
+        // Best-effort cleanup; rethrow the original materialization error below.
+      }
     }
     throw error;
   }

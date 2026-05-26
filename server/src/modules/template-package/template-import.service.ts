@@ -1,8 +1,6 @@
-type DuplicateAction = 'cancel' | 'create_copy' | 'rename_copy';
-
 interface TemplateImportPreview {
   conflicts: {
-    duplicateTemplate: boolean;
+    nameConflict: boolean;
     suggestedGroupName: string;
   };
   compatibility: {
@@ -13,18 +11,13 @@ interface TemplateImportPreview {
 
 interface BuildTemplateImportPlanInput {
   desiredGroupName: string;
-  duplicateAction: DuplicateAction;
   preview: TemplateImportPreview;
 }
 
 export function buildTemplateImportPlan(input: BuildTemplateImportPlanInput) {
-  if (input.duplicateAction === 'cancel') {
-    throw new Error('用户取消了导入操作');
-  }
-
-  const finalGroupName = input.duplicateAction === 'rename_copy'
+  const finalGroupName = input.preview.conflicts.nameConflict
     ? input.preview.conflicts.suggestedGroupName
-    : input.desiredGroupName;
+    : input.desiredGroupName.trim() || input.preview.conflicts.suggestedGroupName;
 
   const unresolvedCount = input.preview.compatibility.unresolved.filter((item: any) =>
     item?.status === 'requires_user_selection',
@@ -33,5 +26,6 @@ export function buildTemplateImportPlan(input: BuildTemplateImportPlanInput) {
   return {
     finalGroupName,
     unresolvedCount,
+    importAction: input.preview.conflicts.nameConflict ? 'rename_copy' : 'create_copy' as const,
   };
 }

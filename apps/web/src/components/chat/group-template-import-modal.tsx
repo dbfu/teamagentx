@@ -1,8 +1,4 @@
-import {
-  TemplatePackageExportPayload,
-  TemplatePreviewResult,
-  templatePackageApi,
-} from '@/lib/agent-api'
+import { TemplatePreviewResult, templatePackageApi } from '@/lib/agent-api'
 import { AlertCircle, CheckCircle2, Loader2, Upload, X } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { toast } from 'sonner'
@@ -11,83 +7,6 @@ interface GroupTemplateImportModalProps {
   isOpen: boolean
   onClose: () => void
   onImported?: (chatRoomId: string) => void | Promise<void>
-}
-
-function isBrowserLocalSpeechConfig(value: unknown): boolean {
-  if (!value || typeof value !== 'object') return false
-  const record = value as {
-    behavior?: { enabled?: boolean; outputMode?: string }
-    profile?: { provider?: string | null }
-  }
-  return record.behavior?.enabled === true
-    && record.behavior?.outputMode !== 'off'
-    && record.profile?.provider === 'browser-local'
-}
-
-function sanitizeCapabilityDescriptors(payload: TemplatePackageExportPayload) {
-  const browserLocalAudioAllowance = new Map(
-    payload.snapshot.agents
-      .filter((agent) => isBrowserLocalSpeechConfig(agent.speechConfig))
-      .map((agent) => [
-        agent.id,
-        agent.capabilities.filter(
-          (capability) => capability.enabled && capability.capabilityType === 'audio',
-        ).length,
-      ]),
-  )
-
-  if (browserLocalAudioAllowance.size === 0) {
-    return payload.capabilityDescriptors
-  }
-
-  const keptAudioCount = new Map<string, number>()
-  return payload.capabilityDescriptors.filter((descriptor) => {
-    if (descriptor.capabilityType !== 'audio') return true
-    const allowance = browserLocalAudioAllowance.get(descriptor.agentRef)
-    if (allowance === undefined) return true
-
-    const currentCount = keptAudioCount.get(descriptor.agentRef) ?? 0
-    if (currentCount >= allowance) {
-      return false
-    }
-
-    keptAudioCount.set(descriptor.agentRef, currentCount + 1)
-    return true
-  })
-}
-
-function parseTemplatePackage(rawText: string): TemplatePackageExportPayload {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(rawText)
-  } catch {
-    throw new Error('JSON 解析失败，请检查模板包文件格式')
-  }
-
-  if (!parsed || typeof parsed !== 'object') {
-    throw new Error('模板包内容无效')
-  }
-
-  const payload = parsed as Partial<TemplatePackageExportPayload>
-  if (!payload.manifest || !payload.snapshot || !Array.isArray(payload.capabilityDescriptors)) {
-    throw new Error('模板包缺少 manifest、snapshot 或 capabilityDescriptors')
-  }
-
-  return {
-    manifest: payload.manifest,
-    snapshot: payload.snapshot,
-    capabilityDescriptors: sanitizeCapabilityDescriptors({
-      manifest: payload.manifest,
-      snapshot: payload.snapshot,
-      capabilityDescriptors: payload.capabilityDescriptors,
-      skills: Array.isArray(payload.skills) ? payload.skills : [],
-      skillUsages: Array.isArray(payload.skillUsages) ? payload.skillUsages : [],
-      degradedSkills: Array.isArray(payload.degradedSkills) ? payload.degradedSkills : [],
-    }),
-    skills: Array.isArray(payload.skills) ? payload.skills : [],
-    skillUsages: Array.isArray(payload.skillUsages) ? payload.skillUsages : [],
-    degradedSkills: Array.isArray(payload.degradedSkills) ? payload.degradedSkills : [],
-  }
 }
 
 export function GroupTemplateImportModal({
@@ -100,7 +19,7 @@ export function GroupTemplateImportModal({
   const [loadingPreview, setLoadingPreview] = useState(false)
   const [importing, setImporting] = useState(false)
   const [fileName, setFileName] = useState('')
-  const [payload, setPayload] = useState<TemplatePackageExportPayload | null>(null)
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<TemplatePreviewResult | null>(null)
   const [desiredGroupName, setDesiredGroupName] = useState('')
 
@@ -109,7 +28,7 @@ export function GroupTemplateImportModal({
     setLoadingPreview(false)
     setImporting(false)
     setFileName('')
-    setPayload(null)
+    setSelectedFile(null)
     setPreview(null)
     setDesiredGroupName('')
   }
@@ -127,27 +46,25 @@ export function GroupTemplateImportModal({
   }
 
   const loadPreview = async (nextDesiredName?: string) => {
-    if (!payload) {
-      toast.error('请先选择模板包文件')
+    if (!selectedFile) {
+      toast.error('请先选择群组模板文件')
       return
     }
 
-    const finalDesiredName = (nextDesiredName ?? desiredGroupName).trim() || payload.manifest.title
     setLoadingPreview(true)
     try {
       const response = await templatePackageApi.preview({
-        manifest: payload.manifest,
-        desiredGroupName: finalDesiredName,
-        capabilityDescriptors: payload.capabilityDescriptors,
+        file: selectedFile,
+        desiredGroupName: (nextDesiredName ?? desiredGroupName).trim(),
       })
 
       if (!response.success || !response.data) {
-        toast.error(response.error || '模板包预检失败')
+        toast.error(response.error || '群组模板预检失败')
         return
       }
 
       setPreview(response.data)
-      setDesiredGroupName(finalDesiredName)
+      setDesiredGroupName((nextDesiredName ?? desiredGroupName).trim() || response.data.manifest.title)
       setStep(2)
     } finally {
       setLoadingPreview(false)
@@ -159,21 +76,16 @@ export function GroupTemplateImportModal({
     event.target.value = ''
     if (!file) return
 
-    try {
-      const parsedPayload = parseTemplatePackage(await file.text())
-      setFileName(file.name)
-      setPayload(parsedPayload)
-      setPreview(null)
-      setDesiredGroupName(parsedPayload.manifest.title)
-      setStep(1)
-      toast.success('模板包已加载，可以继续预检')
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '模板包解析失败')
-    }
+    setSelectedFile(file)
+    setFileName(file.name)
+    setPreview(null)
+    setDesiredGroupName('')
+    setStep(1)
+    toast.success('群组模板已加载，可以开始预检')
   }
 
   const handleConfirmImport = async () => {
-    if (!payload || !preview) {
+    if (!selectedFile || !preview) {
       toast.error('请先完成预检')
       return
     }
@@ -181,13 +93,8 @@ export function GroupTemplateImportModal({
     setImporting(true)
     try {
       const response = await templatePackageApi.import({
-        manifest: payload.manifest,
-        snapshot: payload.snapshot,
-        skills: payload.skills,
-        skillUsages: payload.skillUsages,
-        capabilityDescriptors: payload.capabilityDescriptors,
-        desiredGroupName: desiredGroupName.trim() || payload.manifest.title,
-        duplicateAction: 'rename_copy',
+        file: selectedFile,
+        desiredGroupName: desiredGroupName.trim() || preview.manifest.title,
       })
 
       if (!response.success || !response.data) {
@@ -195,7 +102,7 @@ export function GroupTemplateImportModal({
         return
       }
 
-      toast.success(`已导入群组模板包：${response.data.finalGroupName}`)
+      toast.success(`已导入群组模板：${response.data.finalGroupName}`)
       await onImported?.(response.data.chatRoomId)
       resetState()
       onClose()
@@ -205,7 +112,7 @@ export function GroupTemplateImportModal({
   }
 
   const unresolvedList = preview?.compatibility.unresolved ?? []
-  const degradedSkills = payload?.degradedSkills ?? []
+  const degradedSkills = preview?.degradedSkills ?? []
   const requiredConfigItems = unresolvedList.filter((item) => item.status === 'requires_user_selection')
   const optionalCapabilityItems = unresolvedList.filter((item) => item.status === 'unsupported_but_importable')
   const resolvedItems = preview?.compatibility.resolved ?? []
@@ -214,7 +121,7 @@ export function GroupTemplateImportModal({
   const willAutoRename = Boolean(
     preview
       && effectiveImportName
-      && effectiveImportName !== (desiredNameTrimmed || payload?.manifest.title || ''),
+      && effectiveImportName !== (desiredNameTrimmed || preview.manifest.title),
   )
   const resolvedSummaryMap = resolvedItems.reduce((map, item) => {
     const key = `${item.capabilityType}::${item.providerName}`
@@ -247,8 +154,8 @@ export function GroupTemplateImportModal({
               <Upload className="size-4" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-foreground">导入群组模板包</h2>
-              <p className="text-sm text-muted-foreground">选择模板包，预检兼容性，再创建新的群组副本。</p>
+              <h2 className="text-lg font-semibold text-foreground">导入群组模板</h2>
+              <p className="text-sm text-muted-foreground">选择 ZIP 文件，预检兼容性，再创建新的群组副本。</p>
             </div>
           </div>
           <button
@@ -287,34 +194,28 @@ export function GroupTemplateImportModal({
               >
                 <Upload className="size-8 text-blue-500" />
                 <div>
-                  <div className="text-sm font-medium text-foreground">选择模板包 JSON 文件</div>
-                  <div className="mt-1 text-xs text-muted-foreground">支持本地导出的群组模板包，导入前会先做兼容性预检。</div>
+                  <div className="text-sm font-medium text-foreground">选择群组模板 ZIP 文件</div>
+                  <div className="mt-1 text-xs text-muted-foreground">支持本地导出的群组模板，导入前会先做兼容性预检。</div>
                 </div>
               </button>
               <input
                 ref={importInputRef}
                 type="file"
-                accept="application/json,.json"
+                accept="application/zip,.zip"
                 onChange={handleImportFile}
                 className="hidden"
               />
 
-              {payload && (
+              {selectedFile && (
                 <div className="rounded-xl border border-border bg-background px-4 py-3">
-                  <div className="text-sm font-medium text-foreground">{payload.manifest.title}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">{fileName || '已选择模板包文件'}</div>
-                  <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-muted-foreground md:grid-cols-4">
-                    <div>助手 {payload.manifest.contents.agents}</div>
-                    <div>分类 {payload.manifest.contents.categories}</div>
-                    <div>技能 {payload.manifest.contents.skills}</div>
-                    <div>定时任务 {payload.manifest.contents.cronTasks}</div>
-                  </div>
+                  <div className="text-sm font-medium text-foreground">{fileName || selectedFile.name}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">已选择群组模板文件，下一步会自动从 ZIP 中读取模板摘要。</div>
                 </div>
               )}
             </>
           )}
 
-          {step >= 2 && payload && preview && (
+          {step >= 2 && preview && (
             <>
               <div className="grid gap-5 md:grid-cols-[1.2fr_0.8fr]">
                 <div className="space-y-4 rounded-xl border border-border bg-background p-4">
@@ -341,7 +242,7 @@ export function GroupTemplateImportModal({
                   <div>
                     <label className="mb-2 block text-sm font-medium text-foreground">导入规则</label>
                     <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3 text-sm text-gray-700">
-                      系统会自动创建新的群组副本。
+                      系统会自动创建新的群组副本，并默认使用当前环境的可用模型。
                       {willAutoRename ? ` 如果名称冲突，将自动命名为：${effectiveImportName}` : ' 当前名称可直接导入。'}
                     </div>
                   </div>
@@ -360,10 +261,10 @@ export function GroupTemplateImportModal({
                     <div className="rounded-lg bg-muted/50 px-3 py-2">定时任务 {preview.summary.cronTasks}</div>
                   </div>
 
-                  <div className={`rounded-lg px-3 py-2 text-sm ${preview.conflicts.duplicateTemplate ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>
-                    {preview.conflicts.duplicateTemplate
-                      ? '检测到同模板版本已导入，本次会继续创建一个新的群组副本。'
-                      : '未检测到同版本重复导入，可以直接创建副本'}
+                  <div className={`rounded-lg px-3 py-2 text-sm ${preview.conflicts.nameConflict ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>
+                    {preview.conflicts.nameConflict
+                      ? `检测到群组名称冲突，本次会自动改名为：${preview.conflicts.suggestedGroupName}`
+                      : '当前群组名称可直接导入，不会因为历史导入记录自动改名。'}
                   </div>
                 </div>
               </div>
@@ -383,7 +284,7 @@ export function GroupTemplateImportModal({
                           {resolvedSummary.map((item) => (
                             <div key={item.key} className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-emerald-700">
                               <div className="text-sm font-medium">{item.capabilityType} → {item.providerName}</div>
-                              <div className="mt-1 text-xs">{item.count} 个能力已映射到这个本地模型</div>
+                              <div className="mt-1 text-xs">{item.count} 项能力已映射到这个本地模型</div>
                             </div>
                           ))}
                         </div>
@@ -402,17 +303,17 @@ export function GroupTemplateImportModal({
                   </div>
                   <div className="space-y-2 text-sm text-muted-foreground">
                     {requiredConfigItems.length === 0 && degradedSkills.length === 0 ? (
-                      <div>没有待处理问题，导入后即可直接使用。</div>
+                      <div>没有阻断问题，导入后即可直接使用。</div>
                     ) : (
                       <>
                         {requiredConfigItems.map((item) => (
                           <div key={`${item.agentRef}-${item.capabilityType}`} className="rounded-lg bg-amber-50 px-3 py-2 text-amber-700">
-                            {item.capabilityType}：{item.status === 'requires_user_selection' ? '需要用户选择本地模型' : '当前环境不支持，但仍会导入'}
+                            {item.capabilityType}：当前环境没有可直接使用的默认模型，导入后需要补充配置。
                           </div>
                         ))}
                         {degradedSkills.map((skill) => (
                           <div key={skill.slug} className="rounded-lg bg-orange-50 px-3 py-2 text-orange-700">
-                            技能 {skill.slug} 已降级：{skill.reason}
+                            技能 {skill.slug} 导出时不完整：{skill.reason}
                           </div>
                         ))}
                       </>
@@ -464,7 +365,7 @@ export function GroupTemplateImportModal({
               <button
                 type="button"
                 onClick={() => loadPreview()}
-                disabled={!payload || loadingPreview}
+                disabled={!selectedFile || loadingPreview}
                 className="inline-flex items-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-sm text-white hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {loadingPreview ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}

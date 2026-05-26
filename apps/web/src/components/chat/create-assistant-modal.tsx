@@ -24,6 +24,7 @@ interface CreateAssistantModalProps {
     acpTool: string
     proxyConfig?: string | null
     codexModel?: string | null
+    codexFastMode?: boolean
     claudeModel?: string | null
     thinkingMode?: AgentThinkingMode | null
     categoryId: string | null
@@ -169,6 +170,7 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
   const [llmProviders, setLlmProviders] = useState<LlmProvider[]>([])
   const [llmProviderId, setLlmProviderId] = useState<string>('')
   const [codexModel, setCodexModel] = useState('')
+  const [codexFastMode, setCodexFastMode] = useState(false)
   const [claudeModel, setClaudeModel] = useState('')
   const [thinkingMode, setThinkingMode] = useState<AgentThinkingMode>('high')
   const [proxyConfig, setProxyConfig] = useState('')
@@ -184,6 +186,7 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
   )
   const selectedAcpTool = acpTools.find((tool) => tool.id === acpTool)
   const showLocalCodexConfig = assistantType === 'acp' && acpTool === 'codex' && !llmProviderId
+  const showCodexFastMode = assistantType === 'acp' && acpTool === 'codex'
   const showLocalClaudeConfig = assistantType === 'acp' && acpTool === 'claude' && !llmProviderId
 
   // 当 defaultCategoryId 变化时更新 categoryId（组件重新挂载后）
@@ -258,6 +261,7 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
         acpTool: assistantType === 'acp' ? acpTool : '',
         proxyConfig: showLocalCodexConfig ? proxyConfig.trim() || null : null,
         codexModel: showLocalCodexConfig ? codexModel.trim() || null : null,
+        codexFastMode: showCodexFastMode && codexFastMode,
         claudeModel: showLocalClaudeConfig ? claudeModel.trim() || null : null,
         thinkingMode,
         categoryId: categoryId || null,
@@ -280,6 +284,7 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
         setCategoryId('')
         setLlmProviderId('')
         setCodexModel('')
+        setCodexFastMode(false)
         setClaudeModel('')
         setThinkingMode('high')
         setProxyConfig('')
@@ -420,6 +425,35 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
                     <SelectItem value="off">关</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+            )}
+
+            {showCodexFastMode && (
+              <div className="mb-4 rounded-lg border border-border p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium text-foreground">Fast 模式</div>
+                    <div className="text-xs text-muted-foreground">
+                      开启后大约能提升 1.5 倍速度，但 token 消耗速度会变快
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setCodexFastMode(v => !v)}
+                    className={cn(
+                      'relative h-5 w-10 rounded-full transition-colors',
+                      codexFastMode ? 'bg-primary' : 'bg-muted'
+                    )}
+                    aria-pressed={codexFastMode}
+                  >
+                    <span
+                      className={cn(
+                        'absolute left-0.5 top-0.5 size-4 rounded-full bg-white transition-transform',
+                        codexFastMode ? 'translate-x-5' : 'translate-x-0'
+                      )}
+                    />
+                  </button>
+                </div>
               </div>
             )}
 

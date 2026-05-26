@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { UserAvatar, UserAvatarSelector } from '@/components/chat/user-avatar'
+import { UserAvatarSelector } from '@/components/chat/user-avatar'
 
 interface RegisterModalProps {
   isOpen: boolean
@@ -61,7 +61,13 @@ export function RegisterModal({ isOpen, onRegister }: RegisterModalProps) {
       <div className="w-[420px] shrink-0 rounded-2xl bg-card shadow-xl">
         {/* Header */}
         <div className="flex items-center gap-3 border-b border-border px-6 py-4">
-          <UserAvatar avatar={selectedAvatar} size="lg" />
+          <div className="flex size-11 items-center justify-center overflow-hidden rounded-2xl border border-border bg-[var(--surface-raised)] shadow-sm">
+            <img
+              src={`${import.meta.env.BASE_URL}app-logo.png`}
+              alt="TeamAgentX"
+              className="size-full object-cover"
+            />
+          </div>
           <h2 className="text-lg font-semibold text-foreground">创建账号</h2>
         </div>
 

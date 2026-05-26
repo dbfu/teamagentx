@@ -1,6 +1,13 @@
 import { randomUUID } from 'crypto';
 import fs from 'node:fs';
+import path from 'node:path';
 import prisma from '../../lib/prisma.js';
+import {
+  GROUP_ASSISTANT_ID,
+  LEGACY_SYSTEM_AGENT_IDS,
+  SYSTEM_AGENT_IDS,
+} from '../../core/agent/system-assistant.constants.js';
+import { cronTaskService } from '../cron-task/cron-task.service.js';
 import { deserializeAgentSpeechConfig } from '../speech/speech-config.js';
 import { serializeAgentSpeechConfig } from '../speech/speech-config.js';
 import { getSharedSkillsDir } from '../skill/preinstalled-skills.js';
@@ -8,12 +15,23 @@ import { skillInstallService } from '../skill/skill-install.service.js';
 import { buildTemplatePackagePayload } from './template-export.service.js';
 import { buildTemplateImportPlan } from './template-import.service.js';
 import { previewTemplatePackage } from './template-preview.service.js';
-import { collectSkillsForTemplate, materializeTemplateSkills } from './template-skill-packager.js';
+import {
+  collectSkillsForTemplate,
+  materializeTemplateSkills,
+  type DegradedTemplateSkill,
+  type TemplateSkillPackage,
+  type TemplateSkillUsage,
+} from './template-skill-packager.js';
 
 const agentInclude = {
   category: true,
   capabilities: true,
 } as const;
+
+const TEMPLATE_EXCLUDED_AGENT_IDS = new Set([
+  ...SYSTEM_AGENT_IDS,
+  ...LEGACY_SYSTEM_AGENT_IDS,
+]);
 
 export const templatePackageService = {
   async exportChatRoomTemplate(input: {
@@ -48,12 +66,14 @@ export const templatePackageService = {
       ),
     );
 
-    const agents = agentIds.length > 0
+    const allAgents = agentIds.length > 0
       ? await prisma.agent.findMany({
         where: { id: { in: agentIds } },
         include: agentInclude,
       })
       : [];
+    const agents = allAgents.filter((agent) => !isTemplateExcludedAgent(agent));
+    const exportedAgentIds = new Set(agents.map((agent) => agent.id));
 
     const categories = Array.from(
       new Map(
@@ -100,7 +120,9 @@ export const templatePackageService = {
         description: room.description,
         rules: room.rules,
         workDir: room.workDir,
-        defaultAgentId: room.defaultAgentId,
+        defaultAgentId: room.defaultAgentId && exportedAgentIds.has(room.defaultAgentId)
+          ? room.defaultAgentId
+          : null,
         agentTriggerMode: (room.agentTriggerMode as 'auto' | 'manual' | 'coordinator') ?? 'auto',
       },
       agents: agents.map((agent) => ({
@@ -113,6 +135,7 @@ export const templatePackageService = {
         workDir: agent.workDir,
         proxyConfig: agent.proxyConfig,
         codexModel: agent.codexModel,
+        codexFastMode: agent.codexFastMode,
         claudeModel: agent.claudeModel,
         thinkingMode: agent.thinkingMode,
         llmProviderId: agent.llmProviderId,
@@ -129,7 +152,15 @@ export const templatePackageService = {
       cronTasks: cronTasks.map((task) => ({
         id: task.id,
         name: task.name,
+        description: task.description,
+        scheduleType: task.scheduleType,
+        cronExpression: task.cronExpression,
+        intervalMinutes: task.intervalMinutes,
+        scheduledAt: task.scheduledAt?.toISOString() ?? null,
         payload: task.payload,
+        agentIds: parseCronTaskAgentIds(task.agentIds),
+        enabled: task.enabled,
+        maxRetries: task.maxRetries,
       })),
       skills: collectedSkills.skills,
       skillUsages: collectedSkills.usages,
@@ -159,6 +190,7 @@ export const templatePackageService = {
     manifestInput: unknown;
     desiredGroupName: string;
     capabilityDescriptors: Parameters<typeof previewTemplatePackage>[0]['capabilityDescriptors'];
+    degradedSkills?: Array<{ slug: string; reason: string }>;
   }) {
     const localProviders = await prisma.llmProvider.findMany({
       where: { isActive: true },
@@ -170,20 +202,6 @@ export const templatePackageService = {
       },
     });
 
-    const manifest = input.manifestInput as Record<string, unknown>;
-    const templateId = typeof manifest.templateId === 'string' ? manifest.templateId : '';
-    const version = typeof manifest.version === 'string' ? manifest.version : '';
-
-    const existingImports = templateId && version
-      ? await prisma.templateImportRecord.findMany({
-        where: { templateId, version },
-        select: {
-          templateId: true,
-          version: true,
-        },
-      })
-      : [];
-
     const existingGroupNames = await prisma.chatRoom.findMany({
       select: { name: true },
     });
@@ -191,9 +209,9 @@ export const templatePackageService = {
     return previewTemplatePackage({
       manifestInput: input.manifestInput,
       desiredGroupName: input.desiredGroupName,
-      existingImports,
       existingGroupNames: existingGroupNames.map((item) => item.name),
       capabilityDescriptors: input.capabilityDescriptors,
+      degradedSkills: input.degradedSkills,
       localProviders: localProviders.map((provider) => ({
         id: provider.id,
         name: provider.name,
@@ -223,6 +241,7 @@ export const templatePackageService = {
         workDir: string | null;
         proxyConfig: string | null;
         codexModel: string | null;
+        codexFastMode?: boolean;
         claudeModel: string | null;
         thinkingMode: string;
         llmProviderId: string | null;
@@ -243,30 +262,32 @@ export const templatePackageService = {
       cronTasks: Array<{
         id: string;
         name: string;
+        description: string | null;
+        scheduleType: 'cron' | 'interval' | 'once';
+        cronExpression: string | null;
+        intervalMinutes: number | null;
+        scheduledAt: string | null;
         payload: string;
+        agentIds: string[];
+        enabled: boolean;
+        maxRetries: number;
       }>;
     };
-    skills?: Array<{
-      slug: string;
-      name: string;
-      description: string;
-      files: Array<{ path: string; content: string }>;
-      origin: Record<string, unknown> | null;
-    }>;
-    skillUsages?: Array<{ agentId: string; slug: string }>;
+    skills?: TemplateSkillPackage[];
+    skillUsages?: TemplateSkillUsage[];
+    degradedSkills?: DegradedTemplateSkill[];
     capabilityDescriptors: Parameters<typeof previewTemplatePackage>[0]['capabilityDescriptors'];
     desiredGroupName: string;
-    duplicateAction: 'cancel' | 'create_copy' | 'rename_copy';
   }) {
     const preview = await this.previewTemplatePayload({
       manifestInput: input.manifestInput,
       desiredGroupName: input.desiredGroupName,
       capabilityDescriptors: input.capabilityDescriptors,
+      degradedSkills: input.degradedSkills,
     });
 
     const plan = buildTemplateImportPlan({
       desiredGroupName: input.desiredGroupName,
-      duplicateAction: input.duplicateAction,
       preview,
     });
 
@@ -313,7 +334,9 @@ export const templatePackageService = {
         categoryIdBySource.set(category.id, newCategoryId);
       }
 
-      for (const agent of input.snapshot.agents) {
+      const importableAgents = input.snapshot.agents.filter((agent) => !isTemplateExcludedAgentId(agent.id));
+
+      for (const agent of importableAgents) {
         const resolvedTextProvider = preview.compatibility.resolved.find(
           (item) => item.agentRef === agent.id && item.capabilityType === 'text',
         );
@@ -322,6 +345,9 @@ export const templatePackageService = {
         const matchedCategoryId = categoryIdBySource.get(
           agent.categoryId ?? '',
         ) ?? null;
+        const importedAgentWorkDir = agent.type === 'builtin'
+          ? getImportedBuiltinAgentWorkDir(importedAgentId)
+          : null;
 
         await tx.agent.create({
           data: {
@@ -330,9 +356,10 @@ export const templatePackageService = {
             prompt: agent.prompt,
             type: agent.type as any,
             acpTool: agent.acpTool,
-            workDir: null,
+            workDir: importedAgentWorkDir,
             proxyConfig: null,
             codexModel: agent.codexModel,
+            codexFastMode: Boolean(agent.codexFastMode),
             claudeModel: agent.claudeModel,
             thinkingMode: agent.thinkingMode || 'high',
             llmProviderId: resolvedTextProvider?.providerId ?? null,
@@ -375,7 +402,7 @@ export const templatePackageService = {
           skillInstallService.getAgentSkillsDir({
             id: importedAgentId,
             type: agent.type as any,
-            workDir: null,
+            workDir: importedAgentWorkDir,
           }),
         );
       }
@@ -395,14 +422,30 @@ export const templatePackageService = {
       }
 
       for (const task of input.snapshot.cronTasks) {
+        const remappedAgentIds = remapCronTaskAgentIds(task.agentIds, importedAgentIdsBySource);
+        const scheduledAt = task.scheduledAt ? new Date(task.scheduledAt) : null;
         await tx.cronTask.create({
           data: {
             id: randomUUID(),
             chatRoomId: roomId,
             name: task.name,
+            description: task.description,
             payload: task.payload,
-            scheduleType: 'once',
-            enabled: false,
+            scheduleType: task.scheduleType,
+            cronExpression: task.cronExpression,
+            intervalMinutes: task.intervalMinutes,
+            scheduledAt,
+            agentIds: JSON.stringify(remappedAgentIds),
+            enabled: task.enabled,
+            maxRetries: task.maxRetries,
+            nextRunAt: task.enabled
+              ? cronTaskService.calculateNextRunAt(
+                task.scheduleType,
+                task.cronExpression,
+                task.intervalMinutes,
+                scheduledAt,
+              )
+              : null,
             updatedAt: new Date(),
           },
         });
@@ -413,7 +456,7 @@ export const templatePackageService = {
           templateId: preview.manifest.templateId,
           version: preview.manifest.version,
           chatRoomId: roomId,
-          importAction: input.duplicateAction,
+          importAction: plan.importAction,
           sourceLabel: preview.manifest.source.author ?? null,
           unresolvedCount: plan.unresolvedCount,
           metadataJson: JSON.stringify({
@@ -511,6 +554,38 @@ async function rollbackImportedTemplateArtifacts(input: {
   for (const skillsDir of input.importedAgentSkillsDirs) {
     fs.rmSync(skillsDir, { recursive: true, force: true });
   }
+}
+
+function getImportedBuiltinAgentWorkDir(agentId: string): string {
+  return path.join(path.dirname(getSharedSkillsDir()), 'builtin-agents', agentId);
+}
+
+function isTemplateExcludedAgentId(agentId: string | null | undefined): boolean {
+  return !!agentId && TEMPLATE_EXCLUDED_AGENT_IDS.has(agentId);
+}
+
+function isTemplateExcludedAgent(agent: { id: string; agentLevel?: string | null }): boolean {
+  return agent.agentLevel === 'system' || isTemplateExcludedAgentId(agent.id);
+}
+
+function parseCronTaskAgentIds(value: string | null): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function remapCronTaskAgentIds(agentIds: string[], importedAgentIdsBySource: Map<string, string>): string[] {
+  if (agentIds.includes('*')) {
+    return ['*'];
+  }
+
+  return agentIds
+    .map((agentId) => importedAgentIdsBySource.get(agentId) ?? null)
+    .filter((agentId): agentId is string => Boolean(agentId));
 }
 
 async function getAvailableAgentName(tx: any, desiredName: string): Promise<string> {

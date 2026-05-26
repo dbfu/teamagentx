@@ -8,6 +8,7 @@ const OPTIMIZE_SYSTEM_PROMPT = `You are an expert at optimizing AI assistant pro
 2. Includes a clear role definition.
 3. Includes concrete behavioral guidance.
 4. Preserves the original intent.
+5. Preserves or adds this TeamAgentX collaboration rule when relevant: a single message may contain at most one triggerable @assistant mention. If multiple assistants could help, choose one next target or ask the user to choose, and refer to any additional assistants by name without @.
 
 Output only the optimized prompt. Do not add explanations or commentary.`;
 
