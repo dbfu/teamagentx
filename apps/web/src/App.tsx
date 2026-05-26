@@ -382,6 +382,13 @@ function AppContent() {
     })
   }, [])
 
+  useEffect(() => {
+    window.electronAPI?.setActiveTaskState?.({
+      hasActiveTasks: executingChatRooms.size > 0,
+      executingRoomCount: executingChatRooms.size,
+    })
+  }, [executingChatRooms])
+
   const selectRoomAndClearUnread = useCallback((roomId: string) => {
     if (roomId) {
       updateUnreadCount(roomId, 0)

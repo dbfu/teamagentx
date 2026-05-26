@@ -55,6 +55,9 @@ let quitRequestedByInstaller = false;
 let shutdownPromise: Promise<void> | null = null;
 let shutdownCompleted = false;
 let downloadedUpdatePath: string | null = null;
+let hasActiveAgentTasks = false;
+let activeAgentTaskRoomCount = 0;
+let isQuitConfirmationOpen = false;
 
 // Runtime 准备阶段（首次启动 / 升级时把 server 解压/拷贝到 userData）。
 // 用于让前端区分「正在准备运行环境」和「服务真的失败」。
@@ -1490,6 +1493,39 @@ async function shutdownBackend(): Promise<void> {
 }
 
 async function requestAppQuit(): Promise<void> {
+  if (!quitRequestedByInstaller && hasActiveAgentTasks) {
+    if (isQuitConfirmationOpen) return;
+
+    isQuitConfirmationOpen = true;
+    const parentWindow = mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()
+      ? mainWindow
+      : undefined;
+
+    const quitConfirmOptions: Electron.MessageBoxOptions = {
+      type: 'warning',
+      title: '确认关闭系统',
+      message: '当前有任务正在执行，确定要关闭系统吗？',
+      detail: activeAgentTaskRoomCount > 0
+        ? `关闭后 ${activeAgentTaskRoomCount} 个群聊中的执行任务会被中断，重启后可在任务队列中查看或恢复。`
+        : '关闭后正在执行的任务会被中断，重启后可在任务队列中查看或恢复。',
+      buttons: ['取消', '确认关闭'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    };
+
+    const result = parentWindow
+      ? await dialog.showMessageBox(parentWindow, quitConfirmOptions)
+      : await dialog.showMessageBox(quitConfirmOptions);
+
+    isQuitConfirmationOpen = false;
+
+    if (result.response !== 1) {
+      isQuitting = false;
+      return;
+    }
+  }
+
   isQuitting = true;
   await shutdownBackend();
   app.quit();
@@ -2131,6 +2167,13 @@ app.whenReady().then(async () => {
     }
   });
 
+  ipcMain.on('app:active-task-state', (_event, state: { hasActiveTasks?: boolean; executingRoomCount?: number }) => {
+    hasActiveAgentTasks = Boolean(state?.hasActiveTasks);
+    activeAgentTaskRoomCount = Number.isFinite(state?.executingRoomCount)
+      ? Math.max(0, Number(state.executingRoomCount))
+      : 0;
+  });
+
   ipcMain.handle('update:check', async () => {
     try {
       const data = await checkForUpdate();
@@ -2354,12 +2397,13 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', (event) => {
-  isQuitting = true;
-
   if (!shutdownCompleted) {
     event.preventDefault();
     void requestAppQuit();
+    return;
   }
+
+  isQuitting = true;
 });
 
 // Handle uncaught exceptions to prevent error dialogs
