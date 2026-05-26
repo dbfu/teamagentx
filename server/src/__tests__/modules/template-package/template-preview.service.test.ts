@@ -40,6 +40,12 @@ describe('template preview service', () => {
           modelType: 'image',
         },
       ],
+      degradedSkills: [
+        {
+          slug: 'broken-skill',
+          reason: 'SKILL.md not found',
+        },
+      ],
       localProviders: [
         {
           id: 'provider-1',
@@ -57,5 +63,6 @@ describe('template preview service', () => {
     assert.equal(result.conflicts.suggestedGroupName, '客服模板（导入副本 1）');
     assert.equal(result.compatibility.resolved.length, 1);
     assert.equal(result.compatibility.unresolved.length, 1);
+    assert.deepStrictEqual(result.degradedSkills, [{ slug: 'broken-skill', reason: 'SKILL.md not found' }]);
   });
 });

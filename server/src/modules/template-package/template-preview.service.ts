@@ -10,6 +10,7 @@ import {
 import {
   parseTemplateManifest,
 } from './template-manifest.js';
+import type { DegradedTemplateSkill } from './template-skill-packager.js';
 
 interface PreviewTemplatePackageInput {
   manifestInput: unknown;
@@ -17,6 +18,7 @@ interface PreviewTemplatePackageInput {
   existingImports: ExistingTemplateImport[];
   existingGroupNames: string[];
   capabilityDescriptors: CapabilityDescriptor[];
+  degradedSkills?: DegradedTemplateSkill[];
   localProviders: LocalCapabilityProvider[];
 }
 
@@ -46,5 +48,6 @@ export function previewTemplatePackage(input: PreviewTemplatePackageInput) {
     },
     conflicts,
     compatibility,
+    degradedSkills: input.degradedSkills ?? [],
   };
 }

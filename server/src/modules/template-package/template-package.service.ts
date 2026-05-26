@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import fs from 'node:fs';
+import path from 'node:path';
 import prisma from '../../lib/prisma.js';
 import { deserializeAgentSpeechConfig } from '../speech/speech-config.js';
 import { serializeAgentSpeechConfig } from '../speech/speech-config.js';
@@ -8,7 +9,13 @@ import { skillInstallService } from '../skill/skill-install.service.js';
 import { buildTemplatePackagePayload } from './template-export.service.js';
 import { buildTemplateImportPlan } from './template-import.service.js';
 import { previewTemplatePackage } from './template-preview.service.js';
-import { collectSkillsForTemplate, materializeTemplateSkills } from './template-skill-packager.js';
+import {
+  collectSkillsForTemplate,
+  materializeTemplateSkills,
+  type DegradedTemplateSkill,
+  type TemplateSkillPackage,
+  type TemplateSkillUsage,
+} from './template-skill-packager.js';
 
 const agentInclude = {
   category: true,
@@ -159,6 +166,7 @@ export const templatePackageService = {
     manifestInput: unknown;
     desiredGroupName: string;
     capabilityDescriptors: Parameters<typeof previewTemplatePackage>[0]['capabilityDescriptors'];
+    degradedSkills?: Array<{ slug: string; reason: string }>;
   }) {
     const localProviders = await prisma.llmProvider.findMany({
       where: { isActive: true },
@@ -194,6 +202,7 @@ export const templatePackageService = {
       existingImports,
       existingGroupNames: existingGroupNames.map((item) => item.name),
       capabilityDescriptors: input.capabilityDescriptors,
+      degradedSkills: input.degradedSkills,
       localProviders: localProviders.map((provider) => ({
         id: provider.id,
         name: provider.name,
@@ -246,27 +255,21 @@ export const templatePackageService = {
         payload: string;
       }>;
     };
-    skills?: Array<{
-      slug: string;
-      name: string;
-      description: string;
-      files: Array<{ path: string; content: string }>;
-      origin: Record<string, unknown> | null;
-    }>;
-    skillUsages?: Array<{ agentId: string; slug: string }>;
+    skills?: TemplateSkillPackage[];
+    skillUsages?: TemplateSkillUsage[];
+    degradedSkills?: DegradedTemplateSkill[];
     capabilityDescriptors: Parameters<typeof previewTemplatePackage>[0]['capabilityDescriptors'];
     desiredGroupName: string;
-    duplicateAction: 'cancel' | 'create_copy' | 'rename_copy';
   }) {
     const preview = await this.previewTemplatePayload({
       manifestInput: input.manifestInput,
       desiredGroupName: input.desiredGroupName,
       capabilityDescriptors: input.capabilityDescriptors,
+      degradedSkills: input.degradedSkills,
     });
 
     const plan = buildTemplateImportPlan({
       desiredGroupName: input.desiredGroupName,
-      duplicateAction: input.duplicateAction,
       preview,
     });
 
@@ -322,6 +325,9 @@ export const templatePackageService = {
         const matchedCategoryId = categoryIdBySource.get(
           agent.categoryId ?? '',
         ) ?? null;
+        const importedAgentWorkDir = agent.type === 'builtin'
+          ? getImportedBuiltinAgentWorkDir(importedAgentId)
+          : null;
 
         await tx.agent.create({
           data: {
@@ -330,7 +336,7 @@ export const templatePackageService = {
             prompt: agent.prompt,
             type: agent.type as any,
             acpTool: agent.acpTool,
-            workDir: null,
+            workDir: importedAgentWorkDir,
             proxyConfig: null,
             codexModel: agent.codexModel,
             claudeModel: agent.claudeModel,
@@ -375,7 +381,7 @@ export const templatePackageService = {
           skillInstallService.getAgentSkillsDir({
             id: importedAgentId,
             type: agent.type as any,
-            workDir: null,
+            workDir: importedAgentWorkDir,
           }),
         );
       }
@@ -413,7 +419,7 @@ export const templatePackageService = {
           templateId: preview.manifest.templateId,
           version: preview.manifest.version,
           chatRoomId: roomId,
-          importAction: input.duplicateAction,
+          importAction: plan.importAction,
           sourceLabel: preview.manifest.source.author ?? null,
           unresolvedCount: plan.unresolvedCount,
           metadataJson: JSON.stringify({
@@ -511,6 +517,10 @@ async function rollbackImportedTemplateArtifacts(input: {
   for (const skillsDir of input.importedAgentSkillsDirs) {
     fs.rmSync(skillsDir, { recursive: true, force: true });
   }
+}
+
+function getImportedBuiltinAgentWorkDir(agentId: string): string {
+  return path.join(path.dirname(getSharedSkillsDir()), 'builtin-agents', agentId);
 }
 
 async function getAvailableAgentName(tx: any, desiredName: string): Promise<string> {

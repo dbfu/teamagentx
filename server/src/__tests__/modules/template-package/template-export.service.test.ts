@@ -91,7 +91,7 @@ describe('template export service', () => {
         slug: 'browser-use',
         name: 'Browser Use',
         description: 'Test',
-        files: [{ path: 'SKILL.md', content: 'body' }],
+        files: [{ path: 'SKILL.md', content: Buffer.from('body') }],
         origin: null,
       }],
       skillUsages: [{ agentId: 'agent-1', slug: 'browser-use' }],

@@ -398,6 +398,7 @@ export interface TemplatePreviewSummary {
 export interface TemplatePreviewResult {
   manifest: TemplatePackageManifest
   summary: TemplatePreviewSummary
+  degradedSkills: DegradedTemplateSkill[]
   conflicts: {
     duplicateTemplate: boolean
     allowedActions?: Array<'cancel' | 'create_copy' | 'rename_copy'>
@@ -462,6 +463,22 @@ async function request<T>(
 
   const data = await response.json()
   return data
+}
+
+function parseTemplateFilename(contentDisposition: string | null): string {
+  if (!contentDisposition) return 'group-template.zip'
+
+  const filenameStarMatch = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)
+  if (filenameStarMatch?.[1]) {
+    try {
+      return decodeURIComponent(filenameStarMatch[1])
+    } catch {
+      return filenameStarMatch[1]
+    }
+  }
+
+  const filenameMatch = contentDisposition.match(/filename="([^"]+)"/i)
+  return filenameMatch?.[1] || 'group-template.zip'
 }
 
 // ACP 工具信息类型
@@ -696,39 +713,69 @@ export const templatePackageApi = {
     chatRoomId: string
     packageTitle?: string
     packageSummary?: string
-    includeSkills?: boolean
-    includeCronTasks?: boolean
-  }): Promise<ApiResponse<TemplatePackageExportPayload>> {
-    return request<TemplatePackageExportPayload>('/template-packages/export', {
+  }): Promise<ApiResponse<{ blob: Blob; filename: string }>> {
+    const baseUrl = await getApiBaseUrl()
+    const response = await fetch(`${baseUrl}/template-packages/export`, {
       method: 'POST',
       body: JSON.stringify(input),
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
     })
+
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => ({ error: '导出失败' })) as { error?: string }
+      return {
+        success: false,
+        error: errorPayload.error || '导出失败',
+      }
+    }
+
+    const blob = await response.blob()
+    return {
+      success: true,
+      data: {
+        blob,
+        filename: parseTemplateFilename(response.headers.get('content-disposition')),
+      },
+    }
   },
 
   async preview(input: {
-    manifest: TemplatePackageManifest
+    file: File
     desiredGroupName: string
-    capabilityDescriptors?: TemplateCapabilityDescriptor[]
   }): Promise<ApiResponse<TemplatePreviewResult>> {
-    return request<TemplatePreviewResult>('/template-packages/preview', {
+    const baseUrl = await getApiBaseUrl()
+    const formData = new FormData()
+    formData.append('template', input.file)
+    formData.append('desiredGroupName', input.desiredGroupName)
+
+    const response = await fetch(`${baseUrl}/template-packages/preview`, {
       method: 'POST',
-      body: JSON.stringify(input),
+      body: formData,
+      cache: 'no-store',
     })
+
+    return response.json()
   },
 
   async import(input: {
-    manifest: TemplatePackageManifest
-    snapshot: TemplatePackageSnapshot
-    skills?: TemplateSkillPackage[]
-    skillUsages?: TemplateSkillUsage[]
-    capabilityDescriptors?: TemplateCapabilityDescriptor[]
+    file: File
     desiredGroupName: string
-    duplicateAction: 'cancel' | 'create_copy' | 'rename_copy'
   }): Promise<ApiResponse<TemplateImportResult>> {
-    return request<TemplateImportResult>('/template-packages/import', {
+    const baseUrl = await getApiBaseUrl()
+    const formData = new FormData()
+    formData.append('template', input.file)
+    formData.append('desiredGroupName', input.desiredGroupName)
+
+    const response = await fetch(`${baseUrl}/template-packages/import`, {
       method: 'POST',
-      body: JSON.stringify(input),
+      body: formData,
+      cache: 'no-store',
     })
+
+    return response.json()
   },
 }
 

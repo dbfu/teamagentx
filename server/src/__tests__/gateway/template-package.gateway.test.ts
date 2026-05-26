@@ -4,6 +4,7 @@ import Fastify, { FastifyInstance } from 'fastify';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
+import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 
 import { agentService } from '../../core/agent/agent.service.js';
 import { chatRoomGateway } from '../../gateway/chatroom.gateway.js';
@@ -11,15 +12,96 @@ import { templatePackageGateway } from '../../gateway/template-package.gateway.j
 import { skillInstallService } from '../../modules/skill/skill-install.service.js';
 import prisma from '../../lib/prisma.js';
 
-function buildTestApp(): FastifyInstance {
-  return Fastify();
+async function buildTestApp(): Promise<FastifyInstance> {
+  const app = Fastify();
+  await app.register(import('@fastify/multipart'));
+  return app;
+}
+
+function buildMultipartPayload(
+  fields: Record<string, string>,
+  file?: {
+    fieldName: string;
+    fileName: string;
+    contentType: string;
+    content: Uint8Array;
+  },
+) {
+  const boundary = `----teamagentx-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const chunks: Buffer[] = [];
+
+  for (const [key, value] of Object.entries(fields)) {
+    chunks.push(Buffer.from(`--${boundary}\r\n`));
+    chunks.push(Buffer.from(`Content-Disposition: form-data; name="${key}"\r\n\r\n`));
+    chunks.push(Buffer.from(`${value}\r\n`));
+  }
+
+  if (file) {
+    chunks.push(Buffer.from(`--${boundary}\r\n`));
+    chunks.push(
+      Buffer.from(
+        `Content-Disposition: form-data; name="${file.fieldName}"; filename="${file.fileName}"\r\n`,
+      ),
+    );
+    chunks.push(Buffer.from(`Content-Type: ${file.contentType}\r\n\r\n`));
+    chunks.push(Buffer.from(file.content));
+    chunks.push(Buffer.from('\r\n'));
+  }
+
+  chunks.push(Buffer.from(`--${boundary}--\r\n`));
+
+  return {
+    payload: Buffer.concat(chunks),
+    contentType: `multipart/form-data; boundary=${boundary}`,
+  };
+}
+
+function parseTemplateZip(buffer: Buffer) {
+  const files = unzipSync(new Uint8Array(buffer));
+  const readJson = <T>(filePath: string): T => {
+    const file = files[filePath];
+    assert.ok(file, `missing ${filePath}`);
+    return JSON.parse(strFromU8(file)) as T;
+  };
+
+  return {
+    manifest: readJson<any>('manifest.json'),
+    snapshot: readJson<any>('snapshot.json'),
+    capabilityDescriptors: readJson<any[]>('capability-descriptors.json'),
+    skillUsages: readJson<any[]>('skill-usages.json'),
+    degradedSkills: readJson<any[]>('degraded-skills.json'),
+    files,
+  };
+}
+
+function buildTemplateZip(input: {
+  manifest: Record<string, unknown>;
+  snapshot: Record<string, unknown>;
+  capabilityDescriptors?: unknown[];
+  skillUsages?: unknown[];
+  degradedSkills?: unknown[];
+  skillFiles?: Record<string, string>;
+}) {
+  const entries: Record<string, Uint8Array> = {
+    'manifest.json': strToU8(JSON.stringify(input.manifest, null, 2)),
+    'snapshot.json': strToU8(JSON.stringify(input.snapshot, null, 2)),
+    'capability-descriptors.json': strToU8(JSON.stringify(input.capabilityDescriptors ?? [], null, 2)),
+    'skill-usages.json': strToU8(JSON.stringify(input.skillUsages ?? [], null, 2)),
+    'degraded-skills.json': strToU8(JSON.stringify(input.degradedSkills ?? [], null, 2)),
+  };
+
+  for (const [filePath, content] of Object.entries(input.skillFiles ?? {})) {
+    entries[filePath] = strToU8(content);
+  }
+
+  return Buffer.from(zipSync(entries));
 }
 
 describe('Template Package Gateway API', () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
-    app = buildTestApp();
+    app = await buildTestApp();
     await app.register(chatRoomGateway);
     await app.register(templatePackageGateway);
   });
@@ -28,7 +110,7 @@ describe('Template Package Gateway API', () => {
     await app.close();
   });
 
-  test('POST /template-packages/export 应返回模板载荷', async () => {
+  test('POST /template-packages/export 应返回群组模板 ZIP', async () => {
     const agent = await agentService.create({
       name: `Template Export Agent ${Date.now()}`,
       prompt: 'assist template export',
@@ -65,14 +147,15 @@ describe('Template Package Gateway API', () => {
     });
 
     assert.equal(response.statusCode, 200);
-    const body = response.json();
-    assert.equal(body.success, true);
-    assert.equal(body.data.manifest.title, '客服模板');
-    assert.equal(body.data.snapshot.room.workDir, null);
-    assert.ok(Array.isArray(body.data.capabilityDescriptors));
+    assert.match(response.headers['content-type'] ?? '', /application\/zip/);
+
+    const exported = parseTemplateZip(response.rawPayload);
+    assert.equal(exported.manifest.title, '客服模板');
+    assert.equal(exported.snapshot.room.workDir, null);
+    assert.ok(Array.isArray(exported.capabilityDescriptors));
   });
 
-  test('POST /template-packages/export 可按选项排除技能与定时任务', async () => {
+  test('POST /template-packages/export 默认包含全部技能与定时任务', async () => {
     const agent = await agentService.create({
       name: `Template Export Lean Agent ${Date.now()}`,
       prompt: 'assist lean export',
@@ -119,19 +202,16 @@ describe('Template Package Gateway API', () => {
       payload: {
         chatRoomId: room.id,
         packageTitle: '精简模板',
-        includeSkills: false,
-        includeCronTasks: false,
       },
     });
 
     assert.equal(response.statusCode, 200);
-    const body = response.json();
-    assert.equal(body.success, true);
-    assert.equal(body.data.manifest.contents.skills, 0);
-    assert.equal(body.data.manifest.contents.cronTasks, 0);
-    assert.equal(body.data.skills.length, 0);
-    assert.equal(body.data.skillUsages.length, 0);
-    assert.equal(body.data.snapshot.cronTasks.length, 0);
+    const exported = parseTemplateZip(response.rawPayload);
+    assert.equal(exported.manifest.contents.skills, 1);
+    assert.equal(exported.manifest.contents.cronTasks, 1);
+    assert.equal(exported.skillUsages.length, 1);
+    assert.equal(exported.snapshot.cronTasks.length, 1);
+    assert.ok(exported.files['skills/browser-use/SKILL.md']);
   });
 
   test('POST /template-packages/export 对同一群组应生成稳定 templateId', async () => {
@@ -147,6 +227,7 @@ describe('Template Package Gateway API', () => {
       url: '/chatrooms',
       payload: {
         name: `Template Stable Room ${Date.now()}`,
+        workDir: path.join(os.tmpdir(), `teamagentx-template-stable-${Date.now()}`),
       },
     });
     assert.equal(roomResponse.statusCode, 201);
@@ -178,41 +259,75 @@ describe('Template Package Gateway API', () => {
 
     assert.equal(firstExport.statusCode, 200);
     assert.equal(secondExport.statusCode, 200);
-    assert.equal(firstExport.json().data.manifest.templateId, secondExport.json().data.manifest.templateId);
-    assert.equal(firstExport.json().data.manifest.templateId, `tpl-room-${room.id}`);
+    const firstZip = parseTemplateZip(firstExport.rawPayload);
+    const secondZip = parseTemplateZip(secondExport.rawPayload);
+    assert.equal(firstZip.manifest.templateId, secondZip.manifest.templateId);
+    assert.equal(firstZip.manifest.templateId, `tpl-room-${room.id}`);
   });
 
   test('POST /template-packages/preview 应返回冲突与兼容性摘要', async () => {
+    const zipBuffer = buildTemplateZip({
+      manifest: {
+        schemaVersion: '1.0',
+        templateId: 'tpl-preview',
+        version: '1.0.0',
+        title: '客服模板',
+        source: { type: 'local' },
+        contents: {
+          group: true,
+          agents: 1,
+          categories: 0,
+          skills: 0,
+          cronTasks: 0,
+        },
+      },
+      snapshot: {
+        room: {
+          name: '客服模板',
+          description: null,
+          rules: null,
+          defaultAgentId: null,
+          agentTriggerMode: 'auto',
+        },
+        agents: [],
+        categories: [],
+        cronTasks: [],
+      },
+      capabilityDescriptors: [
+        {
+          agentRef: 'agent-1',
+          capabilityType: 'text',
+          required: true,
+          tool: 'claude',
+          providerProtocol: 'anthropic',
+          modelType: 'text',
+        },
+      ],
+      degradedSkills: [
+        {
+          slug: 'broken-skill',
+          reason: 'SKILL.md not found',
+        },
+      ],
+    });
+
+    const multipart = buildMultipartPayload(
+      { desiredGroupName: '客服模板' },
+      {
+        fieldName: 'template',
+        fileName: 'group-template.zip',
+        contentType: 'application/zip',
+        content: zipBuffer,
+      },
+    );
+
     const response = await app.inject({
       method: 'POST',
       url: '/template-packages/preview',
-      payload: {
-        desiredGroupName: '客服模板',
-        manifest: {
-          schemaVersion: '1.0',
-          templateId: 'tpl-preview',
-          version: '1.0.0',
-          title: '客服模板',
-          source: { type: 'local' },
-          contents: {
-            group: true,
-            agents: 1,
-            categories: 0,
-            skills: 0,
-            cronTasks: 0,
-          },
-        },
-        capabilityDescriptors: [
-          {
-            agentRef: 'agent-1',
-            capabilityType: 'text',
-            required: true,
-            tool: 'claude',
-            providerProtocol: 'anthropic',
-            modelType: 'text',
-          },
-        ],
+      headers: {
+        'content-type': multipart.contentType,
       },
+      payload: multipart.payload,
     });
 
     assert.equal(response.statusCode, 200);
@@ -221,6 +336,7 @@ describe('Template Package Gateway API', () => {
     assert.equal(body.data.summary.groupName, '客服模板');
     assert.equal(body.data.summary.agents, 1);
     assert.ok(Array.isArray(body.data.compatibility.resolved));
+    assert.deepEqual(body.data.degradedSkills, [{ slug: 'broken-skill', reason: 'SKILL.md not found' }]);
   });
 
   test('POST /template-packages/preview 应识别重复模板和未映射能力', async () => {
@@ -248,23 +364,48 @@ describe('Template Package Gateway API', () => {
       },
     });
 
+    const zipBuffer = buildTemplateZip({
+      manifest: previewManifest,
+      snapshot: {
+        room: {
+          name: '客服模板',
+          description: null,
+          rules: null,
+          defaultAgentId: null,
+          agentTriggerMode: 'auto',
+        },
+        agents: [],
+        categories: [],
+        cronTasks: [],
+      },
+      capabilityDescriptors: [
+        {
+          agentRef: 'agent-1',
+          capabilityType: 'image',
+          required: true,
+          tool: null,
+          providerProtocol: 'openai',
+          modelType: 'image',
+        },
+      ],
+    });
+    const multipart = buildMultipartPayload(
+      { desiredGroupName: '客服模板' },
+      {
+        fieldName: 'template',
+        fileName: 'group-template.zip',
+        contentType: 'application/zip',
+        content: zipBuffer,
+      },
+    );
+
     const response = await app.inject({
       method: 'POST',
       url: '/template-packages/preview',
-      payload: {
-        desiredGroupName: '客服模板',
-        manifest: previewManifest,
-        capabilityDescriptors: [
-          {
-            agentRef: 'agent-1',
-            capabilityType: 'image',
-            required: true,
-            tool: null,
-            providerProtocol: 'openai',
-            modelType: 'image',
-          },
-        ],
+      headers: {
+        'content-type': multipart.contentType,
       },
+      payload: multipart.payload,
     });
 
     assert.equal(response.statusCode, 200);
@@ -337,20 +478,24 @@ describe('Template Package Gateway API', () => {
       },
     });
     assert.equal(exportResponse.statusCode, 200);
-    const exported = exportResponse.json().data;
+    const exported = parseTemplateZip(exportResponse.rawPayload);
+    const multipart = buildMultipartPayload(
+      { desiredGroupName: '客服导入模板' },
+      {
+        fieldName: 'template',
+        fileName: 'group-template.zip',
+        contentType: 'application/zip',
+        content: exportResponse.rawPayload,
+      },
+    );
 
     const importResponse = await app.inject({
       method: 'POST',
       url: '/template-packages/import',
-      payload: {
-        manifest: exported.manifest,
-        snapshot: exported.snapshot,
-        skills: exported.skills,
-        skillUsages: exported.skillUsages,
-        capabilityDescriptors: exported.capabilityDescriptors,
-        desiredGroupName: '客服导入模板',
-        duplicateAction: 'create_copy',
+      headers: {
+        'content-type': multipart.contentType,
       },
+      payload: multipart.payload,
     });
 
     assert.equal(importResponse.statusCode, 200);
@@ -398,6 +543,7 @@ describe('Template Package Gateway API', () => {
       url: '/chatrooms',
       payload: {
         name: `Template ReExport Room ${Date.now()}`,
+        workDir: path.join(os.tmpdir(), `teamagentx-template-reexport-${Date.now()}`),
       },
     });
     assert.equal(roomResponse.statusCode, 201);
@@ -419,20 +565,24 @@ describe('Template Package Gateway API', () => {
       },
     });
     assert.equal(exportResponse.statusCode, 200);
-    const exported = exportResponse.json().data;
+    const exported = parseTemplateZip(exportResponse.rawPayload);
+    const multipart = buildMultipartPayload(
+      { desiredGroupName: `沿用模板副本 ${Date.now()}` },
+      {
+        fieldName: 'template',
+        fileName: 'group-template.zip',
+        contentType: 'application/zip',
+        content: exportResponse.rawPayload,
+      },
+    );
 
     const importResponse = await app.inject({
       method: 'POST',
       url: '/template-packages/import',
-      payload: {
-        manifest: exported.manifest,
-        snapshot: exported.snapshot,
-        skills: exported.skills,
-        skillUsages: exported.skillUsages,
-        capabilityDescriptors: exported.capabilityDescriptors,
-        desiredGroupName: `沿用模板副本 ${Date.now()}`,
-        duplicateAction: 'create_copy',
+      headers: {
+        'content-type': multipart.contentType,
       },
+      payload: multipart.payload,
     });
     assert.equal(importResponse.statusCode, 200);
     const importedRoomId = importResponse.json().data.chatRoomId;
@@ -446,7 +596,8 @@ describe('Template Package Gateway API', () => {
       },
     });
     assert.equal(reExportResponse.statusCode, 200);
-    assert.equal(reExportResponse.json().data.manifest.templateId, exported.manifest.templateId);
+    const reExported = parseTemplateZip(reExportResponse.rawPayload);
+    assert.equal(reExported.manifest.templateId, exported.manifest.templateId);
   });
 
   test('POST /template-packages/import 在技能物化失败时应回滚已导入数据', async () => {
@@ -492,7 +643,15 @@ describe('Template Package Gateway API', () => {
       },
     });
     assert.equal(exportResponse.statusCode, 200);
-    const exported = exportResponse.json().data;
+    const multipart = buildMultipartPayload(
+      { desiredGroupName: `客服失败导入模板副本 ${Date.now()}` },
+      {
+        fieldName: 'template',
+        fileName: 'group-template.zip',
+        contentType: 'application/zip',
+        content: exportResponse.rawPayload,
+      },
+    );
 
     const beforeCounts = {
       chatRooms: await prisma.chatRoom.count(),
@@ -510,15 +669,10 @@ describe('Template Package Gateway API', () => {
     const importResponse = await app.inject({
       method: 'POST',
       url: '/template-packages/import',
-      payload: {
-        manifest: exported.manifest,
-        snapshot: exported.snapshot,
-        skills: exported.skills,
-        skillUsages: exported.skillUsages,
-        capabilityDescriptors: exported.capabilityDescriptors,
-        desiredGroupName: `客服失败导入模板副本 ${Date.now()}`,
-        duplicateAction: 'create_copy',
+      headers: {
+        'content-type': multipart.contentType,
       },
+      payload: multipart.payload,
     });
 
     assert.equal(importResponse.statusCode, 400);

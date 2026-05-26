@@ -3,7 +3,7 @@ import path from 'node:path';
 
 export interface TemplateSkillFile {
   path: string;
-  content: string;
+  content: Uint8Array;
 }
 
 export interface TemplateSkillPackage {
@@ -44,23 +44,37 @@ function parseSkillFrontmatter(skillMd: string): { name: string; description: st
   return { name, description };
 }
 
-function collectFilesRecursively(rootDir: string, currentDir: string, results: TemplateSkillFile[]) {
+function collectFilesRecursively(
+  rootDir: string,
+  currentDir: string,
+  results: TemplateSkillFile[],
+  visitedRealPaths = new Set<string>(),
+) {
+  const currentRealPath = fs.realpathSync(currentDir);
+  if (visitedRealPaths.has(currentRealPath)) {
+    return;
+  }
+  visitedRealPaths.add(currentRealPath);
+
   const entries = fs.readdirSync(currentDir, { withFileTypes: true });
   for (const entry of entries) {
     if (entry.name === '.git') continue;
     const fullPath = path.join(currentDir, entry.name);
     const relativePath = path.relative(rootDir, fullPath);
-    if (entry.isDirectory()) {
-      collectFilesRecursively(rootDir, fullPath, results);
+    const stat = entry.isSymbolicLink() ? fs.statSync(fullPath) : null;
+    if (entry.isDirectory() || stat?.isDirectory()) {
+      collectFilesRecursively(rootDir, fullPath, results, visitedRealPaths);
       continue;
     }
-    if (entry.isFile()) {
+    if (entry.isFile() || stat?.isFile()) {
       results.push({
         path: relativePath,
-        content: fs.readFileSync(fullPath, 'utf8'),
+        content: fs.readFileSync(fullPath),
       });
     }
   }
+
+  visitedRealPaths.delete(currentRealPath);
 }
 
 export function collectSkillsForTemplate(agentSkillDirs: Array<{ agentId: string; skillsDir: string }>) {
@@ -78,7 +92,6 @@ export function collectSkillsForTemplate(agentSkillDirs: Array<{ agentId: string
       const skillDir = path.join(skillsDir, entry.name);
       const skillMdPath = path.join(skillDir, 'SKILL.md');
       if (!fs.existsSync(skillMdPath)) {
-        degraded.push({ slug: entry.name, reason: 'SKILL.md not found' });
         continue;
       }
 
@@ -142,7 +155,7 @@ export function materializeTemplateSkills(input: {
       for (const file of skill.files) {
         const targetPath = path.join(targetSkillDir, file.path);
         fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-        fs.writeFileSync(targetPath, file.content, 'utf8');
+        fs.writeFileSync(targetPath, Buffer.from(file.content));
       }
     }
 
