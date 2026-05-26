@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 
 import { agentService } from '../../core/agent/agent.service.js';
+import { GROUP_ASSISTANT_ID } from '../../core/agent/system-assistant.constants.js';
 import { chatRoomGateway } from '../../gateway/chatroom.gateway.js';
 import { templatePackageGateway } from '../../gateway/template-package.gateway.js';
 import { skillInstallService } from '../../modules/skill/skill-install.service.js';
@@ -190,9 +191,13 @@ describe('Template Package Gateway API', () => {
         id: `cron-${Date.now()}`,
         chatRoomId: room.id,
         name: '日报任务',
+        description: '每天上午九点执行',
         payload: 'send summary',
-        scheduleType: 'once',
-        enabled: false,
+        scheduleType: 'cron',
+        cronExpression: '0 9 * * *',
+        agentIds: JSON.stringify([agent.id]),
+        enabled: true,
+        maxRetries: 5,
       },
     });
 
@@ -211,6 +216,11 @@ describe('Template Package Gateway API', () => {
     assert.equal(exported.manifest.contents.cronTasks, 1);
     assert.equal(exported.skillUsages.length, 1);
     assert.equal(exported.snapshot.cronTasks.length, 1);
+    assert.equal(exported.snapshot.cronTasks[0]?.scheduleType, 'cron');
+    assert.equal(exported.snapshot.cronTasks[0]?.cronExpression, '0 9 * * *');
+    assert.deepEqual(exported.snapshot.cronTasks[0]?.agentIds, [agent.id]);
+    assert.equal(exported.snapshot.cronTasks[0]?.enabled, true);
+    assert.equal(exported.snapshot.cronTasks[0]?.maxRetries, 5);
     assert.ok(exported.files['skills/browser-use/SKILL.md']);
   });
 
@@ -263,6 +273,47 @@ describe('Template Package Gateway API', () => {
     const secondZip = parseTemplateZip(secondExport.rawPayload);
     assert.equal(firstZip.manifest.templateId, secondZip.manifest.templateId);
     assert.equal(firstZip.manifest.templateId, `tpl-room-${room.id}`);
+  });
+
+  test('POST /template-packages/export 不应包含系统群助手', async () => {
+    const agent = await agentService.create({
+      name: `Template Export Business Agent ${Date.now()}`,
+      prompt: 'assist export without system agent',
+      type: 'builtin',
+      workDir: path.join(os.tmpdir(), `teamagentx-template-business-agent-${Date.now()}`),
+    });
+
+    const roomResponse = await app.inject({
+      method: 'POST',
+      url: '/chatrooms',
+      payload: {
+        name: `Template Export No System Room ${Date.now()}`,
+        workDir: path.join(os.tmpdir(), `teamagentx-template-no-system-${Date.now()}`),
+      },
+    });
+    assert.equal(roomResponse.statusCode, 201);
+    const room = roomResponse.json().data;
+
+    const addAgentResponse = await app.inject({
+      method: 'POST',
+      url: `/chatrooms/${room.id}/agents`,
+      payload: { agentId: agent.id },
+    });
+    assert.equal(addAgentResponse.statusCode, 201);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/template-packages/export',
+      payload: {
+        chatRoomId: room.id,
+        packageTitle: '排除系统助手模板',
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const exported = parseTemplateZip(response.rawPayload);
+    assert.equal(exported.snapshot.agents.some((item: { id: string }) => item.id === GROUP_ASSISTANT_ID), false);
+    assert.equal(exported.snapshot.agents.length, 1);
   });
 
   test('POST /template-packages/preview 应返回冲突与兼容性摘要', async () => {
@@ -339,7 +390,7 @@ describe('Template Package Gateway API', () => {
     assert.deepEqual(body.data.degradedSkills, [{ slug: 'broken-skill', reason: 'SKILL.md not found' }]);
   });
 
-  test('POST /template-packages/preview 应识别重复模板和未映射能力', async () => {
+  test('POST /template-packages/preview 应识别名称冲突和未映射能力', async () => {
     const previewManifest = {
       schemaVersion: '1.0',
       templateId: `tpl-preview-duplicate-${Date.now()}`,
@@ -355,12 +406,11 @@ describe('Template Package Gateway API', () => {
       },
     };
 
-    await (prisma as any).templateImportRecord.create({
+    await prisma.chatRoom.create({
       data: {
-        templateId: previewManifest.templateId,
-        version: previewManifest.version,
-        chatRoomId: `preview-room-${Date.now()}`,
-        importAction: 'create_copy',
+        id: `preview-room-${Date.now()}`,
+        name: '客服模板',
+        updatedAt: new Date(),
       },
     });
 
@@ -411,7 +461,7 @@ describe('Template Package Gateway API', () => {
     assert.equal(response.statusCode, 200);
     const body = response.json();
     assert.equal(body.success, true);
-    assert.equal(body.data.conflicts.duplicateTemplate, true);
+    assert.equal(body.data.conflicts.nameConflict, true);
     assert.equal(body.data.compatibility.unresolved.length, 1);
     assert.equal(body.data.compatibility.unresolved[0]?.capabilityType, 'image');
   });
@@ -468,6 +518,21 @@ describe('Template Package Gateway API', () => {
       '---\nname: Browser Use\ndescription: Test skill\n---\nbody',
       'utf8',
     );
+
+    await prisma.cronTask.create({
+      data: {
+        id: `cron-import-${Date.now()}`,
+        chatRoomId: room.id,
+        name: '客服日报',
+        description: '工作日早上推送',
+        payload: 'send support summary',
+        scheduleType: 'cron',
+        cronExpression: '0 10 * * 1-5',
+        agentIds: JSON.stringify([primaryAgent.id, secondaryAgent.id]),
+        enabled: true,
+        maxRetries: 7,
+      },
+    });
 
     const exportResponse = await app.inject({
       method: 'POST',
@@ -528,6 +593,124 @@ describe('Template Package Gateway API', () => {
       (roomAgent) => roomAgent.agentId === importedRoom.defaultAgentId,
     );
     assert.equal(importedDefaultAgent?.agent?.prompt, secondaryAgent.prompt);
+
+    const importedCronTasks = await prisma.cronTask.findMany({
+      where: { chatRoomId: importedRoom.id },
+      orderBy: { createdAt: 'asc' },
+    });
+    assert.equal(importedCronTasks.length, 1);
+    assert.equal(importedCronTasks[0]?.name, '客服日报');
+    assert.equal(importedCronTasks[0]?.description, '工作日早上推送');
+    assert.equal(importedCronTasks[0]?.scheduleType, 'cron');
+    assert.equal(importedCronTasks[0]?.cronExpression, '0 10 * * 1-5');
+    assert.equal(importedCronTasks[0]?.enabled, true);
+    assert.equal(importedCronTasks[0]?.maxRetries, 7);
+    assert.ok(importedCronTasks[0]?.nextRunAt);
+    const importedAgentIds = importedRoom.chatRoomAgents.map((roomAgent) => roomAgent.agentId).sort();
+    assert.deepEqual(JSON.parse(importedCronTasks[0]?.agentIds ?? '[]').sort(), importedAgentIds);
+  });
+
+  test('POST /template-packages/import 应忽略模板中的系统群助手', async () => {
+    const zipBuffer = buildTemplateZip({
+      manifest: {
+        schemaVersion: '1.0',
+        templateId: `tpl-ignore-system-${Date.now()}`,
+        version: '1.0.0',
+        title: '忽略系统群助手模板',
+        source: { type: 'local' },
+        contents: {
+          group: true,
+          agents: 2,
+          categories: 0,
+          skills: 0,
+          cronTasks: 0,
+        },
+      },
+      snapshot: {
+        room: {
+          name: '忽略系统群助手模板',
+          description: null,
+          rules: null,
+          defaultAgentId: GROUP_ASSISTANT_ID,
+          agentTriggerMode: 'auto',
+        },
+        agents: [
+          {
+            id: GROUP_ASSISTANT_ID,
+            name: '群助手',
+            prompt: 'system assistant',
+            type: 'acp',
+            acpTool: 'claude',
+            categoryId: null,
+            workDir: null,
+            proxyConfig: null,
+            codexModel: null,
+            claudeModel: null,
+            thinkingMode: 'high',
+            llmProviderId: null,
+            speechConfig: null,
+            capabilities: [],
+          },
+          {
+            id: 'business-agent-1',
+            name: '业务助手',
+            prompt: 'business assistant',
+            type: 'builtin',
+            acpTool: null,
+            categoryId: null,
+            workDir: null,
+            proxyConfig: null,
+            codexModel: null,
+            claudeModel: null,
+            thinkingMode: 'high',
+            llmProviderId: null,
+            speechConfig: null,
+            capabilities: [],
+          },
+        ],
+        categories: [],
+        cronTasks: [],
+      },
+      capabilityDescriptors: [],
+    });
+
+    const multipart = buildMultipartPayload(
+      { desiredGroupName: '忽略系统群助手模板' },
+      {
+        fieldName: 'template',
+        fileName: 'group-template.zip',
+        contentType: 'application/zip',
+        content: zipBuffer,
+      },
+    );
+
+    const importResponse = await app.inject({
+      method: 'POST',
+      url: '/template-packages/import',
+      headers: {
+        'content-type': multipart.contentType,
+      },
+      payload: multipart.payload,
+    });
+
+    assert.equal(importResponse.statusCode, 200);
+    const imported = importResponse.json();
+    assert.equal(imported.data.importedAgents, 1);
+
+    const importedRoom = await prisma.chatRoom.findUniqueOrThrow({
+      where: { id: imported.data.chatRoomId },
+      include: {
+        chatRoomAgents: {
+          include: {
+            agent: true,
+          },
+        },
+      },
+    });
+
+    assert.equal(importedRoom.defaultAgentId, null);
+    assert.equal(importedRoom.chatRoomAgents.some((item) => item.agentId === GROUP_ASSISTANT_ID), false);
+    assert.equal(importedRoom.chatRoomAgents.filter((item) => item.agent?.agentLevel !== 'system').length, 1);
   });
 
   test('POST /template-packages/export 对导入后的群组应沿用原模板 templateId', async () => {

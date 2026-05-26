@@ -9,7 +9,7 @@ describe('template import service', () => {
       desiredGroupName: '客服模板',
       preview: {
         conflicts: {
-          duplicateTemplate: true,
+          nameConflict: true,
           suggestedGroupName: '客服模板（导入副本 1）',
         },
         compatibility: {
@@ -29,7 +29,7 @@ describe('template import service', () => {
       desiredGroupName: '客服模板',
       preview: {
         conflicts: {
-          duplicateTemplate: false,
+          nameConflict: false,
           suggestedGroupName: '客服模板',
         },
         compatibility: {
@@ -48,7 +48,7 @@ describe('template import service', () => {
       desiredGroupName: '客服模板',
       preview: {
         conflicts: {
-          duplicateTemplate: false,
+          nameConflict: false,
           suggestedGroupName: '客服模板',
         },
         compatibility: {

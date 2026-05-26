@@ -404,7 +404,7 @@ export interface TemplatePreviewResult {
   summary: TemplatePreviewSummary
   degradedSkills: DegradedTemplateSkill[]
   conflicts: {
-    duplicateTemplate: boolean
+    nameConflict: boolean
     allowedActions?: Array<'cancel' | 'create_copy' | 'rename_copy'>
     suggestedGroupName: string
   }

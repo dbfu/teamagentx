@@ -44,7 +44,15 @@ interface SnapshotCategoryInput {
 interface SnapshotCronTaskInput {
   id: string;
   name: string;
+  description: string | null;
+  scheduleType: 'cron' | 'interval' | 'once';
+  cronExpression: string | null;
+  intervalMinutes: number | null;
+  scheduledAt: string | null;
   payload: string;
+  agentIds: string[];
+  enabled: boolean;
+  maxRetries: number;
 }
 
 interface BuildTemplateSnapshotInput {
@@ -91,7 +99,15 @@ export function buildTemplateSnapshot(input: BuildTemplateSnapshotInput) {
     cronTasks: input.cronTasks.map((task) => ({
       id: task.id,
       name: task.name,
+      description: task.description,
+      scheduleType: task.scheduleType,
+      cronExpression: task.cronExpression,
+      intervalMinutes: task.intervalMinutes,
+      scheduledAt: task.scheduledAt,
       payload: task.payload,
+      agentIds: task.agentIds,
+      enabled: task.enabled,
+      maxRetries: task.maxRetries,
     })),
   };
 }

@@ -261,10 +261,10 @@ export function GroupTemplateImportModal({
                     <div className="rounded-lg bg-muted/50 px-3 py-2">定时任务 {preview.summary.cronTasks}</div>
                   </div>
 
-                  <div className={`rounded-lg px-3 py-2 text-sm ${preview.conflicts.duplicateTemplate ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>
-                    {preview.conflicts.duplicateTemplate
-                      ? '检测到同模板版本已导入，本次会继续创建新的群组副本。'
-                      : '未检测到同版本重复导入，可以直接创建副本。'}
+                  <div className={`rounded-lg px-3 py-2 text-sm ${preview.conflicts.nameConflict ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>
+                    {preview.conflicts.nameConflict
+                      ? `检测到群组名称冲突，本次会自动改名为：${preview.conflicts.suggestedGroupName}`
+                      : '当前群组名称可直接导入，不会因为历史导入记录自动改名。'}
                   </div>
                 </div>
               </div>

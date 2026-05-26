@@ -1,6 +1,6 @@
 interface TemplateImportPreview {
   conflicts: {
-    duplicateTemplate: boolean;
+    nameConflict: boolean;
     suggestedGroupName: string;
   };
   compatibility: {
@@ -15,7 +15,9 @@ interface BuildTemplateImportPlanInput {
 }
 
 export function buildTemplateImportPlan(input: BuildTemplateImportPlanInput) {
-  const finalGroupName = input.preview.conflicts.suggestedGroupName;
+  const finalGroupName = input.preview.conflicts.nameConflict
+    ? input.preview.conflicts.suggestedGroupName
+    : input.desiredGroupName.trim() || input.preview.conflicts.suggestedGroupName;
 
   const unresolvedCount = input.preview.compatibility.unresolved.filter((item: any) =>
     item?.status === 'requires_user_selection',
@@ -24,6 +26,6 @@ export function buildTemplateImportPlan(input: BuildTemplateImportPlanInput) {
   return {
     finalGroupName,
     unresolvedCount,
-    importAction: finalGroupName === input.desiredGroupName ? 'create_copy' : 'rename_copy' as const,
+    importAction: input.preview.conflicts.nameConflict ? 'rename_copy' : 'create_copy' as const,
   };
 }
