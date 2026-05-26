@@ -490,7 +490,7 @@ export const chatRoomService = {
       return addVirtualSystemAgents(syncQuickChatRoomAvatar({ ...rest, lastMessage }), systemAgents);
     });
 
-    // 排序：置顶在前，然后按最后消息时间倒序（无消息的按创建时间）
+    // 排序：置顶在前，然后按最后消息时间倒序（无消息的按更新时间）
     processedRooms.sort((a, b) => {
       // 置顶的排在前面
       if (a.isPinned !== b.isPinned) {
@@ -502,13 +502,13 @@ export const chatRoomService = {
         const bPinnedAt = b.pinnedAt ? new Date(b.pinnedAt).getTime() : 0;
         return bPinnedAt - aPinnedAt;
       }
-      // 都不是置顶时，按最后消息时间倒序（无消息的按创建时间）
+      // 都不是置顶时，按最后消息时间倒序（无消息的按更新时间）
       const aTime = a.lastMessage?.time
         ? new Date(a.lastMessage.time).getTime()
-        : new Date(a.createdAt).getTime();
+        : new Date(a.updatedAt).getTime();
       const bTime = b.lastMessage?.time
         ? new Date(b.lastMessage.time).getTime()
-        : new Date(b.createdAt).getTime();
+        : new Date(b.updatedAt).getTime();
       return bTime - aTime;
     });
 

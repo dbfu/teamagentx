@@ -50,7 +50,11 @@ export function ChatAreaHeader({
   const [packageScripts, setPackageScripts] = useState<PackageScriptsResult | null>(null)
   const [loadingScripts, setLoadingScripts] = useState(false)
   const [runningScript, setRunningScript] = useState<string | null>(null)
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false)
+  const [moreTooltipOpen, setMoreTooltipOpen] = useState(false)
+  const [suppressMoreTooltip, setSuppressMoreTooltip] = useState(false)
   const packageScriptsRequestRef = useRef(0)
+  const moreTooltipSuppressTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
   const visibleScripts = packageScripts?.scripts ?? []
   const shouldShowPackageScriptsMenu = packageScripts?.hasPackageJson === true
 
@@ -93,6 +97,14 @@ export function ChatAreaHeader({
     }
   }, [loadPackageScripts])
 
+  useEffect(() => {
+    return () => {
+      if (moreTooltipSuppressTimerRef.current) {
+        window.clearTimeout(moreTooltipSuppressTimerRef.current)
+      }
+    }
+  }, [])
+
   const handleRunPackageScript = useCallback(async (scriptId: string, scriptName: string) => {
     setRunningScript(scriptId)
     try {
@@ -122,6 +134,42 @@ export function ChatAreaHeader({
       setRunningScript(null)
     }
   }, [chatRoom.id, terminalOpenTarget])
+
+  const clearMoreTooltipSuppressTimer = useCallback(() => {
+    if (moreTooltipSuppressTimerRef.current) {
+      window.clearTimeout(moreTooltipSuppressTimerRef.current)
+      moreTooltipSuppressTimerRef.current = null
+    }
+  }, [])
+
+  const suppressMoreTooltipBriefly = useCallback(() => {
+    clearMoreTooltipSuppressTimer()
+    setSuppressMoreTooltip(true)
+    moreTooltipSuppressTimerRef.current = window.setTimeout(() => {
+      setSuppressMoreTooltip(false)
+      moreTooltipSuppressTimerRef.current = null
+    }, 350)
+  }, [clearMoreTooltipSuppressTimer])
+
+  const handleMoreMenuOpenChange = useCallback((open: boolean) => {
+    setMoreMenuOpen(open)
+    setMoreTooltipOpen(false)
+    if (open) {
+      clearMoreTooltipSuppressTimer()
+      setSuppressMoreTooltip(true)
+    } else {
+      suppressMoreTooltipBriefly()
+    }
+  }, [clearMoreTooltipSuppressTimer, suppressMoreTooltipBriefly])
+
+  const handleMoreTooltipOpenChange = useCallback((open: boolean) => {
+    setMoreTooltipOpen(open && !moreMenuOpen && !suppressMoreTooltip)
+  }, [moreMenuOpen, suppressMoreTooltip])
+
+  const handleMoreTriggerPointerLeave = useCallback(() => {
+    clearMoreTooltipSuppressTimer()
+    setSuppressMoreTooltip(false)
+  }, [clearMoreTooltipSuppressTimer])
 
   const packageScriptsMenu = (
     <DropdownMenu onOpenChange={(open) => {
@@ -334,13 +382,18 @@ export function ChatAreaHeader({
               <TooltipContent side="bottom">任务看板</TooltipContent>
             </Tooltip>
             {/* 更多按钮 */}
-            <DropdownMenu>
-              <Tooltip>
+            <DropdownMenu open={moreMenuOpen} onOpenChange={handleMoreMenuOpenChange}>
+              <Tooltip
+                open={!moreMenuOpen && !suppressMoreTooltip && moreTooltipOpen}
+                onOpenChange={handleMoreTooltipOpenChange}
+              >
                 <TooltipTrigger asChild>
                   <DropdownMenuTrigger asChild>
                     <button
                       className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                       type="button"
+                      onBlur={handleMoreTriggerPointerLeave}
+                      onPointerLeave={handleMoreTriggerPointerLeave}
                     >
                       <MoreHorizontal className="size-5" />
                     </button>

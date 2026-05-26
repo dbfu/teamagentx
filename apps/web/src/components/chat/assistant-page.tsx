@@ -304,7 +304,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
       const allAgents = [
         ...groupedResponse.data.categories.flatMap(cg => cg.agents),
         ...groupedResponse.data.uncategorized
-      ].filter(agent => agent.agentLevel !== 'system')
+      ]
       setAssistants(allAgents)
       // 默认展开所有分类（包括未分类）
       const allCategoryIds = [...groupedResponse.data.categories.map(cg => cg.category.id), '__uncategorized__']
@@ -879,25 +879,29 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
   // Filter helpers for grouped display
   const displayedGroupedData = groupedData
 
-  // 系统协调助手是内置执行器，不作为可管理助手展示。
-  const { normalCategories } = displayedGroupedData ? {
-    normalCategories: displayedGroupedData.categories.filter(cg => cg.category.sortOrder !== -1000),
-  } : { normalCategories: [] }
+  // 系统协调助手由后端隐藏；可见系统分类仅展示群助手，并限制为快速对话入口。
+  const { normalCategories, systemCategoryGroup } = displayedGroupedData ? {
+    normalCategories: displayedGroupedData.categories.filter(cg => cg.category.id !== SYSTEM_CATEGORY_ID),
+    systemCategoryGroup: displayedGroupedData.categories.find(cg => cg.category.id === SYSTEM_CATEGORY_ID) || null,
+  } : { normalCategories: [], systemCategoryGroup: null }
+
+  const matchesSearch = (agent: Agent) =>
+    agent.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    agent.description?.toLowerCase().includes(searchQuery.toLowerCase())
 
   const filteredGroupedData = displayedGroupedData ? {
     categories: normalCategories
       .map(cg => ({
         category: cg.category,
-        agents: cg.agents.filter(a =>
-          a.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          a.description?.toLowerCase().includes(searchQuery.toLowerCase())
-        )
+        agents: cg.agents.filter(matchesSearch)
       })),
-    systemCategory: null as { category: AgentCategory; agents: Agent[] } | null,
-    uncategorized: displayedGroupedData.uncategorized.filter(a =>
-      a.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      a.description?.toLowerCase().includes(searchQuery.toLowerCase())
-    )
+    systemCategory: systemCategoryGroup
+      ? {
+          category: systemCategoryGroup.category,
+          agents: systemCategoryGroup.agents.filter(matchesSearch),
+        }
+      : null,
+    uncategorized: displayedGroupedData.uncategorized.filter(matchesSearch)
   } : null
 
   return (

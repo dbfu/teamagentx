@@ -65,6 +65,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
   const brandOptions = [
     { value: 'enterprise', label: '商务蓝', color: 'oklch(0.55 0.22 250)' },
     { value: 'graphite', label: '石墨灰', color: 'oklch(0.36 0.018 260)' },
+    { value: 'violet', label: '灵感紫', color: 'oklch(0.54 0.28 293)' },
     { value: 'emerald', label: '翡翠绿', color: 'oklch(0.55 0.16 158)' },
     { value: 'ruby', label: '曜石红', color: 'oklch(0.55 0.2 18)' },
   ] as const

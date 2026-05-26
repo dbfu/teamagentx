@@ -416,6 +416,12 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
       swatches: ['oklch(0.36 0.018 260)', 'oklch(0.72 0.02 260)', 'oklch(0.945 0.004 260)'],
     },
     {
+      value: 'violet',
+      label: '灵感紫',
+      description: '接近 Markdown 高亮文字的紫色，适合偏技术感的工作界面',
+      swatches: ['oklch(0.54 0.28 293)', 'oklch(0.7 0.19 293)', 'oklch(0.96 0.02 300)'],
+    },
+    {
       value: 'emerald',
       label: '翡翠绿',
       description: '专业、冷静，适合运营和增长团队',

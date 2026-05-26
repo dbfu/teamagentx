@@ -38,6 +38,7 @@ import { TodoData } from './stores/socket-store'
 import { toast } from 'sonner'
 
 const EMPTY_MESSAGES: Message[] = []
+const DISCONNECTED_BANNER_DELAY_MS = 1500
 
 function formatRuntimeBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
@@ -826,12 +827,16 @@ export default function App() {
 
   // Show disconnected banner when connection is lost
   useEffect(() => {
-    if (isConnected) {
+    if (isConnected || state !== 'authenticated' || !hasConnectedRef.current) {
       setShowDisconnectedBanner(false)
-    } else if (hasConnectedRef.current && state === 'authenticated') {
-      // Connection was lost after being connected
-      setShowDisconnectedBanner(true)
+      return
     }
+
+    const timer = window.setTimeout(() => {
+      setShowDisconnectedBanner(true)
+    }, DISCONNECTED_BANNER_DELAY_MS)
+
+    return () => window.clearTimeout(timer)
   }, [isConnected, state])
 
   // Show register modal for first time users
