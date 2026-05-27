@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f0f9ff;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#e0f2fe;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="agentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#3b82f6;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#2563eb;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="400" height="300" fill="url(#bgGrad)"/>
+
+  <!-- Chat bubbles -->
+  <rect x="20" y="20" width="150" height="40" rx="8" fill="#3b82f6" opacity="0.9"/>
+  <rect x="230" y="80" width="150" height="40" rx="8" fill="#10b981" opacity="0.9"/>
+  <rect x="20" y="140" width="180" height="40" rx="8" fill="#3b82f6" opacity="0.9"/>
+  <rect x="200" y="200" width="180" height="40" rx="8" fill="#f59e0b" opacity="0.9"/>
+
+  <!-- Agent icons -->
+  <circle cx="195" y="60" r="25" fill="url(#agentGrad)"/>
+  <text x="195" y="68" font-family="Arial" font-size="16" fill="white" text-anchor="middle">A1</text>
+
+  <circle cx="195" y="180" r="25" fill="url(#agentGrad)"/>
+  <text x="195" y="188" font-family="Arial" font-size="16" fill="white" text-anchor="middle">A2</text>
+
+  <!-- Connection lines -->
+  <path d="M 195 85 L 195 155" stroke="#3b82f6" stroke-width="2" stroke-dasharray="4"/>
+
+  <!-- Central hub -->
+  <circle cx="195" cy="120" r="30" fill="#1e40af" opacity="0.8"/>
+  <text x="195" y="128" font-family="Arial" font-size="14" fill="white" text-anchor="middle">TX</text>
+</svg>
