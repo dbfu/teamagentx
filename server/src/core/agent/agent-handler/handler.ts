@@ -62,7 +62,7 @@ export const messageEventEmitter = emitter as {
 export function setupAIHandlers(
   emit: (msg: Message, chatRoomId: string) => Promise<void> | void,
   emitTyping: (
-    data: {messageId: string; agentId: string; agentName: string},
+    data: {messageId: string; agentId: string; agentName: string; status?: 'pending' | 'executing'; startedAt?: number},
     chatRoomId: string,
   ) => void,
   emitDone: (

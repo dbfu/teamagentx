@@ -11,6 +11,7 @@ import {
   processingMap,
   abortControllers,
   discardExecutionResultKeys,
+  taskExecutionStartedAt,
   streamEventsCache,
 } from './cache.js';
 import {
@@ -56,11 +57,13 @@ export async function processQueue(chatRoomId: string, agentId: string) {
 
       // 标记任务为 executing 状态
       await taskQueueService.updateStatus(task.id, 'executing');
+      const startedAt = Date.now();
+      taskExecutionStartedAt.set(task.id, startedAt);
 
       // 发送 typing 事件（让前端初始化流式面板）
       if (globalEmitTyping) {
         globalEmitTyping(
-          { messageId: task.messageId, agentId: task.agentId, agentName: task.agentName, status: 'executing' },
+          { messageId: task.messageId, agentId: task.agentId, agentName: task.agentName, status: 'executing', startedAt },
           chatRoomId,
         );
       }
@@ -549,6 +552,8 @@ export async function processQueue(chatRoomId: string, agentId: string) {
           error,
         );
       } finally {
+        taskExecutionStartedAt.delete(task.id);
+
         // 删除已处理的任务
         await taskQueueService.delete(task.id);
 

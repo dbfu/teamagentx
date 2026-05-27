@@ -6,6 +6,7 @@ import {
   getAgentStatuses,
   stopAgentExecution,
   getCachedStreamEvents,
+  taskExecutionStartedAt,
   processQueue,
   broadcastAgentStatus,
   setGlobalBroadcastMessage,
@@ -85,7 +86,7 @@ export function setupSocket(io: Server) {
   };
 
   // Emit typing indicator when agent starts working
-  const emitTyping = (data: { messageId: string; agentId: string; agentName: string; status?: 'pending' | 'executing' }, chatRoomId: string) => {
+  const emitTyping = (data: { messageId: string; agentId: string; agentName: string; status?: 'pending' | 'executing'; startedAt?: number }, chatRoomId: string) => {
     io.to(chatRoomId).emit('agent:typing', data);
     startTypingLoop(chatRoomId).catch(console.error);
   };
@@ -557,6 +558,9 @@ export function setupSocket(io: Server) {
               agentId: task.agentId,
               agentName: task.agentName,
               status: task.status === 'executing' ? 'executing' : 'pending',
+              startedAt: task.status === 'executing'
+                ? taskExecutionStartedAt.get(task.id) ?? task.createdAt.getTime()
+                : undefined,
             });
 
             // 发送缓存的流式事件

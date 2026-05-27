@@ -1417,7 +1417,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
           status: nextStatus,
           startedAt: nextStatus === 'pending'
             ? updated[existingIndex].startedAt
-            : (updated[existingIndex].startedAt ?? Date.now()),
+            : (data.startedAt ?? updated[existingIndex].startedAt ?? Date.now()),
         }
         newTypingAgents.set(data.messageId, updated)
       } else {
@@ -1427,7 +1427,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
             agentId: data.agentId,
             agentName: data.agentName,
             status: data.status,
-            startedAt: data.status === 'pending' ? undefined : Date.now(),
+            startedAt: data.status === 'pending' ? undefined : (data.startedAt ?? Date.now()),
           },
         ])
       }
@@ -1541,7 +1541,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
           status: nextStatus,
           startedAt: nextStatus === 'pending'
             ? updated[existingIndex].startedAt
-            : (updated[existingIndex].startedAt ?? Date.now()),
+            : (data.startedAt ?? updated[existingIndex].startedAt ?? Date.now()),
         }
         newTypingAgents.set(data.messageId, updated)
       } else {
@@ -1551,7 +1551,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
             agentId: data.agentId,
             agentName: data.agentName,
             status: data.status,
-            startedAt: data.status === 'pending' ? undefined : Date.now(),
+            startedAt: data.status === 'pending' ? undefined : (data.startedAt ?? Date.now()),
           },
         ])
       }

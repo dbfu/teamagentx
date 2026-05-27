@@ -93,6 +93,7 @@ interface AgentTypingData {
   agentId: string
   agentName: string
   status?: 'pending' | 'executing'
+  startedAt?: number
 }
 
 interface AgentDoneData {
@@ -146,6 +147,7 @@ export interface AgentResumeData {
   agentId: string
   agentName: string
   status?: 'pending' | 'executing'
+  startedAt?: number
 }
 
 // 缓存的流式事件数据类型

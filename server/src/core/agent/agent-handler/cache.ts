@@ -12,6 +12,9 @@ export const abortControllers = new Map<string, AbortController>();
 // Executions cleared by context/message cleanup should not write final records.
 export const discardExecutionResultKeys = new Set<string>();
 
+// Running task start times - keyed by TaskQueue.id. Used to restore elapsed time after room switches.
+export const taskExecutionStartedAt = new Map<string, number>();
+
 // 流式事件缓存 - 用于刷新页面后恢复数据
 interface CachedStreamEvent {
   id: string;
@@ -95,6 +98,7 @@ export function clearAllExecutionState(): void {
   processingMap.clear();
   abortControllers.clear();
   discardExecutionResultKeys.clear();
+  taskExecutionStartedAt.clear();
   streamEventsCache.clear();
 
   console.log('[AgentHandler] 已清理所有执行状态');
