@@ -187,6 +187,9 @@ interface ChatStore {
   loadingOlderMessagesByRoom: Record<string, boolean>
   hasOlderMessagesByRoom: Record<string, boolean>
   inputValue: string
+  inputHistory: string[]
+  inputHistoryCursor: number
+  inputHistoryDraft: string
   loading: boolean
   loadingOlderMessages: boolean
   hasOlderMessages: boolean
@@ -249,6 +252,8 @@ interface ChatStore {
 
   // Actions
   setInputValue: (value: string) => void
+  addInputHistory: (value: string) => void
+  navigateInputHistory: (direction: 'previous' | 'next') => boolean
   setActiveChatRoomId: (chatRoomId: string | null) => void
   setMessages: (messages: Message[], chatRoomId?: string) => void
   addMessage: (message: Message) => void
@@ -321,6 +326,7 @@ interface ChatStore {
 
 // 每个房间最多保留多少个语音消息 ID，避免 localStorage 无限增长
 const MAX_VOICE_IDS_PER_ROOM = 500
+const MAX_INPUT_HISTORY_SIZE = 50
 const EMPTY_MESSAGES: Message[] = []
 
 function findCachedMessage(
@@ -337,6 +343,37 @@ function findCachedMessage(
   }
 
   return undefined
+}
+
+function getCaretTextOffset(target: EventTarget | null): number | null {
+  if (!(target instanceof HTMLElement)) return null
+
+  const selection = window.getSelection()
+  if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) return null
+  if (!selection.anchorNode || !target.contains(selection.anchorNode)) return null
+
+  const range = selection.getRangeAt(0)
+  const preRange = document.createRange()
+  preRange.selectNodeContents(target)
+  preRange.setEnd(range.startContainer, range.startOffset)
+  return preRange.toString().length
+}
+
+function shouldNavigateInputHistory(e: React.KeyboardEvent, inputValue: string): boolean {
+  if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return false
+  if (e.shiftKey || e.altKey || e.ctrlKey || e.metaKey || e.nativeEvent.isComposing) return false
+
+  const caretOffset = getCaretTextOffset(e.currentTarget)
+  if (caretOffset === null) return true
+  if (!inputValue.includes('\n')) return true
+
+  if (e.key === 'ArrowUp') {
+    const firstLineEnd = inputValue.indexOf('\n')
+    return caretOffset <= firstLineEnd
+  }
+
+  const lastLineStart = inputValue.lastIndexOf('\n') + 1
+  return caretOffset >= lastLineStart
 }
 
 function sortMessagesByTime(messages: Message[]): Message[] {
@@ -393,6 +430,9 @@ export const useChatStore = create<ChatStore>()(
   loadingOlderMessagesByRoom: {},
   hasOlderMessagesByRoom: {},
   inputValue: '',
+  inputHistory: [],
+  inputHistoryCursor: -1,
+  inputHistoryDraft: '',
   loading: false,
   loadingOlderMessages: false,
   hasOlderMessages: true,
@@ -449,7 +489,58 @@ export const useChatStore = create<ChatStore>()(
   pendingImages: [],
 
   // Actions
-  setInputValue: (value) => set({ inputValue: value }),
+  setInputValue: (value) => set({
+    inputValue: value,
+    inputHistoryCursor: -1,
+    inputHistoryDraft: '',
+  }),
+  addInputHistory: (value) => set((state) => {
+    const historyValue = value.trim()
+    if (!historyValue) return state
+
+    const nextHistory = [
+      ...state.inputHistory.filter((item) => item !== historyValue),
+      historyValue,
+    ].slice(-MAX_INPUT_HISTORY_SIZE)
+
+    return {
+      inputHistory: nextHistory,
+      inputHistoryCursor: -1,
+      inputHistoryDraft: '',
+    }
+  }),
+  navigateInputHistory: (direction) => {
+    const state = get()
+    if (state.inputHistory.length === 0) return false
+
+    if (direction === 'previous') {
+      const nextCursor = state.inputHistoryCursor === -1
+        ? state.inputHistory.length - 1
+        : Math.max(0, state.inputHistoryCursor - 1)
+      const nextDraft = state.inputHistoryCursor === -1 ? state.inputValue : state.inputHistoryDraft
+      const nextValue = state.inputHistory[nextCursor]
+
+      set({
+        inputValue: nextValue,
+        inputHistoryCursor: nextCursor,
+        inputHistoryDraft: nextDraft,
+      })
+      return true
+    }
+
+    if (state.inputHistoryCursor === -1) return false
+
+    const nextCursor = state.inputHistoryCursor + 1
+    const returningToDraft = nextCursor >= state.inputHistory.length
+    const nextValue = returningToDraft ? state.inputHistoryDraft : state.inputHistory[nextCursor]
+
+    set({
+      inputValue: nextValue,
+      inputHistoryCursor: returningToDraft ? -1 : nextCursor,
+      inputHistoryDraft: returningToDraft ? '' : state.inputHistoryDraft,
+    })
+    return true
+  },
   setActiveChatRoomId: (chatRoomId) => set((state) => {
     const roomMessages = chatRoomId ? state.messagesByRoom[chatRoomId] ?? [] : []
     return {
@@ -1071,6 +1162,8 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
 
   // Actions - 使用 getState() 获取稳定引用
   const setInputValue = useChatStore((s) => s.setInputValue)
+  const addInputHistory = useChatStore((s) => s.addInputHistory)
+  const navigateInputHistory = useChatStore((s) => s.navigateInputHistory)
   const setActiveChatRoomId = useChatStore((s) => s.setActiveChatRoomId)
   const setSidePanelMode = useChatStore((s) => s.setSidePanelMode)
   const setShowAddAgent = useChatStore((s) => s.setShowAddAgent)
@@ -1773,6 +1866,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
       uploadedImages.length === 0 &&
       getMentionedAgentNames(trimmedInput).length === 0
     if (isRoomNewCommand) {
+      addInputHistory(trimmedInput)
       await clearMessages(chatRoom.id)
       setInputValue('')
       useChatStore.getState().setForceScrollToBottom(true)
@@ -1822,6 +1916,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
       }
       useChatStore.getState().addMessage(humanMessage)
       useChatRoomStore.getState().updateRoomLastMessage(chatRoom.id, humanMessage)
+      addInputHistory(trimmedInput)
       setInputValue('')
       useChatStore.getState().setForceScrollToBottom(true)
 
@@ -1926,6 +2021,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
       isHuman: true,
       attachments,
     })
+    addInputHistory(trimmedInput)
 
     // 发送消息时立即更新群聊的 lastMessage（使用临时数据）
     useChatRoomStore.getState().updateRoomLastMessage(chatRoom.id, {
@@ -1948,15 +2044,23 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     if (document.activeElement instanceof HTMLElement) {
       document.activeElement.blur()
     }
-  }, [allAgents, chatRoom, clearMessages, sendMessage, setInputValue])
+  }, [addInputHistory, allAgents, chatRoom, clearMessages, sendMessage, setInputValue])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (shouldNavigateInputHistory(e, inputValue)) {
+      const navigated = navigateInputHistory(e.key === 'ArrowUp' ? 'previous' : 'next')
+      if (navigated) {
+        e.preventDefault()
+      }
+      return
+    }
+
     // 中文输入过程中不响应回车（检测 nativeEvent.isComposing）
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault()
       handleSend()
     }
-  }, [handleSend])
+  }, [handleSend, inputValue, navigateInputHistory])
 
   const handleAddAgents = useCallback(async (agentIds: string[]) => {
     if (!chatRoom) return

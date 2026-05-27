@@ -138,12 +138,17 @@ export function AgentCard({
       className={cn(
         'group relative flex flex-col items-center gap-2 rounded-lg p-3 transition-all duration-200 hover:bg-accent cursor-pointer',
         isDragging && 'opacity-40 scale-95',
-        assistant.agentLevel === 'system' && 'cursor-default' // 系统助手不显示拖拽 cursor
+        assistant.agentLevel === 'system' && (!assistant.isActive || !onStartQuickChat) && 'cursor-default'
       )}
       onContextMenu={(e) => onContextMenu(e, assistant)}
       onClick={() => {
-        // 系统助手不支持点击进详情，右键菜单打开时不触发 onClick
-        if (assistant.agentLevel === 'system' || openMenuId) {
+        if (openMenuId) {
+          return
+        }
+        if (assistant.agentLevel === 'system') {
+          if (assistant.isActive) {
+            onStartQuickChat?.(assistant)
+          }
           return
         }
         onClick?.(assistant)

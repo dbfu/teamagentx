@@ -161,6 +161,7 @@ export const messageService = {
   },
 
   async deleteByChatRoomId(chatRoomId: string) {
+    const now = new Date();
     // 删除消息前先收集音频附件，删完数据库再清理磁盘文件
     const audioAttachments = await prisma.attachment.findMany({
       where: { type: 'audio', message: { chatRoomId } },
@@ -172,6 +173,10 @@ export const messageService = {
     for (const att of audioAttachments) {
       await uploadService.deleteAudio(att.url).catch(() => {});
     }
+    await prisma.chatRoom.updateMany({
+      where: { id: chatRoomId },
+      data: { updatedAt: now },
+    });
     return result;
   },
 

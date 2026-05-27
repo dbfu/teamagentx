@@ -283,11 +283,9 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
     }
   }
 
-  const handleStopAgent = (agentId: string) => {
+  const handleStopAgent = (agentId: string, messageId?: string) => {
     if (chatRoom) {
-      setStreamingViewAgent(null)
-      setSidePanelMode(null)
-      stopAgent(chatRoom.id, agentId)
+      stopAgent(chatRoom.id, agentId, messageId)
     }
   }
 

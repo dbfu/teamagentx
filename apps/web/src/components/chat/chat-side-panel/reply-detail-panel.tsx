@@ -6,6 +6,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw'
 import { remarkMentions, MENTION_MARKER_CLASS } from '@/lib/remark-mentions'
+import { remarkTrimUrlPunctuation } from '@/lib/remark-trim-url-punctuation'
 import { resolveAssetUrl } from '@/lib/asset-url'
 
 interface MentionAgent {
@@ -33,7 +34,7 @@ export function ReplyDetailPanel({ selectedReplyMessage, replies, mentionAgents 
       return (
         <div className="prose prose-sm [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap">
           <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
+            remarkPlugins={[remarkGfm, remarkTrimUrlPunctuation]}
             components={{
               a: ({ href, children }) => (
                 <a href={href} target="_blank" rel="noopener noreferrer">
@@ -55,7 +56,7 @@ export function ReplyDetailPanel({ selectedReplyMessage, replies, mentionAgents 
     return (
       <div className="prose prose-sm [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap">
         <ReactMarkdown
-          remarkPlugins={[remarkGfm, [remarkMentions, { mentionAgents }]]}
+          remarkPlugins={[remarkGfm, remarkTrimUrlPunctuation, [remarkMentions, { mentionAgents }]]}
           rehypePlugins={[rehypeRaw]}
           components={{
             a: ({ href, children }) => (

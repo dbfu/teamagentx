@@ -578,22 +578,45 @@ export function setupSocket(io: Server) {
     });
 
     // Stop agent execution
-    socket.on('agent:stop', async (data: { chatRoomId: string; agentId: string }) => {
+    socket.on('agent:stop', async (data: { chatRoomId: string; agentId?: string; messageId?: string }) => {
       try {
-        const { chatRoomId, agentId } = data;
-        console.log(`[agent:stop] 收到停止请求: chatRoomId=${chatRoomId}, agentId=${agentId}`);
+        const { chatRoomId, messageId } = data;
+        let { agentId } = data;
+
+        if (messageId) {
+          const activeTasks = await taskQueueService.getActiveTasks(chatRoomId);
+          const matchedTask = activeTasks.find(task =>
+            task.messageId === messageId && (!agentId || task.agentId === agentId)
+          ) ?? activeTasks.find(task => task.messageId === messageId);
+
+          if (matchedTask) {
+            agentId = matchedTask.agentId;
+          }
+        }
+
+        if (!agentId) {
+          socket.emit('agent:stop-failed', {
+            chatRoomId,
+            messageId,
+            message: '未找到要停止的助手'
+          });
+          return;
+        }
+
+        console.log(`[agent:stop] 收到停止请求: chatRoomId=${chatRoomId}, agentId=${agentId}, messageId=${messageId ?? '-'}`);
 
         const stopped = stopAgentExecution(chatRoomId, agentId);
 
         if (stopped) {
           // 通知前端已停止
-          socket.emit('agent:stopped', { chatRoomId, agentId });
+          socket.emit('agent:stopped', { chatRoomId, agentId, messageId });
           // 广播给群聊里的所有人
-          socket.to(chatRoomId).emit('agent:stopped', { chatRoomId, agentId });
+          socket.to(chatRoomId).emit('agent:stopped', { chatRoomId, agentId, messageId });
         } else {
           socket.emit('agent:stop-failed', {
             chatRoomId,
             agentId,
+            messageId,
             message: '未找到正在执行的任务'
           });
         }

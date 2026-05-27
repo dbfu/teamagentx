@@ -130,7 +130,14 @@ export class PackageScriptService {
     };
 
     await walk(rootDir);
-    return result.sort((left, right) => left.localeCompare(right));
+    return result.sort((left, right) => {
+      const leftDir = path.relative(rootDir, path.dirname(left));
+      const rightDir = path.relative(rootDir, path.dirname(right));
+
+      if (leftDir === '') return rightDir === '' ? 0 : -1;
+      if (rightDir === '') return 1;
+      return leftDir.localeCompare(rightDir);
+    });
   }
 
   private buildScriptId(relativeDir: string, scriptName: string): string {

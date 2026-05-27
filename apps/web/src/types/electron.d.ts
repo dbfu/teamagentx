@@ -17,6 +17,7 @@ declare global {
       data?: OpenAtLoginSettings;
       error?: string;
     }>;
+    setActiveTaskState?: (state: { hasActiveTasks: boolean; executingRoomCount: number }) => void;
     checkForUpdates: () => Promise<{
       success: boolean;
       data?: { hasUpdate: boolean; currentVersion: string; update: UpdateInfo | null; noUrlConfigured?: boolean };

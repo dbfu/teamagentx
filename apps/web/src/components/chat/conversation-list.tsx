@@ -307,8 +307,8 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
             return (
               <>
                 {[...chatRooms].sort((a, b) => {
-                  const aTime = a.lastMessage?.time ? new Date(a.lastMessage.time).getTime() : new Date(a.createdAt).getTime()
-                  const bTime = b.lastMessage?.time ? new Date(b.lastMessage.time).getTime() : new Date(b.createdAt).getTime()
+                  const aTime = a.lastMessage?.time ? new Date(a.lastMessage.time).getTime() : new Date(a.updatedAt).getTime()
+                  const bTime = b.lastMessage?.time ? new Date(b.lastMessage.time).getTime() : new Date(b.updatedAt).getTime()
                   return bTime - aTime
                 }).map((room) => {
                   const unreadCount = unreadCounts[room.id] || 0

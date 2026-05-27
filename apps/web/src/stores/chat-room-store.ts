@@ -73,10 +73,11 @@ export const useChatRoomStore = create<ChatRoomStore>()(
           if (roomIndex === -1) return state
 
           const updatedRooms = [...state.chatRooms]
-          // 只更新 lastMessage，不移动位置（渲染时会按时间排序）
+          // 更新 lastMessage 和活动时间，渲染时会按时间排序
           updatedRooms[roomIndex] = {
             ...updatedRooms[roomIndex],
             lastMessage,
+            updatedAt: lastMessage?.time ?? new Date().toISOString(),
           }
 
           return { chatRooms: updatedRooms }

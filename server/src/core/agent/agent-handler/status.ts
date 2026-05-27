@@ -108,11 +108,14 @@ export async function getAgentStatus(
 }
 
 // Get all agent statuses for a chatRoom
-export async function getAgentStatuses(chatRoomId: string): Promise<Map<string, AgentStatus>> {
+export async function getAgentStatuses(chatRoomId: string, extraAgentIds: string[] = []): Promise<Map<string, AgentStatus>> {
   const statuses = new Map<string, AgentStatus>();
 
-  // Get all agents in this chatRoom
-  const chatRoomAgents = await chatRoomService.getAgents(chatRoomId);
+  // Get all visible/member agents in this chatRoom.
+  const [chatRoomAgents, activeTasks] = await Promise.all([
+    chatRoomService.getAgents(chatRoomId),
+    taskQueueService.getActiveTasks(chatRoomId),
+  ]);
 
   for (const cra of chatRoomAgents) {
     if (cra.agent) {
@@ -121,13 +124,28 @@ export async function getAgentStatuses(chatRoomId: string): Promise<Map<string, 
     }
   }
 
+  // Hidden system agents, such as the internal coordinator, are not room members.
+  // Include them while they have active queue items so stop/resume UI can target them.
+  for (const task of activeTasks) {
+    if (!statuses.has(task.agentId)) {
+      const status = await getAgentStatus(chatRoomId, task.agentId);
+      statuses.set(task.agentId, status);
+    }
+  }
+
+  for (const agentId of extraAgentIds) {
+    if (!agentId || statuses.has(agentId)) continue;
+    const status = await getAgentStatus(chatRoomId, agentId);
+    statuses.set(agentId, status);
+  }
+
   return statuses;
 }
 
 // Broadcast agent status changes to the chatRoom
-export async function broadcastAgentStatus(chatRoomId: string) {
+export async function broadcastAgentStatus(chatRoomId: string, extraAgentIds: string[] = []) {
   if (globalEmitStatus) {
-    const statuses = await getAgentStatuses(chatRoomId);
+    const statuses = await getAgentStatuses(chatRoomId, extraAgentIds);
     const statusObj: Record<string, AgentStatus> = {};
     const queueCounts: Record<string, number> = {};
     for (const [agentId, status] of statuses) {

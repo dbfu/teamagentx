@@ -118,7 +118,7 @@ interface StreamPanelProps {
   completedAgents: Set<string>
   streamEvents: Map<string, StreamEvent[]>
   chatRoomId?: string
-  onStop?: (agentId: string) => void
+  onStop?: (agentId: string, messageId?: string) => void
 }
 
 export function StreamPanel({
@@ -280,7 +280,7 @@ export function StreamPanel({
             </div>
             {isExecuting && onStop && chatRoomId && (
               <button
-                onClick={() => onStop(streamingViewAgent!.agentId)}
+                onClick={() => onStop(streamingViewAgent!.agentId, streamingViewAgent!.messageId)}
                 className="flex items-center gap-1.5 rounded-lg bg-red-500 px-2.5 py-1.5 text-xs text-white hover:bg-red-600 transition-colors"
                 title="停止执行"
               >

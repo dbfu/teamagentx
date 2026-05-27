@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   getOpenAtLoginSettings: () => ipcRenderer.invoke('app:get-open-at-login-settings'),
   setOpenAtLogin: (enabled: boolean) => ipcRenderer.invoke('app:set-open-at-login', enabled),
+  setActiveTaskState: (state: { hasActiveTasks: boolean; executingRoomCount: number }) =>
+    ipcRenderer.send('app:active-task-state', state),
   checkForUpdates: () => ipcRenderer.invoke('update:check'),
   downloadUpdate: (update: {
     version: string;

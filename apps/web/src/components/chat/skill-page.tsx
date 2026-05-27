@@ -1,5 +1,6 @@
 import { SelectAgentsDialog } from '@/components/chat/dialogs/select-agents-dialog';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Agent, agentApi } from '@/lib/agent-api';
 import { AgentAvatarImage } from '@/lib/agent-avatars';
 import { ExternalSkill, SharedSkill, skillApi, SkillDetail, SkillFile } from '@/lib/skill-api';
@@ -223,6 +224,8 @@ export function SkillPage() {
   const [selectAgentsOpen, setSelectAgentsOpen] = useState(false);
   const [currentSkill, setCurrentSkill] = useState<SharedSkill | null>(null);
   const [batchInstalling, setBatchInstalling] = useState(false);
+  const [unlinkingInstallKey, setUnlinkingInstallKey] = useState<string | null>(null);
+  const [pendingUnlinkInstall, setPendingUnlinkInstall] = useState<{ skill: SharedSkill; agent: Agent } | null>(null);
   // 复制路径状态
   const [copied, setCopied] = useState(false);
   // 打开目录状态
@@ -515,6 +518,25 @@ export function SkillPage() {
     }
   };
 
+  const handleUnlinkInstalledAgent = async (skill: SharedSkill, agent: Agent) => {
+    const installKey = `${skill.slug}:${agent.id}`;
+    setUnlinkingInstallKey(installKey);
+    try {
+      const result = await skillApi.unlink(skill.slug, agent.id);
+      if (result.success) {
+        toast.success(`已从「${agent.name}」移除「${skill.name}」`);
+        setPendingUnlinkInstall(null);
+        await loadData();
+      } else {
+        toast.error(result.error || '移除失败');
+      }
+    } catch {
+      toast.error('移除失败');
+    } finally {
+      setUnlinkingInstallKey(null);
+    }
+  };
+
 
   return (
     <>
@@ -716,6 +738,8 @@ export function SkillPage() {
                               <div className="flex flex-wrap gap-2">
                                 {skill.installedAgents.map((name) => {
                                   const agent = agents.find(a => a.name === name);
+                                  const installKey = agent ? `${skill.slug}:${agent.id}` : null;
+                                  const isUnlinking = installKey === unlinkingInstallKey;
                                   return (
                                     <span
                                       key={name}
@@ -723,6 +747,21 @@ export function SkillPage() {
                                     >
                                       <AgentAvatarImage avatar={agent?.avatar ?? null} className="size-4" />
                                       {name}
+                                      {agent && (
+                                        <button
+                                          type="button"
+                                          onClick={() => setPendingUnlinkInstall({ skill, agent })}
+                                          disabled={isUnlinking}
+                                          className="ml-0.5 rounded text-primary/70 hover:bg-primary/10 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                                          title="从该助手移除"
+                                        >
+                                          {isUnlinking ? (
+                                            <RefreshCw className="size-3 animate-spin" />
+                                          ) : (
+                                            <X className="size-3" />
+                                          )}
+                                        </button>
+                                      )}
                                     </span>
                                   );
                                 })}
@@ -756,6 +795,23 @@ export function SkillPage() {
         onConfirm={handleBatchInstall}
         title={`安装「${currentSkill?.name || ''}」到助手`}
         loading={batchInstalling}
+      />
+
+      <ConfirmDialog
+        open={!!pendingUnlinkInstall}
+        onOpenChange={(open) => !open && setPendingUnlinkInstall(null)}
+        title="移除技能"
+        description={`确定要从助手「${pendingUnlinkInstall?.agent.name ?? ''}」移除技能「${pendingUnlinkInstall?.skill.name ?? ''}」吗？`}
+        confirmText="移除"
+        onConfirm={async () => {
+          if (!pendingUnlinkInstall) return;
+          await handleUnlinkInstalledAgent(pendingUnlinkInstall.skill, pendingUnlinkInstall.agent);
+        }}
+        loading={
+          !!pendingUnlinkInstall &&
+          unlinkingInstallKey === `${pendingUnlinkInstall.skill.slug}:${pendingUnlinkInstall.agent.id}`
+        }
+        icon={X}
       />
 
       {/* 技能内容查看模态框 */}
