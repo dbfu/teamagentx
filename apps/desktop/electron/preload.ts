@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     terminalTarget: 'terminal-app' | 'iterm2' | 'alacritty' | 'kitty' | 'ghostty' | 'wezterm' | 'kaku' = 'terminal-app'
   ) => ipcRenderer.invoke('terminal:run-command', { path, command, terminalTarget }),
   selectFolder: () => ipcRenderer.invoke('select-folder'),
+  exportPdf: (payload: { html: string; filename: string }) => ipcRenderer.invoke('pdf:export', payload),
   // 使用默认浏览器打开外部链接
   openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
   // 窗口控制 API (用于 Windows 无边框窗口)

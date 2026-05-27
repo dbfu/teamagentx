@@ -71,6 +71,10 @@ describe('internal coordinator no-dispatch handling', () => {
 
     assert.match(prompt, /只有你（群调度助手）支持在一条调度消息中 @多个助手/);
     assert.match(prompt, /多个助手同时执行任务/);
+    assert.match(prompt, /多个可并行推进的任务/);
+    assert.match(prompt, /同时 @多个助手 分配任务/);
+    assert.match(prompt, /必须等所有被并行调度的助手都明确完成各自任务后/);
+    assert.match(prompt, /才能调度下一个阶段任务/);
     assert.match(prompt, /其他业务助手在协调模式下不能直接 @助手 触发任务/);
     assert.match(prompt, /不会直接触发目标助手/);
     assert.match(prompt, /@assistant_name @assistant_name original_content/);
@@ -83,6 +87,19 @@ describe('internal coordinator no-dispatch handling', () => {
     assert.match(prompt, /最终回复必须提及群主/);
     assert.match(prompt, /不要为了提问或确认而 @其他人类成员/);
     assert.match(prompt, /不要把需要用户回答或确认的问题输出为“无需调度”/);
+    assert.match(prompt, /不能在一条消息里同时 @业务助手 和 @群主/);
+    assert.match(prompt, /必须先只 @群主 提问/);
+    assert.match(prompt, /用户回答或确认后，再调度合适的助手处理/);
+  });
+
+  test('prompt blocks next phase until all parallel tasks finish', () => {
+    const prompt = buildInternalCoordinatorPrompt();
+
+    assert.match(prompt, /上一阶段是并行任务/);
+    assert.match(prompt, /任意一个并行助手尚未明确完成/);
+    assert.match(prompt, /无法确认所有并行任务都已完成/);
+    assert.match(prompt, /必须输出“无需调度”/);
+    assert.match(prompt, /不能进入下一个阶段任务/);
   });
 
   test('suppresses only exact internal coordinator no-dispatch output', () => {

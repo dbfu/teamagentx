@@ -39,6 +39,10 @@ declare global {
       terminalTarget?: 'terminal-app' | 'iterm2' | 'alacritty' | 'kitty' | 'ghostty' | 'wezterm' | 'kaku'
     ) => Promise<{ success: boolean; error?: string }>;
     selectFolder: () => Promise<{ success: boolean; path: string | null }>;
+    exportPdf?: (payload: {
+      html: string;
+      filename: string;
+    }) => Promise<{ success: boolean; filePath?: string; canceled?: boolean; error?: string }>;
     openExternal: (url: string) => Promise<{ success: boolean; error?: string }>;
     windowMinimize: () => Promise<void>;
     windowMaximize: () => Promise<void>;

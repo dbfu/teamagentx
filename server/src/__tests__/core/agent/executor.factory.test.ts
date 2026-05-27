@@ -96,4 +96,38 @@ describe('createExecutor', () => {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
+
+  test('将 stateless 模式传入执行器', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-stateless-'));
+    try {
+      const claudeExecutor = createExecutor({
+        agent: testAgent({ type: 'builtin', name: 'StatelessClaudeAgent' }),
+        chatRoomId: 'room-1',
+        threadId: 'room-1_StatelessClaudeAgent',
+        injectGroupHistory: true,
+        chatRoomAgents: [],
+        customWorkDir: tmpDir,
+        stateless: true,
+      });
+      assert.strictEqual((claudeExecutor as any).stateless, true);
+
+      const codexExecutor = createExecutor({
+        agent: testAgent({
+          id: 'agent-4',
+          name: 'StatelessCodexAgent',
+          type: 'acp',
+          acpTool: 'codex',
+        }),
+        chatRoomId: 'room-1',
+        threadId: 'room-1_StatelessCodexAgent',
+        injectGroupHistory: true,
+        chatRoomAgents: [],
+        customWorkDir: tmpDir,
+        stateless: true,
+      });
+      assert.strictEqual((codexExecutor as any).stateless, true);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 });

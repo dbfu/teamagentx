@@ -716,6 +716,7 @@ export class CodexSdkExecutor implements IAgentExecutor {
   readonly codexModel: string | null;
   readonly codexFastMode: boolean;
   readonly thinkingMode: AgentThinkingMode;
+  readonly stateless: boolean;
 
   private _lastInjectedMessageId?: string;
   private systemPrompt: string;
@@ -756,6 +757,7 @@ export class CodexSdkExecutor implements IAgentExecutor {
     codexFastMode?: boolean,
     thinkingMode?: AgentThinkingMode | null,
     chatRoomRules?: string,
+    stateless: boolean = false,
   ) {
     this.name = name;
     this.chatRoomId = chatRoomId;
@@ -770,6 +772,7 @@ export class CodexSdkExecutor implements IAgentExecutor {
     this.codexModel = codexModel || null;
     this.codexFastMode = Boolean(codexFastMode);
     this.thinkingMode = thinkingMode || DEFAULT_AGENT_THINKING_MODE;
+    this.stateless = stateless;
 
     this.workDir = resolveAgentWorkDir({
       chatRoomId,
@@ -809,8 +812,8 @@ When you perform file operations or run commands, operate in this directory by d
 For long-running services or commands that should keep running after this turn, such as \`pnpm dev\`, \`npm run dev\`, \`vite\`, \`next dev\`, watch modes, servers, listeners, and \`tail -f\`, use the MCP tool \`start_background_command\` instead of running the command directly in the shell. Use \`read_background_command_output\` to inspect logs, \`list_background_commands\` to find existing tasks, and \`stop_background_command\` when the user asks to stop one. Do not block the turn waiting for a dev server to exit.`;
 
     this.ensureWorkDirectory();
-    this.threadId = this.loadThreadId();
-    this.lastInjectedSkillsSignature = this.loadSkillsSignature();
+    this.threadId = this.stateless ? null : this.loadThreadId();
+    this.lastInjectedSkillsSignature = this.stateless ? undefined : this.loadSkillsSignature();
   }
 
   get lastInjectedMessageId(): string | undefined {
@@ -1271,6 +1274,8 @@ process.stdin.on("data", (chunk) => {
   }
 
   private saveThreadId(): void {
+    if (this.stateless) return;
+
     try {
       const statePath = this.getSessionStatePath();
       if (!this.threadId) {
@@ -1487,6 +1492,11 @@ Other assistants: ${othersInfo}${mentionTip}
   }
 
   private buildSkillsUpdateSection(): string {
+    if (this.stateless) {
+      return `[Installed Skills Update]
+${buildInstalledSkillsInstructions(this.agentId)}`;
+    }
+
     const currentSignature = buildInstalledSkillsSignature(this.agentId);
     if (this.lastInjectedSkillsSignature === currentSignature) {
       return '';
@@ -1730,7 +1740,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     switch (event.type) {
       case 'thread.started':
         this.threadId = event.thread_id;
-        this.saveThreadId();
+        if (!this.stateless) this.saveThreadId();
         return undefined;
       case 'item.started':
       case 'item.updated':
@@ -1801,7 +1811,12 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       return { actions: [{ type: 'message', content: unsupportedMessage }] };
     }
 
-    this.resetOvergrownThreadIfNeeded();
+    if (this.stateless) {
+      this.thread = null;
+      this.threadId = null;
+    } else {
+      this.resetOvergrownThreadIfNeeded();
+    }
     this.lastContext = this.buildFullMessage(message, history);
     const abortController = new AbortController();
     this.currentAbortController = abortController;
@@ -1865,7 +1880,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
 
       if (thread.id && thread.id !== this.threadId) {
         this.threadId = thread.id;
-        this.saveThreadId();
+        if (!this.stateless) this.saveThreadId();
       }
 
       const finalResponse = this.content || 'codex 执行完成';
@@ -1898,6 +1913,10 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       cleanup();
       signal?.removeEventListener('abort', abort);
       this.currentAbortController = null;
+      if (this.stateless) {
+        this.thread = null;
+        this.threadId = null;
+      }
       this.emitStream = null;
       this.emitToolCall = null;
       this.emitThinking = null;

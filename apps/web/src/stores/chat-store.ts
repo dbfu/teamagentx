@@ -4,7 +4,7 @@ import { createElement, useRef, useCallback, useEffect, useMemo } from 'react'
 import { Agent, Message, messageApi, agentApi, ExecutionRecord, debugApi, AgentDebugInfo, ChatRoom, chatRoomApi, AgentContextInfo, uploadApi, type GitCommandAction } from '@/lib/agent-api'
 import { useSocketStore } from './socket-store'
 import { useChatRoomStore } from './chat-room-store'
-import type { ToolCall, StreamEvent, AgentStatus } from './socket-store'
+import type { ToolCall, StreamEvent, AgentStatus, TodoData } from './socket-store'
 import { PendingImage } from '@/components/chat/image-preview-list'
 import { compressImage, fileToBase64, createPreviewUrl, revokePreviewUrl, getImageDimensions, isValidImageType, isValidImageSize } from '@/lib/image-utils'
 import { isActivelyViewingChatRoom } from '@/lib/chat-room-presence'
@@ -152,6 +152,78 @@ function getMentionedDispatchableAgentNames(content: string, chatRoom: ChatRoom,
 
   const mentionedNames = getMentionedKnownAgentNames(content, Array.from(dispatchableAgentNames))
   return mentionedNames.filter((name) => dispatchableAgentNames.has(name))
+}
+
+function isCurrentUserChatRoomOwner(
+  chatRoom: ChatRoom,
+  currentUser: { id?: string | null; username?: string | null } | null | undefined,
+): boolean {
+  if (!currentUser) return false
+  if (chatRoom.ownerId) return currentUser.id === chatRoom.ownerId
+  return Boolean(chatRoom.owner?.username && currentUser.username === chatRoom.owner.username)
+}
+
+function toTimestamp(value: string | Date | null | undefined): number {
+  if (!value) return 0
+  const timestamp = new Date(value).getTime()
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function findLatestOwnerMentionReplyTarget(params: {
+  chatRoom: ChatRoom
+  messages: Message[]
+  todos: TodoData[]
+  currentUser: { id?: string | null; username?: string | null } | null | undefined
+}): { messageId: string; todoId?: string } | null {
+  const { chatRoom, messages, todos, currentUser } = params
+  const ownerUsername = chatRoom.owner?.username
+  if (!ownerUsername || !isCurrentUserChatRoomOwner(chatRoom, currentUser)) return null
+
+  const pendingTodos = todos.filter((todo) => (
+    todo.chatRoomId === chatRoom.id
+    && todo.status === 'pending'
+  ))
+  const pendingTodoByMessageId = new Map(pendingTodos.map((todo) => [todo.messageId, todo]))
+  const latestOwnerHumanMessageTime = messages.reduce((latestTime, message) => {
+    if (message.chatRoomId !== chatRoom.id || !message.isHuman) return latestTime
+    const isOwnerMessage = chatRoom.ownerId
+      ? message.userId === chatRoom.ownerId
+      : message.user?.username === ownerUsername
+    if (!isOwnerMessage) return latestTime
+    return Math.max(latestTime, toTimestamp(message.time))
+  }, 0)
+
+  const candidates: { messageId: string; todoId?: string; timestamp: number }[] = []
+
+  for (const message of messages) {
+    if (message.chatRoomId !== chatRoom.id || message.isHuman || !message.agentId) continue
+    if (!getMentionedKnownAgentNames(message.content, [ownerUsername]).includes(ownerUsername)) continue
+
+    const pendingTodo = pendingTodoByMessageId.get(message.id)
+    const timestamp = toTimestamp(message.time)
+    if (timestamp <= latestOwnerHumanMessageTime) continue
+
+    candidates.push({
+      messageId: message.id,
+      todoId: pendingTodo?.id,
+      timestamp,
+    })
+  }
+
+  for (const todo of pendingTodos) {
+    const timestamp = toTimestamp(todo.createdAt)
+    if (timestamp <= latestOwnerHumanMessageTime) continue
+
+    candidates.push({
+      messageId: todo.messageId,
+      todoId: todo.id,
+      timestamp,
+    })
+  }
+
+  if (candidates.length === 0) return null
+  candidates.sort((a, b) => b.timestamp - a.timestamp)
+  return candidates[0]
 }
 
 export type SidePanelMode = 'agents' | 'context' | 'history' | 'stream' | 'agent-detail' | 'record-detail' | 'reply-detail' | 'room-settings' | 'execution-detail' | 'cron-tasks' | 'task-queue' | 'task-board' | null
@@ -1217,6 +1289,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     onAgentTaskCancelled,
     onInactiveTasks,
     onAgentTaskResumed,
+    completeTodo,
   } = useSocketStore()
 
   // 处理新消息
@@ -1888,6 +1961,20 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
       toast.warning(tooManyMentionsToast)
       return
     }
+    const currentSocketState = useSocketStore.getState()
+    const ownerMentionReplyTarget = (
+      !chatRoom.isQuickChatRoom &&
+      (chatRoom.agentTriggerMode ?? 'coordinator') === 'auto' &&
+      !chatRoom.defaultAgentId &&
+      mentionedDispatchableAgentNames.length === 0
+    )
+      ? findLatestOwnerMentionReplyTarget({
+          chatRoom,
+          messages,
+          todos: currentSocketState.todos,
+          currentUser: currentSocketState.user,
+        })
+      : null
 
     const gitCommand = normalizedCommandContent?.gitCommand
     const shouldExecuteSystemGitCommand =
@@ -1991,7 +2078,8 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
       !chatRoom.isQuickChatRoom &&
       (chatRoom.agentTriggerMode ?? 'coordinator') !== 'coordinator' &&
       !chatRoom.defaultAgentId &&
-      mentionedDispatchableAgentNames.length === 0
+      mentionedDispatchableAgentNames.length === 0 &&
+      !ownerMentionReplyTarget
     ) {
       toast.warning(missingRecipientToast)
       return
@@ -2020,7 +2108,11 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
       content,
       isHuman: true,
       attachments,
+      replyMessageId: ownerMentionReplyTarget?.messageId ?? null,
     })
+    if (ownerMentionReplyTarget?.todoId) {
+      completeTodo(ownerMentionReplyTarget.todoId)
+    }
     addInputHistory(trimmedInput)
 
     // 发送消息时立即更新群聊的 lastMessage（使用临时数据）
@@ -2044,7 +2136,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     if (document.activeElement instanceof HTMLElement) {
       document.activeElement.blur()
     }
-  }, [addInputHistory, allAgents, chatRoom, clearMessages, sendMessage, setInputValue])
+  }, [addInputHistory, allAgents, chatRoom, clearMessages, completeTodo, messages, sendMessage, setInputValue])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (shouldNavigateInputHistory(e, inputValue)) {

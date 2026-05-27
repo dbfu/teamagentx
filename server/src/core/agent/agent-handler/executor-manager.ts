@@ -142,6 +142,7 @@ export async function getExecutor(
     imageGenerationProvider,
     lastInjectedMessageId,  // 传递上次注入位置
     chatRoomRules,  // 传递群规则
+    stateless: agent.id === GROUP_COORDINATOR_ID,
   });
   executorCache.set(cacheKey, executor);
   return executor;

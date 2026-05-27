@@ -1,5 +1,6 @@
 import prisma from '../../lib/prisma.js';
 import { uploadService } from '../upload/upload.service.js';
+import { randomUUID } from 'crypto';
 
 interface AttachmentData {
   type?: 'image' | 'audio' | 'file';
@@ -12,6 +13,17 @@ interface AttachmentData {
   durationMs?: number;
   transcript?: string;
   waveform?: string;
+}
+
+function buildArchiveTitle(messages: Array<{ content: string; time: Date }>) {
+  const firstContent = messages.find((message) => message.content.trim())?.content.trim();
+  if (firstContent) {
+    const normalized = firstContent.replace(/\s+/g, ' ');
+    return normalized.length > 40 ? `${normalized.slice(0, 40)}...` : normalized;
+  }
+
+  const firstTime = messages[0]?.time;
+  return firstTime ? `聊天记录 ${firstTime.toLocaleString('zh-CN')}` : '聊天记录';
 }
 
 export const messageService = {
@@ -90,6 +102,7 @@ export const messageService = {
 
   async findMany(options?: { take?: number }) {
     return prisma.message.findMany({
+      where: { archiveId: null },
       include: { user: true, agent: true, attachments: true },
       orderBy: { time: 'asc' },
       take: options?.take ?? 100,
@@ -119,6 +132,7 @@ export const messageService = {
     return prisma.message.findMany({
       where: {
         chatRoomId,
+        archiveId: null,
         ...(beforeMessage
           ? {
               OR: [
@@ -141,10 +155,10 @@ export const messageService = {
     // 先获取 afterMessageId 的时间
     const afterMessage = await prisma.message.findUnique({
       where: { id: afterMessageId },
-      select: { time: true },
+      select: { time: true, archiveId: true },
     });
-    if (!afterMessage) {
-      // 如果消息不存在，返回空数组（可能被删除了）
+    if (!afterMessage || afterMessage.archiveId) {
+      // 如果消息不存在或已归档，返回空数组
       return [];
     }
 
@@ -152,12 +166,104 @@ export const messageService = {
     return prisma.message.findMany({
       where: {
         chatRoomId,
+        archiveId: null,
         time: { gt: afterMessage.time },
       },
       include: { user: true, agent: true, attachments: true },
       orderBy: { time: 'asc' },
       take: take ?? 50,
     });
+  },
+
+  async findArchivesByChatRoomId(chatRoomId: string) {
+    return prisma.chatRoomMessageArchive.findMany({
+      where: { chatRoomId },
+      orderBy: { archivedAt: 'desc' },
+    });
+  },
+
+  async findArchiveById(id: string) {
+    return prisma.chatRoomMessageArchive.findUnique({
+      where: { id },
+    });
+  },
+
+  async findByArchiveId(archiveId: string, options?: { take?: number; order?: 'asc' | 'desc'; beforeMessageId?: string }) {
+    const beforeMessage = options?.beforeMessageId
+      ? await prisma.message.findUnique({
+          where: { id: options.beforeMessageId },
+          select: { id: true, archiveId: true, time: true },
+        })
+      : null;
+
+    if (options?.beforeMessageId && (!beforeMessage || beforeMessage.archiveId !== archiveId)) {
+      return [];
+    }
+
+    const order = options?.order ?? 'asc';
+    return prisma.message.findMany({
+      where: {
+        archiveId,
+        ...(beforeMessage
+          ? {
+              OR: [
+                { time: { lt: beforeMessage.time } },
+                { time: beforeMessage.time, id: { lt: beforeMessage.id } },
+              ],
+            }
+          : {}),
+      },
+      include: { user: true, agent: true, attachments: true },
+      orderBy: [{ time: order }, { id: order }],
+      take: options?.take ?? 100,
+    });
+  },
+
+  async archiveByChatRoomId(chatRoomId: string, createdBy?: string | null) {
+    const now = new Date();
+    const messages = await prisma.message.findMany({
+      where: { chatRoomId, archiveId: null },
+      select: { id: true, content: true, time: true },
+      orderBy: [{ time: 'asc' }, { id: 'asc' }],
+    });
+
+    if (messages.length === 0) {
+      await prisma.chatRoom.updateMany({
+        where: { id: chatRoomId },
+        data: { updatedAt: now },
+      });
+      return { count: 0, archive: null };
+    }
+
+    const archiveId = randomUUID();
+    const archive = await prisma.$transaction(async (tx) => {
+      const createdArchive = await tx.chatRoomMessageArchive.create({
+        data: {
+          id: archiveId,
+          chatRoomId,
+          title: buildArchiveTitle(messages),
+          messageCount: messages.length,
+          startedAt: messages[0]?.time ?? null,
+          endedAt: messages[messages.length - 1]?.time ?? null,
+          archivedAt: now,
+          createdBy: createdBy ?? null,
+        },
+      });
+
+      await tx.message.updateMany({
+        where: { chatRoomId, archiveId: null },
+        data: { archiveId },
+      });
+
+      await tx.chatRoom.updateMany({
+        where: { id: chatRoomId },
+        data: { updatedAt: now },
+      });
+
+      return createdArchive;
+    });
+
+    return { count: messages.length, archive };
   },
 
   async deleteByChatRoomId(chatRoomId: string) {
