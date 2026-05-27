@@ -37,6 +37,8 @@ function isAgentValidationError(error: unknown): error is Error {
     '图片能力只能绑定图片模型',
     '开启图片能力时必须选择图片模型',
     '图片模型供应商不存在',
+    'Claude 仅支持',
+    'Codex 仅支持',
     '代理配置',
     '代理地址',
     '思考模式',
@@ -284,7 +286,7 @@ const updateAgentBodySchema = {
     },
     isActive: { type: 'boolean' },
     categoryId: { type: 'string', description: '分类 ID，设为 null 移除分类' },
-    llmProviderId: { type: 'string', description: 'LLM 供应商 ID，设为 null 移除供应商' },
+    llmProviderId: { type: 'string', nullable: true, description: 'LLM 供应商 ID，设为 null 移除供应商' },
     imageGeneration: {
       type: 'object',
       additionalProperties: false,

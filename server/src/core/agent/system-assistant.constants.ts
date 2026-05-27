@@ -16,8 +16,8 @@ export const LEGACY_SYSTEM_AGENT_IDS = [
 ];
 
 export const VISIBLE_SYSTEM_AGENT_IDS = [GROUP_ASSISTANT_ID];
-export const HIDDEN_SYSTEM_AGENT_IDS = [GROUP_COORDINATOR_ID];
-export const SYSTEM_AGENT_IDS = [...VISIBLE_SYSTEM_AGENT_IDS, ...HIDDEN_SYSTEM_AGENT_IDS];
+export const HIDDEN_SYSTEM_AGENT_IDS: string[] = [];
+export const SYSTEM_AGENT_IDS = [GROUP_ASSISTANT_ID, GROUP_COORDINATOR_ID];
 
 export function isLegacySystemAgentId(agentId: string | null | undefined): boolean {
   return !!agentId && LEGACY_SYSTEM_AGENT_IDS.includes(agentId);

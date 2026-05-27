@@ -91,6 +91,9 @@ type PreparedAutoSpeakItem = {
   voiceConfig: AgentVoicePanelConfig
 }
 
+const SIDE_PANEL_BOTTOM_LOCK_MS = 1200
+const SIDE_PANEL_BOTTOM_LOCK_FRAMES = 75
+
 function logVoiceQueue(event: string, details: Record<string, unknown>): void {
   console.debug(`[voice-queue] ${event}`, details)
   void window.electronAPI?.appendDebugLog?.(`[voice-queue] ${event}`, details)
@@ -463,7 +466,7 @@ export function ChatMessagesList({
   const [deletingSelected, setDeletingSelected] = useState(false)
   // 上一次消息数量，用于检测新消息
   const prevMessageCountRef = useRef(messages.length)
-  const prevLastMessageIdRef = useRef(messages[messages.length - 1]?.id ?? null)
+  const prevLastMessageIdRef = useRef<string | null>(messages[messages.length - 1]?.id ?? null)
   // 记录上一次的群聊 ID，用于检测群聊切换
   const prevChatRoomIdRef = useRef(chatRoomId)
   // 是否已完成初始滚动位置恢复（切换群聊时重置）
@@ -485,6 +488,7 @@ export function ChatMessagesList({
   const pendingScrollSaveFrameRef = useRef<number | null>(null)
   const latestScrollAnchorRef = useRef<CapturedScrollAnchor | null>(null)
   const wasSidePanelOpenRef = useRef(isSidePanelOpen)
+  const sidePanelBottomLockUntilRef = useRef(0)
 
   const selectedCount = selectedMessageIds.size
   const getVirtualItemKey = useCallback((index: number) => messages[index]?.id ?? index, [messages])
@@ -497,6 +501,7 @@ export function ChatMessagesList({
     overscan: isMobile ? 8 : 12,
   })
   const virtualItems = rowVirtualizer.getVirtualItems()
+  const virtualTotalSize = rowVirtualizer.getTotalSize()
 
   const exitMultiSelect = useCallback(() => {
     setIsMultiSelectMode(false)
@@ -720,11 +725,13 @@ export function ChatMessagesList({
     userScrollIntentUntilRef.current = Math.max(userScrollIntentUntilRef.current, intentUntil)
     if (options?.cancelAutoBottom) {
       userLeavingBottomUntilRef.current = Math.max(userLeavingBottomUntilRef.current, intentUntil)
+      sidePanelBottomLockUntilRef.current = 0
       cancelPendingScrollToBottom()
     }
   }, [cancelPendingScrollToBottom])
 
-  const handlePointerDown = useCallback(() => {
+  const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget) return
     markUserScrollIntent({ cancelAutoBottom: true })
   }, [markUserScrollIntent])
 
@@ -866,13 +873,17 @@ export function ChatMessagesList({
 
   useLayoutEffect(() => {
     const wasSidePanelOpen = wasSidePanelOpenRef.current
-    const wasPinnedToBottom = isNearBottomRef.current
+    const wasPinnedToBottom = isNearBottomRef.current || checkIsNearBottom()
     const userIsLeavingBottom = Date.now() <= userLeavingBottomUntilRef.current
     wasSidePanelOpenRef.current = isSidePanelOpen
 
+    if (!isSidePanelOpen) {
+      sidePanelBottomLockUntilRef.current = 0
+      return
+    }
+
     if (
-      !isSidePanelOpen
-      || wasSidePanelOpen
+      wasSidePanelOpen
       || !wasPinnedToBottom
       || userIsLeavingBottom
       || !messagesBelongToCurrentRoom
@@ -881,9 +892,61 @@ export function ChatMessagesList({
       return
     }
 
-    scrollToBottom({ save: true, frames: 14 })
+    sidePanelBottomLockUntilRef.current = Date.now() + SIDE_PANEL_BOTTOM_LOCK_MS
+    scrollToBottom({ save: true, frames: SIDE_PANEL_BOTTOM_LOCK_FRAMES })
     setShowNewMessageHint(false)
     setShowScrollToBottomHint(false)
+  }, [checkIsNearBottom, isSidePanelOpen, messagesBelongToCurrentRoom, scrollToBottom])
+
+  useLayoutEffect(() => {
+    if (
+      !isSidePanelOpen
+      || Date.now() > sidePanelBottomLockUntilRef.current
+      || !messagesBelongToCurrentRoom
+      || !hasRestoredPositionRef.current
+    ) {
+      return
+    }
+
+    scrollToBottom({ save: true, frames: SIDE_PANEL_BOTTOM_LOCK_FRAMES })
+    setShowNewMessageHint(false)
+    setShowScrollToBottomHint(false)
+  }, [isSidePanelOpen, messagesBelongToCurrentRoom, scrollToBottom, virtualTotalSize])
+
+  useEffect(() => {
+    if (!isSidePanelOpen || typeof ResizeObserver === 'undefined') return
+
+    const container = containerRef.current
+    if (!container) return
+
+    let frameId: number | null = null
+    const keepBottomIfLocked = () => {
+      frameId = null
+      if (
+        Date.now() > sidePanelBottomLockUntilRef.current
+        || !messagesBelongToCurrentRoom
+        || !hasRestoredPositionRef.current
+      ) {
+        return
+      }
+
+      scrollToBottom({ save: true, frames: SIDE_PANEL_BOTTOM_LOCK_FRAMES })
+      setShowNewMessageHint(false)
+      setShowScrollToBottomHint(false)
+    }
+
+    const observer = new ResizeObserver(() => {
+      if (frameId !== null) return
+      frameId = requestAnimationFrame(keepBottomIfLocked)
+    })
+    observer.observe(container)
+
+    return () => {
+      observer.disconnect()
+      if (frameId !== null) {
+        cancelAnimationFrame(frameId)
+      }
+    }
   }, [isSidePanelOpen, messagesBelongToCurrentRoom, scrollToBottom])
 
   const highlightMessage = useCallback((messageId: string) => {
@@ -942,6 +1005,17 @@ export function ChatMessagesList({
   // 检测新消息
   useEffect(() => {
     const currentLastMessageId = messages[messages.length - 1]?.id ?? null
+    if (messages.length === 0) {
+      prevMessageCountRef.current = 0
+      prevLastMessageIdRef.current = null
+      isNearBottomRef.current = true
+      userLeavingBottomUntilRef.current = 0
+      sidePanelBottomLockUntilRef.current = 0
+      setShowNewMessageHint(false)
+      setShowScrollToBottomHint(false)
+      return
+    }
+
     if (prevChatRoomIdRef.current !== chatRoomId) {
       prevMessageCountRef.current = messages.length
       prevLastMessageIdRef.current = currentLastMessageId
@@ -1465,7 +1539,7 @@ export function ChatMessagesList({
         ) : (
           <div
             className="relative w-full"
-            style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+            style={{ height: `${virtualTotalSize}px` }}
           >
             {virtualItems.map((virtualItem) => {
               const message = messages[virtualItem.index]
@@ -1563,7 +1637,7 @@ export function ChatMessagesList({
       />
 
       {/* 新消息提示 */}
-      {showNewMessageHint && (
+      {messages.length > 0 && showNewMessageHint && (
         <button
           onClick={() => {
             scrollToBottom({ save: true })
@@ -1577,7 +1651,7 @@ export function ChatMessagesList({
         </button>
       )}
 
-      {!showNewMessageHint && showScrollToBottomHint && (
+      {messages.length > 0 && !showNewMessageHint && showScrollToBottomHint && (
         <button
           type="button"
           aria-label="滚动到底部"

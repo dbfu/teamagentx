@@ -45,12 +45,14 @@ import { InstallSkillModal } from './install-skill-modal'
 import { CreateCategoryModal } from './create-category-modal'
 import { CategoryToggleButton } from './category-toggle-button'
 import { shouldRenderUncategorizedSection } from './assistant-page-dnd'
+import { SystemAssistantModelModal, type SystemAssistantRuntimeConfig } from './system-assistant-model-modal'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { QuickChatStartDialog } from './quick-chat-start-dialog'
 import { AgentCard } from './agent-card'
 import { useAuthStore } from '@/stores'
 import { toast } from 'sonner'
 import { useChatRoomStore } from '@/stores/chat-room-store'
+import { GROUP_ASSISTANT_ID, GROUP_COORDINATOR_ID } from '@/lib/system-agents'
 
 // 系统分类 ID
 const SYSTEM_CATEGORY_ID = 'system-category-00000000-0000-0000-0000-000000000001'
@@ -276,6 +278,8 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
   const [quickChatAgent, setQuickChatAgent] = useState<Agent | null>(null)
   const [quickChatDialogOpen, setQuickChatDialogOpen] = useState(false)
   const [creatingQuickChat, setCreatingQuickChat] = useState(false)
+  const [systemModelAgent, setSystemModelAgent] = useState<Agent | null>(null)
+  const [systemModelModalOpen, setSystemModelModalOpen] = useState(false)
 
   // dnd-kit 状态
   const [activeAgent, setActiveAgent] = useState<Agent | null>(null)
@@ -462,6 +466,19 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
   const openEditModal = async (assistant: Agent) => {
     setEditMode('edit')
     closeMenu()
+    if (
+      assistant.agentLevel === 'system'
+      && (
+        assistant.id === GROUP_ASSISTANT_ID
+        || assistant.id === GROUP_COORDINATOR_ID
+        || assistant.name === '群助手'
+        || assistant.name === '群调度助手'
+      )
+    ) {
+      setSystemModelAgent(await loadAssistantForModal(assistant))
+      setSystemModelModalOpen(true)
+      return
+    }
     setEditingAssistant(await loadAssistantForModal(assistant))
     setIsEditModalOpen(true)
   }
@@ -605,6 +622,22 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     } finally {
       setCreatingQuickChat(false)
     }
+  }
+
+  const handleUpdateSystemAssistantModel = async (data: SystemAssistantRuntimeConfig): Promise<boolean> => {
+    if (!systemModelAgent) return false
+
+    const response = await agentApi.update(systemModelAgent.id, data)
+    if (response.success) {
+      toast.success(`${systemModelAgent.name}已更新`)
+      await fetchData()
+      await loadChatRooms()
+      setSystemModelAgent(null)
+      return true
+    }
+
+    toast.error(response.error || '更新失败')
+    return false
   }
 
   // 点击助手卡片 - 移动端直接快速对话，桌面端跳转详情页
@@ -1280,6 +1313,16 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
         onSubmit={editMode === 'copy' ? handleCreateAssistant : handleUpdateAssistant}
         assistant={editingAssistant}
         mode={editMode}
+      />
+
+      <SystemAssistantModelModal
+        isOpen={systemModelModalOpen}
+        assistant={systemModelAgent}
+        onClose={() => {
+          setSystemModelModalOpen(false)
+          setSystemModelAgent(null)
+        }}
+        onSubmit={handleUpdateSystemAssistantModel}
       />
 
       <ConfirmDialog
