@@ -1,6 +1,7 @@
 import { GROUP_ASSISTANT_ID } from '../system-assistant.constants.js';
 import { agentCreatorTools } from './agent-creator.tools.js';
 import { chatroomHelperTools } from './chatroom-helper.tools.js';
+import { createChatHistorySearchTools } from './chat-history-search.tools.js';
 import { cronTaskHelperTools } from './cron-task-helper.tools.js';
 import { createExternalPlatformHelperTools } from './external-platform-helper.tools.js';
 import { skillManagerTools } from './skill-manager.tools.js';
@@ -29,9 +30,12 @@ export function getSystemAssistantTools(
   agentId: string | undefined | null,
   chatRoomId: string,
 ): SystemTool[] {
-  if (agentId !== GROUP_ASSISTANT_ID) return [];
+  const roomContextTools = createChatHistorySearchTools(chatRoomId);
+
+  if (agentId !== GROUP_ASSISTANT_ID) return dedupeTools(roomContextTools);
 
   return dedupeTools([
+    ...roomContextTools,
     ...agentCreatorTools,
     ...skillManagerTools,
     ...cronTaskHelperTools,

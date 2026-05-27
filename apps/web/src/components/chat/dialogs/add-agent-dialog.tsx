@@ -264,7 +264,7 @@ export function AddAgentDialog({
           {/* Footer - 确认按钮 */}
           <div className="flex items-center justify-between border-t border-border px-6 py-4">
             <span className="text-sm text-muted-foreground">
-              点击助手卡片可多选，默认注入群历史消息
+              点击助手卡片可多选
             </span>
             <button
               onClick={handleAddAgents}

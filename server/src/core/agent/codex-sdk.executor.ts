@@ -744,7 +744,7 @@ export class CodexSdkExecutor implements IAgentExecutor {
     systemPrompt: string,
     chatRoomId: string,
     workDir: string | null,
-    injectGroupHistory: boolean = true,
+    injectGroupHistory: boolean = false,
     agentId?: string,
     sessionDir?: string,
     customWorkDir?: string,
@@ -1468,6 +1468,11 @@ ${historyText}
 `;
       }
     }
+
+    fullMessage += `[Group History Access]
+Full group history is not included by default. If the current request depends on earlier discussion, use \`get_recent_room_messages\` for recent chatroom context, \`search_room_messages\` to search messages by keyword, or \`get_room_message_detail\` to inspect a specific message or the Nth keyword match with offset. These tools automatically use the current chatroom; do not ask for or provide a chatRoomId.
+
+`;
 
     if (this.chatRoomAgents.length > 0) {
       const agentsInfo = this.chatRoomAgents.map((agent) => agent.name).join(', ');

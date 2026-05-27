@@ -36,7 +36,7 @@ export async function enqueueAgentTask(
     chatRoomId,
     agent.id,
   );
-  const injectGroupHistory = chatRoomAgent?.injectGroupHistory ?? true;
+  const injectGroupHistory = chatRoomAgent?.injectGroupHistory ?? false;
   const executor = await getExecutor(chatRoomId, agent.name);
 
   let history = options?.history;

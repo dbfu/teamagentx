@@ -15,13 +15,11 @@ const EMPTY_TASKS: { id: string; agentId: string; agentName: string; messageId: 
 interface AgentDetailPanelProps {
   chatRoomId: string
   selectedRoomAgent: { id: string; name: string; avatar?: string | null; avatarColor?: string | null; description?: string | null; chatRoomAgentId?: string; agentType?: string; agentLevel?: string; chatRoomId?: string; injectGroupHistory?: boolean } | null
-  setSelectedRoomAgent: (agent: { id: string; name: string; avatar?: string | null; avatarColor?: string | null; description?: string | null; chatRoomAgentId?: string; agentType?: string; agentLevel?: string; chatRoomId?: string; injectGroupHistory?: boolean } | null) => void
   agentStatus?: AgentStatus
   hasExecutionRecords?: boolean
   onViewHistory: () => void
   onViewStream?: () => void
   onViewTaskQueue?: () => void
-  onAgentSettingsChange?: () => void
 }
 
 // 状态配置
@@ -36,13 +34,11 @@ function getStatusConfig(status: AgentStatus) {
 export function AgentDetailPanel({
   chatRoomId,
   selectedRoomAgent,
-  setSelectedRoomAgent,
   agentStatus,
   hasExecutionRecords,
   onViewHistory,
   onViewStream,
   onViewTaskQueue,
-  onAgentSettingsChange,
 }: AgentDetailPanelProps) {
   const navigate = useNavigate()
   const isActive = agentStatus === 'executing' || agentStatus === 'busy'
@@ -67,36 +63,8 @@ export function AgentDetailPanel({
   const [isClearing, setIsClearing] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
 
-  const [savingSettings, setSavingSettings] = useState(false)
-
   // 是否是可以清空上下文的助手（原生助手和 ACP 助手都支持）
   const canClearContext = selectedRoomAgent?.agentType === 'builtin' || selectedRoomAgent?.agentType === 'acp'
-
-  // 切换注入群历史
-  const handleToggleInjectHistory = async () => {
-    if (!selectedRoomAgent?.id || !selectedRoomAgent?.chatRoomAgentId) return
-
-    const newValue = !selectedRoomAgent?.injectGroupHistory
-    setSavingSettings(true)
-    try {
-      const response = await chatRoomApi.updateAgentSettings(chatRoomId, selectedRoomAgent.id, {
-        injectGroupHistory: newValue,
-      })
-      if (response.success) {
-        toast.success(newValue ? '已开启注入群历史' : '已关闭注入群历史')
-        // 更新本地状态
-        setSelectedRoomAgent({
-          ...selectedRoomAgent,
-          injectGroupHistory: newValue,
-        })
-        onAgentSettingsChange?.()
-      } else {
-        toast.error(response.error || '保存失败')
-      }
-    } finally {
-      setSavingSettings(false)
-    }
-  }
 
   // 清空上下文
   const handleClearContext = async () => {
@@ -154,34 +122,6 @@ export function AgentDetailPanel({
       <div>
         <div className="text-xs text-muted-foreground mb-1">描述</div>
         <div className="text-sm text-foreground">{selectedRoomAgent?.description || '暂无描述'}</div>
-      </div>
-
-      {/* 注入群历史 */}
-      <div>
-        <div className="text-xs text-muted-foreground mb-1">注入群历史</div>
-        <div className="flex items-center justify-between">
-          <span className="text-sm text-muted-foreground">
-            开启后助手可以查看群聊历史消息
-          </span>
-          <button
-            onClick={handleToggleInjectHistory}
-            disabled={savingSettings}
-            className={cn(
-              'relative h-5 w-10 rounded-full transition-colors',
-              selectedRoomAgent?.injectGroupHistory ? 'bg-primary' : 'bg-muted'
-            )}
-          >
-            <div
-              className={cn(
-                'absolute top-0.5 size-4 rounded-full bg-background transition-transform',
-                selectedRoomAgent?.injectGroupHistory ? 'translate-x-5.5 left-0.5' : 'translate-x-0.5 left-0.5'
-              )}
-            />
-            {savingSettings && (
-              <Loader2 className="absolute inset-0 m-auto size-3 animate-spin text-white" />
-            )}
-          </button>
-        </div>
       </div>
 
       {/* 操作按钮 */}

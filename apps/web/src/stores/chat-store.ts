@@ -2158,11 +2158,10 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     if (!chatRoom) return
     setAddingAgentIds(new Set(agentIds))
     try {
-      // 依次添加每个助手（默认注入群历史消息）
+      // 依次添加每个助手，群历史按需通过工具检索
       for (const agentId of agentIds) {
         await chatRoomApi.addAgent(chatRoom.id, {
           agentId,
-          injectGroupHistory: true,
         })
       }
       onChatRoomChange?.()
@@ -2198,7 +2197,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
         agentType: roomAgent?.agent?.type,
         agentLevel: found.agentLevel,
         chatRoomId: chatRoom?.id,
-        injectGroupHistory: roomAgent?.injectGroupHistory ?? true,
+        injectGroupHistory: roomAgent?.injectGroupHistory ?? false,
       })
       setSidePanelMode('agent-detail')
     }

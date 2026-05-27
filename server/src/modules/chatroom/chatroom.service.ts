@@ -152,7 +152,7 @@ function addVirtualSystemAgents<T extends { id: string; chatRoomAgents: any[] }>
       userId: null,
       agentId: agent.id,
       role: 'MEMBER',
-      injectGroupHistory: true,
+      injectGroupHistory: false,
       customWorkDir: null,
       joinedAt: new Date(),
       lastReadAt: new Date(),
@@ -306,7 +306,7 @@ export const chatRoomService = {
         chatRoomId: chatRoom.id,
         userId: ownerId,
         role: 'OWNER',
-        injectGroupHistory: true,
+        injectGroupHistory: false,
       },
     });
 
@@ -518,7 +518,7 @@ export const chatRoomService = {
   },
 
   async addAgent(data: AddAgentData) {
-    const { chatRoomId, userId, agentId, role = 'MEMBER', injectGroupHistory = true } = data;
+    const { chatRoomId, userId, agentId, role = 'MEMBER', injectGroupHistory = false } = data;
 
     // Validate that exactly one of userId or agentId is provided
     if ((!userId && !agentId) || (userId && agentId)) {
@@ -657,7 +657,7 @@ export const chatRoomService = {
       userId: null,
       agentId: agent.id,
       role: 'MEMBER',
-      injectGroupHistory: true,
+      injectGroupHistory: false,
       customWorkDir: null,
       joinedAt: new Date(),
       lastReadAt: new Date(),
@@ -717,7 +717,7 @@ export const chatRoomService = {
         chatRoomId,
         userId,
         role: 'OWNER',
-        injectGroupHistory: true,
+        injectGroupHistory: false,
         lastReadAt: now,
       },
     });
@@ -897,7 +897,7 @@ export const chatRoomService = {
         chatRoomId: chatRoom.id,
         userId,
         role: 'OWNER',
-        injectGroupHistory: true,
+        injectGroupHistory: false,
       },
     });
 

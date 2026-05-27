@@ -392,7 +392,7 @@ export const templatePackageService = {
             chatRoomId: roomId,
             agentId: importedAgentId,
             role: 'MEMBER',
-            injectGroupHistory: true,
+            injectGroupHistory: false,
           },
         });
 

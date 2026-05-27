@@ -395,13 +395,11 @@ export function ChatSidePanel({
         <AgentDetailPanel
           chatRoomId={chatRoom.id}
           selectedRoomAgent={selectedRoomAgent}
-          setSelectedRoomAgent={setSelectedRoomAgent}
           agentStatus={selectedRoomAgent ? agentStatuses?.get(selectedRoomAgent.id) : undefined}
           hasExecutionRecords={executionRecords.length > 0}
           onViewHistory={handleViewHistory}
           onViewStream={handleViewStream}
           onViewTaskQueue={handleViewTaskQueue}
-          onAgentSettingsChange={onChatRoomChange}
         />
       )}
 

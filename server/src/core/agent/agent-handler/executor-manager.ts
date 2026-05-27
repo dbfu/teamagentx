@@ -70,7 +70,7 @@ export async function getExecutor(
     chatRoomId,
     agent.id,
   );
-  const injectGroupHistory = chatRoomAgent?.injectGroupHistory ?? true;
+  const injectGroupHistory = chatRoomAgent?.injectGroupHistory ?? false;
   const lastInjectedMessageId = chatRoomAgent?.lastInjectedMessageId ?? undefined;  // 上次注入位置
 
   // 获取群聊配置
@@ -186,7 +186,7 @@ export function _testInjectDebugInfo(
     lastHistory: debugInfo.lastHistory ?? null,
     threadId: debugInfo.threadId ?? cacheKey,
     chatRoomId: debugInfo.chatRoomId ?? chatRoomId,
-    injectGroupHistory: debugInfo.injectGroupHistory ?? true,
+    injectGroupHistory: debugInfo.injectGroupHistory ?? false,
     chatRoomAgents: debugInfo.chatRoomAgents ?? [],
     workDir: debugInfo.workDir,
     lastResponse: debugInfo.lastResponse ?? null,

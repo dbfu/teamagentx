@@ -11,6 +11,9 @@ describe('System assistant tools', () => {
     const toolNames = getSystemAssistantTools(GROUP_ASSISTANT_ID, 'room-1')
       .map((tool) => tool.name);
 
+    assert.ok(toolNames.includes('get_room_message_detail'));
+    assert.ok(toolNames.includes('get_recent_room_messages'));
+    assert.ok(toolNames.includes('search_room_messages'));
     assert.ok(toolNames.includes('create_agent'));
     assert.ok(toolNames.includes('create_llm_provider'));
     assert.ok(toolNames.includes('create_skill'));
@@ -19,7 +22,14 @@ describe('System assistant tools', () => {
     assert.ok(toolNames.includes('save_bridge_platform_config'));
   });
 
-  test('旧系统助手不再暴露系统工具', () => {
-    assert.deepStrictEqual(getSystemAssistantTools(AGENT_CREATOR_ID, 'room-1'), []);
+  test('旧系统助手只暴露房间上下文工具', () => {
+    const toolNames = getSystemAssistantTools(AGENT_CREATOR_ID, 'room-1')
+      .map((tool) => tool.name);
+
+    assert.deepStrictEqual(toolNames, [
+      'get_room_message_detail',
+      'get_recent_room_messages',
+      'search_room_messages',
+    ]);
   });
 });
