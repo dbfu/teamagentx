@@ -53,7 +53,6 @@ interface ChatMessagesListProps {
   onLoadOlderMessages?: () => Promise<void> | void
   currentUser?: CurrentUser
   isSidePanelOpen?: boolean
-  isStreamPanelOpen?: boolean
   readOnly?: boolean
 }
 
@@ -389,7 +388,6 @@ export function ChatMessagesList({
   onLoadOlderMessages,
   currentUser,
   isSidePanelOpen = false,
-  isStreamPanelOpen = false,
   readOnly = false,
 }: ChatMessagesListProps) {
   const isMobile = useIsMobile()
@@ -873,7 +871,7 @@ export function ChatMessagesList({
     wasSidePanelOpenRef.current = isSidePanelOpen
 
     if (
-      !isStreamPanelOpen
+      !isSidePanelOpen
       || wasSidePanelOpen
       || !wasPinnedToBottom
       || userIsLeavingBottom
@@ -886,7 +884,7 @@ export function ChatMessagesList({
     scrollToBottom({ save: true, frames: 14 })
     setShowNewMessageHint(false)
     setShowScrollToBottomHint(false)
-  }, [isSidePanelOpen, isStreamPanelOpen, messagesBelongToCurrentRoom, scrollToBottom])
+  }, [isSidePanelOpen, messagesBelongToCurrentRoom, scrollToBottom])
 
   const highlightMessage = useCallback((messageId: string) => {
     const messageEl = messageRefs.current.get(messageId)

@@ -371,7 +371,6 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
               onLoadOlderMessages={loadOlderMessages}
               currentUser={currentUser}
               isSidePanelOpen={!isMobile && sidePanelMode !== null}
-              isStreamPanelOpen={!isMobile && sidePanelMode === 'stream'}
             />
 
             {/* Input area */}
