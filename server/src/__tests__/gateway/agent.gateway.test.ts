@@ -4,6 +4,10 @@ import Fastify, { FastifyInstance } from 'fastify';
 import { agentGateway } from '../../gateway/agent.gateway.js';
 import { chatRoomGateway } from '../../gateway/chatroom.gateway.js';
 import { _testInjectDebugInfo, clearExecutorCache } from '../../core/agent/agent-handler/index.js';
+import prisma from '../../lib/prisma.js';
+import { GROUP_ASSISTANT_ID, GROUP_COORDINATOR_ID } from '../../core/agent/system-assistant.constants.js';
+import { getGroupAssistantDefinition, getGroupCoordinatorDefinition } from '../../scripts/system-agent-definitions.js';
+import { syncSystemAgents } from '../../scripts/system-agent-sync.js';
 
 // Helper to build test app
 function buildTestApp(): FastifyInstance {
@@ -139,6 +143,28 @@ describe('Agent Gateway API', () => {
       const grouped = groupedResponse.json();
       assert.strictEqual(grouped.success, true);
       assert.strictEqual(grouped.data.uncategorized[0].id, second.id);
+    });
+
+    test('应该在分组列表返回群助手和群调度助手', async () => {
+      await syncSystemAgents([
+        getGroupAssistantDefinition(),
+        getGroupCoordinatorDefinition(),
+      ]);
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/agents/grouped',
+      });
+
+      assert.strictEqual(response.statusCode, 200);
+      const body = response.json();
+      assert.strictEqual(body.success, true);
+
+      const systemAgents = body.data.categories
+        .flatMap((group: any) => group.agents)
+        .filter((agent: any) => agent.agentLevel === 'system');
+      assert.ok(systemAgents.some((agent: any) => agent.id === GROUP_ASSISTANT_ID));
+      assert.ok(systemAgents.some((agent: any) => agent.id === GROUP_COORDINATOR_ID));
     });
 
     test('应该创建包含所有字段的 Agent', async () => {
@@ -336,6 +362,116 @@ describe('Agent Gateway API', () => {
       assert.strictEqual(body.success, true);
       assert.strictEqual(body.data.llmProviderId, null);
       assert.strictEqual(body.data.speechConfig, null);
+    });
+
+    test('应该允许群助手和群调度助手更新模型供应商', async () => {
+      const provider = await prisma.llmProvider.create({
+        data: {
+          name: 'System Group Provider ' + Date.now(),
+          apiProtocol: 'anthropic',
+          apiKey: 'test-key',
+          model: 'claude-test-model',
+        },
+      });
+      await syncSystemAgents([
+        getGroupAssistantDefinition(),
+        getGroupCoordinatorDefinition(),
+      ]);
+
+      try {
+        const groupResponse = await app.inject({
+          method: 'PUT',
+          url: `/agents/${GROUP_ASSISTANT_ID}`,
+          payload: {
+            llmProviderId: provider.id,
+          },
+        });
+        const coordinatorResponse = await app.inject({
+          method: 'PUT',
+          url: `/agents/${GROUP_COORDINATOR_ID}`,
+          payload: {
+            llmProviderId: provider.id,
+          },
+        });
+
+        assert.strictEqual(groupResponse.statusCode, 200);
+        assert.strictEqual(coordinatorResponse.statusCode, 200);
+
+        const groupBody = groupResponse.json();
+        const coordinatorBody = coordinatorResponse.json();
+        assert.strictEqual(groupBody.success, true);
+        assert.strictEqual(coordinatorBody.success, true);
+        assert.strictEqual(groupBody.data.llmProviderId, provider.id);
+        assert.strictEqual(coordinatorBody.data.llmProviderId, provider.id);
+
+        const runtimeResponse = await app.inject({
+          method: 'PUT',
+          url: `/agents/${GROUP_ASSISTANT_ID}`,
+          payload: {
+            acpTool: 'codex',
+            llmProviderId: null,
+            codexModel: 'gpt-5-codex',
+            codexFastMode: true,
+            thinkingMode: 'medium',
+          },
+        });
+
+        assert.strictEqual(runtimeResponse.statusCode, 200);
+        const runtimeBody = runtimeResponse.json();
+        assert.strictEqual(runtimeBody.data.acpTool, 'codex');
+        assert.strictEqual(runtimeBody.data.llmProviderId, null);
+        assert.strictEqual(runtimeBody.data.codexModel, 'gpt-5-codex');
+        assert.strictEqual(runtimeBody.data.codexFastMode, true);
+        assert.strictEqual(runtimeBody.data.thinkingMode, 'medium');
+
+        await syncSystemAgents([
+          getGroupAssistantDefinition(),
+          getGroupCoordinatorDefinition(),
+        ]);
+        const preserved = await prisma.agent.findUniqueOrThrow({
+          where: { id: GROUP_ASSISTANT_ID },
+          select: {
+            acpTool: true,
+            llmProviderId: true,
+            codexModel: true,
+            codexFastMode: true,
+            thinkingMode: true,
+          },
+        });
+        assert.strictEqual(preserved.acpTool, 'codex');
+        assert.strictEqual(preserved.llmProviderId, null);
+        assert.strictEqual(preserved.codexModel, 'gpt-5-codex');
+        assert.strictEqual(preserved.codexFastMode, true);
+        assert.strictEqual(preserved.thinkingMode, 'medium');
+
+        const rejectedResponse = await app.inject({
+          method: 'PUT',
+          url: `/agents/${GROUP_ASSISTANT_ID}`,
+          payload: {
+            prompt: 'should still be protected',
+          },
+        });
+
+        assert.strictEqual(rejectedResponse.statusCode, 403);
+      } finally {
+        await prisma.agent.update({
+          where: { id: GROUP_ASSISTANT_ID },
+          data: {
+            acpTool: 'claude',
+            llmProviderId: null,
+            codexModel: null,
+            codexFastMode: false,
+            thinkingMode: 'high',
+          },
+        }).catch(() => null);
+        await prisma.agent.update({
+          where: { id: GROUP_COORDINATOR_ID },
+          data: { llmProviderId: null },
+        }).catch(() => null);
+        await prisma.llmProvider.delete({
+          where: { id: provider.id },
+        }).catch(() => null);
+      }
     });
 
     test('应该返回 404 当 Agent 不存在时', async () => {

@@ -84,8 +84,8 @@ async function reserveSystemAgentName(
 /**
  * 用内置定义同步系统助手。
  *
- * 系统助手是产品内置能力，用户不能修改。这里每次启动都覆盖系统托管字段；
- * 但 llmProviderId 与本机模型配置有关，只在创建或缺失时填入默认值。
+ * 系统助手是产品内置能力。这里每次启动覆盖身份、提示词和分类等系统托管字段；
+ * 运行配置（Agent 引擎、模型、思考模式等）由用户在本机配置，不能在启动同步时覆盖。
  */
 export async function syncSystemAgent(
   definition: SystemAgentDefinition,
@@ -103,10 +103,7 @@ export async function syncSystemAgent(
     avatarColor: definition.avatarColor ?? null,
     description: definition.description ?? null,
     prompt: definition.prompt,
-    type: definition.type ?? 'builtin',
     agentLevel: 'system' as const,
-    acpTool: definition.acpTool ?? null,
-    workDir: definition.workDir ?? null,
     categoryId: SYSTEM_CATEGORY_ID,
     isActive: true,
     updatedAt: new Date(),
@@ -121,6 +118,9 @@ export async function syncSystemAgent(
       data: {
         id: definition.id,
         ...managedData,
+        type: definition.type ?? 'builtin',
+        acpTool: definition.acpTool ?? null,
+        workDir: definition.workDir ?? null,
         llmProviderId: definition.llmProviderId ?? null,
       },
     });

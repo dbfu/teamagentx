@@ -421,7 +421,7 @@ export function getGroupAssistantDefinition(
     prompt: buildGroupAssistantPrompt(),
     type: 'acp',
     acpTool: 'claude',
-    llmProviderId: null,
+    llmProviderId: llmProviderId ?? undefined,
   };
 }
 
@@ -437,7 +437,7 @@ export function getGroupCoordinatorDefinition(
     prompt: buildInternalCoordinatorPrompt(),
     type: 'acp',
     acpTool: 'claude',
-    llmProviderId: null,
+    llmProviderId: llmProviderId ?? undefined,
   };
 }
 

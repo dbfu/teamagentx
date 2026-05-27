@@ -1,0 +1,17 @@
+{
+  "name": "@teamagentx/docs",
+  "version": "1.0.0",
+  "description": "TeamAgentX 使用文档",
+  "scripts": {
+    "dev": "vitepress dev docs",
+    "build": "vitepress build docs",
+    "preview": "vitepress preview docs"
+  },
+  "keywords": ["teamagentx", "docs", "vitepress"],
+  "author": "TeamAgentX",
+  "license": "MIT",
+  "devDependencies": {
+    "vitepress": "^1.6.4",
+    "vue": "^3.5.35"
+  }
+}
