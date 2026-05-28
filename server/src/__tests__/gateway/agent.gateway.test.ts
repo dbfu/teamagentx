@@ -364,6 +364,50 @@ describe('Agent Gateway API', () => {
       assert.strictEqual(body.data.speechConfig, null);
     });
 
+    test('应该允许更新时显式清空已绑定的 LLM 供应商', async () => {
+      const provider = await prisma.llmProvider.create({
+        data: {
+          name: 'Clear Bound Provider ' + Date.now(),
+          type: 'custom',
+          modelType: 'text',
+          apiProtocol: 'openai',
+          apiUrl: 'https://api.openai.com/v1',
+          apiKey: 'test-key',
+          model: 'gpt-5-mini',
+          isActive: true,
+        },
+      });
+
+      const createResponse = await app.inject({
+        method: 'POST',
+        url: '/agents',
+        payload: {
+          name: 'Clear Bound Provider Agent ' + Date.now(),
+          prompt: 'Original prompt',
+          type: 'acp',
+          acpTool: 'codex',
+          llmProviderId: provider.id,
+        },
+      });
+      const created = createResponse.json();
+      assert.strictEqual(created.data.llmProviderId, provider.id);
+
+      const response = await app.inject({
+        method: 'PUT',
+        url: `/agents/${created.data.id}`,
+        payload: {
+          llmProviderId: null,
+        },
+      });
+
+      assert.strictEqual(response.statusCode, 200);
+
+      const body = response.json();
+      assert.strictEqual(body.success, true);
+      assert.strictEqual(body.data.llmProviderId, null);
+      assert.strictEqual(body.data.llmProvider, null);
+    });
+
     test('应该允许群助手和群调度助手更新模型供应商', async () => {
       const provider = await prisma.llmProvider.create({
         data: {

@@ -905,13 +905,13 @@ export const MentionInput = forwardRef<MentionInputRef, MentionInputProps>(funct
               key={item.command}
               ref={index === selectedCommandIndex ? selectedCommandRef : null}
               className={cn(
-                'flex cursor-pointer items-start gap-3 px-3 py-2.5 first:rounded-t-lg last:rounded-b-lg hover:bg-blue-500/5',
+                'flex cursor-pointer items-center gap-3 px-3 py-2.5 first:rounded-t-lg last:rounded-b-lg hover:bg-blue-500/5',
                 index === selectedCommandIndex && 'bg-blue-500/5'
               )}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => handleSelectSlashCommand(item)}
             >
-              <span className="mt-0.5 inline-flex min-w-[6.75rem] shrink-0 whitespace-nowrap rounded-md bg-blue-500/10 px-2 py-0.5 font-mono text-xs font-medium text-blue-600">
+              <span className="inline-flex min-w-[6.75rem] shrink-0 whitespace-nowrap rounded-md bg-blue-500/10 px-2 py-0.5 font-mono text-xs font-medium text-blue-600">
                 {item.command}
               </span>
               <span className="min-w-0 flex-1">
