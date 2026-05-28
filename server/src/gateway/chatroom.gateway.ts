@@ -15,6 +15,7 @@ import {
   getCacheKey,
   processingMap,
   broadcastAgentJoinedMessage,
+  broadcastAgentsUpdated,
   broadcastChatRoomRulesUpdatedMessage,
 } from '../core/agent/agent-handler/index.js';
 import { agentService } from '../core/agent/agent.service.js';
@@ -803,7 +804,6 @@ export async function chatRoomGateway(app: FastifyInstance) {
 
       // 如果添加的是助手，发送通知消息到群聊
       if (agentId && chatRoomAgent.agent) {
-        const io = (app as any).io as Server;
         // 广播助手加入通知消息
         await broadcastAgentJoinedMessage(
           id,
@@ -811,9 +811,7 @@ export async function chatRoomGateway(app: FastifyInstance) {
           chatRoomAgent.agent.description,
         );
         // 广播群聊成员更新事件
-        if (io) {
-          io.to(id).emit('chatroom:agents-updated', { chatRoomId: id });
-        }
+        broadcastAgentsUpdated(id);
       }
 
       return reply.code(201).send({ success: true, data: chatRoomAgent });

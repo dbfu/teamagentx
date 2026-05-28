@@ -1,5 +1,5 @@
 import { GROUP_ASSISTANT_ID } from '../system-assistant.constants.js';
-import { agentCreatorTools } from './agent-creator.tools.js';
+import { createAgentCreatorTools } from './agent-creator.tools.js';
 import { chatroomHelperTools } from './chatroom-helper.tools.js';
 import { createChatHistorySearchTools } from './chat-history-search.tools.js';
 import { cronTaskHelperTools } from './cron-task-helper.tools.js';
@@ -39,7 +39,7 @@ export function getSystemAssistantTools(
 
   return dedupeTools([
     ...roomContextTools,
-    ...agentCreatorTools,
+    ...createAgentCreatorTools(chatRoomId),
     ...skillManagerTools,
     ...cronTaskHelperTools,
     ...chatroomHelperTools,

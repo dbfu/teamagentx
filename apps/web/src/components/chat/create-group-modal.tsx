@@ -1,6 +1,6 @@
 import { Agent, agentApi, chatRoomApi } from '@/lib/agent-api'
 import { AgentAvatarImage } from '@/lib/agent-avatars'
-import { GroupAvatarImage, groupAvatarOptions } from '@/lib/group-avatars'
+import { getRandomGroupAvatarIndex, GroupAvatarImage, groupAvatarOptions } from '@/lib/group-avatars'
 import { cn } from '@/lib/utils'
 import { Check, FolderOpen, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -17,7 +17,7 @@ export function CreateGroupModal({ isOpen, onClose, onSuccess, ownerId }: Create
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [workDir, setWorkDir] = useState('')
-  const [selectedAvatarIndex, setSelectedAvatarIndex] = useState(0)
+  const [selectedAvatarIndex, setSelectedAvatarIndex] = useState(() => getRandomGroupAvatarIndex())
   const [agents, setAgents] = useState<Agent[]>([])
   const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(false)
@@ -90,7 +90,7 @@ export function CreateGroupModal({ isOpen, onClose, onSuccess, ownerId }: Create
       setName('')
       setDescription('')
       setWorkDir('')
-      setSelectedAvatarIndex(0)
+      setSelectedAvatarIndex(getRandomGroupAvatarIndex())
       setSelectedAgentIds(new Set())
       onSuccess?.(chatRoomId)
       onClose()

@@ -16,6 +16,12 @@ import { clearExecutorCacheEntries } from '../agent-handler/cache.js';
 // 群聊管理助手的专用 ID
 export const CHATROOM_HELPER_AGENT_ID = 'c3d4e5f6-7890-abcd-ef12-345678901234';
 
+const GROUP_AVATAR_COUNT = 24;
+
+function getRandomGroupAvatarValue(): string {
+  return String(Math.floor(Math.random() * (GROUP_AVATAR_COUNT - 1)) + 1);
+}
+
 // 创建群聊工具
 export const createChatRoomTool = tool(
   async ({
@@ -38,7 +44,7 @@ export const createChatRoomTool = tool(
       const chatRoom = await chatRoomService.create({
         name,
         description,
-        avatar,
+        avatar: avatar || getRandomGroupAvatarValue(),
         avatarColor,
         rules: rules?.trim() || undefined,
       });
