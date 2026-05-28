@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { DocsPage } from './docs-page'
-import { getResolvedDownloadHref } from './download-helper'
+import { getResolvedDownloadHref, trackBaiduDownload } from './download-helper'
 import { useSiteConfig } from './site-config'
 import communityTemplates from './community-templates.json'
 
@@ -529,12 +529,14 @@ function App() {
             </p>
             <div className="hero-actions">
               <div className="hero-download-stack">
-                {IS_IOS && DOWNLOAD_URL_IOS ? (
-                  <a href={getResolvedDownloadHref(DOWNLOAD_URL_IOS)} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-hero">
-                    {downloadIcon(15)} 下载 iOS App
-                  </a>
-                ) : IS_ANDROID && DOWNLOAD_URL_ANDROID ? (
-                  <a href={getResolvedDownloadHref(DOWNLOAD_URL_ANDROID)} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-hero">
+                {IS_ANDROID && DOWNLOAD_URL_ANDROID ? (
+                  <a
+                    href={getResolvedDownloadHref(DOWNLOAD_URL_ANDROID, { platform: 'android' })}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn btn-primary btn-hero"
+                    onClick={() => trackBaiduDownload('android')}
+                  >
                     {downloadIcon(15)} 下载 Android App
                   </a>
                 ) : IS_MAC ? (
@@ -542,7 +544,13 @@ function App() {
                     {downloadIcon(15)} 下载 macOS 客户端
                   </button>
                 ) : (
-                  <a href={getResolvedDownloadHref(DOWNLOAD_URL_WIN)} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-hero">
+                  <a
+                    href={getResolvedDownloadHref(DOWNLOAD_URL_WIN, { platform: 'windows' })}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn btn-primary btn-hero"
+                    onClick={() => trackBaiduDownload('windows')}
+                  >
                     {downloadIcon(15)} 下载 Windows 客户端
                   </a>
                 )}
@@ -793,29 +801,33 @@ function App() {
               {downloadIcon(16)}下载 macOS 客户端
             </button>
             <a
-              href={getResolvedDownloadHref(DOWNLOAD_URL_WIN)}
+              href={getResolvedDownloadHref(DOWNLOAD_URL_WIN, { platform: 'windows' })}
               target="_blank"
               rel="noopener noreferrer"
               className={`btn btn-lg ${!IS_MOBILE && !IS_MAC ? 'btn-primary' : 'btn-outline'}`}
+              onClick={() => trackBaiduDownload('windows')}
             >
               下载 Windows 客户端
             </a>
           </div>
           <div className="download-platform-row">
             <span className="download-platform-label">移动端</span>
-            {DOWNLOAD_URL_IOS ? (
-              <a href={getResolvedDownloadHref(DOWNLOAD_URL_IOS)} target="_blank" rel="noopener noreferrer" className={`btn btn-lg ${IS_IOS ? 'btn-primary' : 'btn-outline'}`}>{downloadIcon(16)}下载 iOS App</a>
-            ) : (
-              <span className="mobile-store-btn mobile-store-soon">iOS 即将上线</span>
-            )}
             {DOWNLOAD_URL_ANDROID ? (
-              <a href={getResolvedDownloadHref(DOWNLOAD_URL_ANDROID)} target="_blank" rel="noopener noreferrer" className={`btn btn-lg ${IS_ANDROID ? 'btn-primary' : 'btn-outline'}`}>{downloadIcon(16)}下载 Android App</a>
+              <a
+                href={getResolvedDownloadHref(DOWNLOAD_URL_ANDROID, { platform: 'android' })}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`btn btn-lg ${IS_ANDROID ? 'btn-primary' : 'btn-outline'}`}
+                onClick={() => trackBaiduDownload('android')}
+              >
+                {downloadIcon(16)}下载 Android App
+              </a>
             ) : (
               <span className="mobile-store-btn mobile-store-soon">Android 即将上线</span>
             )}
           </div>
         </div>
-        <p className="download-note reveal">当前版本 {APP_VERSION} · 支持 macOS 12+ / Windows 10+ / iOS / Android · Apache 2.0 开源协议</p>
+        <p className="download-note reveal">当前版本 {APP_VERSION} · 支持 macOS 12+ / Windows 10+ / Android · Apache 2.0 开源协议</p>
       </section>
 
       {/* ── macOS 芯片选择弹窗 ── */}
@@ -852,11 +864,14 @@ function App() {
               </button>
             </div>
             <a
-              href={getResolvedDownloadHref(selectedArch === 'arm64' ? DOWNLOAD_URL_MAC_ARM64 : DOWNLOAD_URL_MAC_X64)}
+              href={getResolvedDownloadHref(selectedArch === 'arm64' ? DOWNLOAD_URL_MAC_ARM64 : DOWNLOAD_URL_MAC_X64, {
+                platform: selectedArch === 'arm64' ? 'macos-arm64' : 'macos-x64',
+              })}
               target="_blank"
               rel="noopener noreferrer"
               className="btn btn-primary mac-modal-download-btn"
               onClick={() => {
+                trackBaiduDownload(selectedArch === 'arm64' ? 'macos-arm64' : 'macos-x64')
                 setShowMacModal(false)
               }}
             >

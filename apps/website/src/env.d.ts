@@ -1,5 +1,9 @@
 /// <reference types="vite/client" />
 
+interface Window {
+  _hmt?: unknown[][]
+}
+
 interface ImportMetaEnv {
   readonly VITE_APP_VERSION: string
   readonly VITE_DOWNLOAD_URL_MAC_ARM64: string
