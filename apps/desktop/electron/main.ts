@@ -2466,6 +2466,13 @@ app.whenReady().then(async () => {
     }
   });
 
+  // 获取用户配置文件路径（用于登录界面提示）
+  ipcMain.handle('get-user-config-path', () => {
+    const homeDir = os.homedir();
+    const userConfigPath = path.join(homeDir, '.teamagentx', 'user.json');
+    return userConfigPath;
+  });
+
   // 先创建窗口和托盘（用户立即看到界面），再后台启动服务
   createTray();
   createWindow();

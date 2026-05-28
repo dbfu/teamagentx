@@ -60,6 +60,8 @@ declare global {
         progress: RuntimePrepareProgress | null;
       };
     }>;
+    // 获取用户配置文件路径（用于登录界面提示）
+    getUserConfigPath?: () => Promise<string>;
     appendDebugLog?: (message: string, payload?: unknown) => Promise<{ success: boolean; error?: string }>;
     openLogFolder?: () => Promise<{ success: boolean; error?: string }>;
     onRuntimePrepareStart?: (callback: () => void) => () => void;
