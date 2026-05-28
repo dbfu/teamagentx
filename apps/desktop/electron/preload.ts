@@ -42,6 +42,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectFolder: () => ipcRenderer.invoke('select-folder'),
   // 使用默认浏览器打开外部链接
   openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
+  setBadgeCount: (count: number) => ipcRenderer.invoke('notification:set-badge-count', count),
+  showNotification: (payload: { title: string; body: string; chatRoomId?: string }) => ipcRenderer.invoke('notification:show', payload),
+  onNotificationOpen: (callback: (chatRoomId: string) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, chatRoomId: string) => callback(chatRoomId);
+    ipcRenderer.on('notification:open-chatroom', handler);
+    return () => ipcRenderer.removeListener('notification:open-chatroom', handler);
+  },
   // 窗口控制 API (用于 Windows 无边框窗口)
   windowMinimize: () => ipcRenderer.invoke('window:minimize'),
   windowMaximize: () => ipcRenderer.invoke('window:maximize'),

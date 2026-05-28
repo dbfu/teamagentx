@@ -5,7 +5,7 @@ import { bridgeApi, BridgeBot } from '@/lib/bridge-api'
 import { groupAvatarOptions, GroupAvatarImage, normalizeGroupAvatarIndex } from '@/lib/group-avatars'
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/stores'
-import { Bot, Eraser, Pencil, Trash2 } from 'lucide-react'
+import { Bot, ChevronDown, ChevronUp, Eraser, Pencil, Save, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { WorkDirCard, type FolderOpenTarget } from './work-dir-card'
@@ -47,6 +47,8 @@ export function RoomSettingsPanel({
   const [workDirDraft, setWorkDirDraft] = useState(chatRoom.workDir || '')
   const [openingFolder, setOpeningFolder] = useState(false)
   const terminalOpenTarget = useUIStore((state) => state.terminalOpenTarget)
+  const [avatarExpanded, setAvatarExpanded] = useState(false)
+  const [rulesDirty, setRulesDirty] = useState(false)
   const nameInputRef = useRef<HTMLInputElement>(null)
   const descInputRef = useRef<HTMLInputElement>(null)
   const rulesInputRef = useRef<HTMLTextAreaElement>(null)
@@ -255,25 +257,34 @@ export function RoomSettingsPanel({
 
         {/* 头像选择 */}
         <div>
-          <label className="mb-1.5 block text-sm font-medium text-muted-foreground">头像</label>
-          <div className="grid max-h-40 grid-cols-6 gap-1 overflow-y-auto rounded-lg border border-input bg-background p-2">
-            {groupAvatarOptions.map((index) => (
-              <button
-                key={index}
-                type="button"
-                onClick={() => handleSelectIcon(index)}
-                disabled={saving}
-                className={cn(
-                  'flex size-10 items-center justify-center rounded-lg transition-colors',
-                  selectedIconIndex === index
-                    ? 'bg-primary/10 ring-2 ring-primary'
-                    : 'hover:bg-accent'
-                )}
-              >
-                <GroupAvatarImage avatar={index} className="size-8 rounded-full" />
-              </button>
-            ))}
-          </div>
+          <button
+            type="button"
+            onClick={() => setAvatarExpanded((v) => !v)}
+            className="mb-1.5 flex w-full items-center justify-between text-sm font-medium text-muted-foreground hover:text-foreground"
+          >
+            <span>更换头像</span>
+            {avatarExpanded ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+          </button>
+          {avatarExpanded && (
+            <div className="grid max-h-40 grid-cols-6 gap-1 overflow-y-auto rounded-lg border border-input bg-background p-2">
+              {groupAvatarOptions.map((index) => (
+                <button
+                  key={index}
+                  type="button"
+                  onClick={() => { handleSelectIcon(index); setAvatarExpanded(false) }}
+                  disabled={saving}
+                  className={cn(
+                    'flex size-10 items-center justify-center rounded-lg transition-colors',
+                    selectedIconIndex === index
+                      ? 'bg-primary/10 ring-2 ring-primary'
+                      : 'hover:bg-accent'
+                  )}
+                >
+                  <GroupAvatarImage avatar={index} className="size-8 rounded-full" />
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* 群描述 */}
@@ -395,34 +406,91 @@ export function RoomSettingsPanel({
 
         {/* 群规则 */}
         <div>
-          <label className="mb-1.5 block text-sm font-medium text-muted-foreground">群规则</label>
+          <div className="mb-1.5 flex items-center justify-between">
+            <label className="block text-sm font-medium text-muted-foreground">群规则</label>
+            {!editingRules && (
+              <button
+                onClick={() => { setEditingRules(true); setRulesDirty(false) }}
+                className="flex items-center gap-1 text-xs text-primary hover:text-primary/80"
+              >
+                <Pencil className="size-3" />
+                编辑
+              </button>
+            )}
+          </div>
           <div className="text-xs text-muted-foreground mb-2">
             群规则会注入到群内所有助手的上下文中，指导助手的行为。
           </div>
           {editingRules ? (
-            <textarea
-              ref={rulesInputRef}
-              value={rules}
-              onChange={(e) => setRules(e.target.value)}
-              onBlur={() => {
-                setEditingRules(false)
-                if (rules !== (chatRoom.rules || '')) {
-                  handleSave({ rules: rules.trim() || undefined })
-                }
-              }}
-              placeholder="输入群规则，例如：&#10;- 所有回复使用中文&#10;- 代码需要添加注释&#10;- 重要决策需要说明理由"
-              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none disabled:opacity-50 min-h-[100px] resize-y"
-              disabled={saving}
-            />
+            <div className="space-y-2">
+              {/* 预设规则模板 */}
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { label: '防循环', text: '只有我（群主）能宣布讨论结束，其他助手不得擅自结束讨论。' },
+                  { label: '防扇出', text: '完成任务时（完成/已交付/搞定），不得 @ 任何人，直接结束回复。' },
+                  { label: '用中文', text: '所有回复必须使用中文。' },
+                  { label: '说明理由', text: '重要决策必须在回复中说明理由。' },
+                ].map((tpl) => (
+                  <button
+                    key={tpl.label}
+                    type="button"
+                    onClick={() => {
+                      const sep = rules.trim() ? '\n' : ''
+                      setRules((prev) => prev.trim() + sep + '- ' + tpl.text)
+                      setRulesDirty(true)
+                    }}
+                    className="rounded-full border border-primary/30 bg-primary/5 px-2 py-0.5 text-xs text-primary hover:bg-primary/10"
+                  >
+                    + {tpl.label}
+                  </button>
+                ))}
+              </div>
+              <textarea
+                ref={rulesInputRef}
+                value={rules}
+                onChange={(e) => { setRules(e.target.value); setRulesDirty(true) }}
+                placeholder="输入群规则，例如：&#10;- 所有回复使用中文&#10;- 代码需要添加注释&#10;- 重要决策需要说明理由"
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none disabled:opacity-50 min-h-[100px] resize-y"
+                disabled={saving}
+              />
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">{rules.length} 字</span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingRules(false)
+                      setRules(chatRoom.rules || '')
+                      setRulesDirty(false)
+                    }}
+                    className="rounded-lg border border-input px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent"
+                    disabled={saving}
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const ok = await handleSave({ rules: rules.trim() || undefined })
+                      if (ok) { setEditingRules(false); setRulesDirty(false) }
+                    }}
+                    disabled={saving || !rulesDirty}
+                    className="flex items-center gap-1 rounded-lg bg-blue-500 px-3 py-1.5 text-xs text-white hover:bg-blue-600 disabled:opacity-50"
+                  >
+                    <Save className="size-3" />
+                    保存
+                  </button>
+                </div>
+              </div>
+            </div>
           ) : (
             <div
-              className="flex cursor-pointer items-start justify-between rounded-lg border border-input px-3 py-2 hover:bg-accent min-h-[60px]"
-              onClick={() => setEditingRules(true)}
+              className="cursor-pointer rounded-lg border border-input px-3 py-2 hover:bg-accent min-h-[60px]"
+              onClick={() => { setEditingRules(true); setRulesDirty(false) }}
             >
-              <span className="text-sm text-foreground whitespace-pre-wrap flex-1">
-                {chatRoom.rules || '暂无规则，点击添加'}
+              <span className="text-sm text-foreground whitespace-pre-wrap">
+                {chatRoom.rules || <span className="text-muted-foreground">暂无规则，点击编辑</span>}
               </span>
-              <Pencil className="size-4 text-muted-foreground shrink-0 ml-2 mt-0.5" />
             </div>
           )}
         </div>

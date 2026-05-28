@@ -33,6 +33,9 @@ class ChatStore extends ChangeNotifier {
   Map<String, String> get streamingContent => _streamingContent;
   Map<String, String> get streamingThinking => _streamingThinking;
   Map<String, int> get unreadCounts => _unreadCounts;
+  int get totalUnreadCount => _unreadCounts.values
+      .where((count) => count > 0)
+      .fold(0, (sum, count) => sum + count);
 
   /// 加载消息
   Future<void> loadMessages(String chatRoomId) async {

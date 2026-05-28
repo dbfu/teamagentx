@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../stores/auth_store.dart';
 import '../stores/theme_store.dart';
+import '../services/mobile_notification_service.dart';
 import '../services/storage_service.dart';
 import '../constants/colors.dart';
 
@@ -30,6 +31,7 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    MobileNotificationService.setOpenChatRoomHandler(_openChatRoomFromNotification);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _init();
     });
@@ -37,6 +39,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    MobileNotificationService.setOpenChatRoomHandler(null);
     // 清理 WebView 控制器
     _controller = null;
     super.dispose();
@@ -129,6 +132,16 @@ class _HomePageState extends State<HomePage> {
               if (url != null) {
                 _openExternalUrl(url.toString());
               }
+            } else if (type == 'notification:setBadgeCount') {
+              final count = payload['count'];
+              MobileNotificationService.setBadgeCount(count is int ? count : 0);
+            } else if (type == 'notification:showMessage') {
+              MobileNotificationService.showMessage(
+                title: payload['title']?.toString() ?? 'TeamAgentX',
+                body: payload['body']?.toString() ?? '有新消息',
+                chatRoomId: payload['chatRoomId']?.toString(),
+                count: payload['count'] is int ? payload['count'] as int : 0,
+              );
             }
           } catch (e) {
             // 忽略非 JSON 消息
@@ -178,6 +191,24 @@ class _HomePageState extends State<HomePage> {
         context,
       ).showSnackBar(const SnackBar(content: Text('无法打开链接')));
     }
+  }
+
+  Future<void> _openChatRoomFromNotification(String chatRoomId) async {
+    if (_webUrl == null || _webUrl!.isEmpty) return;
+
+    final uri = Uri.parse(_webUrl!);
+    final target = uri.replace(
+      path: '/',
+      queryParameters: {'room': chatRoomId},
+      fragment: '',
+    );
+
+    if (_controller == null) {
+      _webUrl = target.toString();
+      return;
+    }
+
+    await _controller!.loadRequest(target);
   }
 
   /// 拦截 WebView 内 target="_blank" 与 window.open 外链，转给系统默认浏览器。
