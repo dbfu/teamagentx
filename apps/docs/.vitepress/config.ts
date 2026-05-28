@@ -14,31 +14,40 @@ export default defineConfig({
 
     nav: [
       { text: '首页', link: '/' },
+      { text: '使用手册', link: '/user-guide/' },
       { text: '快速开始', link: '/getting-started' },
       { text: '功能介绍', link: '/features' },
-      { text: '配置指南', link: '/configuration' },
+      { text: '配置指南', link: '/configuration/' },
     ],
 
     sidebar: [
       {
-        text: '开始',
+        text: '用户手册',
         items: [
           { text: '简介', link: '/' },
+          { text: '手册目录', link: '/user-guide/' },
+          { text: '首次设置', link: '/user-guide/first-run' },
+          { text: '模型管理', link: '/user-guide/models' },
+          { text: '助手管理', link: '/user-guide/agents' },
+          { text: '群聊与消息', link: '/user-guide/chatrooms' },
+          { text: '快速对话', link: '/user-guide/quick-chat' },
+          { text: '技能管理', link: '/user-guide/skills' },
+          { text: '定时任务', link: '/user-guide/cron-tasks' },
+          { text: '频道集成', link: '/user-guide/integrations' },
+          { text: '设置与多端连接', link: '/user-guide/settings' },
+        ]
+      },
+      {
+        text: '项目与部署',
+        items: [
           { text: '快速开始', link: '/getting-started' },
+          { text: '功能介绍', link: '/features' },
           { text: '安装部署', link: '/installation' },
         ]
       },
       {
-        text: '功能',
-        items: [
-          { text: '智能体管理', link: '/features/agents' },
-          { text: '聊天室', link: '/features/chatrooms' },
-          { text: '快速对话', link: '/features/quick-chat' },
-          { text: '定时任务', link: '/features/cron-tasks' },
-        ]
-      },
-      {
         text: '配置',
+        link: '/configuration/',
         items: [
           { text: '环境变量', link: '/configuration/env' },
           { text: 'LLM 配置', link: '/configuration/llm' },
@@ -47,6 +56,7 @@ export default defineConfig({
       },
       {
         text: '开发',
+        link: '/development/',
         items: [
           { text: '架构概览', link: '/development/architecture' },
           { text: '技术栈', link: '/development/tech-stack' },
