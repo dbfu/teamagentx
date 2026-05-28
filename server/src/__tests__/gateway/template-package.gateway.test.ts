@@ -10,6 +10,7 @@ import { agentService } from '../../core/agent/agent.service.js';
 import { GROUP_ASSISTANT_ID } from '../../core/agent/system-assistant.constants.js';
 import { chatRoomGateway } from '../../gateway/chatroom.gateway.js';
 import { templatePackageGateway } from '../../gateway/template-package.gateway.js';
+import { SYSTEM_CATEGORY_ID } from '../../scripts/system-agent-sync.js';
 import { skillInstallService } from '../../modules/skill/skill-install.service.js';
 import prisma from '../../lib/prisma.js';
 
@@ -314,6 +315,59 @@ describe('Template Package Gateway API', () => {
     const exported = parseTemplateZip(response.rawPayload);
     assert.equal(exported.snapshot.agents.some((item: { id: string }) => item.id === GROUP_ASSISTANT_ID), false);
     assert.equal(exported.snapshot.agents.length, 1);
+  });
+
+  test('POST /template-packages/export 不应包含历史导入的群助手模板副本', async () => {
+    await prisma.agentCategory.upsert({
+      where: { id: SYSTEM_CATEGORY_ID },
+      update: {},
+      create: {
+        id: SYSTEM_CATEGORY_ID,
+        name: '系统',
+        description: '系统内置助手，不可删除',
+        sortOrder: -1000,
+      },
+    });
+
+    const dirtyAgent = await agentService.create({
+      name: `群助手（模板副本 ${Date.now()}）`,
+      prompt: 'dirty group assistant copy',
+      type: 'acp',
+      acpTool: 'claude',
+      categoryId: SYSTEM_CATEGORY_ID,
+    });
+
+    const roomResponse = await app.inject({
+      method: 'POST',
+      url: '/chatrooms',
+      payload: {
+        name: `Template Export Dirty System Room ${Date.now()}`,
+        workDir: path.join(os.tmpdir(), `teamagentx-template-dirty-system-${Date.now()}`),
+      },
+    });
+    assert.equal(roomResponse.statusCode, 201);
+    const room = roomResponse.json().data;
+
+    const addAgentResponse = await app.inject({
+      method: 'POST',
+      url: `/chatrooms/${room.id}/agents`,
+      payload: { agentId: dirtyAgent.id },
+    });
+    assert.equal(addAgentResponse.statusCode, 201);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/template-packages/export',
+      payload: {
+        chatRoomId: room.id,
+        packageTitle: '排除脏系统副本模板',
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const exported = parseTemplateZip(response.rawPayload);
+    assert.equal(exported.snapshot.agents.some((item: { id: string }) => item.id === dirtyAgent.id), false);
+    assert.equal(exported.snapshot.categories.some((item: { id: string }) => item.id === SYSTEM_CATEGORY_ID), false);
   });
 
   test('POST /template-packages/preview 应返回冲突与兼容性摘要', async () => {
@@ -711,6 +765,127 @@ describe('Template Package Gateway API', () => {
     assert.equal(importedRoom.defaultAgentId, null);
     assert.equal(importedRoom.chatRoomAgents.some((item) => item.agentId === GROUP_ASSISTANT_ID), false);
     assert.equal(importedRoom.chatRoomAgents.filter((item) => item.agent?.agentLevel !== 'system').length, 1);
+  });
+
+  test('POST /template-packages/import 应忽略模板中的群助手模板副本', async () => {
+    await prisma.agentCategory.upsert({
+      where: { id: SYSTEM_CATEGORY_ID },
+      update: {},
+      create: {
+        id: SYSTEM_CATEGORY_ID,
+        name: '系统',
+        description: '系统内置助手，不可删除',
+        sortOrder: -1000,
+      },
+    });
+
+    const zipBuffer = buildTemplateZip({
+      manifest: {
+        schemaVersion: '1.0',
+        templateId: `tpl-ignore-dirty-system-${Date.now()}`,
+        version: '1.0.0',
+        title: '忽略脏系统副本模板',
+        source: { type: 'local' },
+        contents: {
+          group: true,
+          agents: 2,
+          categories: 1,
+          skills: 0,
+          cronTasks: 0,
+        },
+      },
+      snapshot: {
+        room: {
+          name: '忽略脏系统副本模板',
+          description: null,
+          rules: null,
+          defaultAgentId: 'dirty-group-assistant-copy',
+          agentTriggerMode: 'auto',
+        },
+        agents: [
+          {
+            id: 'dirty-group-assistant-copy',
+            name: '群助手（模板副本 1）',
+            prompt: 'dirty group assistant copy',
+            type: 'acp',
+            acpTool: 'claude',
+            categoryId: SYSTEM_CATEGORY_ID,
+            workDir: null,
+            proxyConfig: null,
+            codexModel: null,
+            claudeModel: null,
+            thinkingMode: 'high',
+            llmProviderId: null,
+            speechConfig: null,
+            capabilities: [],
+          },
+          {
+            id: 'business-agent-2',
+            name: '业务助手二',
+            prompt: 'business assistant',
+            type: 'builtin',
+            acpTool: null,
+            categoryId: null,
+            workDir: null,
+            proxyConfig: null,
+            codexModel: null,
+            claudeModel: null,
+            thinkingMode: 'high',
+            llmProviderId: null,
+            speechConfig: null,
+            capabilities: [],
+          },
+        ],
+        categories: [
+          {
+            id: SYSTEM_CATEGORY_ID,
+            name: '系统',
+            description: '系统内置助手，不可删除',
+            sortOrder: -1000,
+          },
+        ],
+        cronTasks: [],
+      },
+      capabilityDescriptors: [],
+    });
+
+    const multipart = buildMultipartPayload(
+      { desiredGroupName: '忽略脏系统副本模板' },
+      {
+        fieldName: 'template',
+        fileName: 'group-template.zip',
+        contentType: 'application/zip',
+        content: zipBuffer,
+      },
+    );
+
+    const importResponse = await app.inject({
+      method: 'POST',
+      url: '/template-packages/import',
+      headers: {
+        'content-type': multipart.contentType,
+      },
+      payload: multipart.payload,
+    });
+
+    assert.equal(importResponse.statusCode, 200);
+    const imported = importResponse.json();
+    assert.equal(imported.data.importedAgents, 1);
+
+    const importedRoom = await prisma.chatRoom.findUniqueOrThrow({
+      where: { id: imported.data.chatRoomId },
+      include: {
+        chatRoomAgents: {
+          include: {
+            agent: true,
+          },
+        },
+      },
+    });
+    assert.equal(
+      importedRoom.chatRoomAgents.some((item) => item.agent?.name.startsWith('群助手（模板副本')),
+      false,
+    );
   });
 
   test('POST /template-packages/export 对导入后的群组应沿用原模板 templateId', async () => {

@@ -1,13 +1,12 @@
 
-import { ChatRoom, chatRoomApi, templatePackageApi } from '@/lib/agent-api'
+import { ChatRoom, chatRoomApi } from '@/lib/agent-api'
 import { AgentAvatarImage } from '@/lib/agent-avatars'
 import { GroupAvatarImage } from '@/lib/group-avatars'
 import { cn, formatDateTime } from '@/lib/utils'
 import { useSocketStore } from '@/stores/socket-store'
-import { Copy, Download, Loader2, MessageSquare, Pin, Plus, RefreshCw, Trash2, Upload } from 'lucide-react'
+import { Copy, Loader2, MessageSquare, Pin, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { GroupTemplateImportModal } from './group-template-import-modal'
 
 interface ConversationListProps {
   chatRooms: ChatRoom[]
@@ -39,8 +38,6 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
   const [deleting, setDeleting] = useState(false)
   // 删除确认对话框状态
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
-  const [showImportModal, setShowImportModal] = useState(false)
-  const [exportingTemplate, setExportingTemplate] = useState(false)
 
   // 格式化未读数显示
   const formatUnreadCount = (count: number) => {
@@ -144,39 +141,6 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
     }
   }
 
-  const handleExportTemplate = async (room: ChatRoom) => {
-    if (exportingTemplate) return
-
-    setExportingTemplate(true)
-    try {
-      const response = await templatePackageApi.export({
-        chatRoomId: room.id,
-        packageTitle: room.name,
-        packageSummary: room.description || undefined,
-      })
-
-      if (!response.success || !response.data) {
-        toast.error(response.error || '导出群组模板失败')
-        return
-      }
-
-      const url = URL.createObjectURL(response.data.blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = response.data.filename
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      setTimeout(() => URL.revokeObjectURL(url), 100)
-      toast.success(`已导出群组模板：${room.name}`)
-    } catch {
-      toast.error('导出群组模板失败')
-    } finally {
-      setExportingTemplate(false)
-      handleCloseContextMenu()
-    }
-  }
-
   return (
     <>
     <div className={cn("flex h-full select-none flex-col bg-background overflow-x-hidden", isMobile ? "w-full border-0" : "w-72 shrink-0 border-r border-border")}>
@@ -191,46 +155,35 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
             <span className="text-xl font-semibold text-foreground">消息</span>
           </div>
           <div className="flex items-center gap-1">
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                setShowImportModal(true)
-              }}
-              className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              title="导入群组模板"
-              style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
-            >
-              <Upload className="size-4" />
-            </button>
-              {onCreateChatRoom && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onCreateChatRoom()
-                  }}
-                  className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  title="创建群聊"
-                  style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
-                >
-                  <Plus className="size-4" />
-                </button>
-              )}
-              {onRefresh && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onRefresh()
-                  }}
-                  className={cn(
-                    "flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  )}
-                  title="刷新"
-                  style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
-                >
-                  <RefreshCw className={cn("size-4", isRefreshing && "animate-spin")} />
-                </button>
-              )}
-            </div>
+            {onCreateChatRoom && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onCreateChatRoom()
+                }}
+                className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                title="创建群聊"
+                style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+              >
+                <Plus className="size-4" />
+              </button>
+            )}
+            {onRefresh && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onRefresh()
+                }}
+                className={cn(
+                  "flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                )}
+                title="刷新"
+                style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+              >
+                <RefreshCw className={cn("size-4", isRefreshing && "animate-spin")} />
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -420,14 +373,6 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
               复制群聊
             </button>
             <button
-              onClick={() => handleExportTemplate(contextMenu.room)}
-              disabled={exportingTemplate}
-              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-popover-foreground hover:bg-accent disabled:opacity-50"
-            >
-              {exportingTemplate ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
-              导出群组模板
-            </button>
-            <button
               onClick={handleDeleteClick}
               className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
             >
@@ -466,15 +411,6 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
         </>
       )}
     </div>
-    <GroupTemplateImportModal
-      isOpen={showImportModal}
-      onClose={() => setShowImportModal(false)}
-      onImported={async (chatRoomId) => {
-        setShowImportModal(false)
-        onRefresh?.()
-        onSelect(chatRoomId)
-      }}
-    />
     </>
   )
 }
