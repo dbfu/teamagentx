@@ -44,7 +44,7 @@
 |------|---------|---------|---------|
 | [README.md](README.md) | 索引 + 阅读路径 | - | 约 1k |
 | [01-overview.md](01-overview.md) | 产品定位 + 核心架构 | ⭐⭐⭐ | 约 3k |
-| [02-features.md](02-features.md) | v0.1.0 功能详细分类（9 大功能域）| ⭐⭐⭐ | 约 6k |
+| [02-features.md](02-features.md) | v0.1.0 功能详细分类（11 大功能域，含 Bridge 集成与语音）| ⭐⭐⭐ | 约 6k |
 | [03-workflows.md](03-workflows.md) | 工作流程 + 状态机 + 消息流转 | ⭐⭐ | 约 4k |
 | [04-problems-and-solutions.md](04-problems-and-solutions.md) | **13 个重大问题 + 解决方案**（核心章）| ⭐⭐⭐⭐ | 约 13k |
 | [05-competitors.md](05-competitors.md) | 5 赛道竞品 + 横向对比 + 借鉴 | ⭐⭐⭐ | 约 7k |
@@ -53,6 +53,7 @@
 | [08-server-architecture.md](08-server-architecture.md) | 服务端代码架构 · Agent 执行系统 · Socket 事件 | ⭐⭐⭐ | 约 4k |
 | [09-api-reference.md](09-api-reference.md) | 完整 REST API 速查（所有路由） | ⭐⭐⭐ | 约 3k |
 | [10-frontend-architecture.md](10-frontend-architecture.md) | 前端目录 · Stores · 面板系统 · Electron 集成 | ⭐⭐ | 约 3k |
+| [11-agent-trigger-system.md](11-agent-trigger-system.md) | 助手触发系统 · coordinator/auto/manual 模式 · @解析规则 · 提示词建议 | ⭐⭐⭐ | 约 3k |
 | [12-user-guide.md](12-user-guide.md) | 新手使用说明 · 初始化 · 模型/助手/技能 · 群聊协作 | ⭐⭐⭐ | 约 7k |
 
 总计约 62k 字。
@@ -100,7 +101,7 @@
 3. **可观测的多 Agent 协作**——流式 thinking + 执行记录 + 上下文检视
 
 ### 3. v0.1.0 已落地（远超用户最初描述）
-9 大功能域、约 50+ API 端点、若干独有亮点：
+11 大功能域、约 60+ API 端点、若干独有亮点：
 - ⭐ **群级 Cron 定时任务**（独有）
 - ⭐ **粘贴文本一键解析模型配置**（UX 亮点）
 - ⭐ **流式提示词优化**
@@ -110,6 +111,8 @@
 - ⭐ **每个助手在每个群独立的上下文 / 历史注入开关**
 - ⭐ **本地 Agent 复用**（接 Claude Code key）
 - ⭐ **移动端扫码连接**
+- ⭐ **Bridge 外部平台**（Telegram / 飞书 / 钉钉 / 企业微信 接入同一群聊）
+- ⭐ **思考模式（thinkingMode）**：off/low/medium/high 控制 Claude 推理预算
 
 详见 [02-features.md](02-features.md)。
 

@@ -286,4 +286,14 @@ export const skillApi = {
       body: JSON.stringify({ sourcePath, method }),
     });
   },
+
+  /**
+   * 复制本地技能文件夹到共享目录
+   */
+  async importLocalFolder(sourcePath: string): Promise<ApiResponse<ExternalImportResult>> {
+    return request<ExternalImportResult>('/skills/import-local-folder', {
+      method: 'POST',
+      body: JSON.stringify({ sourcePath }),
+    });
+  },
 };

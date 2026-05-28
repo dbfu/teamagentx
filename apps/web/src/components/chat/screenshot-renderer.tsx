@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from 'react'
 import { Message } from '@/lib/agent-api'
 import { AgentAvatarImage } from '@/lib/agent-avatars'
 import { GroupAvatarImage } from '@/lib/group-avatars'
+import { SCREENSHOT_EXPORT_WIDTH } from '@/lib/screenshot-utils'
 import { ChatMessage } from './chat-message'
 
 interface MentionAgent {
@@ -89,7 +90,7 @@ export function ScreenshotRenderer({
         position: 'fixed',
         top: '0',
         left: '0',
-        width: '1000px',
+        width: `${SCREENSHOT_EXPORT_WIDTH}px`,
         maxWidth: 'none',
         backgroundColor: 'white',
         opacity: 0,
@@ -120,25 +121,26 @@ export function ScreenshotRenderer({
       {/* 消息列表 - 使用过滤后的消息 */}
       <div className="py-2">
         {filteredMessages.map((message) => (
-          <ChatMessage
-            key={message.id}
-            message={message}
-            isRight={message.isHuman}
-            showSpeechButton={false}
-            mentionAgents={mentionAgents}
-            currentUser={currentUser}
-            // 不传递 replyCount 和 replyTo，避免渲染回复相关元素
-            replyCount={undefined}
-            replyTo={undefined}
-            // 禁用所有交互功能
-            onAgentAvatarClick={() => {}}
-            onTypingAgentClick={() => {}}
-            onMentionClick={() => {}}
-            onReplyClick={() => {}}
-            onExecutionDetailClick={() => {}}
-            onMentionAgent={() => {}}
-            disableContentCollapse
-          />
+          <div key={message.id} data-screenshot-page-item="true">
+            <ChatMessage
+              message={message}
+              isRight={message.isHuman}
+              showSpeechButton={false}
+              mentionAgents={mentionAgents}
+              currentUser={currentUser}
+              // 不传递 replyCount 和 replyTo，避免渲染回复相关元素
+              replyCount={undefined}
+              replyTo={undefined}
+              // 禁用所有交互功能
+              onAgentAvatarClick={() => {}}
+              onTypingAgentClick={() => {}}
+              onMentionClick={() => {}}
+              onReplyClick={() => {}}
+              onExecutionDetailClick={() => {}}
+              onMentionAgent={() => {}}
+              disableContentCollapse
+            />
+          </div>
         ))}
       </div>
 

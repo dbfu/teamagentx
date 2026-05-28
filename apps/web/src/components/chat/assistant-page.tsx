@@ -38,18 +38,21 @@ import {
 } from 'lucide-react'
 import { agentApi, categoryApi, Agent, AgentCategory, AgentSpeechConfig, AgentsGrouped, type AgentThinkingMode } from '@/lib/agent-api'
 import { cn } from '@/lib/utils'
+import { isSystemAssistantDetailBlocked } from '@/lib/system-agents'
 import { CreateAssistantModal } from './create-assistant-modal'
 import { EditAssistantModal } from './edit-assistant-modal'
 import { InstallSkillModal } from './install-skill-modal'
 import { CreateCategoryModal } from './create-category-modal'
 import { CategoryToggleButton } from './category-toggle-button'
 import { shouldRenderUncategorizedSection } from './assistant-page-dnd'
+import { SystemAssistantModelModal, type SystemAssistantRuntimeConfig } from './system-assistant-model-modal'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { QuickChatStartDialog } from './quick-chat-start-dialog'
 import { AgentCard } from './agent-card'
 import { useAuthStore } from '@/stores'
 import { toast } from 'sonner'
 import { useChatRoomStore } from '@/stores/chat-room-store'
+import { GROUP_ASSISTANT_ID, GROUP_COORDINATOR_ID } from '@/lib/system-agents'
 
 // 系统分类 ID
 const SYSTEM_CATEGORY_ID = 'system-category-00000000-0000-0000-0000-000000000001'
@@ -275,6 +278,8 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
   const [quickChatAgent, setQuickChatAgent] = useState<Agent | null>(null)
   const [quickChatDialogOpen, setQuickChatDialogOpen] = useState(false)
   const [creatingQuickChat, setCreatingQuickChat] = useState(false)
+  const [systemModelAgent, setSystemModelAgent] = useState<Agent | null>(null)
+  const [systemModelModalOpen, setSystemModelModalOpen] = useState(false)
 
   // dnd-kit 状态
   const [activeAgent, setActiveAgent] = useState<Agent | null>(null)
@@ -303,7 +308,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
       const allAgents = [
         ...groupedResponse.data.categories.flatMap(cg => cg.agents),
         ...groupedResponse.data.uncategorized
-      ].filter(agent => agent.agentLevel !== 'system')
+      ]
       setAssistants(allAgents)
       // 默认展开所有分类（包括未分类）
       const allCategoryIds = [...groupedResponse.data.categories.map(cg => cg.category.id), '__uncategorized__']
@@ -341,6 +346,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     acpTool: string
     proxyConfig?: string | null
     codexModel?: string | null
+    codexFastMode?: boolean
     claudeModel?: string | null
     thinkingMode?: AgentThinkingMode | null
     categoryId: string | null
@@ -357,6 +363,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
       acpTool: data.acpTool || undefined,
       proxyConfig: data.proxyConfig || null,
       codexModel: data.codexModel || null,
+      codexFastMode: Boolean(data.codexFastMode),
       claudeModel: data.claudeModel || null,
       thinkingMode: data.thinkingMode || 'high',
       categoryId: data.categoryId || undefined,
@@ -385,6 +392,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     acpTool: string
     proxyConfig?: string | null
     codexModel?: string | null
+    codexFastMode?: boolean
     claudeModel?: string | null
     thinkingMode?: AgentThinkingMode | null
     categoryId: string | null
@@ -402,6 +410,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
       acpTool: data.acpTool || undefined,
       proxyConfig: data.proxyConfig || null,
       codexModel: data.codexModel || null,
+      codexFastMode: Boolean(data.codexFastMode),
       claudeModel: data.claudeModel || null,
       thinkingMode: data.thinkingMode || 'high',
       categoryId: data.categoryId,
@@ -457,6 +466,19 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
   const openEditModal = async (assistant: Agent) => {
     setEditMode('edit')
     closeMenu()
+    if (
+      assistant.agentLevel === 'system'
+      && (
+        assistant.id === GROUP_ASSISTANT_ID
+        || assistant.id === GROUP_COORDINATOR_ID
+        || assistant.name === '群助手'
+        || assistant.name === '群调度助手'
+      )
+    ) {
+      setSystemModelAgent(await loadAssistantForModal(assistant))
+      setSystemModelModalOpen(true)
+      return
+    }
     setEditingAssistant(await loadAssistantForModal(assistant))
     setIsEditModalOpen(true)
   }
@@ -602,8 +624,25 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     }
   }
 
+  const handleUpdateSystemAssistantModel = async (data: SystemAssistantRuntimeConfig): Promise<boolean> => {
+    if (!systemModelAgent) return false
+
+    const response = await agentApi.update(systemModelAgent.id, data)
+    if (response.success) {
+      toast.success(`${systemModelAgent.name}已更新`)
+      await fetchData()
+      await loadChatRooms()
+      setSystemModelAgent(null)
+      return true
+    }
+
+    toast.error(response.error || '更新失败')
+    return false
+  }
+
   // 点击助手卡片 - 移动端直接快速对话，桌面端跳转详情页
   const handleAgentClick = (agent: Agent) => {
+    if (isSystemAssistantDetailBlocked(agent)) return
     if (isMobile) {
       openQuickChatDialog(agent)
     } else {
@@ -873,25 +912,29 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
   // Filter helpers for grouped display
   const displayedGroupedData = groupedData
 
-  // 系统协调助手是内置执行器，不作为可管理助手展示。
-  const { normalCategories } = displayedGroupedData ? {
-    normalCategories: displayedGroupedData.categories.filter(cg => cg.category.sortOrder !== -1000),
-  } : { normalCategories: [] }
+  // 系统协调助手由后端隐藏；可见系统分类仅展示群助手，并限制为快速对话入口。
+  const { normalCategories, systemCategoryGroup } = displayedGroupedData ? {
+    normalCategories: displayedGroupedData.categories.filter(cg => cg.category.id !== SYSTEM_CATEGORY_ID),
+    systemCategoryGroup: displayedGroupedData.categories.find(cg => cg.category.id === SYSTEM_CATEGORY_ID) || null,
+  } : { normalCategories: [], systemCategoryGroup: null }
+
+  const matchesSearch = (agent: Agent) =>
+    agent.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    agent.description?.toLowerCase().includes(searchQuery.toLowerCase())
 
   const filteredGroupedData = displayedGroupedData ? {
     categories: normalCategories
       .map(cg => ({
         category: cg.category,
-        agents: cg.agents.filter(a =>
-          a.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          a.description?.toLowerCase().includes(searchQuery.toLowerCase())
-        )
+        agents: cg.agents.filter(matchesSearch)
       })),
-    systemCategory: null as { category: AgentCategory; agents: Agent[] } | null,
-    uncategorized: displayedGroupedData.uncategorized.filter(a =>
-      a.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      a.description?.toLowerCase().includes(searchQuery.toLowerCase())
-    )
+    systemCategory: systemCategoryGroup
+      ? {
+          category: systemCategoryGroup.category,
+          agents: systemCategoryGroup.agents.filter(matchesSearch),
+        }
+      : null,
+    uncategorized: displayedGroupedData.uncategorized.filter(matchesSearch)
   } : null
 
   return (
@@ -1270,6 +1313,16 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
         onSubmit={editMode === 'copy' ? handleCreateAssistant : handleUpdateAssistant}
         assistant={editingAssistant}
         mode={editMode}
+      />
+
+      <SystemAssistantModelModal
+        isOpen={systemModelModalOpen}
+        assistant={systemModelAgent}
+        onClose={() => {
+          setSystemModelModalOpen(false)
+          setSystemModelAgent(null)
+        }}
+        onSubmit={handleUpdateSystemAssistantModel}
       />
 
       <ConfirmDialog

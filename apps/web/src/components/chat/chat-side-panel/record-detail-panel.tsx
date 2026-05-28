@@ -6,6 +6,8 @@ import { CheckCircle, ChevronDown, ChevronRight, CircleStop, XCircle } from 'luc
 import { MarkdownContent } from '../markdown-content'
 import { CodeEditToolContent, CodeReadToolOutput, isCodeEditTool, isCodeReadTool, renderToolValue } from './tool-call-content'
 
+const SHOW_EXECUTION_CONTEXT = import.meta.env.VITE_SHOW_EXECUTION_CONTEXT !== 'false'
+
 // 格式化耗时显示（1m40s 格式，分钟为0时只显示秒）
 function formatDuration(ms: number): string {
   const totalSeconds = Math.round(ms / 1000)
@@ -176,6 +178,26 @@ export function RecordDetailPanel({ selectedRecord }: RecordDetailPanelProps) {
           />
         </CollapsibleContent>
       </Collapsible>
+
+      {SHOW_EXECUTION_CONTEXT && selectedRecord.context && (
+        <Collapsible className="rounded border border-sky-500/30 bg-sky-500/10 text-xs">
+          <CollapsibleTrigger asChild>
+            <div className="group flex items-center gap-2 p-2 cursor-pointer hover:opacity-80">
+              <CollapsibleStateIcon />
+              <span className="inline-flex items-center px-2 py-0.5 rounded bg-sky-500/20 text-sky-700 dark:text-sky-400 font-medium">
+                🧩 上下文
+              </span>
+              <span className="text-muted-foreground">{selectedRecord.context.length} 字</span>
+            </div>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <MarkdownContent
+              content={selectedRecord.context}
+              className="px-3 pb-3 dark:prose-invert [&_pre]:bg-muted/50 [&_pre]:p-2 [&_pre]:rounded [&_code]:text-xs max-h-96 overflow-y-auto"
+            />
+          </CollapsibleContent>
+        </Collapsible>
+      )}
 
       {/* 执行过程 - 按时间顺序显示 */}
       <div className="space-y-3">

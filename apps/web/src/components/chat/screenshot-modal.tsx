@@ -1,15 +1,26 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Message } from '@/lib/agent-api'
 import { Button } from '@/components/ui/button'
-import { Download, Copy, Check, ImageDown, AlertCircle, Loader2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Download, Copy, Check, ImageDown, AlertCircle, Loader2, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import { ScreenshotRenderer } from './screenshot-renderer'
 import {
+  SCREENSHOT_IMAGE_PAGE_THRESHOLD,
+  SCREENSHOT_PIXEL_RATIO,
   elementToImage,
+  elementToImageSegments,
+  estimateScreenshotImagePageCount,
+  printElementAsPdf,
+  shouldMergeScreenshotOnServer,
   downloadImage,
   copyImageToClipboard,
   generateScreenshotFilename,
 } from '@/lib/screenshot-utils'
+
+interface ScreenshotPage {
+  url: string
+  filename: string
+}
 
 interface MentionAgent {
   id: string
@@ -47,11 +58,36 @@ export function ScreenshotModal({
   currentUser,
 }: ScreenshotModalProps) {
   const [generating, setGenerating] = useState(false)
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [pages, setPages] = useState<ScreenshotPage[]>([])
+  const [currentPageIndex, setCurrentPageIndex] = useState(0)
+  const [pdfOnlyMode, setPdfOnlyMode] = useState(false)
+  const [estimatedImagePageCount, setEstimatedImagePageCount] = useState(0)
+  const [printingPdf, setPrintingPdf] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
   const renderElementRef = useRef<HTMLElement | null>(null)
+  const previewObjectUrlsRef = useRef<string[]>([])
+
+  const clearPreviewObjectUrls = useCallback(() => {
+    for (const objectUrl of previewObjectUrlsRef.current) {
+      URL.revokeObjectURL(objectUrl)
+    }
+    previewObjectUrlsRef.current = []
+  }, [])
+
+  const currentPage = pages[currentPageIndex] ?? null
+  const pageCount = pages.length
+  const hasMultiplePages = pageCount > 1
+
+  const buildPageFilename = useCallback((pageNumber: number, totalPages: number) => {
+    const filename = generateScreenshotFilename(roomName)
+    if (totalPages <= 1) {
+      return filename
+    }
+
+    return filename.replace(/\.png$/i, `_第${String(pageNumber).padStart(2, '0')}页.png`)
+  }, [roomName])
 
   // 处理渲染器准备好
   const handleRendererReady = useCallback((element: HTMLElement) => {
@@ -64,15 +100,44 @@ export function ScreenshotModal({
 
     setGenerating(true)
     setError(null)
-    setPreviewUrl(null)
+    setPages([])
+    setCurrentPageIndex(0)
+    setPdfOnlyMode(false)
+    setEstimatedImagePageCount(0)
+    clearPreviewObjectUrls()
 
     try {
-      const dataUrl = await elementToImage(renderElementRef.current, {
-        quality: 0.95,
-        backgroundColor: '#ffffff',
-        pixelRatio: 2,
-      })
-      setPreviewUrl(dataUrl)
+      if (shouldMergeScreenshotOnServer(renderElementRef.current, SCREENSHOT_PIXEL_RATIO)) {
+        const pageCount = estimateScreenshotImagePageCount(renderElementRef.current, SCREENSHOT_PIXEL_RATIO)
+        if (pageCount > SCREENSHOT_IMAGE_PAGE_THRESHOLD) {
+          setPdfOnlyMode(true)
+          setEstimatedImagePageCount(pageCount)
+          return
+        }
+
+        const files = await elementToImageSegments(renderElementRef.current, {
+          quality: 0.95,
+          backgroundColor: '#ffffff',
+          pixelRatio: SCREENSHOT_PIXEL_RATIO,
+        })
+
+        const objectUrls = files.map(file => URL.createObjectURL(file))
+        previewObjectUrlsRef.current = objectUrls
+        setPages(objectUrls.map((url, index) => ({
+          url,
+          filename: buildPageFilename(index + 1, objectUrls.length),
+        })))
+      } else {
+        const dataUrl = await elementToImage(renderElementRef.current, {
+          quality: 0.95,
+          backgroundColor: '#ffffff',
+          pixelRatio: SCREENSHOT_PIXEL_RATIO,
+        })
+        setPages([{
+          url: dataUrl,
+          filename: buildPageFilename(1, 1),
+        }])
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : '截图生成失败'
       setError(message)
@@ -80,7 +145,7 @@ export function ScreenshotModal({
     } finally {
       setGenerating(false)
     }
-  }, [])
+  }, [buildPageFilename, clearPreviewObjectUrls])
 
   // 弹窗打开后自动生成截图
   useEffect(() => {
@@ -98,34 +163,82 @@ export function ScreenshotModal({
   // 弹窗关闭时清理状态
   useEffect(() => {
     if (!open) {
-      setPreviewUrl(null)
+      setPages([])
+      setCurrentPageIndex(0)
+      setPdfOnlyMode(false)
+      setEstimatedImagePageCount(0)
       setError(null)
       setCopied(false)
+      setPrintingPdf(false)
       renderElementRef.current = null
+      clearPreviewObjectUrls()
     }
-  }, [open])
+  }, [open, clearPreviewObjectUrls])
+
+  useEffect(() => () => clearPreviewObjectUrls(), [clearPreviewObjectUrls])
+
+  const pageStatusText = useMemo(() => {
+    if (!hasMultiplePages) {
+      return ''
+    }
+    return `第 ${currentPageIndex + 1} / ${pageCount} 页`
+  }, [currentPageIndex, hasMultiplePages, pageCount])
+
+  const handlePrevPage = useCallback(() => {
+    setCurrentPageIndex(index => Math.max(0, index - 1))
+    setCopied(false)
+  }, [])
+
+  const handleNextPage = useCallback(() => {
+    setCurrentPageIndex(index => Math.min(pageCount - 1, index + 1))
+    setCopied(false)
+  }, [pageCount])
 
   // 下载图片
-  const handleDownload = useCallback(() => {
-    if (!previewUrl) return
-    const filename = generateScreenshotFilename(roomName)
-    downloadImage(previewUrl, filename)
-    toast.success('截图已下载')
-    onOpenChange(false)
-  }, [previewUrl, roomName, onOpenChange])
+  const handleDownload = useCallback(async () => {
+    if (!currentPage) return
+    try {
+      await downloadImage(currentPage.url, currentPage.filename)
+      toast.success(hasMultiplePages ? `第 ${currentPageIndex + 1} 页已下载` : '截图已下载')
+      if (!hasMultiplePages) {
+        onOpenChange(false)
+      }
+    } catch {
+      toast.error('下载失败')
+    }
+  }, [currentPage, currentPageIndex, hasMultiplePages, onOpenChange])
 
   // 复制图片到剪贴板
   const handleCopy = useCallback(async () => {
-    if (!previewUrl) return
-    const success = await copyImageToClipboard(previewUrl)
+    if (!currentPage) return
+    const success = await copyImageToClipboard(currentPage.url)
     if (success) {
       setCopied(true)
-      toast.success('已复制到剪贴板')
+      toast.success(hasMultiplePages ? `第 ${currentPageIndex + 1} 页已复制到剪贴板` : '已复制到剪贴板')
       setTimeout(() => setCopied(false), 2000)
     } else {
       toast.error('复制失败')
     }
-  }, [previewUrl])
+  }, [currentPage, currentPageIndex, hasMultiplePages])
+
+  const handleExportPdf = useCallback(async () => {
+    if (!renderElementRef.current) return
+
+    setPrintingPdf(true)
+    try {
+      const filename = generateScreenshotFilename(roomName).replace(/\.png$/i, '.pdf')
+      const result = await printElementAsPdf(renderElementRef.current, filename)
+      if (result.canceled) {
+        return
+      }
+      toast.success(result.method === 'electron' ? 'PDF 已导出' : '已打开 PDF 打印窗口')
+    } catch (err) {
+      console.error('导出 PDF 失败:', err)
+      toast.error('导出 PDF 失败')
+    } finally {
+      setPrintingPdf(false)
+    }
+  }, [roomName])
 
   // 空消息提示
   if (messages.length === 0) {
@@ -183,7 +296,7 @@ export function ScreenshotModal({
           {/* Content */}
           <div className="p-6">
             <p className="text-sm text-muted-foreground mb-4">
-              将聊天记录导出为图片，可下载或复制到剪贴板
+              将聊天记录导出为图片，内容较长时会自动分页
             </p>
 
             {/* 预览区域 */}
@@ -202,15 +315,55 @@ export function ScreenshotModal({
                 </div>
               )}
 
-              {!generating && !error && previewUrl && (
-                <img
-                  src={previewUrl}
-                  alt="截图预览"
-                  className="max-w-full mx-auto rounded shadow"
-                />
+              {!generating && !error && pdfOnlyMode && (
+                <div className="flex h-[200px] flex-col items-center justify-center rounded-lg border border-blue-100 bg-blue-50 px-4 text-center text-blue-700">
+                  <FileText className="mb-3 size-8" />
+                  <div className="text-sm font-medium">内容较长，建议导出 PDF</div>
+                  <div className="mt-1 text-xs">
+                    预计会生成 {estimatedImagePageCount} 张图片，已跳过图片预览以避免等待过久。
+                  </div>
+                </div>
               )}
 
-              {!generating && !error && !previewUrl && (
+              {!generating && !error && currentPage && (
+                <div className="space-y-3">
+                  {hasMultiplePages && (
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700">
+                      <span>内容较长，已拆分为 {pageCount} 张图片。</span>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 border-blue-200 bg-white px-2 text-blue-700 hover:bg-blue-100"
+                          onClick={handlePrevPage}
+                          disabled={currentPageIndex === 0}
+                        >
+                          <ChevronLeft className="size-3.5" />
+                        </Button>
+                        <span className="min-w-16 text-center">{pageStatusText}</span>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 border-blue-200 bg-white px-2 text-blue-700 hover:bg-blue-100"
+                          onClick={handleNextPage}
+                          disabled={currentPageIndex >= pageCount - 1}
+                        >
+                          <ChevronRight className="size-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                  <img
+                    src={currentPage.url}
+                    alt={hasMultiplePages ? `截图预览第 ${currentPageIndex + 1} 页` : '截图预览'}
+                    className="max-w-full mx-auto rounded shadow"
+                  />
+                </div>
+              )}
+
+              {!generating && !error && !currentPage && !pdfOnlyMode && (
                 <div className="flex items-center justify-center h-[200px] text-muted-foreground">
                   等待生成截图...
                 </div>
@@ -224,22 +377,33 @@ export function ScreenshotModal({
               取消
             </Button>
             <Button
+              variant={pdfOnlyMode ? undefined : 'outline'}
+              onClick={handleExportPdf}
+              disabled={generating || printingPdf}
+            >
+              {printingPdf ? (
+                <><Loader2 className="size-4 mr-1 animate-spin" /> 生成中</>
+              ) : (
+                <><FileText className="size-4 mr-1" /> 导出 PDF</>
+              )}
+            </Button>
+            <Button
               variant="outline"
               onClick={handleCopy}
-              disabled={!previewUrl || generating}
+              disabled={!currentPage || generating}
             >
               {copied ? (
                 <><Check className="size-4 mr-1" /> 已复制</>
               ) : (
-                <><Copy className="size-4 mr-1" /> 复制</>
+                <><Copy className="size-4 mr-1" /> {hasMultiplePages ? '复制当前页' : '复制'}</>
               )}
             </Button>
             <Button
               onClick={handleDownload}
-              disabled={!previewUrl || generating}
+              disabled={!currentPage || generating}
             >
               <Download className="size-4 mr-1" />
-              下载图片
+              {hasMultiplePages ? '下载当前页' : '下载图片'}
             </Button>
           </div>
         </div>

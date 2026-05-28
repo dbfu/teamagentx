@@ -11,16 +11,18 @@ import {
     tool as sdkTool,
 } from '@anthropic-ai/claude-agent-sdk';
 import type { LlmProvider } from '@prisma/client';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import { createHash, randomUUID } from 'crypto';
 import * as fs from 'fs';
 import { createRequire } from 'module';
 import * as os from 'os';
 import * as path from 'path';
+import treeKill from 'tree-kill';
 import { z } from 'zod/v4';
 import { agentMemoryService } from '../../modules/agent-memory/agent-memory.service.js';
 import { skillInstallService } from '../../modules/skill/skill-install.service.js';
 import type { AttachmentData } from '../../modules/task-queue/task-queue.service.js';
+import { backgroundCommandService } from '../shell/background-command.service.js';
 import {
     buildAcpProviderEnv,
     type AcpProviderInfo,
@@ -42,10 +44,7 @@ import type {
 } from './executor.interface.js';
 import { getImageGenerationSkillInstructions } from './image-generation-config.js';
 import { generateImageForAgent } from './image-generation.service.js';
-import {
-    buildInstalledSkillsInstructions,
-    buildInstalledSkillsSignature,
-} from './skill-instructions.js';
+import { buildInstalledSkillNames } from './skill-instructions.js';
 import { syncGlobalClaudeLocalConfig } from './claude-local-config.js';
 import { getSystemAssistantTools } from './tools/index.js';
 import {
@@ -133,6 +132,18 @@ function stringifyMcpToolResult(result: unknown): string {
   }
 }
 
+function toStructuredContent(value: unknown): Record<string, unknown> {
+  try {
+    const plain = JSON.parse(JSON.stringify(value ?? {}));
+    if (plain && typeof plain === 'object' && !Array.isArray(plain)) {
+      return plain as Record<string, unknown>;
+    }
+    return {value: plain};
+  } catch {
+    return {value: stringifyMcpToolResult(value)};
+  }
+}
+
 const requireFromServerBundle = createRequire(import.meta.url);
 const requireFromClaudeSdk = (() => {
   try {
@@ -163,10 +174,10 @@ function logClaudeSdkDebug(
 
 function getClaudeMaxTurns(): number {
   const rawValue = process.env.CLAUDE_AGENT_MAX_TURNS;
-  if (!rawValue) return 50;
+  if (!rawValue) return 100;
 
   const parsed = Number.parseInt(rawValue, 10);
-  if (!Number.isFinite(parsed) || parsed < 1) return 50;
+  if (!Number.isFinite(parsed) || parsed < 1) return 100;
 
   return parsed;
 }
@@ -258,7 +269,12 @@ function shouldApplyBackgroundIdleFinish(state: {
   );
 }
 
+function getClaudeSettingSources(hasLlmProvider: boolean): SettingSource[] {
+  return hasLlmProvider ? ['user'] : ['user', 'project', 'local'];
+}
+
 export const __claudeSdkTestUtils = {
+  getClaudeSettingSources,
   getBackgroundIdleFinishMs,
   shouldApplyBackgroundIdleFinish,
 };
@@ -471,13 +487,13 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
   readonly llmProvider?: LlmProvider;
   readonly imageGenerationProvider?: LlmProvider | null;
   readonly thinkingMode: AgentThinkingMode;
+  readonly stateless: boolean;
 
   private _lastInjectedMessageId?: string;
   private systemPrompt: string;
   private agentId: string | null = null;
   private sessionId: string;
   private hasStartedSession = false;
-  private lastInjectedSkillsSignature?: string;
   private acpProviderInfo?: AcpProviderInfo;
   private currentAbortController: AbortController | null = null;
 
@@ -518,6 +534,7 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
     imageGenerationProvider?: LlmProvider | null,
     thinkingMode?: AgentThinkingMode | null,
     chatRoomRules?: string,
+    stateless: boolean = false,
   ) {
     this.name = name;
     this.chatRoomId = chatRoomId;
@@ -529,16 +546,16 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
     this.llmProvider = llmProvider;
     this.imageGenerationProvider = imageGenerationProvider;
     this.thinkingMode = thinkingMode || DEFAULT_AGENT_THINKING_MODE;
+    this.stateless = stateless;
     this.workDir = resolveAgentWorkDir({
       chatRoomId,
       sessionDir,
       customWorkDir,
       agentWorkDir: workDir,
     });
-    const savedSession = this.loadSessionState();
+    const savedSession = this.stateless ? null : this.loadSessionState();
     this.sessionId = savedSession?.sessionId || randomUUID();
     this.hasStartedSession = savedSession?.hasStartedSession ?? false;
-    this.lastInjectedSkillsSignature = savedSession?.skillsSignature;
 
     const modelInfo = this.llmProvider
       ? `
@@ -560,9 +577,15 @@ ${chatRoomRulesSection}
 
 ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
 
+## Assistant Mentions
+In TeamAgentX, an @assistant mention can trigger another assistant task. A single message may contain at most one triggerable @assistant mention. When handing off or asking another assistant, choose one target assistant and mention only that assistant. If multiple assistants could help, choose the best next assistant or ask the user to choose; refer to any additional assistants by name without @.
+
 ## Working Directory
 Your working directory is: ${this.workDir}
-When you perform file operations or run commands, operate in this directory by default. Resolve relative paths from this directory.`;
+When you perform file operations or run commands, operate in this directory by default. Resolve relative paths from this directory.
+
+## Shell Commands
+Use TeamAgentX MCP shell tools for shell execution. For normal foreground shell commands, use \`mcp__tax__run_shell_command\`. For long-running services or commands that should keep running after this turn, such as \`pnpm dev\`, \`npm run dev\`, \`vite\`, \`next dev\`, watch modes, servers, listeners, and \`tail -f\`, use \`mcp__tax__start_background_command\`. Use \`mcp__tax__read_background_command_output\` to inspect logs, \`mcp__tax__list_background_commands\` to find existing tasks, and \`mcp__tax__stop_background_command\` when the user asks to stop one. Do not block the turn waiting for a dev server to exit.`;
 
     this.ensureWorkDirectory();
   }
@@ -624,7 +647,6 @@ When you perform file operations or run commands, operate in this directory by d
   private loadSessionState(): {
     sessionId: string;
     hasStartedSession: boolean;
-    skillsSignature?: string;
   } | null {
     try {
       const statePath = this.getSessionStatePath();
@@ -648,10 +670,6 @@ When you perform file operations or run commands, operate in this directory by d
       const loaded = {
         sessionId: state.sessionId,
         hasStartedSession: state.hasStartedSession !== false,
-        skillsSignature:
-          typeof state.skillsSignature === 'string'
-            ? state.skillsSignature
-            : undefined,
       };
       const conversationPath = this.getClaudeConversationPath(loaded.sessionId);
       if (!loaded.hasStartedSession && fs.existsSync(conversationPath)) {
@@ -699,6 +717,8 @@ When you perform file operations or run commands, operate in this directory by d
   }
 
   private saveSessionId(): void {
+    if (this.stateless) return;
+
     try {
       const statePath = this.getSessionStatePath();
       fs.mkdirSync(path.dirname(statePath), {recursive: true});
@@ -708,7 +728,6 @@ When you perform file operations or run commands, operate in this directory by d
           {
             sessionId: this.sessionId,
             hasStartedSession: this.hasStartedSession,
-            skillsSignature: this.lastInjectedSkillsSignature,
             updatedAt: new Date().toISOString(),
           },
           null,
@@ -882,6 +901,13 @@ When you perform file operations or run commands, operate in this directory by d
     });
   }
 
+  private buildMcpCommandEnv(): NodeJS.ProcessEnv {
+    return {
+      ...process.env,
+      CLAUDE_CONFIG_DIR: this.getClaudeConfigDir(),
+    };
+  }
+
   private buildHooks(): Partial<Record<HookEvent, HookCallbackMatcher[]>> {
     return {};
   }
@@ -903,11 +929,6 @@ When you perform file operations or run commands, operate in this directory by d
     );
     if (longTermMemorySection) {
       fullMessage += `${longTermMemorySection}\n\n`;
-    }
-
-    const skillsUpdateSection = this.buildSkillsUpdateSection();
-    if (skillsUpdateSection) {
-      fullMessage += `${skillsUpdateSection}\n\n`;
     }
 
     if (this.injectGroupHistory && history && history.length > 0) {
@@ -949,7 +970,7 @@ ${historyText}
       const othersInfo = otherAgents.length > 0 ? otherAgentsList : 'none';
       const mentionTip =
         otherAgents.length > 0
-          ? '\n[Tip]\nWhen you need to message another assistant, write "@assistant_name message content" directly in your final reply. You may also mention an assistant in body text when the @ is preceded by a space. A target assistant is triggered only when @ is at the start of a line or the previous character is a space; @ immediately after punctuation will not trigger. A single message may mention at most one assistant. If the user only asks you to send a message to another assistant, output only that @assistant message in the final reply, with no explanation, pleasantries, summary, or expanded collaboration invitation. Before sending such a message, decide whether triggering another assistant is actually necessary.'
+          ? '\n[Tip]\nWhen you need to message another assistant, write "@assistant_name message content" directly in your final reply. You may also mention an assistant in body text when the @ is preceded by a space. A target assistant is triggered only when @ is at the start of a line or the previous character is a space; @ immediately after punctuation will not trigger. A single message may contain at most one triggerable @assistant mention. If you need to refer to additional assistants, write their names without @. If the user only asks you to send a message to another assistant, output only that @assistant message in the final reply, with no explanation, pleasantries, summary, or expanded collaboration invitation. Before sending such a message, decide whether triggering another assistant is actually necessary.'
           : '';
 
       fullMessage += `[Group Chat Member Info]
@@ -963,18 +984,6 @@ Other assistants: ${othersInfo}${mentionTip}
 
     fullMessage += `[Current Message]\n${message}`;
     return fullMessage;
-  }
-
-  private buildSkillsUpdateSection(): string {
-    const currentSignature = buildInstalledSkillsSignature(this.agentId);
-    if (this.lastInjectedSkillsSignature === currentSignature) {
-      return '';
-    }
-
-    this.lastInjectedSkillsSignature = currentSignature;
-    this.saveSessionId();
-    return `[Installed Skills Update]
-${buildInstalledSkillsInstructions(this.agentId)}`;
   }
 
   private buildPrompt(
@@ -1085,6 +1094,335 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     });
   }
 
+  private async runShellCommandForMcp(
+    command: string,
+    timeoutMs?: number,
+  ): Promise<Record<string, unknown>> {
+    const trimmedCommand = command.trim();
+    if (!trimmedCommand) {
+      throw new Error('command is required');
+    }
+
+    const timeout = Math.min(Math.max(timeoutMs || 120_000, 1_000), 600_000);
+    const outputLimitBytes = 128 * 1024;
+    let stdout = '';
+    let stderr = '';
+
+    const appendOutput = (current: string, chunk: Buffer): string => {
+      const next = current + chunk.toString('utf-8');
+      if (Buffer.byteLength(next, 'utf-8') <= outputLimitBytes) return next;
+      return Buffer.from(next, 'utf-8')
+        .subarray(-outputLimitBytes)
+        .toString('utf-8');
+    };
+
+    return await new Promise<Record<string, unknown>>((resolve, reject) => {
+      let settled = false;
+      let timedOut = false;
+      const child = spawn(trimmedCommand, [], {
+        cwd: this.workDir,
+        shell: process.env.SHELL || '/bin/bash',
+        env: this.buildMcpCommandEnv(),
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      const finish = (result: Record<string, unknown>): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutHandle);
+        resolve(result);
+      };
+
+      const timeoutHandle = setTimeout(() => {
+        timedOut = true;
+        if (child.pid) {
+          treeKill(child.pid, 'SIGKILL', () => {
+            finish({
+              command: trimmedCommand,
+              workDir: this.workDir,
+              exitCode: 124,
+              timedOut,
+              stdout,
+              stderr,
+            });
+          });
+          return;
+        }
+        finish({
+          command: trimmedCommand,
+          workDir: this.workDir,
+          exitCode: 124,
+          timedOut,
+          stdout,
+          stderr,
+        });
+      }, timeout);
+
+      child.stdout.on('data', (chunk: Buffer) => {
+        stdout = appendOutput(stdout, chunk);
+      });
+      child.stderr.on('data', (chunk: Buffer) => {
+        stderr = appendOutput(stderr, chunk);
+      });
+      child.once('error', (error) => {
+        if (settled) return;
+        clearTimeout(timeoutHandle);
+        reject(error);
+      });
+      child.once('exit', (code, signal) => {
+        finish({
+          command: trimmedCommand,
+          workDir: this.workDir,
+          exitCode: code ?? (signal === 'SIGTERM' ? 143 : 1),
+          timedOut,
+          stdout,
+          stderr,
+        });
+      });
+    });
+  }
+
+  private requireAgentIdForMcpTool(): string {
+    if (!this.agentId) {
+      throw new Error('The current assistant is missing agentId.');
+    }
+    return this.agentId;
+  }
+
+  private buildShellMcpTools(): any[] {
+    return [
+      sdkTool(
+        'run_shell_command',
+        'Run a foreground shell command in the current TeamAgentX working directory. Use start_background_command for dev servers, watch commands, listeners, and other long-running commands.',
+        {
+          command: z
+            .string()
+            .describe('Shell command to run in the current working directory.'),
+          timeoutMs: z
+            .number()
+            .int()
+            .min(1_000)
+            .max(600_000)
+            .optional()
+            .describe('Maximum runtime in milliseconds. Default 120000.'),
+        },
+        async (args) => {
+          try {
+            const result = await this.runShellCommandForMcp(
+              args.command,
+              args.timeoutMs,
+            );
+            const exitCode = Number(result.exitCode ?? 0);
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: stringifyMcpToolResult(result),
+                },
+              ],
+              structuredContent: result,
+              isError: exitCode !== 0,
+            };
+          } catch (error) {
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text:
+                    error instanceof Error ? error.message : 'Shell command failed.',
+                },
+              ],
+              isError: true,
+            };
+          }
+        },
+        {alwaysLoad: true},
+      ),
+    ];
+  }
+
+  private buildBackgroundCommandMcpTools(): any[] {
+    return [
+      sdkTool(
+        'start_background_command',
+        'Start a long-running shell command in the TeamAgentX background task manager. Use this for dev servers, watch commands, tail -f, and services that should keep running after this turn.',
+        {
+          command: z
+            .string()
+            .describe('Shell command to run in the current working directory.'),
+        },
+        async (args) => {
+          try {
+            const agentId = this.requireAgentIdForMcpTool();
+            const task = await backgroundCommandService.start({
+              chatRoomId: this.chatRoomId,
+              agentId,
+              agentName: this.name,
+              command: args.command,
+              workDir: this.workDir,
+              env: this.buildMcpCommandEnv(),
+            });
+            const structuredContent = toStructuredContent(task);
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: stringifyMcpToolResult(structuredContent),
+                },
+              ],
+              structuredContent,
+            };
+          } catch (error) {
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text:
+                    error instanceof Error
+                      ? error.message
+                      : 'Background command start failed.',
+                },
+              ],
+              isError: true,
+            };
+          }
+        },
+        {alwaysLoad: true},
+      ),
+      sdkTool(
+        'read_background_command_output',
+        'Read the latest stdout and stderr from a background command started with start_background_command.',
+        {
+          taskId: z
+            .string()
+            .describe('Background task ID returned by start_background_command.'),
+          tailBytes: z
+            .number()
+            .int()
+            .min(1)
+            .optional()
+            .describe('Maximum bytes to read from the end of each output stream.'),
+        },
+        async (args) => {
+          try {
+            const agentId = this.requireAgentIdForMcpTool();
+            const task = await backgroundCommandService.read(
+              args.taskId,
+              this.chatRoomId,
+              agentId,
+              args.tailBytes,
+            );
+            const structuredContent = toStructuredContent(task);
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: stringifyMcpToolResult(structuredContent),
+                },
+              ],
+              structuredContent,
+            };
+          } catch (error) {
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text:
+                    error instanceof Error
+                      ? error.message
+                      : 'Background command read failed.',
+                },
+              ],
+              isError: true,
+            };
+          }
+        },
+        {alwaysLoad: true},
+      ),
+      sdkTool(
+        'stop_background_command',
+        'Stop a running background command by task ID.',
+        {
+          taskId: z
+            .string()
+            .describe('Background task ID returned by start_background_command.'),
+        },
+        async (args) => {
+          try {
+            const agentId = this.requireAgentIdForMcpTool();
+            const task = await backgroundCommandService.stop(
+              args.taskId,
+              this.chatRoomId,
+              agentId,
+            );
+            const structuredContent = toStructuredContent(task);
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: stringifyMcpToolResult(structuredContent),
+                },
+              ],
+              structuredContent,
+            };
+          } catch (error) {
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text:
+                    error instanceof Error
+                      ? error.message
+                      : 'Background command stop failed.',
+                },
+              ],
+              isError: true,
+            };
+          }
+        },
+        {alwaysLoad: true},
+      ),
+      sdkTool(
+        'list_background_commands',
+        'List recent background commands started by this assistant in this chatroom.',
+        {},
+        async () => {
+          try {
+            const agentId = this.requireAgentIdForMcpTool();
+            const tasks = await backgroundCommandService.list(
+              this.chatRoomId,
+              agentId,
+            );
+            const structuredContent = toStructuredContent({tasks});
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: stringifyMcpToolResult(structuredContent),
+                },
+              ],
+              structuredContent,
+            };
+          } catch (error) {
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text:
+                    error instanceof Error
+                      ? error.message
+                      : 'Background command list failed.',
+                },
+              ],
+              isError: true,
+            };
+          }
+        },
+        {alwaysLoad: true},
+      ),
+    ];
+  }
+
   private getAllowedTaxTools(): string[] {
     const systemToolNames = this.getSystemAssistantTools()
       .map((tool) => tool.name)
@@ -1093,6 +1431,11 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       );
 
     return [
+      'mcp__tax__run_shell_command',
+      'mcp__tax__start_background_command',
+      'mcp__tax__read_background_command_output',
+      'mcp__tax__stop_background_command',
+      'mcp__tax__list_background_commands',
       ...(this.imageGenerationProvider ? ['mcp__tax__generate_image'] : []),
       ...systemToolNames.map((name) => `mcp__tax__${name}`),
     ];
@@ -1189,6 +1532,8 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
               ),
             ]
           : []),
+        ...this.buildShellMcpTools(),
+        ...this.buildBackgroundCommandMcpTools(),
         ...this.buildSystemAssistantMcpTools(),
       ],
     });
@@ -1370,7 +1715,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
         this.sessionId !== sdkSessionId || !this.hasStartedSession;
       this.sessionId = sdkSessionId;
       this.hasStartedSession = true;
-      if (shouldSaveSession) this.saveSessionId();
+      if (shouldSaveSession && !this.stateless) this.saveSessionId();
     }
 
     switch (message.type) {
@@ -1411,7 +1756,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
         if ((message as any).session_id) {
           this.sessionId = (message as any).session_id;
           this.hasStartedSession = true;
-          this.saveSessionId();
+          if (!this.stateless) this.saveSessionId();
         }
         if (
           (message as any).subtype === 'success' &&
@@ -1453,11 +1798,10 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     const env = this.buildEnv();
     const maxTurns = getClaudeMaxTurns();
     const thinking = getClaudeThinkingOptions(this.llmProvider, this.thinkingMode);
+    const skills = buildInstalledSkillNames(this.agentId);
     this.lastClaudeStderr = '';
     this.logQueryStart(env);
-    const settingSources: SettingSource[] = this.llmProvider
-      ? []
-      : ['user', 'project', 'local'];
+    const settingSources = getClaudeSettingSources(Boolean(this.llmProvider));
     const allowedTaxTools = this.getAllowedTaxTools();
     const q = query({
       prompt: this.buildPrompt(fullMessage, attachments),
@@ -1468,6 +1812,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
         includePartialMessages: true,
         maxTurns,
         thinking,
+        skills,
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
         ...(allowedTaxTools.length > 0
@@ -1476,6 +1821,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
                 tax: this.buildTeamAgentXMcpServer(),
               },
               allowedTools: allowedTaxTools,
+              disallowedTools: ['Bash', 'TaskOutput'],
             }
           : {}),
         settingSources,
@@ -1587,6 +1933,10 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
 
     const fullMessage = this.buildFullMessage(message, history);
     this.lastContext = fullMessage;
+    if (this.stateless) {
+      this.sessionId = randomUUID();
+      this.hasStartedSession = false;
+    }
 
     const abortController = new AbortController();
     this.currentAbortController = abortController;
@@ -1670,9 +2020,8 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
         console.warn(
-          `${this.name}: Claude SDK query 已中止，重置 session 供下一轮使用`,
+          `${this.name}: Claude SDK query 已中止，保留 session 供下一轮继续使用`,
         );
-        this.resetSession();
         throw error;
       }
       console.error(`${this.name}: claude sdk 执行失败`, error);

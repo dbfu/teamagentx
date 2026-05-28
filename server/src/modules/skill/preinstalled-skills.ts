@@ -10,6 +10,7 @@ export const PREINSTALLED_SKILL_NAMES = [
   'skill-creator',
   'browser-use',
   'image-generation-sdk',
+  'exa-web-search-free',
 ] as const;
 
 export const SKILL_MANAGER_DEFAULT_SKILLS = [
@@ -19,6 +20,7 @@ export const SKILL_MANAGER_DEFAULT_SKILLS = [
 
 export const NEW_AGENT_DEFAULT_SKILLS = [
   'browser-use',
+  'exa-web-search-free',
 ] as const;
 
 export function getSharedSkillsDir(): string {

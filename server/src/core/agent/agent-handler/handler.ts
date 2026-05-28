@@ -1,5 +1,7 @@
 import { EventEmitter } from 'events';
 import { chatRoomService } from '../../../modules/chatroom/chatroom.service.js';
+import { agentMemoryService } from '../../../modules/agent-memory/agent-memory.service.js';
+import { messageService } from '../../../modules/message/message.service.js';
 import { agentService } from '../agent.service.js';
 import { recoveryService } from '../../../modules/recovery/recovery.service.js';
 import type { Message } from '../../../types/message.js';
@@ -17,6 +19,34 @@ interface ReceivedMessageEvent {
   chatRoomId: string;
 }
 
+export function shouldTriggerCoordinatorAgent(params: {
+  agentTriggerMode: string;
+  isQuickChatRoom?: boolean | null | undefined;
+  hasMentions: boolean;
+  messageIsHuman?: boolean | undefined;
+  sourceAgentId?: string | null;
+}) {
+  if (params.agentTriggerMode !== 'coordinator') return false;
+  if (params.isQuickChatRoom) return false;
+  if (params.sourceAgentId === GROUP_COORDINATOR_ID) return false;
+
+  return !params.hasMentions || !params.messageIsHuman;
+}
+
+export function getTriggerMentionNames(params: {
+  agentTriggerMode: string;
+  sourceAgentId?: string | null;
+  mentionNames: string[];
+}) {
+  const isInternalCoordinatorDispatch =
+    params.agentTriggerMode === 'coordinator' &&
+    params.sourceAgentId === GROUP_COORDINATOR_ID;
+
+  return isInternalCoordinatorDispatch
+    ? params.mentionNames
+    : params.mentionNames.slice(0, 1);
+}
+
 // 消息事件发射器
 const emitter = new EventEmitter();
 
@@ -32,7 +62,7 @@ export const messageEventEmitter = emitter as {
 export function setupAIHandlers(
   emit: (msg: Message, chatRoomId: string) => Promise<void> | void,
   emitTyping: (
-    data: {messageId: string; agentId: string; agentName: string},
+    data: {messageId: string; agentId: string; agentName: string; status?: 'pending' | 'executing'; startedAt?: number},
     chatRoomId: string,
   ) => void,
   emitDone: (
@@ -55,6 +85,7 @@ export function setupAIHandlers(
     data: { chatRoomId: string; statuses: Record<string, AgentStatus>; queueCounts?: Record<string, number> },
     chatRoomId2: string,
   ) => void,
+  emitTodoCreated: (todo: any, userId: string) => void,
   broadcastTaskQueue: (
     chatRoomId: string,
     agentId: string,
@@ -72,6 +103,7 @@ export function setupAIHandlers(
     emitToolCall,
     emitThinking,
     emitStatus,
+    emitTodoCreated,
     broadcastTaskQueue,
     emitChatRoomCreated,
     emitAgentsUpdated,
@@ -121,8 +153,16 @@ export function setupAIHandlers(
       // 先解析 @mentions，判断是否有 @助手
       const activeAgents = await agentService.findActive();
       const activeAgentByName = new Map(activeAgents.map((agent) => [agent.name, agent]));
-      const mentionNames = parseKnownMentions(message.content, activeAgents.map((agent) => agent.name));
-      const triggerMentionNames = mentionNames.slice(0, 1);
+      const mentionNames = parseKnownMentions(
+        message.content,
+        activeAgents.map((agent) => agent.name),
+        { allowInline: true },
+      );
+      const triggerMentionNames = getTriggerMentionNames({
+        agentTriggerMode,
+        sourceAgentId: message.agentId,
+        mentionNames,
+      });
       const hasMentions = triggerMentionNames.length > 0;
 
       // 快速对话群聊：如果没有 @其他助手，则触发快速对话助手
@@ -169,45 +209,97 @@ export function setupAIHandlers(
         return;
       }
 
-      // 协调模式：普通助手消息里的 @ 只展示，不直接触发目标助手。
-      // 用户未 @ 和普通助手消息都会交给内置群调度助手；用户 @ 和群调度助手 @ 继续触发目标助手。
+      // 协调模式：用户显式 @ 仍直接触发；助手消息即使 @ 其他助手，也先交给内置群调度助手裁决。
       if (
         chatRoom &&
-        !chatRoom.isQuickChatRoom &&
-        agentTriggerMode === 'coordinator'
+        shouldTriggerCoordinatorAgent({
+          agentTriggerMode,
+          isQuickChatRoom: chatRoom.isQuickChatRoom,
+          hasMentions,
+          messageIsHuman: message.isHuman,
+          sourceAgentId: message.agentId,
+        })
       ) {
-        if (
-          (message.isHuman && !hasMentions) ||
-          (!message.isHuman && message.agentId !== GROUP_COORDINATOR_ID)
-        ) {
-          const coordinatorAgent = await agentService.findById(GROUP_COORDINATOR_ID);
+        const coordinatorAgent = await agentService.findById(GROUP_COORDINATOR_ID);
 
-          if (coordinatorAgent && coordinatorAgent.isActive) {
-            debugLog('coordinatorAgentTrigger', {
-              chatRoomId,
-              agentId: coordinatorAgent.id,
-              agentName: coordinatorAgent.name,
-              triggerMessageId: message.id,
-              sourceAgentId: message.agentId,
-              sourceIsHuman: message.isHuman,
-            });
+        if (coordinatorAgent && coordinatorAgent.isActive) {
+          debugLog('coordinatorAgentTrigger', {
+            chatRoomId,
+            agentId: coordinatorAgent.id,
+            agentName: coordinatorAgent.name,
+            triggerMessageId: message.id,
+            sourceAgentId: message.agentId,
+            sourceIsHuman: message.isHuman,
+            hasMentions,
+          });
 
-            await enqueueAgentTask(
-              chatRoomId,
-              message,
-              createInternalCoordinatorAgent(coordinatorAgent),
-            );
-          } else {
-            console.warn(`[coordinatorAgentTrigger] 内置协调助手不存在或未启用: ${GROUP_COORDINATOR_ID}`);
-          }
-          return;
+          const coordinatorHistory = await agentMemoryService.buildRecentHistory(
+            chatRoomId,
+            message.id,
+            5,
+          );
+
+          await enqueueAgentTask(
+            chatRoomId,
+            message,
+            createInternalCoordinatorAgent(coordinatorAgent),
+            undefined,
+            { history: coordinatorHistory },
+          );
+        } else {
+          console.warn(`[coordinatorAgentTrigger] 内置协调助手不存在或未启用: ${GROUP_COORDINATOR_ID}`);
         }
+        return;
       }
 
       // 普通群聊：无 @ 发言时，触发默认接收助手。
       // Socket 入口已校验发送者是群聊成员；这里不再限制必须由群主触发，
       // 避免多人群聊或历史 ownerId 漂移时默认助手静默失效。
       if (!hasMentions) {
+        if (
+          message.isHuman &&
+          chatRoom &&
+          agentTriggerMode === 'auto' &&
+          !chatRoom.isQuickChatRoom &&
+          !chatRoom.defaultAgentId &&
+          message.replyMessageId
+        ) {
+          const replyTargetMessage = await messageService.findById(message.replyMessageId);
+          const replyTargetAgentId = replyTargetMessage?.chatRoomId === chatRoomId && !replyTargetMessage.isHuman
+            ? replyTargetMessage.agentId
+            : null;
+
+          if (replyTargetAgentId) {
+            const agent = await agentService.findById(replyTargetAgentId);
+
+            if (agent && agent.isActive) {
+              if (agent.agentLevel !== 'system') {
+                const isMember = await chatRoomService.isAgentMember(
+                  chatRoomId,
+                  agent.id,
+                );
+                if (!isMember) {
+                  console.log(
+                    `Reply target agent ${agent.name} is not a member of chatRoom ${chatRoomId}`,
+                  );
+                  return;
+                }
+              }
+
+              debugLog('ownerMentionReplyTrigger', {
+                chatRoomId,
+                agentId: agent.id,
+                agentName: agent.name,
+                triggerMessageId: message.id,
+                replyMessageId: message.replyMessageId,
+              });
+
+              await enqueueAgentTask(chatRoomId, message, agent);
+            }
+          }
+          return;
+        }
+
         if (
           message.isHuman &&
           chatRoom &&
@@ -249,7 +341,7 @@ export function setupAIHandlers(
         chatRoomId,
         mentionNames,
         triggerMentionNames,
-        ignoredMentionNames: mentionNames.slice(1),
+        ignoredMentionNames: mentionNames.filter((name) => !triggerMentionNames.includes(name)),
       });
 
       // 获取快速对话的目标助手信息（用于注入默认目标）
@@ -257,7 +349,7 @@ export function setupAIHandlers(
         ? await agentService.findById(chatRoom.quickChatAgentId)
         : null;
 
-      // 单条消息最多触发一个助手；多个 @ 时只处理第一个有效助手。
+      // 协调模式下只有内置群调度助手可在单条消息中同时触发多个助手；其他来源只处理第一个有效助手。
       for (const agentName of triggerMentionNames) {
         // Find agent by name
         const agent = activeAgentByName.get(agentName);

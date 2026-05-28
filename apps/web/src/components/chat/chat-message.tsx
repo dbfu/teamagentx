@@ -3,7 +3,7 @@ import { tokenUsageApi } from '@/lib/token-usage-api'
 import { cn, formatDateTime } from '@/lib/utils'
 import { copyToClipboard } from '@/lib/copy-utils'
 import { Bot, CheckSquare, MessageSquareMore, Info, Copy, XCircle, Trash2, Volume2, ChevronDown, ChevronUp, Clock } from 'lucide-react'
-import { memo, useState, useCallback, useMemo } from 'react'
+import { memo, useEffect, useState, useCallback, useMemo, type SyntheticEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { toast } from 'sonner'
 import { ImageViewerModal } from './image-viewer-modal'
@@ -17,6 +17,7 @@ import { toVoicePanelConfig } from '@/lib/agent-speech'
 import { normalizeSpeechText, prewarmTts, speakText, stopSpeechPlayback, supportsSpeechPlayback } from '@/lib/browser-speech'
 import { resolveAssetUrl } from '@/lib/asset-url'
 import { MarkdownContent } from './markdown-content'
+import { isSystemAssistantDetailBlocked } from '@/lib/system-agents'
 
 function logManualVoice(event: string, details: Record<string, unknown>): void {
   console.debug(`[voice-manual] ${event}`, details)
@@ -44,6 +45,7 @@ interface TypingAgent {
   agentId: string
   agentName: string
   status?: 'pending' | 'executing' | 'cancelled'  // 新增状态字段
+  startedAt?: number
 }
 
 interface MentionAgent {
@@ -102,13 +104,14 @@ interface ChatMessageProps {
   onToggleSelection?: (messageId: string) => void
   selectionMode?: boolean
   isSelected?: boolean
+  copyOnlyContextMenu?: boolean
   disableContentCollapse?: boolean
   onStopSpeak?: (messageId: string) => void
   onStartManualSpeak?: (messageId: string) => void
   onCompleteManualSpeak?: (messageId: string) => void
 }
 
-export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = true, isRight, replyTo, replyCount, showSpeechButton = true, typingAgents, mentionAgents, currentUser, onMarkPlayed, onAgentAvatarClick, onTypingAgentClick, onMentionClick, onReplyClick, onExecutionDetailClick, onMentionAgent, onDeleteMessage, onStartMultiSelect, onToggleSelection, selectionMode, isSelected, disableContentCollapse = false, onStopSpeak, onStartManualSpeak, onCompleteManualSpeak }: ChatMessageProps) {
+export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = true, isRight, replyTo, replyCount, showSpeechButton = true, typingAgents, mentionAgents, currentUser, onMarkPlayed, onAgentAvatarClick, onTypingAgentClick, onMentionClick, onReplyClick, onExecutionDetailClick, onMentionAgent, onDeleteMessage, onStartMultiSelect, onToggleSelection, selectionMode, isSelected, copyOnlyContextMenu = false, disableContentCollapse = false, onStopSpeak, onStartManualSpeak, onCompleteManualSpeak }: ChatMessageProps) {
   const isMobile = useIsMobile()
   const allAgents = useChatStore((s) => s.allAgents)
   const isCurrentlyPlaying = useChatStore((s) => s.playingVoiceMessageId === message.id)
@@ -143,7 +146,19 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
 
   // 图片查看器状态
   const [viewerImage, setViewerImage] = useState<{ url: string; name: string } | null>(null)
+  const [durationTick, setDurationTick] = useState(0)
+  const durationNow = useMemo(() => Date.now(), [durationTick])
   // isSpeaking = isCurrentlyPlaying（通过 store 统一管理，手动和自动播放图标一致）
+
+  useEffect(() => {
+    const hasExecutingAgent = typingAgents?.some((agent) => agent.status !== 'pending' && agent.status !== 'cancelled')
+    if (!hasExecutingAgent) return
+
+    const intervalId = window.setInterval(() => {
+      setDurationTick((value) => value + 1)
+    }, 1000)
+    return () => window.clearInterval(intervalId)
+  }, [typingAgents])
 
   // 处理右键菜单（桌面端）
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
@@ -173,7 +188,9 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
   }, [longPressTimer])
 
   // 复制消息内容
-  const handleCopy = useCallback(async () => {
+  const handleCopy = useCallback(async (event?: SyntheticEvent) => {
+    event?.preventDefault()
+    event?.stopPropagation()
     const success = await copyToClipboard(message.content)
     if (success) {
       toast.success('已复制到剪贴板')
@@ -354,13 +371,19 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
         }
 
         if (matchedAgent) {
+          const blocksDetail = isSystemAssistantDetailBlocked(matchedAgent)
           // 渲染高亮的 @助手名
           parts.push(
             <span
               key={`mention-${match.index}`}
-              className="text-primary cursor-pointer hover:text-primary/80 whitespace-nowrap"
-              onClick={() => onMentionClick?.(matchedAgent.id, matchedAgent.name)}
-              title={`点击查看 ${matchedAgent.name} 详情`}
+              className={cn(
+                'text-primary whitespace-nowrap',
+                blocksDetail ? 'cursor-default' : 'cursor-pointer hover:text-primary/80'
+              )}
+              onClick={() => {
+                if (!blocksDetail) onMentionClick?.(matchedAgent.id, matchedAgent.name)
+              }}
+              title={blocksDetail ? undefined : `点击查看 ${matchedAgent.name} 详情`}
             >
               @{mentionName}
             </span>
@@ -447,12 +470,22 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
 
           if (attachmentType === 'image') {
             const imageUrl = resolveAssetUrl(attachment.url)
+            const isTallImage = Boolean(
+              attachment.width &&
+              attachment.height &&
+              attachment.height / attachment.width >= 3
+            )
             return (
               <div key={attachment.id} className="relative">
                 <img
                   src={imageUrl}
                   alt={attachment.filename}
-                  className="max-h-[260px] w-auto max-w-[min(360px,70vw)] rounded-lg cursor-pointer object-contain transition-opacity hover:opacity-90"
+                  className={cn(
+                    'rounded-lg cursor-pointer transition-opacity hover:opacity-90',
+                    isTallImage
+                      ? 'h-[260px] w-[min(220px,70vw)] object-cover object-top'
+                      : 'max-h-[260px] w-auto max-w-[min(360px,70vw)] object-contain'
+                  )}
                   onClick={() => imageUrl && setViewerImage({ url: imageUrl, name: attachment.filename })}
                   loading="lazy"
                 />
@@ -504,6 +537,9 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
           }
 
           const isPending = agent.status === 'pending'
+          const elapsedText = !isPending && agent.startedAt
+            ? formatDuration(durationNow - agent.startedAt)
+            : null
           return (
             <div
               key={agent.agentId}
@@ -523,7 +559,10 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
                   <span className="animate-[dot-appear_1.5s_0.6s_infinite] -translate-y-0.5">.</span>
                 </span>
               )}
-              <span>{agent.agentName} {isPending ? '等待执行' : '执行中'}</span>
+              <span>
+                {agent.agentName} {isPending ? '等待执行' : '执行中'}
+                {elapsedText && ` 耗时：${elapsedText}`}
+              </span>
             </div>
           )
         })}
@@ -586,14 +625,16 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
 
     return (
       <>
-        <button
-          onClick={() => onExecutionDetailClick?.(message.id, message.executionRecordId!)}
-          className="inline-flex items-center gap-1 rounded-full bg-purple-100 dark:bg-purple-900/30 px-2 py-0.5 text-xs text-purple-600 dark:text-purple-400 hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors"
-          title="查看执行详情"
-        >
-          <Info className="size-3" />
-          <span>查看执行详情</span>
-        </button>
+        {onExecutionDetailClick && (
+          <button
+            onClick={() => onExecutionDetailClick(message.id, message.executionRecordId!)}
+            className="inline-flex items-center gap-1 rounded-full bg-purple-100 dark:bg-purple-900/30 px-2 py-0.5 text-xs text-purple-600 dark:text-purple-400 hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors"
+            title="查看执行详情"
+          >
+            <Info className="size-3" />
+            <span>查看执行详情</span>
+          </button>
+        )}
         {message.executionDuration && (
           <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
             耗时：{formatDuration(message.executionDuration)}
@@ -614,18 +655,24 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
 
     return (
       <div
-        className="fixed z-50 min-w-[120px] rounded-lg bg-popover py-1 shadow-lg border border-border"
+        className={cn(
+          "fixed min-w-[120px] rounded-lg bg-popover py-1 shadow-lg border border-border pointer-events-auto",
+          copyOnlyContextMenu ? "z-[1000]" : "z-50"
+        )}
         style={{ left: contextMenuPos.x, top: contextMenuPos.y }}
         onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
       >
         <button
-          onClick={handleCopy}
+          type="button"
+          onPointerDown={copyOnlyContextMenu ? handleCopy : undefined}
+          onClick={copyOnlyContextMenu ? undefined : handleCopy}
           className="flex w-full items-center gap-2 px-3 py-2 text-sm text-popover-foreground hover:bg-accent"
         >
           <Copy className="size-4" />
           复制内容
         </button>
-        {!message.isHuman && message.agentId && message.agent?.name && (
+        {!copyOnlyContextMenu && !message.isHuman && message.agentId && message.agent?.name && (
           <button
             onClick={handleReplyToAgent}
             className="flex w-full items-center gap-2 px-3 py-2 text-sm text-popover-foreground hover:bg-accent"
@@ -634,7 +681,7 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
             回复
           </button>
         )}
-        {onDeleteMessage && (
+        {!copyOnlyContextMenu && onDeleteMessage && (
           <button
             onClick={openDeleteDialog}
             className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
@@ -643,7 +690,7 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
             删除消息
           </button>
         )}
-        {onStartMultiSelect && (
+        {!copyOnlyContextMenu && onStartMultiSelect && (
           <button
             onClick={handleStartMultiSelect}
             className="flex w-full items-center gap-2 px-3 py-2 text-sm text-popover-foreground hover:bg-accent"
@@ -661,7 +708,7 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
 
     const layer = (
       <>
-        <div className="fixed inset-0 z-40" onClick={handleClickOutside} />
+        <div className={cn("fixed inset-0", copyOnlyContextMenu ? "z-[999]" : "z-40")} onClick={handleClickOutside} />
         {renderContextMenu()}
       </>
     )

@@ -7,14 +7,15 @@ import { useChatStore } from '@/stores/chat-store'
 import { chatRoomApi } from '@/lib/agent-api'
 import { toast } from 'sonner'
 import { AgentAvatar } from '../agent-avatar'
+import { isSystemAssistantDetailBlocked } from '@/lib/system-agents'
 
 // 稳定的空数组（避免每次渲染创建新数组）
 const EMPTY_TASKS: { id: string; agentId: string; agentName: string; messageId: string; messageContent: string; status: string; createdAt: string }[] = []
 
 interface AgentDetailPanelProps {
   chatRoomId: string
-  selectedRoomAgent: { id: string; name: string; avatar?: string | null; avatarColor?: string | null; description?: string | null; chatRoomAgentId?: string; agentType?: string; chatRoomId?: string; injectGroupHistory?: boolean } | null
-  setSelectedRoomAgent: (agent: { id: string; name: string; avatar?: string | null; avatarColor?: string | null; description?: string | null; chatRoomAgentId?: string; agentType?: string; chatRoomId?: string; injectGroupHistory?: boolean } | null) => void
+  selectedRoomAgent: { id: string; name: string; avatar?: string | null; avatarColor?: string | null; description?: string | null; chatRoomAgentId?: string; agentType?: string; agentLevel?: string; chatRoomId?: string; injectGroupHistory?: boolean } | null
+  setSelectedRoomAgent: (agent: { id: string; name: string; avatar?: string | null; avatarColor?: string | null; description?: string | null; chatRoomAgentId?: string; agentType?: string; agentLevel?: string; chatRoomId?: string; injectGroupHistory?: boolean } | null) => void
   agentStatus?: AgentStatus
   hasExecutionRecords?: boolean
   onViewHistory: () => void
@@ -60,6 +61,7 @@ export function AgentDetailPanel({
 
   // 总任务数量
   const totalTaskCount = pendingCount + inactiveCount
+  const blocksAssistantDetail = isSystemAssistantDetailBlocked(selectedRoomAgent)
 
   // 清空上下文相关状态
   const [isClearing, setIsClearing] = useState(false)
@@ -215,13 +217,15 @@ export function AgentDetailPanel({
             <History className="size-3.5" />
             {!isActive && hasExecutionRecords ? '最近执行' : '执行历史'}
           </button>
-          <button
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-border bg-background px-3 py-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-            onClick={() => navigate(`/assistant/${selectedRoomAgent?.id}`)}
-          >
-            <ExternalLink className="size-3.5" />
-            助手详情
-          </button>
+          {!blocksAssistantDetail && (
+            <button
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-border bg-background px-3 py-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+              onClick={() => navigate(`/assistant/${selectedRoomAgent?.id}`)}
+            >
+              <ExternalLink className="size-3.5" />
+              助手详情
+            </button>
+          )}
         </div>
 
         {/* 清空上下文 */}

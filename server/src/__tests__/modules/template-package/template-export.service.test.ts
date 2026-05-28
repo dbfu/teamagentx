@@ -39,7 +39,19 @@ describe('template export service', () => {
         },
       ],
       categories: [{ id: 'cat-1', name: '客服', description: '客服分类', sortOrder: 1 }],
-      cronTasks: [{ id: 'cron-1', name: '日报', payload: 'send summary' }],
+      cronTasks: [{
+        id: 'cron-1',
+        name: '日报',
+        description: '每天晨报',
+        scheduleType: 'cron',
+        cronExpression: '0 9 * * *',
+        intervalMinutes: null,
+        scheduledAt: null,
+        payload: 'send summary',
+        agentIds: ['agent-1'],
+        enabled: true,
+        maxRetries: 3,
+      }],
     });
 
     assert.equal(payload.manifest.templateId, 'tpl-customer-support');
@@ -51,6 +63,10 @@ describe('template export service', () => {
     assert.equal(payload.capabilityDescriptors[0]?.capabilityType, 'text');
     assert.equal(payload.skills.length, 0);
     assert.equal(payload.skillUsages.length, 0);
+    assert.equal(payload.snapshot.cronTasks[0]?.scheduleType, 'cron');
+    assert.equal(payload.snapshot.cronTasks[0]?.cronExpression, '0 9 * * *');
+    assert.deepEqual(payload.snapshot.cronTasks[0]?.agentIds, ['agent-1']);
+    assert.equal(payload.snapshot.cronTasks[0]?.enabled, true);
   });
 
   test('omits skills and cron tasks when export options disable them', () => {
@@ -86,12 +102,24 @@ describe('template export service', () => {
         },
       ],
       categories: [],
-      cronTasks: [{ id: 'cron-1', name: '日报', payload: 'send summary' }],
+      cronTasks: [{
+        id: 'cron-1',
+        name: '日报',
+        description: null,
+        scheduleType: 'once',
+        cronExpression: null,
+        intervalMinutes: null,
+        scheduledAt: '2026-05-26T09:00:00.000Z',
+        payload: 'send summary',
+        agentIds: [],
+        enabled: false,
+        maxRetries: 3,
+      }],
       skills: [{
         slug: 'browser-use',
         name: 'Browser Use',
         description: 'Test',
-        files: [{ path: 'SKILL.md', content: 'body' }],
+        files: [{ path: 'SKILL.md', content: Buffer.from('body') }],
         origin: null,
       }],
       skillUsages: [{ agentId: 'agent-1', slug: 'browser-use' }],

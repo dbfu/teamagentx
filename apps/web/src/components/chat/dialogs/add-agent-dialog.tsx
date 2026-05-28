@@ -22,6 +22,10 @@ export function AddAgentDialog({
   const [selectedAgents, setSelectedAgents] = useState<Set<string>>(new Set())
   const [searchQuery, setSearchQuery] = useState('')
   const [isAdding, setIsAdding] = useState(false)
+  const selectableAgents = useMemo(
+    () => availableAgents.filter((agent) => agent.agentLevel !== 'system'),
+    [availableAgents]
+  )
 
   // 当对话框打开时，重置状态
   useEffect(() => {
@@ -30,7 +34,7 @@ export function AddAgentDialog({
       setSelectedAgents(new Set())
       // 从当前 availableAgents 计算所有分类 ID
       const categoryIds = new Set<string>()
-      for (const agent of availableAgents) {
+      for (const agent of selectableAgents) {
         if (agent.categoryId) {
           categoryIds.add(agent.categoryId)
         }
@@ -38,17 +42,17 @@ export function AddAgentDialog({
       categoryIds.add('__uncategorized__')
       setExpandedCategories(categoryIds)
     }
-  }, [open, availableAgents])
+  }, [open, selectableAgents])
 
   // 根据搜索词过滤助手
   const filteredAgents = useMemo(() => {
-    if (!searchQuery.trim()) return availableAgents
+    if (!searchQuery.trim()) return selectableAgents
     const query = searchQuery.toLowerCase()
-    return availableAgents.filter(agent =>
+    return selectableAgents.filter(agent =>
       agent.name.toLowerCase().includes(query) ||
       agent.description?.toLowerCase().includes(query)
     )
-  }, [availableAgents, searchQuery])
+  }, [selectableAgents, searchQuery])
 
   // 对助手进行分组（基于过滤后的列表）
   const groupedAgents = useMemo(() => {

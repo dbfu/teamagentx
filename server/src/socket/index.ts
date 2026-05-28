@@ -6,8 +6,10 @@ import {
   getAgentStatuses,
   stopAgentExecution,
   getCachedStreamEvents,
+  taskExecutionStartedAt,
   processQueue,
   broadcastAgentStatus,
+  setGlobalBroadcastMessage,
   type AgentStatus,
 } from '../core/agent/agent-handler/index.js';
 import type { ToolCall } from '../core/agent/executor.interface.js';
@@ -17,6 +19,7 @@ import { chatRoomService } from '../modules/chatroom/chatroom.service.js';
 import { messageService } from '../modules/message/message.service.js';
 import { userService } from '../modules/user/user.service.js';
 import { taskQueueService } from '../modules/task-queue/task-queue.service.js';
+import { todoService } from '../modules/todo/todo.service.js';
 import { bridgeService, setBridgeInboundMessageBroadcaster } from '../modules/bridge/bridge.service.js';
 import { startTypingLoop, stopTypingLoop } from '../modules/bridge/typing-loop.js';
 import { Message, Attachment } from '../types/message.js';
@@ -73,6 +76,7 @@ export function setupSocket(io: Server) {
     }
   };
   setBridgeInboundMessageBroadcaster(emitMessageToChatRoomMembers);
+  setGlobalBroadcastMessage(emitMessageToChatRoomMembers);
 
   // Emit function for AI responses - broadcasts to specific chatRoom room
   // 同时给群聊里所有用户发送未读更新通知
@@ -82,7 +86,7 @@ export function setupSocket(io: Server) {
   };
 
   // Emit typing indicator when agent starts working
-  const emitTyping = (data: { messageId: string; agentId: string; agentName: string; status?: 'pending' | 'executing' }, chatRoomId: string) => {
+  const emitTyping = (data: { messageId: string; agentId: string; agentName: string; status?: 'pending' | 'executing'; startedAt?: number }, chatRoomId: string) => {
     io.to(chatRoomId).emit('agent:typing', data);
     startTypingLoop(chatRoomId).catch(console.error);
   };
@@ -126,6 +130,10 @@ export function setupSocket(io: Server) {
   // Emit agent status changes - 广播给所有用户，让离开群聊的用户也能收到状态更新
   const emitStatus = (data: { chatRoomId: string; statuses: Record<string, AgentStatus>; queueCounts?: Record<string, number> }, chatRoomId2: string) => {
     io.emit('agent:status', data);  // 广播给所有用户
+  };
+
+  const emitTodoCreated = (todo: any, userId: string) => {
+    io.to(`user:${userId}`).emit('todo:created', todo);
   };
 
   // Broadcast task queue update to chatRoom
@@ -172,7 +180,7 @@ export function setupSocket(io: Server) {
     }
   }
 
-  setupAIHandlers(emit, emitTyping, emitDone, emitStream, emitToolCall, emitThinking, emitStatus, broadcastTaskQueue, emitChatRoomCreated, emitAgentsUpdated);
+  setupAIHandlers(emit, emitTyping, emitDone, emitStream, emitToolCall, emitThinking, emitStatus, emitTodoCreated, broadcastTaskQueue, emitChatRoomCreated, emitAgentsUpdated);
 
   // Socket authentication middleware
   io.use(async (socket: AuthenticatedSocket, next) => {
@@ -550,6 +558,9 @@ export function setupSocket(io: Server) {
               agentId: task.agentId,
               agentName: task.agentName,
               status: task.status === 'executing' ? 'executing' : 'pending',
+              startedAt: task.status === 'executing'
+                ? taskExecutionStartedAt.get(task.id) ?? task.createdAt.getTime()
+                : undefined,
             });
 
             // 发送缓存的流式事件
@@ -571,22 +582,45 @@ export function setupSocket(io: Server) {
     });
 
     // Stop agent execution
-    socket.on('agent:stop', async (data: { chatRoomId: string; agentId: string }) => {
+    socket.on('agent:stop', async (data: { chatRoomId: string; agentId?: string; messageId?: string }) => {
       try {
-        const { chatRoomId, agentId } = data;
-        console.log(`[agent:stop] 收到停止请求: chatRoomId=${chatRoomId}, agentId=${agentId}`);
+        const { chatRoomId, messageId } = data;
+        let { agentId } = data;
+
+        if (messageId) {
+          const activeTasks = await taskQueueService.getActiveTasks(chatRoomId);
+          const matchedTask = activeTasks.find(task =>
+            task.messageId === messageId && (!agentId || task.agentId === agentId)
+          ) ?? activeTasks.find(task => task.messageId === messageId);
+
+          if (matchedTask) {
+            agentId = matchedTask.agentId;
+          }
+        }
+
+        if (!agentId) {
+          socket.emit('agent:stop-failed', {
+            chatRoomId,
+            messageId,
+            message: '未找到要停止的助手'
+          });
+          return;
+        }
+
+        console.log(`[agent:stop] 收到停止请求: chatRoomId=${chatRoomId}, agentId=${agentId}, messageId=${messageId ?? '-'}`);
 
         const stopped = stopAgentExecution(chatRoomId, agentId);
 
         if (stopped) {
           // 通知前端已停止
-          socket.emit('agent:stopped', { chatRoomId, agentId });
+          socket.emit('agent:stopped', { chatRoomId, agentId, messageId });
           // 广播给群聊里的所有人
-          socket.to(chatRoomId).emit('agent:stopped', { chatRoomId, agentId });
+          socket.to(chatRoomId).emit('agent:stopped', { chatRoomId, agentId, messageId });
         } else {
           socket.emit('agent:stop-failed', {
             chatRoomId,
             agentId,
+            messageId,
             message: '未找到正在执行的任务'
           });
         }
@@ -771,6 +805,66 @@ export function setupSocket(io: Server) {
       } catch (error) {
         console.error('Error getting unread counts:', error);
         socket.emit('error', { message: 'Failed to get unread counts' });
+      }
+    });
+
+    socket.on('todo:request', async () => {
+      try {
+        const user = socket.data.user;
+        if (!user) {
+          socket.emit('error', { message: 'User not authenticated' });
+          return;
+        }
+
+        const todos = await todoService.getByOwnerUserId(user.id, 'pending');
+        socket.emit('todo:list', { todos });
+      } catch (error) {
+        console.error('Error getting todos:', error);
+        socket.emit('error', { message: 'Failed to get todos' });
+      }
+    });
+
+    socket.on('todo:complete', async (data: { todoId: string }) => {
+      try {
+        const user = socket.data.user;
+        if (!user) {
+          socket.emit('error', { message: 'User not authenticated' });
+          return;
+        }
+
+        const todo = await todoService.getById(data.todoId);
+        if (!todo || todo.ownerUserId !== user.id) {
+          socket.emit('error', { message: '待办不存在或无权限' });
+          return;
+        }
+
+        await todoService.complete(data.todoId);
+        io.to(`user:${user.id}`).emit('todo:updated', { todoId: data.todoId, status: 'completed' });
+      } catch (error) {
+        console.error('Error completing todo:', error);
+        socket.emit('error', { message: 'Failed to complete todo' });
+      }
+    });
+
+    socket.on('todo:dismiss', async (data: { todoId: string }) => {
+      try {
+        const user = socket.data.user;
+        if (!user) {
+          socket.emit('error', { message: 'User not authenticated' });
+          return;
+        }
+
+        const todo = await todoService.getById(data.todoId);
+        if (!todo || todo.ownerUserId !== user.id) {
+          socket.emit('error', { message: '待办不存在或无权限' });
+          return;
+        }
+
+        await todoService.dismiss(data.todoId);
+        io.to(`user:${user.id}`).emit('todo:updated', { todoId: data.todoId, status: 'dismissed' });
+      } catch (error) {
+        console.error('Error dismissing todo:', error);
+        socket.emit('error', { message: 'Failed to dismiss todo' });
       }
     });
 

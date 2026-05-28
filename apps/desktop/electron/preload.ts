@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   getOpenAtLoginSettings: () => ipcRenderer.invoke('app:get-open-at-login-settings'),
   setOpenAtLogin: (enabled: boolean) => ipcRenderer.invoke('app:set-open-at-login', enabled),
+  setActiveTaskState: (state: { hasActiveTasks: boolean; executingRoomCount: number }) =>
+    ipcRenderer.send('app:active-task-state', state),
   checkForUpdates: () => ipcRenderer.invoke('update:check'),
   downloadUpdate: (update: {
     version: string;
@@ -40,6 +42,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     terminalTarget: 'terminal-app' | 'iterm2' | 'alacritty' | 'kitty' | 'ghostty' | 'wezterm' | 'kaku' = 'terminal-app'
   ) => ipcRenderer.invoke('terminal:run-command', { path, command, terminalTarget }),
   selectFolder: () => ipcRenderer.invoke('select-folder'),
+  exportPdf: (payload: { html: string; filename: string }) => ipcRenderer.invoke('pdf:export', payload),
   // 使用默认浏览器打开外部链接
   openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
   setBadgeCount: (count: number) => ipcRenderer.invoke('notification:set-badge-count', count),

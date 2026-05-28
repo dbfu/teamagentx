@@ -17,6 +17,7 @@ declare global {
       data?: OpenAtLoginSettings;
       error?: string;
     }>;
+    setActiveTaskState?: (state: { hasActiveTasks: boolean; executingRoomCount: number }) => void;
     checkForUpdates: () => Promise<{
       success: boolean;
       data?: { hasUpdate: boolean; currentVersion: string; update: UpdateInfo | null; noUrlConfigured?: boolean };
@@ -38,6 +39,10 @@ declare global {
       terminalTarget?: 'terminal-app' | 'iterm2' | 'alacritty' | 'kitty' | 'ghostty' | 'wezterm' | 'kaku'
     ) => Promise<{ success: boolean; error?: string }>;
     selectFolder: () => Promise<{ success: boolean; path: string | null }>;
+    exportPdf?: (payload: {
+      html: string;
+      filename: string;
+    }) => Promise<{ success: boolean; filePath?: string; canceled?: boolean; error?: string }>;
     openExternal: (url: string) => Promise<{ success: boolean; error?: string }>;
     setBadgeCount: (count: number) => Promise<{ success: boolean; error?: string }>;
   showNotification: (payload: { title: string; body: string; chatRoomId?: string }) => Promise<{ success: boolean; error?: string }>;

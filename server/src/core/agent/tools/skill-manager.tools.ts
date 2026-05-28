@@ -10,6 +10,7 @@ import { agentService } from '../../../core/agent/agent.service.js';
 import { messageService } from '../../../modules/message/message.service.js';
 import { skillInstallService } from '../../../modules/skill/skill-install.service.js';
 import { replaceWithSkillDirectoryLink } from '../../../modules/skill/skill-link.js';
+import { readSkillMetadata } from '../../../modules/skill/skill-metadata.js';
 import { getSharedSkillsDir } from '../../../modules/skill/preinstalled-skills.js';
 import { GROUP_ASSISTANT_ID } from '../system-assistant.constants.js';
 import { clearExecutorCacheEntries } from '../agent-handler/cache.js';
@@ -238,23 +239,9 @@ export const listSharedSkillsTool = tool(
         let description = '';
         let source = 'unknown';
 
-        try {
-          const content = fs.readFileSync(skillMdPath, 'utf-8');
-          const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
-          if (frontmatterMatch) {
-            const lines = frontmatterMatch[1].split('\n');
-            for (const line of lines) {
-              const match = line.match(/^(\w+):\s*(.+)$/);
-              if (match) {
-                const [, key, value] = match;
-                if (key === 'name') name = value.replace(/^["']|["']$/g, '');
-                if (key === 'description') description = value.replace(/^["']|["']$/g, '');
-              }
-            }
-          }
-        } catch {
-          // 忽略解析错误
-        }
+        const metadata = readSkillMetadata(skillMdPath);
+        name = metadata.name || name;
+        description = metadata.description || description;
 
         // 读取 origin.json
         if (fs.existsSync(originPath)) {
@@ -348,23 +335,9 @@ export const listAgentSkillsTool = tool(
         let name = entry.name;
         let description = '';
 
-        try {
-          const content = fs.readFileSync(skillMdPath, 'utf-8');
-          const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
-          if (frontmatterMatch) {
-            const lines = frontmatterMatch[1].split('\n');
-            for (const line of lines) {
-              const match = line.match(/^(\w+):\s*(.+)$/);
-              if (match) {
-                const [, key, value] = match;
-                if (key === 'name') name = value.replace(/^["']|["']$/g, '');
-                if (key === 'description') description = value.replace(/^["']|["']$/g, '');
-              }
-            }
-          }
-        } catch {
-          // 忽略解析错误
-        }
+        const metadata = readSkillMetadata(skillMdPath);
+        name = metadata.name || name;
+        description = metadata.description || description;
 
         skills.push({ name, description, isSymlink });
       }

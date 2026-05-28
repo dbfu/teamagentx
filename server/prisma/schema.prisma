@@ -67,24 +67,24 @@ enum AgentCapabilityType {
 
 // LLM 供应商配置
 model LlmProvider {
-  id               String          @id @default(uuid())
-  name             String          @unique
-  type             LlmProviderType @default(custom)
-  modelType        LlmModelType    @default(text)
-  apiProtocol      String          @default("anthropic") // 'anthropic' | 'openai'
-  apiUrl           String?
-  apiKey           String // 明文存储（本地应用）
-  model            String
-  sttModel         String?          // 语音识别模型（audio 类型专用，留空则与 model 共用）
-  audioUsage       String           @default("both") // audio 类型用途：tts | stt | both
-  imageProvider    String?
-  imageApiType     ImageGenApiType?
-  supportsThinking Boolean? // 是否支持思考模式（null 表示未检测）
-  isActive         Boolean         @default(true)
-  isDefault        Boolean         @default(false)
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
-  agents           Agent[]
+  id                String            @id @default(uuid())
+  name              String            @unique
+  type              LlmProviderType   @default(custom)
+  modelType         LlmModelType      @default(text)
+  apiProtocol       String            @default("anthropic") // 'anthropic' | 'openai'
+  apiUrl            String?
+  apiKey            String // 明文存储（本地应用）
+  model             String
+  sttModel          String? // 语音识别模型（audio 类型专用，留空则与 model 共用）
+  audioUsage        String            @default("both") // audio 类型用途：tts | stt | both
+  imageProvider     String?
+  imageApiType      ImageGenApiType?
+  supportsThinking  Boolean? // 是否支持思考模式（null 表示未检测）
+  isActive          Boolean           @default(true)
+  isDefault         Boolean           @default(false)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  agents            Agent[]
   agentCapabilities AgentCapability[] @relation("CapabilityProvider")
 
   @@index([name])
@@ -117,6 +117,7 @@ model Agent {
   workDir           String? // 工作目录（适用于所有类型）
   proxyConfig       String? // ACP 工具代理配置（如 Codex 本地模式代理地址或 export 片段）
   codexModel        String? // Codex 本地配置模式下指定的模型名称
+  codexFastMode     Boolean            @default(false) // Codex Fast service tier
   claudeModel       String? // Claude 本地配置模式下指定的模型名称
   thinkingMode      String             @default("high") // 思考模式: off | low | medium | high
   isActive          Boolean            @default(true)
@@ -132,10 +133,10 @@ model Agent {
   messages          Message[]
   roomMemories      AgentRoomMemory[]
   quickChatSessions QuickChatSession[] // 快速对话会话
-  triggeredTodos    Todo[] // 旧待办数据关系（运行时待办功能已移除）
+  triggeredTodos    Todo[] // 助手 @ 用户触发的待办
   externalChannels  ExternalChannel[] // 作为默认助手的外部频道
-  platformConfigs   PlatformConfig[]  // 作为平台全局默认助手
-  bridgeBots        BridgeBot[]       // 外部平台机器人实例
+  platformConfigs   PlatformConfig[] // 作为平台全局默认助手
+  bridgeBots        BridgeBot[] // 外部平台机器人实例
   capabilities      AgentCapability[]
 
   @@index([name])
@@ -164,29 +165,30 @@ model AgentCapability {
 }
 
 model ChatRoom {
-  id                String             @id
+  id                String                   @id
   name              String
   description       String?
   rules             String? // 群规则/指南，注入到群内所有 Agent 的上下文
   workDir           String? // 群聊工作目录
   ownerId           String?
-  isQuickChatRoom   Boolean            @default(false) // 标识为快速对话临时群聊
+  isQuickChatRoom   Boolean                  @default(false) // 标识为快速对话临时群聊
   quickChatAgentId  String? // 关联的快速对话助手
   defaultAgentId    String? // 群主无 @ 发言时默认触发的助手
-  agentTriggerMode  String             @default("auto") // 助手触发模式：auto(自动) | manual(手动)，手动模式下助手消息的 @ 不触发其他助手
-  isPinned          Boolean            @default(false) // 是否置顶
+  agentTriggerMode  String                   @default("auto") // 助手触发模式：auto(自动) | manual(手动)，手动模式下助手消息的 @ 不触发其他助手
+  isPinned          Boolean                  @default(false) // 是否置顶
   pinnedAt          DateTime? // 置顶时间
-  createdAt         DateTime           @default(now())
+  createdAt         DateTime                 @default(now())
   updatedAt         DateTime
   avatar            String?
   avatarColor       String?
-  owner             User?              @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  owner             User?                    @relation(fields: [ownerId], references: [id], onDelete: SetNull)
   chatRoomAgents    ChatRoomAgent[]
   messages          Message[]
+  messageArchives   ChatRoomMessageArchive[]
   agentMemories     AgentRoomMemory[]
   quickChatSessions QuickChatSession[] // 快速对话会话
   cronTasks         CronTask[] // 定时任务
-  todos             Todo[] // 旧待办数据关系（运行时待办功能已移除）
+  todos             Todo[] // 助手 @ 用户触发的待办
   externalChannels  ExternalChannel[] // 关联的外部平台频道
   platformConfigs   PlatformConfig[] // 直接绑定到该群聊的平台机器人
   bridgeBots        BridgeBot[] // 直接绑定到该群聊的机器人实例
@@ -219,36 +221,58 @@ model ChatRoomAgent {
 }
 
 model Message {
-  id                String            @id
-  type              String            @default("MESSAGE")
+  id                String                  @id
+  type              String                  @default("MESSAGE")
   content           String
-  time              DateTime          @default(now())
+  time              DateTime                @default(now())
   userId            String?
   agentId           String?
   chatRoomId        String
   replyMessageId    String?
-  isHuman           Boolean           @default(true)
+  isHuman           Boolean                 @default(true)
   executionRecordId String? // 关联的执行记录 ID
+  archiveId         String? // 归档记录 ID；null 表示当前可见消息
   executionDuration Int? // 执行耗时（毫秒）
   totalTokens       Int? // 消息消耗的 token 数
   cacheReadTokens   Int? // 缓存读取 token 数
-  createdAt         DateTime          @default(now())
+  createdAt         DateTime                @default(now())
   updatedAt         DateTime
-  replyTo           Message?          @relation("MessageToMessage", fields: [replyMessageId], references: [id])
-  replies           Message[]         @relation("MessageToMessage")
-  chatRoom          ChatRoom          @relation(fields: [chatRoomId], references: [id], onDelete: Cascade)
-  agent             Agent?            @relation(fields: [agentId], references: [id])
-  user              User?             @relation(fields: [userId], references: [id])
-  executionRecord   ExecutionRecord?  @relation(fields: [executionRecordId], references: [id], onDelete: SetNull)
+  replyTo           Message?                @relation("MessageToMessage", fields: [replyMessageId], references: [id])
+  replies           Message[]               @relation("MessageToMessage")
+  chatRoom          ChatRoom                @relation(fields: [chatRoomId], references: [id], onDelete: Cascade)
+  agent             Agent?                  @relation(fields: [agentId], references: [id])
+  user              User?                   @relation(fields: [userId], references: [id])
+  executionRecord   ExecutionRecord?        @relation(fields: [executionRecordId], references: [id], onDelete: SetNull)
+  archive           ChatRoomMessageArchive? @relation(fields: [archiveId], references: [id], onDelete: SetNull)
   attachments       Attachment[] // 消息附件（图片等）
-  todo              Todo? // 旧待办数据关系（运行时待办功能已移除）
-  coveredMemories   AgentRoomMemory[] @relation("AgentRoomMemoryCoveredMessage")
+  todo              Todo? // 助手 @ 用户触发的待办
+  coveredMemories   AgentRoomMemory[]       @relation("AgentRoomMemoryCoveredMessage")
 
   @@index([time])
   @@index([chatRoomId])
   @@index([agentId])
   @@index([userId])
   @@index([executionRecordId])
+  @@index([archiveId])
+}
+
+model ChatRoomMessageArchive {
+  id           String    @id @default(uuid())
+  chatRoomId   String
+  title        String
+  messageCount Int       @default(0)
+  startedAt    DateTime?
+  endedAt      DateTime?
+  archivedAt   DateTime  @default(now())
+  createdBy    String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  chatRoom ChatRoom  @relation(fields: [chatRoomId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@index([chatRoomId, archivedAt])
+  @@index([createdBy])
 }
 
 // 群聊中某个助手的长期摘要记忆
@@ -419,6 +443,7 @@ model TemplatePackage {
   compatibilityJson String?
   createdBy         String?
   createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   @@index([templateId, version])
 }
@@ -442,19 +467,19 @@ model TemplateImportRecord {
 
 // 消息附件（图片等）
 model Attachment {
-  id        String         @id @default(uuid())
-  messageId String
-  type      AttachmentType @default(image)
-  filename  String // 原始文件名
-  mimeType  String // MIME 类型
-  size      Int // 文件大小（字节）
-  url       String // 访问 URL
-  width     Int? // 图片宽度（像素）
-  height    Int? // 图片高度（像素）
+  id         String         @id @default(uuid())
+  messageId  String
+  type       AttachmentType @default(image)
+  filename   String // 原始文件名
+  mimeType   String // MIME 类型
+  size       Int // 文件大小（字节）
+  url        String // 访问 URL
+  width      Int? // 图片宽度（像素）
+  height     Int? // 图片高度（像素）
   durationMs Int? // 音频时长（毫秒）
   transcript String? // 音频转写文本
-  waveform  String? // 预留波形数据
-  createdAt DateTime       @default(now())
+  waveform   String? // 预留波形数据
+  createdAt  DateTime       @default(now())
 
   message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
 
@@ -476,7 +501,7 @@ model User {
   ownedChatRooms ChatRoom[]
   chatRoomAgents ChatRoomAgent[]
   messages       Message[]
-  todos          Todo[] // 旧待办数据关系（运行时待办功能已移除）
+  todos          Todo[] // 助手 @ 用户触发的待办
   bridgeBots     BridgeBot[]
 
   @@index([username])
@@ -520,14 +545,14 @@ model BackgroundTask {
   @@index([startedAt])
 }
 
-// 旧待办事项数据表（运行时待办功能已移除，暂保留表结构避免破坏历史数据）
+// 待办事项数据表。助手 @ 群内用户时自动创建待办提醒。
 model Todo {
   id             String     @id @default(uuid())
   chatRoomId     String
-  messageId      String     @unique // 旧触发消息 ID（一条消息最多关联一个旧待办）
+  messageId      String     @unique // 触发消息 ID（一条消息最多关联一个待办）
   triggerAgentId String
-  ownerUserId    String? // 群主用户 ID（可为空）
-  contentSummary String // 旧待办内容摘要
+  ownerUserId    String? // 被 @ 的用户 ID（可为空）
+  contentSummary String // 待办内容摘要
   status         TodoStatus @default(pending)
   completedAt    DateTime?
   createdAt      DateTime   @default(now())
@@ -547,8 +572,8 @@ model Todo {
 model PlatformConfig {
   id             String   @id @default(uuid())
   platform       String   @unique
-  botToken       String?  // 全局 Bot Token（加密存储）
-  config         String?  // 平台凭证配置（加密 JSON 存储）
+  botToken       String? // 全局 Bot Token（加密存储）
+  config         String? // 平台凭证配置（加密 JSON 存储）
   defaultAgentId String?
   chatRoomId     String?  @unique
   enabled        Boolean  @default(true)
@@ -556,7 +581,7 @@ model PlatformConfig {
   updatedAt      DateTime @updatedAt
 
   chatRoom     ChatRoom? @relation(fields: [chatRoomId], references: [id], onDelete: SetNull)
-  defaultAgent Agent? @relation(fields: [defaultAgentId], references: [id], onDelete: SetNull)
+  defaultAgent Agent?    @relation(fields: [defaultAgentId], references: [id], onDelete: SetNull)
 }
 
 // 外部平台机器人实例（同一平台可配置多个凭证实例）
@@ -566,7 +591,7 @@ model BridgeBot {
   name           String
   botToken       String?
   config         String?
-  credentialHash String?  // SHA-256(platform + 凭证明文)，用于去重
+  credentialHash String? // SHA-256(platform + 凭证明文)，用于去重
   defaultAgentId String?
   chatRoomId     String?
   ownerId        String?
@@ -586,17 +611,17 @@ model BridgeBot {
 
 // 桥接事件日志
 model BridgeEvent {
-  id          String   @id @default(uuid())
-  platform    String
-  externalId  String
-  direction   String   // inbound | outbound
-  status      String   // success | failed
-  messageId   String?
-  dedupeKey   String?  @unique
+  id             String   @id @default(uuid())
+  platform       String
+  externalId     String
+  direction      String // inbound | outbound
+  status         String // success | failed
+  messageId      String?
+  dedupeKey      String?  @unique
   contentPreview String?
-  agentName   String?
-  errorMsg    String?
-  createdAt   DateTime @default(now())
+  agentName      String?
+  errorMsg       String?
+  createdAt      DateTime @default(now())
 
   @@index([platform, createdAt])
   @@index([createdAt])
@@ -605,13 +630,13 @@ model BridgeEvent {
 // 外部聊天平台频道（Telegram / 飞书 / 钉钉 / 企业微信 / QQ）
 model ExternalChannel {
   id             String   @id @default(uuid())
-  platform       String   // telegram | feishu | dingtalk | wecom | qq
-  externalId     String   // 平台侧群 ID（chat_id / open_chat_id 等）
+  platform       String // telegram | feishu | dingtalk | wecom | qq
+  externalId     String // 平台侧群 ID（chat_id / open_chat_id 等）
   chatRoomId     String
-  botToken       String?  // 平台机器人 Token
-  webhookSecret  String?  // Webhook 验签密钥
-  defaultAgentId String?  // 该群默认 Agent（为空时使用 ChatRoom 默认 Agent）
-  config         String?  // 平台特定配置（JSON 字符串）
+  botToken       String? // 平台机器人 Token
+  webhookSecret  String? // Webhook 验签密钥
+  defaultAgentId String? // 该群默认 Agent（为空时使用 ChatRoom 默认 Agent）
+  config         String? // 平台特定配置（JSON 字符串）
   enabled        Boolean  @default(true)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -621,4 +646,32 @@ model ExternalChannel {
 
   @@unique([platform, externalId])
   @@index([chatRoomId])
+}
+
+// LangGraph checkpoint 存储（运行时由 LangGraph checkpointer 管理）
+model Checkpoint {
+  threadId          String  @map("thread_id")
+  checkpointNs      String  @default("") @map("checkpoint_ns")
+  checkpointId      String  @map("checkpoint_id")
+  parentCheckpointId String? @map("parent_checkpoint_id")
+  type              String?
+  checkpoint        Bytes?
+  metadata          Bytes?
+
+  @@id([threadId, checkpointNs, checkpointId])
+  @@map("checkpoints")
+}
+
+model CheckpointWrite {
+  threadId      String  @map("thread_id")
+  checkpointNs  String  @default("") @map("checkpoint_ns")
+  checkpointId  String  @map("checkpoint_id")
+  taskId        String  @map("task_id")
+  idx           Int     @map("idx")
+  channel       String
+  type          String?
+  value         Bytes?
+
+  @@id([threadId, checkpointNs, checkpointId, taskId, idx])
+  @@map("writes")
 }

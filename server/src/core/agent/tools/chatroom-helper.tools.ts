@@ -7,7 +7,10 @@ import { createSystemTool as tool } from './system-tool.js';
 import { chatRoomService } from '../../../modules/chatroom/chatroom.service.js';
 import { agentService } from '../../../core/agent/agent.service.js';
 import { broadcastChatRoomCreated, broadcastAgentsUpdated } from '../agent-handler/status.js';
-import { broadcastAgentJoinedMessage } from '../agent-handler/message-utils.js';
+import {
+  broadcastAgentJoinedMessage,
+  broadcastChatRoomRulesUpdatedMessage,
+} from '../agent-handler/message-utils.js';
 import { clearExecutorCacheEntries } from '../agent-handler/cache.js';
 
 // 群聊管理助手的专用 ID
@@ -285,8 +288,11 @@ export const updateChatRoomRulesTool = tool(
         return JSON.stringify({ success: false, error: `群聊不存在: ${chatRoomId}` });
       }
 
-      await chatRoomService.update(chatRoomId, { rules });
+      const updatedChatRoom = await chatRoomService.update(chatRoomId, { rules });
       clearExecutorCacheEntries(undefined, chatRoomId);
+      if ((chatRoom.rules ?? '') !== (updatedChatRoom.rules ?? '')) {
+        await broadcastChatRoomRulesUpdatedMessage(chatRoomId, updatedChatRoom.rules);
+      }
 
       return JSON.stringify({
         success: true,

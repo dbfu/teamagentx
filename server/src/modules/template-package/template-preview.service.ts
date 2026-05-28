@@ -5,28 +5,25 @@ import {
 } from './capability-mapper.js';
 import {
   detectTemplateConflicts,
-  type ExistingTemplateImport,
 } from './conflict-detector.js';
 import {
   parseTemplateManifest,
 } from './template-manifest.js';
+import type { DegradedTemplateSkill } from './template-skill-packager.js';
 
 interface PreviewTemplatePackageInput {
   manifestInput: unknown;
   desiredGroupName: string;
-  existingImports: ExistingTemplateImport[];
   existingGroupNames: string[];
   capabilityDescriptors: CapabilityDescriptor[];
+  degradedSkills?: DegradedTemplateSkill[];
   localProviders: LocalCapabilityProvider[];
 }
 
 export function previewTemplatePackage(input: PreviewTemplatePackageInput) {
   const manifest = parseTemplateManifest(input.manifestInput);
   const conflicts = detectTemplateConflicts({
-    templateId: manifest.templateId,
-    version: manifest.version,
     desiredGroupName: input.desiredGroupName,
-    existingImports: input.existingImports,
     existingGroupNames: input.existingGroupNames,
   });
 
@@ -46,5 +43,6 @@ export function previewTemplatePackage(input: PreviewTemplatePackageInput) {
     },
     conflicts,
     compatibility,
+    degradedSkills: input.degradedSkills ?? [],
   };
 }

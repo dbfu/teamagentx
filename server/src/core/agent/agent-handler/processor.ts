@@ -5,11 +5,13 @@ import { executionRecordService, type ExecutionEvent } from '../../../modules/ex
 import { recoveryService } from '../../../modules/recovery/recovery.service.js';
 import { stopTypingLoop } from '../../../modules/bridge/typing-loop.js';
 import { messageService } from '../../../modules/message/message.service.js';
+import { todoService } from '../../../modules/todo/todo.service.js';
 import { agentService } from '../agent.service.js';
 import {
   processingMap,
   abortControllers,
   discardExecutionResultKeys,
+  taskExecutionStartedAt,
   streamEventsCache,
 } from './cache.js';
 import {
@@ -20,6 +22,7 @@ import {
   globalEmitToolCall,
   globalEmitThinking,
   globalEmitStatus,
+  globalEmitTodoCreated,
   globalBroadcastTaskQueue,
   broadcastAgentStatus,
   broadcastAgentTaskQueue,
@@ -54,11 +57,13 @@ export async function processQueue(chatRoomId: string, agentId: string) {
 
       // 标记任务为 executing 状态
       await taskQueueService.updateStatus(task.id, 'executing');
+      const startedAt = Date.now();
+      taskExecutionStartedAt.set(task.id, startedAt);
 
       // 发送 typing 事件（让前端初始化流式面板）
       if (globalEmitTyping) {
         globalEmitTyping(
-          { messageId: task.messageId, agentId: task.agentId, agentName: task.agentName, status: 'executing' },
+          { messageId: task.messageId, agentId: task.agentId, agentName: task.agentName, status: 'executing', startedAt },
           chatRoomId,
         );
       }
@@ -193,6 +198,29 @@ export async function processQueue(chatRoomId: string, agentId: string) {
                 agentId: task.agentId,
                 agentName: task.agentName,
               });
+            }
+
+            try {
+              const todo = await todoService.createFromMentionedUser({
+                chatRoomId,
+                messageId: aiMessage.id,
+                messageTime: aiMessage.time,
+                triggerAgentId: task.agentId,
+                triggerAgentName: task.agentName,
+                content,
+              });
+
+              if (todo?.ownerUserId && globalEmitTodoCreated) {
+                globalEmitTodoCreated(todo, todo.ownerUserId);
+                debugLog('todoCreated', {
+                  chatRoomId,
+                  messageId: aiMessage.id,
+                  todoId: todo.id,
+                  ownerUserId: todo.ownerUserId,
+                });
+              }
+            } catch (todoError) {
+              console.error('Failed to check/create todo:', todoError);
             }
 
             // 更新恢复服务状态（Agent 发送了消息）
@@ -524,6 +552,8 @@ export async function processQueue(chatRoomId: string, agentId: string) {
           error,
         );
       } finally {
+        taskExecutionStartedAt.delete(task.id);
+
         // 删除已处理的任务
         await taskQueueService.delete(task.id);
 
@@ -562,7 +592,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
       processQueue(chatRoomId, agentId);
     } else {
       // 队列清空，广播状态变化（agent finished executing）
-      broadcastAgentStatus(chatRoomId);
+      broadcastAgentStatus(chatRoomId, [agentId]);
     }
   }
 }

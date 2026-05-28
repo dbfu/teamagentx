@@ -37,6 +37,104 @@ function appendRendererDebugLog(message: string, payload?: unknown): void {
   writeLog(`[renderer] ${message}${suffix}`)
 }
 
+type PdfExportPayload = {
+  html?: unknown;
+  filename?: unknown;
+};
+
+function sanitizePdfFilename(filename: string): string {
+  const cleaned = filename
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const fallback = `聊天记录_${new Date().toISOString().slice(0, 10)}.pdf`;
+  const withName = cleaned || fallback;
+  return withName.toLowerCase().endsWith('.pdf') ? withName : `${withName}.pdf`;
+}
+
+async function waitForPdfRender(webContents: Electron.WebContents): Promise<void> {
+  await webContents.executeJavaScript(`
+    new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        requestAnimationFrame(() => requestAnimationFrame(resolve));
+      };
+
+      const waitForImages = Promise.all(
+        Array.from(document.images).map((image) => {
+          if (image.complete) return Promise.resolve();
+          return new Promise((done) => {
+            image.addEventListener('load', done, { once: true });
+            image.addEventListener('error', done, { once: true });
+            setTimeout(done, 2000);
+          });
+        })
+      );
+
+      const waitForFonts = document.fonts
+        ? document.fonts.ready.catch(() => undefined)
+        : Promise.resolve();
+
+      Promise.all([waitForImages, waitForFonts]).then(finish);
+      setTimeout(finish, 3500);
+    });
+  `, true);
+}
+
+async function exportHtmlToPdf(payload: PdfExportPayload): Promise<{ success: boolean; filePath?: string; canceled?: boolean; error?: string }> {
+  const html = typeof payload?.html === 'string' ? payload.html : '';
+  if (!html.trim()) {
+    return { success: false, error: 'PDF 内容为空' };
+  }
+
+  const filename = sanitizePdfFilename(typeof payload?.filename === 'string' ? payload.filename : '');
+  const saveDialogOptions: Electron.SaveDialogOptions = {
+    title: '导出 PDF',
+    defaultPath: path.join(app.getPath('downloads'), filename),
+    filters: [{ name: 'PDF 文件', extensions: ['pdf'] }],
+  };
+  const saveResult = mainWindow
+    ? await dialog.showSaveDialog(mainWindow, saveDialogOptions)
+    : await dialog.showSaveDialog(saveDialogOptions);
+
+  if (saveResult.canceled || !saveResult.filePath) {
+    return { success: false, canceled: true };
+  }
+
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'teamagentx-pdf-'));
+  const tempHtmlPath = path.join(tempDir, 'index.html');
+  const pdfWindow = new BrowserWindow({
+    show: false,
+    backgroundColor: '#ffffff',
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      webSecurity: false,
+    },
+  });
+
+  try {
+    await fs.promises.writeFile(tempHtmlPath, html, 'utf8');
+    await pdfWindow.loadFile(tempHtmlPath);
+    await waitForPdfRender(pdfWindow.webContents);
+
+    const data = await pdfWindow.webContents.printToPDF({
+      printBackground: true,
+      pageSize: 'A4',
+    });
+
+    await fs.promises.writeFile(saveResult.filePath, data);
+    return { success: true, filePath: saveResult.filePath };
+  } finally {
+    if (!pdfWindow.isDestroyed()) {
+      pdfWindow.destroy();
+    }
+    void fs.promises.rm(tempDir, { recursive: true, force: true });
+  }
+}
+
 // Prevent multiple instances
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -55,6 +153,9 @@ let quitRequestedByInstaller = false;
 let shutdownPromise: Promise<void> | null = null;
 let shutdownCompleted = false;
 let downloadedUpdatePath: string | null = null;
+let hasActiveAgentTasks = false;
+let activeAgentTaskRoomCount = 0;
+let isQuitConfirmationOpen = false;
 
 // Runtime 准备阶段（首次启动 / 升级时把 server 解压/拷贝到 userData）。
 // 用于让前端区分「正在准备运行环境」和「服务真的失败」。
@@ -1490,6 +1591,39 @@ async function shutdownBackend(): Promise<void> {
 }
 
 async function requestAppQuit(): Promise<void> {
+  if (!quitRequestedByInstaller && hasActiveAgentTasks) {
+    if (isQuitConfirmationOpen) return;
+
+    isQuitConfirmationOpen = true;
+    const parentWindow = mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()
+      ? mainWindow
+      : undefined;
+
+    const quitConfirmOptions: Electron.MessageBoxOptions = {
+      type: 'warning',
+      title: '确认关闭系统',
+      message: '当前有任务正在执行，确定要关闭系统吗？',
+      detail: activeAgentTaskRoomCount > 0
+        ? `关闭后 ${activeAgentTaskRoomCount} 个群聊中的执行任务会被中断，重启后可在任务队列中查看或恢复。`
+        : '关闭后正在执行的任务会被中断，重启后可在任务队列中查看或恢复。',
+      buttons: ['取消', '确认关闭'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    };
+
+    const result = parentWindow
+      ? await dialog.showMessageBox(parentWindow, quitConfirmOptions)
+      : await dialog.showMessageBox(quitConfirmOptions);
+
+    isQuitConfirmationOpen = false;
+
+    if (result.response !== 1) {
+      isQuitting = false;
+      return;
+    }
+  }
+
   isQuitting = true;
   await shutdownBackend();
   app.quit();
@@ -2134,6 +2268,13 @@ app.whenReady().then(async () => {
     }
   });
 
+  ipcMain.on('app:active-task-state', (_event, state: { hasActiveTasks?: boolean; executingRoomCount?: number }) => {
+    hasActiveAgentTasks = Boolean(state?.hasActiveTasks);
+    activeAgentTaskRoomCount = Number.isFinite(state?.executingRoomCount)
+      ? Math.max(0, Number(state.executingRoomCount))
+      : 0;
+  });
+
   ipcMain.handle('update:check', async () => {
     try {
       const data = await checkForUpdate();
@@ -2267,6 +2408,16 @@ app.whenReady().then(async () => {
     return { success: true, path: result.filePaths[0] };
   });
 
+  ipcMain.handle('pdf:export', async (_event, payload: PdfExportPayload) => {
+    try {
+      return await exportHtmlToPdf(payload);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      writeLog(`[PDF] 导出失败：${message}`);
+      return { success: false, error: message };
+    }
+  });
+
   // 使用默认浏览器打开外部链接
   ipcMain.handle('open-external', async (_event, url: string) => {
     try {
@@ -2392,12 +2543,13 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', (event) => {
-  isQuitting = true;
-
   if (!shutdownCompleted) {
     event.preventDefault();
     void requestAppQuit();
+    return;
   }
+
+  isQuitting = true;
 });
 
 // Handle uncaught exceptions to prevent error dialogs

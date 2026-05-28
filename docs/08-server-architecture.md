@@ -13,12 +13,17 @@ server/src/
 ├── gateway/                # REST 路由层（Fastify route handlers）
 │   ├── agent.gateway.ts
 │   ├── auth.gateway.ts
+│   ├── bridge.gateway.ts          # 外部平台机器人（Telegram/Feishu/DingTalk/WeChat）
 │   ├── category.gateway.ts
 │   ├── chatroom.gateway.ts
 │   ├── cron-task.gateway.ts
+│   ├── internal-agent-tools.gateway.ts  # 内置助手工具端点
 │   ├── llm-provider.gateway.ts
 │   ├── message.gateway.ts
+│   ├── setup.gateway.ts           # 初始化/配置端点
 │   ├── skill.gateway.ts
+│   ├── speech.gateway.ts          # 语音（TTS/STT）
+│   ├── template-package.gateway.ts # 模板包
 │   └── token-usage.gateway.ts
 ├── socket/index.ts         # Socket.io 服务端（认证 + 事件处理）
 ├── core/
@@ -26,10 +31,13 @@ server/src/
 │   │   ├── agent-handler/  # 消息监听、任务入队、执行调度
 │   │   ├── executor.factory.ts   # 执行器工厂
 │   │   ├── executor.interface.ts # IAgentExecutor 接口
-│   │   ├── langchain.executor.ts # builtin 执行器
 │   │   ├── claude-sdk.executor.ts # Claude Agent SDK 执行器
 │   │   ├── codex-sdk.executor.ts  # Codex SDK 执行器
-│   │   ├── model.factory.ts      # LangChain ChatModel 工厂
+│   │   ├── thinking-mode.ts      # 思考模式（off/low/medium/high）
+│   │   ├── internal-coordinator-agent.ts # 内置群调度助手逻辑
+│   │   ├── image-generation.service.ts   # 图片生成服务
+│   │   ├── image-generation-config.ts    # 图片生成配置构建
+│   │   ├── image-generation-provider-profiles.ts # 厂商配置（APIMart GPT-Image 等）
 │   │   ├── skill-instructions.ts # Skill 加载与注入
 │   │   ├── agent-long-term-memory.ts # 长期记忆摘要
 │   │   ├── work-dir.ts           # 工作目录解析
@@ -104,8 +112,9 @@ createApp()
 
 | 执行器类 | 触发条件 | 特点 |
 |---------|---------|------|
-| `ClaudeAgentSdkExecutor` | `agent.type = 'acp'` + `acpTool = 'claude'` | Claude Agent SDK，流式 thinking |
+| `ClaudeAgentSdkExecutor` | `agent.type = 'acp'` + `acpTool = 'claude'` | Claude Agent SDK，流式 thinking，支持 `thinkingMode`（off/low/medium/high）|
 | `CodexSdkExecutor` | `agent.type = 'acp'` + `acpTool = 'codex'` | OpenAI Codex SDK |
+| `ClaudeAgentSdkExecutor` | `agent.type = 'builtin'` | 兼容旧内置助手 |
 
 ### 3.2 执行器工厂
 
@@ -271,3 +280,46 @@ Socket 连接时需在 `auth.token` 中传 JWT token，服务端 `auth middlewar
 | `AGENT_MEMORY_RECENT_MESSAGES` | `10` | 注入最近消息数 |
 | `AGENT_MEMORY_COMPACT_MESSAGES` | `40` | 触发记忆压缩的消息数 |
 | `AGENT_MEMORY_SUMMARY_TARGET_TOKENS` | `2000` | 摘要目标 token 数 |
+
+---
+
+## 10. Bridge 外部平台集成
+
+`server/src/modules/bridge/` 提供将外部 IM 平台消息桥接到群聊的能力。
+
+### 10.1 支持平台
+
+| 平台 | 连接方式 |
+|------|---------|
+| **Telegram** | Polling（长轮询） |
+| **飞书（Feishu）** | WebSocket 长连接 |
+| **钉钉（DingTalk）** | Stream 长连接 |
+| **企业微信（WeCom）** | Webhook 回调 |
+
+### 10.2 工作原理
+
+1. 在群聊设置中创建"机器人绑定"（`BridgeBot`），选择平台并填写 Token/AppSecret 等凭据
+2. 服务启动时按平台类型建立长连接或注册 Webhook
+3. 外部消息到达后，`bridge.service.ts` 将其适配为群聊消息并发入目标群，后续流转与普通用户消息完全一致
+4. 助手回复同步推送回外部平台
+
+### 10.3 关键模块
+
+| 文件 | 职责 |
+|-----|------|
+| `bridge-platform-registry.ts` | 注册各平台的配置字段定义 |
+| `bridge.service.ts` | 消息路由核心 |
+| `platform-inbound-adapters.ts` | 各平台消息 → 内部格式适配 |
+| `platform-senders.ts` | 内部格式 → 各平台消息发送 |
+| `bridge-commands.ts` | 桥接群内置命令（help / clear / @助手）|
+| `bridge-platform-playbooks.ts` | 各平台的配置向导文案 |
+
+---
+
+## 11. 语音（Speech）
+
+`server/src/modules/speech/` 提供 TTS/STT 能力，`speech.gateway.ts` 暴露端点。
+
+- LlmProvider 可配置 `modelType = audio`，指定 `sttModel`（语音识别专用模型）和 `audioUsage`（`tts | stt | both`）
+- 支持远端 TTS API 和浏览器本地语音（`browser-local` 模式）
+- 语音 Catalog：`buildSpeechVoiceCatalog()` 聚合所有可用音色，含平台元数据（`VOICE_PROVIDER_METADATA`）

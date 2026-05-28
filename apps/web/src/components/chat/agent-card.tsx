@@ -1,7 +1,8 @@
-import { MoreHorizontal, Pencil, Trash2, Power, PowerOff, Copy, Zap, Download } from 'lucide-react'
+import { MoreHorizontal, Pencil, Trash2, Power, PowerOff, Copy, Zap, Download, Settings } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Agent } from '@/lib/agent-api'
 import { AgentAvatar } from './agent-avatar'
+import { GROUP_ASSISTANT_ID, GROUP_COORDINATOR_ID } from '@/lib/system-agents'
 
 interface AgentCardProps {
   assistant: Agent
@@ -38,11 +39,17 @@ function MenuContent({
   onInstallSkill?: (agent: Agent) => void
 }) {
   const isSystemAgent = assistant.agentLevel === 'system'
+  const isGroupAssistant = assistant.id === GROUP_ASSISTANT_ID || assistant.name === '群助手'
+  const isGroupCoordinator = assistant.id === GROUP_COORDINATOR_ID || assistant.name === '群调度助手'
+  const canConfigureSystemModel = isSystemAgent && (isGroupAssistant || isGroupCoordinator)
+  const canStartQuickChat = assistant.isActive && onStartQuickChat && (!isSystemAgent || isGroupAssistant)
+  const hasTopActions = canStartQuickChat || (!isSystemAgent && onInstallSkill)
+  const hasEditActions = !isSystemAgent || canConfigureSystemModel
 
   return (
     <>
       {/* 快速对话 - 仅对活跃助手显示 */}
-      {assistant.isActive && onStartQuickChat && (
+      {canStartQuickChat && (
         <button
           onClick={() => onStartQuickChat(assistant)}
           className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/50"
@@ -64,10 +71,19 @@ function MenuContent({
       )}
 
       {/* 分隔线 - 仅在有上下两组菜单时显示 */}
-      {((assistant.isActive && onStartQuickChat) || (!isSystemAgent && onInstallSkill)) && !isSystemAgent && (
+      {hasTopActions && hasEditActions && (
         <div className="my-1 border-t border-border" />
       )}
 
+      {canConfigureSystemModel && (
+        <button
+          onClick={() => onEdit(assistant)}
+          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-accent"
+        >
+          <Settings className="size-3.5" />
+          编辑
+        </button>
+      )}
       {!isSystemAgent && (
         <button
           onClick={() => onEdit(assistant)}
@@ -133,17 +149,25 @@ export function AgentCard({
   onClick,
   isDragging,
 }: AgentCardProps) {
+  const isGroupAssistant = assistant.id === GROUP_ASSISTANT_ID || assistant.name === '群助手'
+  const isSystemChatDisabled = assistant.agentLevel === 'system' && !isGroupAssistant
+
   return (
     <div
       className={cn(
         'group relative flex flex-col items-center gap-2 rounded-lg p-3 transition-all duration-200 hover:bg-accent cursor-pointer',
         isDragging && 'opacity-40 scale-95',
-        assistant.agentLevel === 'system' && 'cursor-default' // 系统助手不显示拖拽 cursor
+        assistant.agentLevel === 'system' && (!assistant.isActive || !onStartQuickChat || isSystemChatDisabled) && 'cursor-default'
       )}
       onContextMenu={(e) => onContextMenu(e, assistant)}
       onClick={() => {
-        // 系统助手不支持点击进详情，右键菜单打开时不触发 onClick
-        if (assistant.agentLevel === 'system' || openMenuId) {
+        if (openMenuId) {
+          return
+        }
+        if (assistant.agentLevel === 'system') {
+          if (assistant.isActive && isGroupAssistant) {
+            onStartQuickChat?.(assistant)
+          }
           return
         }
         onClick?.(assistant)

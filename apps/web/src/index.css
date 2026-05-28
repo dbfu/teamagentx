@@ -129,6 +129,30 @@
   --app-shell: linear-gradient(135deg, oklch(0.135 0.006 260), oklch(0.205 0.01 260));
 }
 
+:root[data-brand-theme='violet'] {
+  --primary: oklch(0.54 0.28 293);
+  --ring: oklch(0.54 0.28 293);
+  --sidebar-primary: oklch(0.54 0.28 293);
+  --sidebar-ring: oklch(0.54 0.28 293);
+  --nav-active: oklch(0.54 0.28 293 / 0.12);
+  --nav-active-border: oklch(0.54 0.28 293 / 0.34);
+  --brand-soft: oklch(0.54 0.28 293 / 0.1);
+  --brand-muted: oklch(0.5 0.22 293);
+  --app-shell: linear-gradient(135deg, oklch(0.99 0.006 293), oklch(0.96 0.02 300));
+}
+
+.dark[data-brand-theme='violet'] {
+  --primary: oklch(0.7 0.19 293);
+  --primary-foreground: oklch(0.16 0.02 293);
+  --ring: oklch(0.7 0.19 293);
+  --sidebar-primary: oklch(0.7 0.19 293);
+  --nav-active: oklch(0.7 0.19 293 / 0.16);
+  --nav-active-border: oklch(0.7 0.19 293 / 0.36);
+  --brand-soft: oklch(0.7 0.19 293 / 0.14);
+  --brand-muted: oklch(0.74 0.16 293);
+  --app-shell: linear-gradient(135deg, oklch(0.14 0.018 293), oklch(0.2 0.03 300));
+}
+
 :root[data-brand-theme='emerald'] {
   --primary: oklch(0.55 0.16 158);
   --ring: oklch(0.55 0.16 158);
@@ -415,6 +439,56 @@
     background: var(--app-shell);
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
     text-rendering: optimizeLegibility;
+  }
+
+  html:has(body [class*="fixed"][class*="inset-0"][class*="bg-black/"]),
+  html:has(body [class*="fixed"][class*="inset-0"] [class*="bg-black/"]),
+  body:has([class*="fixed"][class*="inset-0"][class*="bg-black/"]),
+  body:has([class*="fixed"][class*="inset-0"] [class*="bg-black/"]) {
+    overflow: hidden;
+  }
+
+  [class*="fixed"][class*="inset-0"][class*="bg-black/"][class*="overflow-y-auto"],
+  [class*="fixed"][class*="inset-0"][class*="overflow-y-auto"]:has([class*="bg-black/"]) {
+    overflow-y: hidden !important;
+  }
+
+  /* Electron: modal/popover layers must not inherit app window drag regions. */
+  [data-slot="dialog-overlay"],
+  [data-slot="dialog-content"],
+  [data-slot="dialog-header"],
+  [data-slot="dialog-close"],
+  [data-slot="alert-dialog-overlay"],
+  [data-slot="alert-dialog-content"],
+  [data-slot="alert-dialog-header"],
+  [data-slot="sheet-overlay"],
+  [data-slot="sheet-content"],
+  [data-slot="sheet-header"],
+  [data-slot="sheet-close"],
+  [data-slot="drawer-overlay"],
+  [data-slot="drawer-content"],
+  [data-slot="drawer-header"],
+  [data-slot="drawer-close"],
+  [data-slot="select-content"],
+  [data-slot="dropdown-menu-content"],
+  [data-slot="dropdown-menu-sub-content"],
+  [data-slot="context-menu-content"],
+  [data-slot="context-menu-sub-content"],
+  [data-slot="popover-content"],
+  [data-slot="tooltip-content"],
+  [data-slot="hover-card-content"],
+  [data-slot="menubar-content"],
+  [data-slot="menubar-sub-content"],
+  [data-radix-popper-content-wrapper],
+  [role="dialog"],
+  [role="dialog"] *,
+  [role="alertdialog"],
+  [role="alertdialog"] *,
+  [class*="fixed"][class*="inset-0"][class*="bg-black/"],
+  [class*="fixed"][class*="inset-0"][class*="bg-black/"] *,
+  [class*="fixed"][class*="inset-0"]:has(> [class*="bg-black/"]),
+  [class*="fixed"][class*="inset-0"]:has(> [class*="bg-black/"]) * {
+    -webkit-app-region: no-drag;
   }
 
   /* Global scrollbar - hidden by default, show on hover */

@@ -19,7 +19,7 @@
 | **阻塞上报（blocked）** | 助手主动声明"我做不下去了"的机制，触发总控接管或人类介入 |
 | **群即项目** | 一个群对应一个项目工作目录，文件/任务卡/助手记忆三层隔离 |
 | **injectGroupHistory** | 加助手到群时是否把历史群消息注入其上下文（控制上下文污染） |
-| **触发模式** | 自动模式：助手 @ 触发其他助手；手动模式：仅作提及不触发 |
+| **触发模式（agentTriggerMode）** | `coordinator`（默认）：内置调度助手控制派发；`auto`：助手 @ 直接触发其他助手；`manual`：助手 @ 仅作提及不触发 |
 | **默认接收助手** | 群主发送未 @ 任何人的消息时，自动 @ 该助手（兜底）|
 | **聚合窗口** | 总控派单后，在一定窗口内收齐所有交付再一次性汇总，防扇出风暴 |
 | **客观验收 / verifications** | 不依赖 LLM 判断，跑脚本/测试/校验文件 hash 确认任务真完成 |
@@ -100,6 +100,9 @@ agent:
   # 工作目录
   default_work_dir: ~/projects   # 助手默认目录（可选）
 
+  # 思考模式（Claude 系列扩展思考）
+  thinking_mode: high            # off | low | medium | high（默认 high）
+
   # 状态
   is_active: true
 ```
@@ -142,8 +145,8 @@ chat_room:
           hint: "完成型回复请走任务卡状态变更，不要 @ 总控"
 
   # 触发模式
-  trigger_mode: auto             # auto | manual
-  default_recipient: agt-002     # 用户无 @ 时的默认接收助手
+  trigger_mode: coordinator      # coordinator（默认）| auto | manual
+  default_recipient: agt-002     # 用户无 @ 时的默认接收助手（coordinator 模式下无效）
 
   # 权限模式（计划增强 T7）
   permission_mode: normal        # plan | normal | acceptEdits | bypass
@@ -526,6 +529,26 @@ PUT    /categories/:id
 DELETE /categories/:id
 
 POST   /upload/image
+```
+
+### C.8 Bridge（外部平台机器人）
+```
+GET    /bridge/platforms                          # 列出支持的平台
+GET    /bridge/bots                               # 列出所有机器人绑定
+POST   /bridge/bots                               # 创建机器人绑定
+GET    /bridge/bots/:botId
+PUT    /bridge/bots/:botId
+DELETE /bridge/bots/:botId
+POST   /bridge/bind-code                          # 生成绑定码
+POST   /bridge/webhook/:platform/:botId           # Webhook 入口（各平台回调）
+```
+
+### C.9 Speech（语音）
+```
+GET    /speech/voice-catalog                      # 查询可用音色列表
+POST   /speech/tts                                # 文字转语音
+POST   /speech/stt                                # 语音转文字
+GET    /speech/providers                          # 已配置的语音供应商
 ```
 
 ---

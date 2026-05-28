@@ -77,7 +77,7 @@ export async function createApp(options?: { enableSwagger?: boolean }) {
   await app.register(import('@fastify/multipart'), {
     limits: {
       fileSize: 25 * 1024 * 1024, // 25MB，覆盖图片上传（10MB）和音频 STT（25MB）
-      files: 5,
+      files: 80,
     },
   });
 

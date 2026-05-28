@@ -1,5 +1,6 @@
 import { SelectAgentsDialog } from '@/components/chat/dialogs/select-agents-dialog';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Agent, agentApi } from '@/lib/agent-api';
 import { AgentAvatarImage } from '@/lib/agent-avatars';
 import { ExternalSkill, SharedSkill, skillApi, SkillDetail, SkillFile } from '@/lib/skill-api';
@@ -11,26 +12,34 @@ import { toast } from 'sonner';
 // 自定义 Tabs 组件
 function SimpleTabs({
   tabs,
-  defaultTab,
+  activeTab,
+  onActiveTabChange,
   renderContent,
 }: {
   tabs: { key: string; label: string; count: number }[];
-  defaultTab: string;
+  activeTab: string;
+  onActiveTabChange: (key: string) => void;
   renderContent: (key: string, searchQuery: string, setSearchQuery: (q: string) => void) => React.ReactNode;
 }) {
-  const [activeTab, setActiveTab] = useState(defaultTab);
   const [searchQuery, setSearchQuery] = useState('');
+  const currentTab = tabs.some((tab) => tab.key === activeTab) ? activeTab : tabs[0]?.key ?? '';
+
+  useEffect(() => {
+    if (currentTab && currentTab !== activeTab) {
+      onActiveTabChange(currentTab);
+    }
+  }, [activeTab, currentTab, onActiveTabChange]);
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
       {/* Tab 标签 */}
       <div className="flex shrink-0 items-center gap-6 border-b px-5 pt-4">
         {tabs.map((tab) => {
-          const isActive = activeTab === tab.key;
+          const isActive = currentTab === tab.key;
           return (
             <button
               key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
+              onClick={() => onActiveTabChange(tab.key)}
               className={cn(
                 'relative px-2 py-2 text-sm font-medium transition-colors duration-200',
                 isActive ? 'text-primary' : 'text-muted-foreground',
@@ -53,7 +62,7 @@ function SimpleTabs({
       </div>
       {/* Tab 内容 */}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-5 pb-5 pt-6">
-        {renderContent(activeTab, searchQuery, setSearchQuery)}
+        {currentTab ? renderContent(currentTab, searchQuery, setSearchQuery) : null}
       </div>
     </div>
   );
@@ -215,15 +224,20 @@ export function SkillPage() {
   const [selectAgentsOpen, setSelectAgentsOpen] = useState(false);
   const [currentSkill, setCurrentSkill] = useState<SharedSkill | null>(null);
   const [batchInstalling, setBatchInstalling] = useState(false);
+  const [unlinkingInstallKey, setUnlinkingInstallKey] = useState<string | null>(null);
+  const [pendingUnlinkInstall, setPendingUnlinkInstall] = useState<{ skill: SharedSkill; agent: Agent } | null>(null);
   // 复制路径状态
   const [copied, setCopied] = useState(false);
   // 打开目录状态
   const [openingFolder, setOpeningFolder] = useState(false);
   // 外部技能导入弹框状态
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [activeImportTab, setActiveImportTab] = useState('local-folder');
   const [importingSkill, setImportingSkill] = useState<string | null>(null);
   // 选中的外部技能
   const [selectedExternalSkills, setSelectedExternalSkills] = useState<Set<string>>(new Set());
+  const [selectedLocalFolder, setSelectedLocalFolder] = useState<string | null>(null);
+  const [importingLocalFolder, setImportingLocalFolder] = useState(false);
   // 已安装技能搜索
   const [skillSearchQuery, setSkillSearchQuery] = useState('');
 
@@ -255,6 +269,14 @@ export function SkillPage() {
     acc[tool].push(skill);
     return acc;
   }, {} as Record<string, ExternalSkill[]>);
+  const externalImportCount = externalSkills.filter(s => !s.existsInShared).length;
+  const localFolderTabKey = 'local-folder';
+
+  const closeImportModal = () => {
+    setImportModalOpen(false);
+    setSelectedExternalSkills(new Set());
+    setSelectedLocalFolder(null);
+  };
 
   const handleCopyPath = async () => {
     try {
@@ -359,6 +381,46 @@ export function SkillPage() {
     await loadExternalSkills();
   };
 
+  const handleSelectLocalFolder = async () => {
+    if (!window.electronAPI?.isElectron || !window.electronAPI.selectFolder) {
+      toast.error('仅在 Electron 客户端中支持选择本地文件夹');
+      return;
+    }
+
+    try {
+      const result = await window.electronAPI.selectFolder();
+      if (result.success && result.path) {
+        setSelectedLocalFolder(result.path);
+      }
+    } catch {
+      toast.error('选择文件夹失败');
+    }
+  };
+
+  const handleImportLocalFolder = async () => {
+    if (!selectedLocalFolder) {
+      toast.warning('请选择本地技能文件夹');
+      return;
+    }
+
+    setImportingLocalFolder(true);
+    try {
+      const result = await skillApi.importLocalFolder(selectedLocalFolder);
+      if (result.success) {
+        toast.success('技能已复制到共享技能库');
+        setSelectedLocalFolder(null);
+        await loadData();
+        await loadExternalSkills();
+      } else {
+        toast.error(result.error || '导入失败');
+      }
+    } catch {
+      toast.error('导入失败');
+    } finally {
+      setImportingLocalFolder(false);
+    }
+  };
+
   useEffect(() => {
     loadData();
     loadExternalSkills();
@@ -456,6 +518,25 @@ export function SkillPage() {
     }
   };
 
+  const handleUnlinkInstalledAgent = async (skill: SharedSkill, agent: Agent) => {
+    const installKey = `${skill.slug}:${agent.id}`;
+    setUnlinkingInstallKey(installKey);
+    try {
+      const result = await skillApi.unlink(skill.slug, agent.id);
+      if (result.success) {
+        toast.success(`已从「${agent.name}」移除「${skill.name}」`);
+        setPendingUnlinkInstall(null);
+        await loadData();
+      } else {
+        toast.error(result.error || '移除失败');
+      }
+    } catch {
+      toast.error('移除失败');
+    } finally {
+      setUnlinkingInstallKey(null);
+    }
+  };
+
 
   return (
     <>
@@ -473,15 +554,13 @@ export function SkillPage() {
             className="ml-auto flex items-center gap-1.5"
             style={window.electronAPI?.isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
           >
-            {externalSkills.filter(s => !s.existsInShared).length > 0 && (
-              <button
-                onClick={() => setImportModalOpen(true)}
-                className="ta-button-primary h-8 px-3 text-xs"
-              >
-                <Import className="size-4" />
-                导入外部技能 ({externalSkills.filter(s => !s.existsInShared).length})
-              </button>
-            )}
+            <button
+              onClick={() => setImportModalOpen(true)}
+              className="ta-button-primary h-8 px-3 text-xs"
+            >
+              <Import className="size-4" />
+              {externalImportCount > 0 ? `导入技能 (${externalImportCount})` : '导入技能'}
+            </button>
             <button
               onClick={loadData}
               disabled={loading}
@@ -504,15 +583,13 @@ export function SkillPage() {
               <Package className="size-16 mb-3 opacity-50" />
               <p className="text-lg">暂无技能</p>
               <p className="mt-2 text-sm">在群聊中 @技能管理 创建技能</p>
-              {externalSkills.filter(s => !s.existsInShared).length > 0 && (
-                <button
-                  onClick={() => setImportModalOpen(true)}
-                  className="ta-button-primary mt-4"
-                >
-                  <Import className="size-4" />
-                  导入外部技能 ({externalSkills.filter(s => !s.existsInShared).length})
-                </button>
-              )}
+              <button
+                onClick={() => setImportModalOpen(true)}
+                className="ta-button-primary mt-4"
+              >
+                <Import className="size-4" />
+                {externalImportCount > 0 ? `导入技能 (${externalImportCount})` : '导入技能'}
+              </button>
             </div>
           ) : (
             <div className="ta-page-section space-y-3">
@@ -661,6 +738,8 @@ export function SkillPage() {
                               <div className="flex flex-wrap gap-2">
                                 {skill.installedAgents.map((name) => {
                                   const agent = agents.find(a => a.name === name);
+                                  const installKey = agent ? `${skill.slug}:${agent.id}` : null;
+                                  const isUnlinking = installKey === unlinkingInstallKey;
                                   return (
                                     <span
                                       key={name}
@@ -668,6 +747,21 @@ export function SkillPage() {
                                     >
                                       <AgentAvatarImage avatar={agent?.avatar ?? null} className="size-4" />
                                       {name}
+                                      {agent && (
+                                        <button
+                                          type="button"
+                                          onClick={() => setPendingUnlinkInstall({ skill, agent })}
+                                          disabled={isUnlinking}
+                                          className="ml-0.5 rounded text-primary/70 hover:bg-primary/10 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                                          title="从该助手移除"
+                                        >
+                                          {isUnlinking ? (
+                                            <RefreshCw className="size-3 animate-spin" />
+                                          ) : (
+                                            <X className="size-3" />
+                                          )}
+                                        </button>
+                                      )}
                                     </span>
                                   );
                                 })}
@@ -701,6 +795,23 @@ export function SkillPage() {
         onConfirm={handleBatchInstall}
         title={`安装「${currentSkill?.name || ''}」到助手`}
         loading={batchInstalling}
+      />
+
+      <ConfirmDialog
+        open={!!pendingUnlinkInstall}
+        onOpenChange={(open) => !open && setPendingUnlinkInstall(null)}
+        title="移除技能"
+        description={`确定要从助手「${pendingUnlinkInstall?.agent.name ?? ''}」移除技能「${pendingUnlinkInstall?.skill.name ?? ''}」吗？`}
+        confirmText="移除"
+        onConfirm={async () => {
+          if (!pendingUnlinkInstall) return;
+          await handleUnlinkInstalledAgent(pendingUnlinkInstall.skill, pendingUnlinkInstall.agent);
+        }}
+        loading={
+          !!pendingUnlinkInstall &&
+          unlinkingInstallKey === `${pendingUnlinkInstall.skill.slug}:${pendingUnlinkInstall.agent.id}`
+        }
+        icon={X}
       />
 
       {/* 技能内容查看模态框 */}
@@ -805,23 +916,17 @@ export function SkillPage() {
           {/* Backdrop */}
           <div
             className="absolute inset-0 bg-black/50"
-            onClick={() => {
-              setImportModalOpen(false);
-              setSelectedExternalSkills(new Set());
-            }}
+            onClick={closeImportModal}
           />
           {/* Modal */}
           <div className="relative z-10 flex max-h-[85vh] w-[900px] flex-col rounded-[var(--radius-panel)] bg-card shadow-xl">
             {/* Header */}
             <div className="flex items-center justify-between border-b px-6 py-4">
               <div>
-                <h3 className="text-lg font-semibold text-foreground">导入外部技能</h3>
+                <h3 className="text-lg font-semibold text-foreground">导入技能</h3>
               </div>
               <button
-                onClick={() => {
-                  setImportModalOpen(false);
-                  setSelectedExternalSkills(new Set());
-                }}
+                onClick={closeImportModal}
                 className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
               >
                 <X className="size-5" />
@@ -837,13 +942,49 @@ export function SkillPage() {
                 </div>
               ) : (
                 <SimpleTabs
-                  tabs={Object.entries(groupedExternalSkills).map(([tool, skills]) => ({
-                    key: tool,
-                    label: getToolInfo(tool).name,
-                    count: skills.filter(s => !s.existsInShared).length,
-                  }))}
-                  defaultTab={Object.keys(groupedExternalSkills)[0]}
+                  tabs={[
+                    ...Object.entries(groupedExternalSkills).map(([tool, skills]) => ({
+                      key: tool,
+                      label: getToolInfo(tool).name,
+                      count: skills.filter(s => !s.existsInShared).length,
+                    })),
+                    {
+                      key: localFolderTabKey,
+                      label: '本地文件夹',
+                      count: selectedLocalFolder ? 1 : 0,
+                    },
+                  ]}
+                  activeTab={activeImportTab}
+                  onActiveTabChange={setActiveImportTab}
                   renderContent={(activeKey, searchQuery, setSearchQuery) => {
+                    if (activeKey === localFolderTabKey) {
+                      return (
+                        <div className="flex min-h-0 flex-1 flex-col">
+                          <div className="flex flex-1 flex-col items-center justify-center rounded-lg border border-dashed border-border bg-muted/20 px-6 py-10 text-center">
+                            <FolderOpen className="mb-3 size-10 text-primary" />
+                            <div className="text-sm font-medium text-foreground">选择本地技能文件夹</div>
+                            <div className="mt-1 max-w-md text-xs text-muted-foreground">
+                              文件夹根目录需要包含 SKILL.md，导入时会直接复制到共享技能库。
+                            </div>
+                            <button
+                              onClick={handleSelectLocalFolder}
+                              className="ta-button-primary mt-5"
+                            >
+                              <FolderOpen className="size-4" />
+                              选择文件夹
+                            </button>
+                          </div>
+
+                          {selectedLocalFolder && (
+                            <div className="mt-3 rounded-lg border border-border bg-muted/30 px-3 py-2">
+                              <div className="text-xs text-muted-foreground">已选择</div>
+                              <div className="mt-1 truncate text-sm text-foreground">{selectedLocalFolder}</div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+
                     const skills = groupedExternalSkills[activeKey] || [];
                     // 过滤并排序技能（未导入的在前，已导入的在后）
                     const filteredSkills = skills.filter(skill => {
@@ -959,60 +1100,76 @@ export function SkillPage() {
             {/* Footer */}
             <div className="flex items-center justify-between border-t px-6 py-3">
               <div className="text-xs text-muted-foreground">
-                已选择 {selectedExternalSkills.size} 个技能
+                {activeImportTab === localFolderTabKey
+                  ? selectedLocalFolder ? '已选择 1 个文件夹' : '请选择一个技能文件夹'
+                  : `已选择 ${selectedExternalSkills.size} 个技能`}
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => {
-                    setImportModalOpen(false);
-                    setSelectedExternalSkills(new Set());
-                  }}
+                  onClick={closeImportModal}
                   className="ta-button-secondary"
                 >
                   取消
                 </button>
-                {!isWindows && (
+                {activeImportTab === localFolderTabKey ? (
+                  <button
+                    onClick={handleImportLocalFolder}
+                    disabled={!selectedLocalFolder || importingLocalFolder}
+                    className="ta-button-primary"
+                  >
+                    {importingLocalFolder ? (
+                      <RefreshCw className="size-3 animate-spin" />
+                    ) : (
+                      <Download className="size-3" />
+                    )}
+                    复制到技能库
+                  </button>
+                ) : (
+                  <>
+                    {!isWindows && (
+                      <HoverCard openDelay={200}>
+                        <HoverCardTrigger asChild>
+                          <button
+                            onClick={() => handleBatchImport('symlink')}
+                            disabled={selectedExternalSkills.size === 0 || importingSkill !== null}
+                            className="ta-button-secondary border-primary text-primary hover:bg-primary/10"
+                          >
+                            <Import className="size-3" />
+                            软连接
+                          </button>
+                        </HoverCardTrigger>
+                        <HoverCardContent className="w-72" side="top">
+                          <div className="space-y-2">
+                            <h4 className="font-medium text-sm">软连接导入</h4>
+                            <p className="text-xs text-muted-foreground">
+                              创建符号链接指向外部技能目录，外部技能更新后自动同步，节省磁盘空间。
+                            </p>
+                          </div>
+                        </HoverCardContent>
+                      </HoverCard>
+                    )}
                   <HoverCard openDelay={200}>
                     <HoverCardTrigger asChild>
                       <button
-                        onClick={() => handleBatchImport('symlink')}
+                        onClick={() => handleBatchImport('copy')}
                         disabled={selectedExternalSkills.size === 0 || importingSkill !== null}
-                        className="ta-button-secondary border-primary text-primary hover:bg-primary/10"
+                        className="ta-button-primary"
                       >
-                        <Import className="size-3" />
-                        软连接
+                        <Download className="size-3" />
+                        {isWindows ? '导入' : '复制'}
                       </button>
                     </HoverCardTrigger>
                     <HoverCardContent className="w-72" side="top">
                       <div className="space-y-2">
-                        <h4 className="font-medium text-sm">软连接导入</h4>
+                        <h4 className="font-medium text-sm">复制导入</h4>
                         <p className="text-xs text-muted-foreground">
-                          创建符号链接指向外部技能目录，外部技能更新后自动同步，节省磁盘空间。
+                          完全复制技能文件到本地，独立管理，不受外部更新影响。
                         </p>
                       </div>
                     </HoverCardContent>
                   </HoverCard>
+                  </>
                 )}
-                <HoverCard openDelay={200}>
-                  <HoverCardTrigger asChild>
-                    <button
-                      onClick={() => handleBatchImport('copy')}
-                      disabled={selectedExternalSkills.size === 0 || importingSkill !== null}
-                      className="ta-button-primary"
-                    >
-                      <Download className="size-3" />
-                      {isWindows ? '导入' : '复制'}
-                    </button>
-                  </HoverCardTrigger>
-                  <HoverCardContent className="w-72" side="top">
-                    <div className="space-y-2">
-                      <h4 className="font-medium text-sm">复制导入</h4>
-                      <p className="text-xs text-muted-foreground">
-                        完全复制技能文件到本地，独立管理，不受外部更新影响。
-                      </p>
-                    </div>
-                  </HoverCardContent>
-                </HoverCard>
               </div>
             </div>
           </div>

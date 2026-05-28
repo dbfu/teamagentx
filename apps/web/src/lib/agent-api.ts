@@ -42,6 +42,7 @@ export interface Agent {
   workDir: string | null
   proxyConfig: string | null
   codexModel: string | null
+  codexFastMode: boolean
   claudeModel: string | null
   thinkingMode: AgentThinkingMode
   speechConfig: AgentSpeechConfig | null
@@ -112,6 +113,7 @@ export interface CreateAgentRequest {
   workDir?: string
   proxyConfig?: string | null
   codexModel?: string | null
+  codexFastMode?: boolean
   claudeModel?: string | null
   thinkingMode?: AgentThinkingMode | null
   speechConfig?: AgentSpeechConfig | null
@@ -133,6 +135,7 @@ export interface UpdateAgentRequest {
   workDir?: string
   proxyConfig?: string | null
   codexModel?: string | null
+  codexFastMode?: boolean
   claudeModel?: string | null
   thinkingMode?: AgentThinkingMode | null
   speechConfig?: AgentSpeechConfig | null
@@ -354,6 +357,7 @@ export interface TemplatePackageSnapshot {
     workDir: string | null
     proxyConfig: string | null
     codexModel: string | null
+    codexFastMode: boolean
     claudeModel: string | null
     thinkingMode: AgentThinkingMode
     llmProviderId: string | null
@@ -398,8 +402,9 @@ export interface TemplatePreviewSummary {
 export interface TemplatePreviewResult {
   manifest: TemplatePackageManifest
   summary: TemplatePreviewSummary
+  degradedSkills: DegradedTemplateSkill[]
   conflicts: {
-    duplicateTemplate: boolean
+    nameConflict: boolean
     allowedActions?: Array<'cancel' | 'create_copy' | 'rename_copy'>
     suggestedGroupName: string
   }
@@ -442,6 +447,11 @@ interface MessageListResponse extends ApiResponse<Message[]> {
   pagination?: MessagePagination
 }
 
+interface MessageArchiveMessagesResponse extends ApiResponse<Message[]> {
+  archive?: ChatRoomMessageArchive
+  pagination?: MessagePagination
+}
+
 async function request<T>(
   endpoint: string,
   options?: RequestInit
@@ -462,6 +472,22 @@ async function request<T>(
 
   const data = await response.json()
   return data
+}
+
+function parseTemplateFilename(contentDisposition: string | null): string {
+  if (!contentDisposition) return 'group-template.zip'
+
+  const filenameStarMatch = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)
+  if (filenameStarMatch?.[1]) {
+    try {
+      return decodeURIComponent(filenameStarMatch[1])
+    } catch {
+      return filenameStarMatch[1]
+    }
+  }
+
+  const filenameMatch = contentDisposition.match(/filename="([^"]+)"/i)
+  return filenameMatch?.[1] || 'group-template.zip'
 }
 
 // ACP 工具信息类型
@@ -696,39 +722,69 @@ export const templatePackageApi = {
     chatRoomId: string
     packageTitle?: string
     packageSummary?: string
-    includeSkills?: boolean
-    includeCronTasks?: boolean
-  }): Promise<ApiResponse<TemplatePackageExportPayload>> {
-    return request<TemplatePackageExportPayload>('/template-packages/export', {
+  }): Promise<ApiResponse<{ blob: Blob; filename: string }>> {
+    const baseUrl = await getApiBaseUrl()
+    const response = await fetch(`${baseUrl}/template-packages/export`, {
       method: 'POST',
       body: JSON.stringify(input),
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
     })
+
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => ({ error: '导出失败' })) as { error?: string }
+      return {
+        success: false,
+        error: errorPayload.error || '导出失败',
+      }
+    }
+
+    const blob = await response.blob()
+    return {
+      success: true,
+      data: {
+        blob,
+        filename: parseTemplateFilename(response.headers.get('content-disposition')),
+      },
+    }
   },
 
   async preview(input: {
-    manifest: TemplatePackageManifest
+    file: File
     desiredGroupName: string
-    capabilityDescriptors?: TemplateCapabilityDescriptor[]
   }): Promise<ApiResponse<TemplatePreviewResult>> {
-    return request<TemplatePreviewResult>('/template-packages/preview', {
+    const baseUrl = await getApiBaseUrl()
+    const formData = new FormData()
+    formData.append('template', input.file)
+    formData.append('desiredGroupName', input.desiredGroupName)
+
+    const response = await fetch(`${baseUrl}/template-packages/preview`, {
       method: 'POST',
-      body: JSON.stringify(input),
+      body: formData,
+      cache: 'no-store',
     })
+
+    return response.json()
   },
 
   async import(input: {
-    manifest: TemplatePackageManifest
-    snapshot: TemplatePackageSnapshot
-    skills?: TemplateSkillPackage[]
-    skillUsages?: TemplateSkillUsage[]
-    capabilityDescriptors?: TemplateCapabilityDescriptor[]
+    file: File
     desiredGroupName: string
-    duplicateAction: 'cancel' | 'create_copy' | 'rename_copy'
   }): Promise<ApiResponse<TemplateImportResult>> {
-    return request<TemplateImportResult>('/template-packages/import', {
+    const baseUrl = await getApiBaseUrl()
+    const formData = new FormData()
+    formData.append('template', input.file)
+    formData.append('desiredGroupName', input.desiredGroupName)
+
+    const response = await fetch(`${baseUrl}/template-packages/import`, {
       method: 'POST',
-      body: JSON.stringify(input),
+      body: formData,
+      cache: 'no-store',
     })
+
+    return response.json()
   },
 }
 
@@ -760,6 +816,7 @@ export interface Message {
   replyMessageId: string | null
   isHuman: boolean
   executionRecordId?: string | null  // 关联的执行记录 ID
+  archiveId?: string | null
   executionDuration?: number | null  // 执行耗时（毫秒）
   totalTokens?: number | null        // 消息消耗的 token 数
   cacheReadTokens?: number | null    // 缓存读取 token 数
@@ -780,6 +837,19 @@ export interface Message {
     avatarColor: string | null
   } | null
   attachments?: Attachment[]  // 消息附件（图片等）
+}
+
+export interface ChatRoomMessageArchive {
+  id: string
+  chatRoomId: string
+  title: string
+  messageCount: number
+  startedAt: string | null
+  endedAt: string | null
+  archivedAt: string
+  createdBy: string | null
+  createdAt: string
+  updatedAt: string
 }
 
 // Agent 调试信息类型
@@ -980,10 +1050,27 @@ export const messageApi = {
   },
 
   // 清空群组消息
-  async clearByChatRoomId(chatRoomId: string): Promise<ApiResponse<void>> {
-    return request<void>(`/messages/chatroom/${chatRoomId}`, {
+  async clearByChatRoomId(chatRoomId: string): Promise<ApiResponse<{ count: number; archiveId: string | null }>> {
+    return request<{ count: number; archiveId: string | null }>(`/messages/chatroom/${chatRoomId}`, {
       method: 'DELETE',
     })
+  },
+
+  async getArchives(chatRoomId: string): Promise<ApiResponse<ChatRoomMessageArchive[]>> {
+    return request<ChatRoomMessageArchive[]>(`/chatrooms/${chatRoomId}/message-archives`)
+  },
+
+  async getArchiveMessages(archiveId: string, options?: { beforeMessageId?: string; take?: number }): Promise<MessageArchiveMessagesResponse> {
+    const params = new URLSearchParams()
+    if (options?.beforeMessageId) {
+      params.set('beforeMessageId', options.beforeMessageId)
+    }
+    if (options?.take) {
+      params.set('take', String(options.take))
+    }
+
+    const query = params.toString()
+    return request<Message[]>(`/message-archives/${archiveId}/messages${query ? `?${query}` : ''}`)
   },
 
   // 获取消息的执行记录

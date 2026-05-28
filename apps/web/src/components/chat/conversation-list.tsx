@@ -3,11 +3,10 @@ import { ChatRoom, chatRoomApi } from '@/lib/agent-api'
 import { AgentAvatarImage } from '@/lib/agent-avatars'
 import { GroupAvatarImage } from '@/lib/group-avatars'
 import { cn, formatDateTime } from '@/lib/utils'
-import { Copy, Download, Loader2, MessageSquare, Pin, Plus, RefreshCw, Trash2, Upload } from 'lucide-react'
-import { useState } from 'react'
+import { useSocketStore } from '@/stores/socket-store'
+import { Copy, Loader2, MessageSquare, Pin, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { GroupTemplateExportModal } from './group-template-export-modal'
-import { GroupTemplateImportModal } from './group-template-import-modal'
 
 interface ConversationListProps {
   chatRooms: ChatRoom[]
@@ -25,6 +24,12 @@ interface ConversationListProps {
 export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts = {}, executingChatRooms = new Set(), onRefresh, isRefreshing, onDeleteChatRoom, onCreateChatRoom, isMobile }: ConversationListProps) {
   // 检测是否在 Electron 环境中
   const isElectron = window.electronAPI?.isElectron ?? false
+  const todos = useSocketStore((s) => s.todos)
+  const pendingOwnerMentionRoomIds = useMemo(() => new Set(
+    todos
+      .filter((todo) => todo.status === 'pending')
+      .map((todo) => todo.chatRoomId),
+  ), [todos])
 
   // 右键菜单状态
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; room: ChatRoom } | null>(null)
@@ -33,9 +38,6 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
   const [deleting, setDeleting] = useState(false)
   // 删除确认对话框状态
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
-  const [showImportModal, setShowImportModal] = useState(false)
-  const [showExportModal, setShowExportModal] = useState(false)
-  const [exportTargetRoom, setExportTargetRoom] = useState<ChatRoom | null>(null)
 
   // 格式化未读数显示
   const formatUnreadCount = (count: number) => {
@@ -153,46 +155,35 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
             <span className="text-xl font-semibold text-foreground">消息</span>
           </div>
           <div className="flex items-center gap-1">
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                setShowImportModal(true)
-              }}
-              className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              title="导入模板包"
-              style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
-            >
-              <Upload className="size-4" />
-            </button>
-              {onCreateChatRoom && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onCreateChatRoom()
-                  }}
-                  className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  title="创建群聊"
-                  style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
-                >
-                  <Plus className="size-4" />
-                </button>
-              )}
-              {onRefresh && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onRefresh()
-                  }}
-                  className={cn(
-                    "flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  )}
-                  title="刷新"
-                  style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
-                >
-                  <RefreshCw className={cn("size-4", isRefreshing && "animate-spin")} />
-                </button>
-              )}
-            </div>
+            {onCreateChatRoom && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onCreateChatRoom()
+                }}
+                className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                title="创建群聊"
+                style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+              >
+                <Plus className="size-4" />
+              </button>
+            )}
+            {onRefresh && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onRefresh()
+                }}
+                className={cn(
+                  "flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                )}
+                title="刷新"
+                style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+              >
+                <RefreshCw className={cn("size-4", isRefreshing && "animate-spin")} />
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -208,6 +199,7 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
             const unreadCount = unreadCounts[room.id] || 0
             const unreadDisplay = formatUnreadCount(unreadCount)
             const isExecuting = executingChatRooms.has(room.id)
+            const hasOwnerMention = unreadCount > 0 && pendingOwnerMentionRoomIds.has(room.id)
 
             return (
               <div
@@ -245,6 +237,11 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
                   "max-w-16 truncate text-xs",
                   unreadCount > 0 ? "font-medium text-foreground" : "text-muted-foreground"
                 )}>{room.name}</span>
+                {hasOwnerMention && (
+                  <span className="rounded-full bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-medium text-orange-600">
+                    @群主
+                  </span>
+                )}
               </div>
             )
           })}
@@ -263,13 +260,14 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
             return (
               <>
                 {[...chatRooms].sort((a, b) => {
-                  const aTime = a.lastMessage?.time ? new Date(a.lastMessage.time).getTime() : new Date(a.createdAt).getTime()
-                  const bTime = b.lastMessage?.time ? new Date(b.lastMessage.time).getTime() : new Date(b.createdAt).getTime()
+                  const aTime = a.lastMessage?.time ? new Date(a.lastMessage.time).getTime() : new Date(a.updatedAt).getTime()
+                  const bTime = b.lastMessage?.time ? new Date(b.lastMessage.time).getTime() : new Date(b.updatedAt).getTime()
                   return bTime - aTime
                 }).map((room) => {
                   const unreadCount = unreadCounts[room.id] || 0
                   const unreadDisplay = formatUnreadCount(unreadCount)
                   const isExecuting = executingChatRooms.has(room.id)
+                  const hasOwnerMention = unreadCount > 0 && pendingOwnerMentionRoomIds.has(room.id)
 
                   return (
                     <div
@@ -318,20 +316,25 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
                           )}
                         </div>
                         <p className={cn(
-                          "mt-1 truncate",
+                          "mt-1 flex min-w-0 items-center gap-1 truncate",
                           isMobile ? "text-sm" : "text-xs",
                           unreadCount > 0 ? "text-muted-foreground" : "text-muted-foreground/70"
                         )}>
+                          {hasOwnerMention && (
+                            <span className="shrink-0 rounded-full bg-orange-500/10 px-1.5 py-0.5 text-[11px] font-medium text-orange-600">
+                              @群主
+                            </span>
+                          )}
                           {room.lastMessage ? (
-                            <>
+                            <span className="min-w-0 truncate">
                               {room.lastMessage.isHuman ? (
                                 room.lastMessage.user?.username || '用户'
                               ) : (
                                 room.lastMessage.agent?.name || '助手'
                               )}：{room.lastMessage.content}
-                            </>
+                            </span>
                           ) : (
-                            '暂无消息'
+                            <span className="min-w-0 truncate">暂无消息</span>
                           )}
                         </p>
                       </div>
@@ -368,17 +371,6 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
             >
               {duplicating ? <Loader2 className="size-4 animate-spin" /> : <Copy className="size-4" />}
               复制群聊
-            </button>
-            <button
-              onClick={() => {
-                setExportTargetRoom(contextMenu.room)
-                setShowExportModal(true)
-                handleCloseContextMenu()
-              }}
-              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-popover-foreground hover:bg-accent"
-            >
-              <Download className="size-4" />
-              导出模板包
             </button>
             <button
               onClick={handleDeleteClick}
@@ -419,25 +411,6 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
         </>
       )}
     </div>
-    <GroupTemplateImportModal
-      isOpen={showImportModal}
-      onClose={() => setShowImportModal(false)}
-      onImported={async (chatRoomId) => {
-        setShowImportModal(false)
-        onRefresh?.()
-        onSelect(chatRoomId)
-      }}
-    />
-    {exportTargetRoom && (
-      <GroupTemplateExportModal
-        isOpen={showExportModal}
-        chatRoom={exportTargetRoom}
-        onClose={() => {
-          setShowExportModal(false)
-          setExportTargetRoom(null)
-        }}
-      />
-    )}
     </>
   )
 }

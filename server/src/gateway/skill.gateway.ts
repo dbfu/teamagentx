@@ -10,6 +10,7 @@ import {
   ExternalSkill,
   ExternalImportResult,
 } from '../modules/skill/skill-install.service.js';
+import { parseSkillFrontmatter, readSkillMetadata } from '../modules/skill/skill-metadata.js';
 import { replaceWithSkillDirectoryLink } from '../modules/skill/skill-link.js';
 import { agentService } from '../core/agent/agent.service.js';
 import { clearExecutorCache } from '../core/agent/agent-handler/index.js';
@@ -41,23 +42,7 @@ function readSkillDisplayName(skillDir: string): string | null {
     return null;
   }
 
-  try {
-    const content = fs.readFileSync(skillMdPath, 'utf-8');
-    const match = content.match(/^---\n([\s\S]*?)\n---/);
-    if (!match) return null;
-
-    const nameLine = match[1]
-      .split('\n')
-      .find((line) => line.trim().startsWith('name:'));
-    if (!nameLine) return null;
-
-    return nameLine
-      .replace(/^name:\s*/, '')
-      .replace(/^["']|["']$/g, '')
-      .trim();
-  } catch {
-    return null;
-  }
+  return readSkillMetadata(skillMdPath).name || null;
 }
 
 function resolveSharedSkill(skillName: string): ResolvedSharedSkill | null {
@@ -696,44 +681,9 @@ export async function skillGateway(app: FastifyInstance) {
         let description = '';
         let source = 'unknown';
 
-        // 解析 SKILL.md
-        try {
-          const content = fs.readFileSync(skillMdPath, 'utf-8');
-          const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
-          if (frontmatterMatch) {
-            const fmContent = frontmatterMatch[1];
-            const lines = fmContent.split('\n');
-            for (let i = 0; i < lines.length; i++) {
-              const match = lines[i].match(/^(\w+):\s*(.*)$/);
-              if (match) {
-                const [, key, rawValue] = match;
-                if (key === 'name') {
-                  name = rawValue.replace(/^["']|["']$/g, '').trim();
-                } else if (key === 'description') {
-                  const trimmed = rawValue.trim();
-                  if (trimmed === '|' || trimmed === '>' || trimmed === '|-' || trimmed === '>-') {
-                    // YAML multi-line scalar: collect indented lines below
-                    const parts: string[] = [];
-                    for (let j = i + 1; j < lines.length; j++) {
-                      if (lines[j].match(/^\s/) && lines[j].trim() !== '') {
-                        parts.push(lines[j].trim());
-                      } else {
-                        break;
-                      }
-                    }
-                    description = parts.join(' ').trim();
-                  } else if (trimmed === '|' || trimmed === '') {
-                    description = '';
-                  } else {
-                    description = trimmed.replace(/^["']|["']$/g, '');
-                  }
-                }
-              }
-            }
-          }
-        } catch {
-          // 忽略
-        }
+        const metadata = readSkillMetadata(skillMdPath);
+        name = metadata.name || name;
+        description = metadata.description || description;
 
         // 读取 origin.json
         if (fs.existsSync(originPath)) {
@@ -991,21 +941,9 @@ ${content}`;
       if (fs.existsSync(skillMdPath)) {
         content = fs.readFileSync(skillMdPath, 'utf-8');
 
-        // 解析 frontmatter
-        const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
-        if (frontmatterMatch) {
-          const lines = frontmatterMatch[1].split('\n');
-          for (const line of lines) {
-            const match = line.match(/^(\w+):\s*(.+)$/);
-            if (match) {
-              const [, key, value] = match;
-              const cleanValue = value.replace(/^["']|["']$/g, '');
-              frontmatter[key] = cleanValue;
-              if (key === 'name') name = cleanValue;
-              if (key === 'description') description = cleanValue;
-            }
-          }
-        }
+        frontmatter = parseSkillFrontmatter(content);
+        name = frontmatter.name || name;
+        description = frontmatter.description || description;
       }
 
       // 提取正文内容（去掉 frontmatter）
@@ -1214,6 +1152,101 @@ ${content}`;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(`[skillGateway] External skills scan failed: ${message}`);
+      return reply.code(500).send({ success: false, error: message });
+    }
+  });
+
+  // 复制本地技能文件夹到共享目录
+  app.post<{
+    Body: {
+      sourcePath: string;
+    };
+  }>('/skills/import-local-folder', {
+    schema: {
+      description: '复制本地技能文件夹到共享目录，文件夹根目录必须包含 SKILL.md',
+      tags: ['Skills'],
+      body: {
+        type: 'object',
+        properties: {
+          sourcePath: { type: 'string', description: '本地技能文件夹完整路径' },
+        },
+        required: ['sourcePath'],
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: {
+              type: 'object',
+              properties: {
+                slug: { type: 'string' },
+                method: { type: 'string' },
+                targetPath: { type: 'string' },
+                success: { type: 'boolean' },
+                error: { type: 'string' },
+              },
+            },
+          },
+        },
+        400: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+        500: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { sourcePath } = request.body;
+
+    if (!sourcePath?.trim()) {
+      return reply.code(400).send({ success: false, error: 'sourcePath 是必填参数' });
+    }
+
+    let resolvedPath = sourcePath.trim();
+    if (resolvedPath.startsWith('~')) {
+      resolvedPath = path.join(os.homedir(), resolvedPath.slice(1));
+    }
+
+    try {
+      if (!fs.existsSync(resolvedPath)) {
+        return reply.code(400).send({ success: false, error: '技能文件夹不存在' });
+      }
+
+      const stat = fs.statSync(resolvedPath);
+      if (!stat.isDirectory()) {
+        return reply.code(400).send({ success: false, error: '请选择技能文件夹' });
+      }
+
+      if (!fs.existsSync(path.join(resolvedPath, 'SKILL.md'))) {
+        return reply.code(400).send({ success: false, error: '技能文件夹根目录必须包含 SKILL.md' });
+      }
+
+      const sharedSkillsDir = getSharedSkillsDir();
+      const resolvedSource = path.resolve(resolvedPath);
+      const resolvedShared = path.resolve(sharedSkillsDir);
+      if (resolvedSource === resolvedShared || resolvedSource.startsWith(resolvedShared + path.sep)) {
+        return reply.code(400).send({ success: false, error: '该技能已经位于共享技能目录中' });
+      }
+
+      const result = skillInstallService.importExternalSkill(resolvedPath, 'copy');
+      if (!result.success) {
+        return reply.code(400).send({ success: false, error: result.error || '导入失败' });
+      }
+
+      return reply.send({ success: true, data: result });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[skillGateway] Import local skill folder failed: ${message}`);
       return reply.code(500).send({ success: false, error: message });
     }
   });

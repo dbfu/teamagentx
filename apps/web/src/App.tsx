@@ -1,4 +1,4 @@
-import { ArrowLeft, ChevronLeft, ClipboardList, Eraser, Loader2, MoreVertical, RefreshCw, Square } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ClipboardList, Eraser, History, Loader2, MoreVertical, RefreshCw, Square } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Route, Routes, useLocation, useNavigate, useSearchParams, useParams } from 'react-router-dom'
 import { LoginModal } from './components/auth/login-modal'
@@ -10,6 +10,7 @@ import { ConversationList } from './components/chat/conversation-list'
 import { CreateGroupModal } from './components/chat/create-group-modal'
 import { MobileTabBar } from './components/chat/mobile-tab-bar'
 import { IntegrationPage } from './components/chat/integration-page'
+import { MessageArchivesModal } from './components/chat/message-archives-modal'
 import { ModelPage } from './components/chat/model-page'
 import { SkillPage } from './components/chat/skill-page'
 import { SidebarNav } from './components/chat/sidebar-nav'
@@ -35,8 +36,11 @@ import { ChatRoom, Message } from './lib/agent-api'
 import { getVisibleChatRoomId, isActivelyViewingChatRoom } from './lib/chat-room-presence'
 import { useAuthStore, useChatRoomStore, useSocketStore, useUIStore } from './stores'
 import { useChatStore } from './stores/chat-store'
+import { TodoData } from './stores/socket-store'
+import { toast } from 'sonner'
 
 const EMPTY_MESSAGES: Message[] = []
+const DISCONNECTED_BANNER_DELAY_MS = 1500
 
 function formatRuntimeBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
@@ -130,7 +134,9 @@ function MobileChatDetailPage({
   const agentStatuses = useChatStore((s) => s.agentStatuses)
   const typingAgents = useChatStore((s) => s.typingAgents)
   const stopAgent = useSocketStore((s) => s.stopAgent)
+  const currentUser = useSocketStore((s) => s.user)
   const [showStopAllConfirm, setShowStopAllConfirm] = useState(false)
+  const [showMessageArchives, setShowMessageArchives] = useState(false)
   const [stopAllTargetAgentIds, setStopAllTargetAgentIds] = useState<string[]>([])
 
   const activeTaskAgentIds = useMemo(() => {
@@ -250,18 +256,32 @@ function MobileChatDetailPage({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
               {/* 移动端只保留任务看板和清空消息 */}
-              <DropdownMenuItem onClick={handleOpenTaskBoard}>
+              <DropdownMenuItem
+                className="hover:bg-primary/10 hover:text-primary hover:[&_svg]:text-primary focus:bg-primary/10 focus:text-primary focus:[&_svg]:text-primary"
+                onClick={handleOpenTaskBoard}
+              >
                 <ClipboardList className="size-4 mr-2" />
                 任务看板
               </DropdownMenuItem>
               <DropdownMenuItem
+                className="hover:bg-primary/10 hover:text-primary hover:[&_svg]:text-primary focus:bg-primary/10 focus:text-primary focus:[&_svg]:text-primary"
                 disabled={activeTaskAgentIds.length === 0}
                 onClick={handleStopAllTasks}
               >
                 <Square className="size-4 mr-2" />
                 停止所有任务
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setShowClearConfirm(true)}>
+              <DropdownMenuItem
+                className="hover:bg-primary/10 hover:text-primary hover:[&_svg]:text-primary focus:bg-primary/10 focus:text-primary focus:[&_svg]:text-primary"
+                onClick={() => setShowMessageArchives(true)}
+              >
+                <History className="size-4 mr-2" />
+                历史记录
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="hover:bg-red-500/10 hover:text-red-500 hover:[&_svg]:text-red-500 focus:bg-red-500/10 focus:text-red-500 focus:[&_svg]:text-red-500"
+                onClick={() => setShowClearConfirm(true)}
+              >
                 <Eraser className="size-4 mr-2" />
                 清空消息
               </DropdownMenuItem>
@@ -285,6 +305,12 @@ function MobileChatDetailPage({
         onOpenChange={handleStopAllConfirmOpenChange}
         taskCount={stopAllTargetAgentIds.length}
         onConfirm={confirmStopAllTasks}
+      />
+      <MessageArchivesModal
+        open={showMessageArchives}
+        onOpenChange={setShowMessageArchives}
+        chatRoom={selectedRoom}
+        currentUser={currentUser}
       />
     </div>
   )
@@ -359,7 +385,7 @@ function AppContent() {
   const updateUnreadCount = useChatStore((s) => s.updateUnreadCount)
   const executingChatRooms = useChatStore((s) => s.executingChatRooms)
   const setScrollToMessageId = useChatStore((s) => s.setScrollToMessageId)
-  const { isConnected, onUnreadUpdate, requestUnreadCounts, markChatRoomRead, onMessage, onChatRoomCreated, onAgentsUpdated, onAgentStatus, user: socketUser } = useSocketStore()
+  const { isConnected, onUnreadUpdate, requestUnreadCounts, markChatRoomRead, onMessage, onChatRoomCreated, onAgentsUpdated, onAgentStatus, requestTodos, onTodoList, onTodoCreated, onTodoUpdated, completeTodo, user: socketUser } = useSocketStore()
   const { user } = useAuthStore()
   const visibleChatRoomId = useMemo(() => {
     return getVisibleChatRoomId(location.pathname, isMobile ? null : selectedRoomId)
@@ -374,6 +400,13 @@ function AppContent() {
       hasWindowFocus: typeof document === 'undefined' || typeof document.hasFocus !== 'function' || document.hasFocus(),
     })
   }, [])
+
+  useEffect(() => {
+    window.electronAPI?.setActiveTaskState?.({
+      hasActiveTasks: executingChatRooms.size > 0,
+      executingRoomCount: executingChatRooms.size,
+    })
+  }, [executingChatRooms])
 
   const selectRoomAndClearUnread = useCallback((roomId: string) => {
     if (roomId) {
@@ -606,9 +639,49 @@ function AppContent() {
   useEffect(() => {
     if (isConnected) {
       requestUnreadCounts()
+      requestTodos()
       updateManager.checkForUpdates({ silent: true, reason: 'socket-connected' })
     }
-  }, [isConnected, requestUnreadCounts])
+  }, [isConnected, requestTodos, requestUnreadCounts])
+
+  // 监听待办事件
+  useEffect(() => {
+    if (!isConnected) return
+
+    const unsubList = onTodoList((data) => {
+      useSocketStore.setState({ todos: data.todos })
+    })
+    const unsubCreated = onTodoCreated((todo: TodoData) => {
+      const alreadyExists = useSocketStore.getState().todos.some((item) => item.id === todo.id)
+      useSocketStore.setState((state) => {
+        if (state.todos.some((item) => item.id === todo.id)) return state
+        return { todos: [todo, ...state.todos] }
+      })
+      if (!alreadyExists && !isVisibleChatRoomActive(todo.chatRoomId)) {
+        toast.info('有人 @ 你', {
+          description: `${todo.triggerAgentName} 在「${todo.chatRoomName}」提到了你`,
+          action: {
+            label: '查看',
+            onClick: () => {
+              completeTodo(todo.id)
+              navigate(`/?room=${todo.chatRoomId}&msg=${todo.messageId}`)
+            },
+          },
+        })
+      }
+    })
+    const unsubUpdated = onTodoUpdated((data) => {
+      useSocketStore.setState((state) => ({
+        todos: state.todos.filter((todo) => todo.id !== data.todoId),
+      }))
+    })
+
+    return () => {
+      unsubList()
+      unsubCreated()
+      unsubUpdated()
+    }
+  }, [completeTodo, isConnected, isVisibleChatRoomActive, navigate, onTodoCreated, onTodoList, onTodoUpdated])
 
   // Electron 运行中低频补充检查更新：窗口聚焦、页面可见、网络恢复。
   useEffect(() => {
@@ -800,12 +873,16 @@ export default function App() {
 
   // Show disconnected banner when connection is lost
   useEffect(() => {
-    if (isConnected) {
+    if (isConnected || state !== 'authenticated' || !hasConnectedRef.current) {
       setShowDisconnectedBanner(false)
-    } else if (hasConnectedRef.current && state === 'authenticated') {
-      // Connection was lost after being connected
-      setShowDisconnectedBanner(true)
+      return
     }
+
+    const timer = window.setTimeout(() => {
+      setShowDisconnectedBanner(true)
+    }, DISCONNECTED_BANNER_DELAY_MS)
+
+    return () => window.clearTimeout(timer)
   }, [isConnected, state])
 
   // Show register modal for first time users
@@ -832,11 +909,6 @@ export default function App() {
     avatar?: string,
   ) => {
     return register(username, password, avatar)
-  }
-
-  const handleSwitchToRegister = () => {
-    setShowLogin(false)
-    setShowRegister(true)
   }
 
   const forceSetup = typeof window !== 'undefined' && localStorage.getItem('force_setup_wizard') === 'true'
@@ -996,7 +1068,6 @@ export default function App() {
       <LoginModal
         isOpen={showLogin}
         onLogin={handleLogin}
-        onSwitchToRegister={handleSwitchToRegister}
       />
 
       {/* Register Modal */}

@@ -20,6 +20,7 @@ export interface CreateExecutorOptions {
   imageGenerationProvider?: LlmProvider | null; // 默认图片模型配置
   lastInjectedMessageId?: string;  // 上次注入群历史的最后消息 ID（用于增量注入）
   chatRoomRules?: string;  // 群规则/指南
+  stateless?: boolean;  // 每次执行使用新会话，不恢复 SDK session/thread
 }
 
 function getAgentThinkingMode(agent: Agent): AgentThinkingMode {
@@ -43,6 +44,7 @@ export function createExecutor(options: CreateExecutorOptions): IAgentExecutor {
     imageGenerationProvider,
     lastInjectedMessageId,
     chatRoomRules,
+    stateless,
   } = options;
   const thinkingMode = getAgentThinkingMode(agent);
 
@@ -65,6 +67,7 @@ export function createExecutor(options: CreateExecutorOptions): IAgentExecutor {
           imageGenerationProvider,
           thinkingMode,
           chatRoomRules,
+          stateless,
         );
       }
       if (acpTool === 'codex') {
@@ -83,8 +86,10 @@ export function createExecutor(options: CreateExecutorOptions): IAgentExecutor {
           imageGenerationProvider,
           agent.proxyConfig,
           agent.codexModel,
+          agent.codexFastMode,
           thinkingMode,
           chatRoomRules,
+          stateless,
         );
       }
       throw new Error(`Unsupported agent tool: ${acpTool}`);
@@ -106,6 +111,7 @@ export function createExecutor(options: CreateExecutorOptions): IAgentExecutor {
         imageGenerationProvider,
         thinkingMode,
         chatRoomRules,
+        stateless,
       );
   }
 }

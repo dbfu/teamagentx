@@ -714,7 +714,9 @@ export class CodexSdkExecutor implements IAgentExecutor {
   readonly imageGenerationProvider?: LlmProvider | null;
   readonly proxyConfig: string | null;
   readonly codexModel: string | null;
+  readonly codexFastMode: boolean;
   readonly thinkingMode: AgentThinkingMode;
+  readonly stateless: boolean;
 
   private _lastInjectedMessageId?: string;
   private systemPrompt: string;
@@ -752,8 +754,10 @@ export class CodexSdkExecutor implements IAgentExecutor {
     imageGenerationProvider?: LlmProvider | null,
     proxyConfig?: string | null,
     codexModel?: string | null,
+    codexFastMode?: boolean,
     thinkingMode?: AgentThinkingMode | null,
     chatRoomRules?: string,
+    stateless: boolean = false,
   ) {
     this.name = name;
     this.chatRoomId = chatRoomId;
@@ -766,7 +770,9 @@ export class CodexSdkExecutor implements IAgentExecutor {
     this.imageGenerationProvider = imageGenerationProvider;
     this.proxyConfig = proxyConfig || null;
     this.codexModel = codexModel || null;
+    this.codexFastMode = Boolean(codexFastMode);
     this.thinkingMode = thinkingMode || DEFAULT_AGENT_THINKING_MODE;
+    this.stateless = stateless;
 
     this.workDir = resolveAgentWorkDir({
       chatRoomId,
@@ -795,6 +801,9 @@ ${chatRoomRulesSection}
 
 ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
 
+## Assistant Mentions
+In TeamAgentX, an @assistant mention can trigger another assistant task. A single message may contain at most one triggerable @assistant mention. When handing off or asking another assistant, choose one target assistant and mention only that assistant. If multiple assistants could help, choose the best next assistant or ask the user to choose; refer to any additional assistants by name without @.
+
 ## Working Directory
 Your working directory is: ${this.workDir}
 When you perform file operations or run commands, operate in this directory by default. Resolve relative paths from this directory.
@@ -803,8 +812,8 @@ When you perform file operations or run commands, operate in this directory by d
 For long-running services or commands that should keep running after this turn, such as \`pnpm dev\`, \`npm run dev\`, \`vite\`, \`next dev\`, watch modes, servers, listeners, and \`tail -f\`, use the MCP tool \`start_background_command\` instead of running the command directly in the shell. Use \`read_background_command_output\` to inspect logs, \`list_background_commands\` to find existing tasks, and \`stop_background_command\` when the user asks to stop one. Do not block the turn waiting for a dev server to exit.`;
 
     this.ensureWorkDirectory();
-    this.threadId = this.loadThreadId();
-    this.lastInjectedSkillsSignature = this.loadSkillsSignature();
+    this.threadId = this.stateless ? null : this.loadThreadId();
+    this.lastInjectedSkillsSignature = this.stateless ? undefined : this.loadSkillsSignature();
   }
 
   get lastInjectedMessageId(): string | undefined {
@@ -1265,6 +1274,8 @@ process.stdin.on("data", (chunk) => {
   }
 
   private saveThreadId(): void {
+    if (this.stateless) return;
+
     try {
       const statePath = this.getSessionStatePath();
       if (!this.threadId) {
@@ -1464,7 +1475,7 @@ ${historyText}
       const otherAgentsList = otherAgents.map((agent) => agent.name).join(', ');
       const othersInfo = otherAgents.length > 0 ? otherAgentsList : 'none';
       const mentionTip = otherAgents.length > 0
-        ? '\n[Tip]\nWhen you need to message another assistant, write "@assistant_name message content" directly in your final reply. You may also mention an assistant in body text when the @ is preceded by a space. A target assistant is triggered only when @ is at the start of a line or the previous character is a space; @ immediately after punctuation will not trigger. A single message may mention at most one assistant. If the user only asks you to send a message to another assistant, output only that @assistant message in the final reply, with no explanation, pleasantries, summary, or expanded collaboration invitation.'
+        ? '\n[Tip]\nWhen you need to message another assistant, write "@assistant_name message content" directly in your final reply. You may also mention an assistant in body text when the @ is preceded by a space. A target assistant is triggered only when @ is at the start of a line or the previous character is a space; @ immediately after punctuation will not trigger. A single message may contain at most one triggerable @assistant mention. If you need to refer to additional assistants, write their names without @. If the user only asks you to send a message to another assistant, output only that @assistant message in the final reply, with no explanation, pleasantries, summary, or expanded collaboration invitation.'
         : '';
 
       fullMessage += `[Group Chat Member Info]
@@ -1481,6 +1492,11 @@ Other assistants: ${othersInfo}${mentionTip}
   }
 
   private buildSkillsUpdateSection(): string {
+    if (this.stateless) {
+      return `[Installed Skills Update]
+${buildInstalledSkillsInstructions(this.agentId)}`;
+    }
+
     const currentSignature = buildInstalledSkillsSignature(this.agentId);
     if (this.lastInjectedSkillsSignature === currentSignature) {
       return '';
@@ -1532,6 +1548,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       show_raw_agent_reasoning: this.thinkingMode !== 'off',
       model_reasoning_effort: getCodexReasoningEffort(this.thinkingMode),
       model_reasoning_summary: 'concise',
+      ...(this.codexFastMode ? { service_tier: 'fast' } : {}),
       skills: {
         include_instructions: false,
       },
@@ -1723,7 +1740,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     switch (event.type) {
       case 'thread.started':
         this.threadId = event.thread_id;
-        this.saveThreadId();
+        if (!this.stateless) this.saveThreadId();
         return undefined;
       case 'item.started':
       case 'item.updated':
@@ -1794,7 +1811,12 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       return { actions: [{ type: 'message', content: unsupportedMessage }] };
     }
 
-    this.resetOvergrownThreadIfNeeded();
+    if (this.stateless) {
+      this.thread = null;
+      this.threadId = null;
+    } else {
+      this.resetOvergrownThreadIfNeeded();
+    }
     this.lastContext = this.buildFullMessage(message, history);
     const abortController = new AbortController();
     this.currentAbortController = abortController;
@@ -1858,7 +1880,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
 
       if (thread.id && thread.id !== this.threadId) {
         this.threadId = thread.id;
-        this.saveThreadId();
+        if (!this.stateless) this.saveThreadId();
       }
 
       const finalResponse = this.content || 'codex 执行完成';
@@ -1891,6 +1913,10 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       cleanup();
       signal?.removeEventListener('abort', abort);
       this.currentAbortController = null;
+      if (this.stateless) {
+        this.thread = null;
+        this.threadId = null;
+      }
       this.emitStream = null;
       this.emitToolCall = null;
       this.emitThinking = null;

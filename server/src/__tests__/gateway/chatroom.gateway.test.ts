@@ -520,6 +520,49 @@ describe('ChatRoom Gateway API', () => {
         ],
       );
     });
+
+    test('根目录 package scripts 应排在子目录之前', async () => {
+      const roomWorkDir = path.join(workDirRoot, 'root-first-package-room');
+      const nestedPackageDir = path.join(roomWorkDir, 'apps', 'web');
+      fs.mkdirSync(nestedPackageDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(roomWorkDir, 'package.json'),
+        JSON.stringify({ scripts: { root: 'vite --host 0.0.0.0' } }),
+      );
+      fs.writeFileSync(
+        path.join(nestedPackageDir, 'package.json'),
+        JSON.stringify({ scripts: { web: 'vite' } }),
+      );
+
+      const chatRoomResponse = await app.inject({
+        method: 'POST',
+        url: '/chatrooms',
+        payload: {
+          name: 'Root First Package Scripts Room ' + Date.now(),
+          workDir: roomWorkDir,
+        },
+      });
+      const createdRoom = chatRoomResponse.json();
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/chatrooms/${createdRoom.data.id}/package-scripts`,
+      });
+
+      assert.strictEqual(response.statusCode, 200);
+      const body = response.json();
+      assert.strictEqual(body.success, true);
+      assert.deepStrictEqual(
+        body.data.scripts.map((script: { name: string; relativeDir: string }) => ({
+          name: script.name,
+          relativeDir: script.relativeDir,
+        })),
+        [
+          { name: 'root', relativeDir: '' },
+          { name: 'web', relativeDir: path.join('apps', 'web') },
+        ],
+      );
+    });
   });
 
   describe('DELETE /chatrooms/:id', () => {

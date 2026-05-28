@@ -4,10 +4,11 @@ import { createElement, useRef, useCallback, useEffect, useMemo } from 'react'
 import { Agent, Message, messageApi, agentApi, ExecutionRecord, debugApi, AgentDebugInfo, ChatRoom, chatRoomApi, AgentContextInfo, uploadApi, type GitCommandAction } from '@/lib/agent-api'
 import { useSocketStore } from './socket-store'
 import { useChatRoomStore } from './chat-room-store'
-import type { ToolCall, StreamEvent, AgentStatus } from './socket-store'
+import type { ToolCall, StreamEvent, AgentStatus, TodoData } from './socket-store'
 import { PendingImage } from '@/components/chat/image-preview-list'
 import { compressImage, fileToBase64, createPreviewUrl, revokePreviewUrl, getImageDimensions, isValidImageType, isValidImageSize } from '@/lib/image-utils'
 import { isActivelyViewingChatRoom } from '@/lib/chat-room-presence'
+import { isSystemAssistantDetailBlocked } from '@/lib/system-agents'
 import { toast } from 'sonner'
 
 // 兼容 Android WebView 的 UUID 生成函数
@@ -118,12 +119,17 @@ function getMentionedKnownAgentNames(content: string, agentNames: string[]): str
 
   const endBoundaryChars = '*_>#`!?.,:;！？。，；：'
   const regex = new RegExp(
-    `(?:^|\\r?\\n| )@(${escapedNames.join('|')})(?=\\s|$|[${endBoundaryChars}]|-(?![\\u4e00-\\u9fa5a-zA-Z0-9_]))`,
+    `@(${escapedNames.join('|')})(?=\\s|$|[${endBoundaryChars}]|-(?![\\u4e00-\\u9fa5a-zA-Z0-9_]))`,
     'g',
   )
 
   let match: RegExpExecArray | null
   while ((match = regex.exec(content)) !== null) {
+    const atIndex = match.index
+    const prevChar = atIndex > 0 ? content[atIndex - 1] : ''
+    if (prevChar && /[A-Za-z0-9._%+-]/.test(prevChar)) {
+      continue
+    }
     if (match[1] && !names.includes(match[1])) {
       names.push(match[1])
     }
@@ -148,6 +154,78 @@ function getMentionedDispatchableAgentNames(content: string, chatRoom: ChatRoom,
   return mentionedNames.filter((name) => dispatchableAgentNames.has(name))
 }
 
+function isCurrentUserChatRoomOwner(
+  chatRoom: ChatRoom,
+  currentUser: { id?: string | null; username?: string | null } | null | undefined,
+): boolean {
+  if (!currentUser) return false
+  if (chatRoom.ownerId) return currentUser.id === chatRoom.ownerId
+  return Boolean(chatRoom.owner?.username && currentUser.username === chatRoom.owner.username)
+}
+
+function toTimestamp(value: string | Date | null | undefined): number {
+  if (!value) return 0
+  const timestamp = new Date(value).getTime()
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function findLatestOwnerMentionReplyTarget(params: {
+  chatRoom: ChatRoom
+  messages: Message[]
+  todos: TodoData[]
+  currentUser: { id?: string | null; username?: string | null } | null | undefined
+}): { messageId: string; todoId?: string } | null {
+  const { chatRoom, messages, todos, currentUser } = params
+  const ownerUsername = chatRoom.owner?.username
+  if (!ownerUsername || !isCurrentUserChatRoomOwner(chatRoom, currentUser)) return null
+
+  const pendingTodos = todos.filter((todo) => (
+    todo.chatRoomId === chatRoom.id
+    && todo.status === 'pending'
+  ))
+  const pendingTodoByMessageId = new Map(pendingTodos.map((todo) => [todo.messageId, todo]))
+  const latestOwnerHumanMessageTime = messages.reduce((latestTime, message) => {
+    if (message.chatRoomId !== chatRoom.id || !message.isHuman) return latestTime
+    const isOwnerMessage = chatRoom.ownerId
+      ? message.userId === chatRoom.ownerId
+      : message.user?.username === ownerUsername
+    if (!isOwnerMessage) return latestTime
+    return Math.max(latestTime, toTimestamp(message.time))
+  }, 0)
+
+  const candidates: { messageId: string; todoId?: string; timestamp: number }[] = []
+
+  for (const message of messages) {
+    if (message.chatRoomId !== chatRoom.id || message.isHuman || !message.agentId) continue
+    if (!getMentionedKnownAgentNames(message.content, [ownerUsername]).includes(ownerUsername)) continue
+
+    const pendingTodo = pendingTodoByMessageId.get(message.id)
+    const timestamp = toTimestamp(message.time)
+    if (timestamp <= latestOwnerHumanMessageTime) continue
+
+    candidates.push({
+      messageId: message.id,
+      todoId: pendingTodo?.id,
+      timestamp,
+    })
+  }
+
+  for (const todo of pendingTodos) {
+    const timestamp = toTimestamp(todo.createdAt)
+    if (timestamp <= latestOwnerHumanMessageTime) continue
+
+    candidates.push({
+      messageId: todo.messageId,
+      todoId: todo.id,
+      timestamp,
+    })
+  }
+
+  if (candidates.length === 0) return null
+  candidates.sort((a, b) => b.timestamp - a.timestamp)
+  return candidates[0]
+}
+
 export type SidePanelMode = 'agents' | 'context' | 'history' | 'stream' | 'agent-detail' | 'record-detail' | 'reply-detail' | 'room-settings' | 'execution-detail' | 'cron-tasks' | 'task-queue' | 'task-board' | null
 
 interface MentionAgent {
@@ -166,6 +244,7 @@ interface SelectedRoomAgent {
   description?: string | null
   chatRoomAgentId?: string
   agentType?: string
+  agentLevel?: string
   chatRoomId?: string  // 用于计算默认工作目录
   injectGroupHistory?: boolean  // 是否注入群历史
 }
@@ -180,6 +259,9 @@ interface ChatStore {
   loadingOlderMessagesByRoom: Record<string, boolean>
   hasOlderMessagesByRoom: Record<string, boolean>
   inputValue: string
+  inputHistory: string[]
+  inputHistoryCursor: number
+  inputHistoryDraft: string
   loading: boolean
   loadingOlderMessages: boolean
   hasOlderMessages: boolean
@@ -209,7 +291,7 @@ interface ChatStore {
   clearing: boolean
 
   // Socket 状态
-  typingAgents: Map<string, { agentId: string; agentName: string; status?: 'pending' | 'executing' | 'cancelled' }[]>
+  typingAgents: Map<string, { agentId: string; agentName: string; status?: 'pending' | 'executing' | 'cancelled'; startedAt?: number }[]>
   streamingContent: Map<string, string>
   streamingThinking: Map<string, string>
   toolCalls: Map<string, ToolCall[]>
@@ -242,6 +324,8 @@ interface ChatStore {
 
   // Actions
   setInputValue: (value: string) => void
+  addInputHistory: (value: string) => void
+  navigateInputHistory: (direction: 'previous' | 'next') => boolean
   setActiveChatRoomId: (chatRoomId: string | null) => void
   setMessages: (messages: Message[], chatRoomId?: string) => void
   addMessage: (message: Message) => void
@@ -261,7 +345,7 @@ interface ChatStore {
   setLoadingOlderMessages: (loading: boolean) => void
   setHasOlderMessages: (hasMore: boolean) => void
   setAllAgents: (agents: Agent[]) => void
-  setTypingAgents: (agents: Map<string, { agentId: string; agentName: string; status?: 'pending' | 'executing' | 'cancelled' }[]>) => void
+  setTypingAgents: (agents: Map<string, { agentId: string; agentName: string; status?: 'pending' | 'executing' | 'cancelled'; startedAt?: number }[]>) => void
   setStreamingContent: (content: Map<string, string>) => void
   setStreamingThinking: (thinking: Map<string, string>) => void
   setToolCalls: (calls: Map<string, ToolCall[]>) => void
@@ -314,6 +398,7 @@ interface ChatStore {
 
 // 每个房间最多保留多少个语音消息 ID，避免 localStorage 无限增长
 const MAX_VOICE_IDS_PER_ROOM = 500
+const MAX_INPUT_HISTORY_SIZE = 50
 const EMPTY_MESSAGES: Message[] = []
 
 function findCachedMessage(
@@ -330,6 +415,37 @@ function findCachedMessage(
   }
 
   return undefined
+}
+
+function getCaretTextOffset(target: EventTarget | null): number | null {
+  if (!(target instanceof HTMLElement)) return null
+
+  const selection = window.getSelection()
+  if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) return null
+  if (!selection.anchorNode || !target.contains(selection.anchorNode)) return null
+
+  const range = selection.getRangeAt(0)
+  const preRange = document.createRange()
+  preRange.selectNodeContents(target)
+  preRange.setEnd(range.startContainer, range.startOffset)
+  return preRange.toString().length
+}
+
+function shouldNavigateInputHistory(e: React.KeyboardEvent, inputValue: string): boolean {
+  if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return false
+  if (e.shiftKey || e.altKey || e.ctrlKey || e.metaKey || e.nativeEvent.isComposing) return false
+
+  const caretOffset = getCaretTextOffset(e.currentTarget)
+  if (caretOffset === null) return true
+  if (!inputValue.includes('\n')) return true
+
+  if (e.key === 'ArrowUp') {
+    const firstLineEnd = inputValue.indexOf('\n')
+    return caretOffset <= firstLineEnd
+  }
+
+  const lastLineStart = inputValue.lastIndexOf('\n') + 1
+  return caretOffset >= lastLineStart
 }
 
 function sortMessagesByTime(messages: Message[]): Message[] {
@@ -386,6 +502,9 @@ export const useChatStore = create<ChatStore>()(
   loadingOlderMessagesByRoom: {},
   hasOlderMessagesByRoom: {},
   inputValue: '',
+  inputHistory: [],
+  inputHistoryCursor: -1,
+  inputHistoryDraft: '',
   loading: false,
   loadingOlderMessages: false,
   hasOlderMessages: true,
@@ -442,7 +561,58 @@ export const useChatStore = create<ChatStore>()(
   pendingImages: [],
 
   // Actions
-  setInputValue: (value) => set({ inputValue: value }),
+  setInputValue: (value) => set({
+    inputValue: value,
+    inputHistoryCursor: -1,
+    inputHistoryDraft: '',
+  }),
+  addInputHistory: (value) => set((state) => {
+    const historyValue = value.trim()
+    if (!historyValue) return state
+
+    const nextHistory = [
+      ...state.inputHistory.filter((item) => item !== historyValue),
+      historyValue,
+    ].slice(-MAX_INPUT_HISTORY_SIZE)
+
+    return {
+      inputHistory: nextHistory,
+      inputHistoryCursor: -1,
+      inputHistoryDraft: '',
+    }
+  }),
+  navigateInputHistory: (direction) => {
+    const state = get()
+    if (state.inputHistory.length === 0) return false
+
+    if (direction === 'previous') {
+      const nextCursor = state.inputHistoryCursor === -1
+        ? state.inputHistory.length - 1
+        : Math.max(0, state.inputHistoryCursor - 1)
+      const nextDraft = state.inputHistoryCursor === -1 ? state.inputValue : state.inputHistoryDraft
+      const nextValue = state.inputHistory[nextCursor]
+
+      set({
+        inputValue: nextValue,
+        inputHistoryCursor: nextCursor,
+        inputHistoryDraft: nextDraft,
+      })
+      return true
+    }
+
+    if (state.inputHistoryCursor === -1) return false
+
+    const nextCursor = state.inputHistoryCursor + 1
+    const returningToDraft = nextCursor >= state.inputHistory.length
+    const nextValue = returningToDraft ? state.inputHistoryDraft : state.inputHistory[nextCursor]
+
+    set({
+      inputValue: nextValue,
+      inputHistoryCursor: returningToDraft ? -1 : nextCursor,
+      inputHistoryDraft: returningToDraft ? '' : state.inputHistoryDraft,
+    })
+    return true
+  },
   setActiveChatRoomId: (chatRoomId) => set((state) => {
     const roomMessages = chatRoomId ? state.messagesByRoom[chatRoomId] ?? [] : []
     return {
@@ -1064,6 +1234,8 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
 
   // Actions - 使用 getState() 获取稳定引用
   const setInputValue = useChatStore((s) => s.setInputValue)
+  const addInputHistory = useChatStore((s) => s.addInputHistory)
+  const navigateInputHistory = useChatStore((s) => s.navigateInputHistory)
   const setActiveChatRoomId = useChatStore((s) => s.setActiveChatRoomId)
   const setSidePanelMode = useChatStore((s) => s.setSidePanelMode)
   const setShowAddAgent = useChatStore((s) => s.setShowAddAgent)
@@ -1117,6 +1289,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     onAgentTaskCancelled,
     onInactiveTasks,
     onAgentTaskResumed,
+    completeTodo,
   } = useSocketStore()
 
   // 处理新消息
@@ -1237,14 +1410,26 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
       const existingIndex = existing.findIndex(a => a.agentId === data.agentId)
       if (existingIndex >= 0) {
         const updated = [...existing]
+        const nextStatus = data.status ?? updated[existingIndex].status
         updated[existingIndex] = {
           ...updated[existingIndex],
           agentName: data.agentName,
-          status: data.status ?? updated[existingIndex].status,
+          status: nextStatus,
+          startedAt: nextStatus === 'pending'
+            ? updated[existingIndex].startedAt
+            : (data.startedAt ?? updated[existingIndex].startedAt ?? Date.now()),
         }
         newTypingAgents.set(data.messageId, updated)
       } else {
-        newTypingAgents.set(data.messageId, [...existing, { agentId: data.agentId, agentName: data.agentName, status: data.status }])
+        newTypingAgents.set(data.messageId, [
+          ...existing,
+          {
+            agentId: data.agentId,
+            agentName: data.agentName,
+            status: data.status,
+            startedAt: data.status === 'pending' ? undefined : (data.startedAt ?? Date.now()),
+          },
+        ])
       }
 
       const newCompletedAgents = new Set(completedAgents)
@@ -1349,14 +1534,26 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
       const existingIndex = existing.findIndex(a => a.agentId === data.agentId)
       if (existingIndex >= 0) {
         const updated = [...existing]
+        const nextStatus = data.status ?? updated[existingIndex].status
         updated[existingIndex] = {
           ...updated[existingIndex],
           agentName: data.agentName,
-          status: data.status ?? updated[existingIndex].status,
+          status: nextStatus,
+          startedAt: nextStatus === 'pending'
+            ? updated[existingIndex].startedAt
+            : (data.startedAt ?? updated[existingIndex].startedAt ?? Date.now()),
         }
         newTypingAgents.set(data.messageId, updated)
       } else {
-        newTypingAgents.set(data.messageId, [...existing, { agentId: data.agentId, agentName: data.agentName, status: data.status }])
+        newTypingAgents.set(data.messageId, [
+          ...existing,
+          {
+            agentId: data.agentId,
+            agentName: data.agentName,
+            status: data.status,
+            startedAt: data.status === 'pending' ? undefined : (data.startedAt ?? Date.now()),
+          },
+        ])
       }
 
       const newCompletedAgents = new Set(completedAgents)
@@ -1742,6 +1939,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
       uploadedImages.length === 0 &&
       getMentionedAgentNames(trimmedInput).length === 0
     if (isRoomNewCommand) {
+      addInputHistory(trimmedInput)
       await clearMessages(chatRoom.id)
       setInputValue('')
       useChatStore.getState().setForceScrollToBottom(true)
@@ -1763,6 +1961,20 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
       toast.warning(tooManyMentionsToast)
       return
     }
+    const currentSocketState = useSocketStore.getState()
+    const ownerMentionReplyTarget = (
+      !chatRoom.isQuickChatRoom &&
+      (chatRoom.agentTriggerMode ?? 'coordinator') === 'auto' &&
+      !chatRoom.defaultAgentId &&
+      mentionedDispatchableAgentNames.length === 0
+    )
+      ? findLatestOwnerMentionReplyTarget({
+          chatRoom,
+          messages,
+          todos: currentSocketState.todos,
+          currentUser: currentSocketState.user,
+        })
+      : null
 
     const gitCommand = normalizedCommandContent?.gitCommand
     const shouldExecuteSystemGitCommand =
@@ -1791,6 +2003,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
       }
       useChatStore.getState().addMessage(humanMessage)
       useChatRoomStore.getState().updateRoomLastMessage(chatRoom.id, humanMessage)
+      addInputHistory(trimmedInput)
       setInputValue('')
       useChatStore.getState().setForceScrollToBottom(true)
 
@@ -1865,7 +2078,8 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
       !chatRoom.isQuickChatRoom &&
       (chatRoom.agentTriggerMode ?? 'coordinator') !== 'coordinator' &&
       !chatRoom.defaultAgentId &&
-      mentionedDispatchableAgentNames.length === 0
+      mentionedDispatchableAgentNames.length === 0 &&
+      !ownerMentionReplyTarget
     ) {
       toast.warning(missingRecipientToast)
       return
@@ -1894,7 +2108,12 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
       content,
       isHuman: true,
       attachments,
+      replyMessageId: ownerMentionReplyTarget?.messageId ?? null,
     })
+    if (ownerMentionReplyTarget?.todoId) {
+      completeTodo(ownerMentionReplyTarget.todoId)
+    }
+    addInputHistory(trimmedInput)
 
     // 发送消息时立即更新群聊的 lastMessage（使用临时数据）
     useChatRoomStore.getState().updateRoomLastMessage(chatRoom.id, {
@@ -1917,15 +2136,23 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     if (document.activeElement instanceof HTMLElement) {
       document.activeElement.blur()
     }
-  }, [allAgents, chatRoom, clearMessages, sendMessage, setInputValue])
+  }, [addInputHistory, allAgents, chatRoom, clearMessages, completeTodo, messages, sendMessage, setInputValue])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (shouldNavigateInputHistory(e, inputValue)) {
+      const navigated = navigateInputHistory(e.key === 'ArrowUp' ? 'previous' : 'next')
+      if (navigated) {
+        e.preventDefault()
+      }
+      return
+    }
+
     // 中文输入过程中不响应回车（检测 nativeEvent.isComposing）
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault()
       handleSend()
     }
-  }, [handleSend])
+  }, [handleSend, inputValue, navigateInputHistory])
 
   const handleAddAgents = useCallback(async (agentIds: string[]) => {
     if (!chatRoom) return
@@ -1955,6 +2182,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
 
   const handleAgentAvatarClick = useCallback((agentId: string, agentName: string) => {
     const found = allAgents.find(a => a.id === agentId || a.name === agentName)
+    if (isSystemAssistantDetailBlocked(found ?? { id: agentId, name: agentName })) return
     if (found) {
       // 从 chatRoom.chatRoomAgents 中查找 chatRoomAgentId 和 agentType
       const roomAgent = chatRoom?.chatRoomAgents?.find(
@@ -1968,6 +2196,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
         description: found.description,
         chatRoomAgentId: roomAgent?.id,
         agentType: roomAgent?.agent?.type,
+        agentLevel: found.agentLevel,
         chatRoomId: chatRoom?.id,
         injectGroupHistory: roomAgent?.injectGroupHistory ?? true,
       })

@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { messageService } from '../../../modules/message/message.service.js';
 import type { Message } from '../../../types/message.js';
-import { globalEmit } from './status.js';
+import { globalBroadcastMessage, globalEmit } from './status.js';
 import { debugLog } from './debug.js';
 
 // 构建 AI 消息对象
@@ -127,9 +127,10 @@ export async function broadcastAgentJoinedMessage(
     isHuman: true,
   });
 
-  // 广播消息
-  if (globalEmit) {
-    await globalEmit(message, chatRoomId);
+  // Broadcast for UI/unread sync only. Do not emit receivedMessage here,
+  // otherwise the join notification itself would trigger the coordinator/default agent.
+  if (globalBroadcastMessage) {
+    await globalBroadcastMessage(message, chatRoomId);
   }
 
   debugLog('agentJoinedMessage', {
@@ -142,11 +143,73 @@ export async function broadcastAgentJoinedMessage(
   return messageId;
 }
 
+export function buildChatRoomRulesUpdatedMessageContent(rules?: string | null): string {
+  const trimmedRules = rules?.trim();
+  if (!trimmedRules) {
+    return '群规则已清空。\n\n请所有助手从现在开始不再沿用旧群规则。';
+  }
+
+  return `群规则已更新。\n\n请所有助手从现在开始使用新的群规则。\n\n新的群规则：\n${trimmedRules}`;
+}
+
+export async function broadcastChatRoomRulesUpdatedMessage(
+  chatRoomId: string,
+  rules?: string | null,
+): Promise<string> {
+  const messageId = randomUUID();
+  const content = buildChatRoomRulesUpdatedMessageContent(rules);
+  const time = new Date();
+  const message: Message = {
+    id: messageId,
+    type: 'message',
+    content,
+    time,
+    user: '系统',
+    agentId: undefined,
+    agentName: undefined,
+    avatar: undefined,
+    avatarColor: undefined,
+    chatRoomId,
+    replyMessageId: undefined,
+    isHuman: true,
+  };
+
+  await messageService.create({
+    id: messageId,
+    type: 'MESSAGE',
+    content,
+    time,
+    userId: null,
+    agentId: null,
+    chatRoomId,
+    replyMessageId: null,
+    isHuman: true,
+  });
+
+  // Broadcast for UI/unread sync only. Do not emit receivedMessage here,
+  // otherwise the notification itself would trigger the coordinator/default agent.
+  if (globalBroadcastMessage) {
+    await globalBroadcastMessage(message, chatRoomId);
+  }
+
+  debugLog('chatRoomRulesUpdatedMessage', {
+    chatRoomId,
+    messageId,
+    content,
+  });
+
+  return messageId;
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\\/]/g, '\\$&');
 }
 
-export function parseKnownMentions(content: string, agentNames: string[]): string[] {
+export function parseKnownMentions(
+  content: string,
+  agentNames: string[],
+  options?: { allowInline?: boolean },
+): string[] {
   const mentions: string[] = [];
   const escapedNames = agentNames
     .filter(Boolean)
@@ -156,12 +219,25 @@ export function parseKnownMentions(content: string, agentNames: string[]): strin
 
   const endBoundaryChars = '*_>#`!?.,:;！？。，；：';
   const regex = new RegExp(
-    `(?:^|\\r?\\n| )@(${escapedNames.join('|')})(?=\\s|$|[${endBoundaryChars}]|-(?![\\u4e00-\\u9fa5a-zA-Z0-9_]))`,
+    `@(${escapedNames.join('|')})(?=\\s|$|[${endBoundaryChars}]|-(?![\\u4e00-\\u9fa5a-zA-Z0-9_]))`,
     'g',
   );
 
   let match: RegExpExecArray | null;
   while ((match = regex.exec(content)) !== null) {
+    const atIndex = match.index;
+    const prevChar = atIndex > 0 ? content[atIndex - 1] : '';
+    const isLineStart = atIndex === 0 || prevChar === '\n' || prevChar === '\r';
+    const hasStandardBoundary = isLineStart || prevChar === ' ';
+    if (!options?.allowInline && !hasStandardBoundary) {
+      continue;
+    }
+    // Collaboration messages can use Feishu/Lark-style inline mentions like "请@助手".
+    // Avoid treating email-like ASCII text before @ as an assistant mention.
+    if (options?.allowInline && prevChar && /[A-Za-z0-9._%+-]/.test(prevChar)) {
+      continue;
+    }
+
     const name = match[1];
     if (name && !mentions.includes(name)) {
       mentions.push(name);

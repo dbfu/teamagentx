@@ -93,6 +93,7 @@ interface AgentTypingData {
   agentId: string
   agentName: string
   status?: 'pending' | 'executing'
+  startedAt?: number
 }
 
 interface AgentDoneData {
@@ -146,6 +147,7 @@ export interface AgentResumeData {
   agentId: string
   agentName: string
   status?: 'pending' | 'executing'
+  startedAt?: number
 }
 
 // 缓存的流式事件数据类型
@@ -159,6 +161,7 @@ export interface CachedStreamEventData {
 interface AgentStoppedData {
   chatRoomId: string
   agentId: string
+  messageId?: string
 }
 
 interface AgentTaskQueueData {
@@ -202,6 +205,20 @@ interface InactiveTasksData {
   }[]
 }
 
+// Todo 数据类型
+export interface TodoData {
+  id: string
+  chatRoomId: string
+  messageId: string
+  triggerAgentId: string
+  triggerAgentName: string
+  ownerUserId: string | null
+  contentSummary: string
+  chatRoomName: string
+  status: 'pending' | 'completed' | 'dismissed' | string
+  createdAt: string | Date
+}
+
 interface PackageScriptsUpdatedData {
   chatRoomId: string
   data: {
@@ -240,13 +257,14 @@ interface SocketStore {
   username: string | null
   user: JoinedResponse['user'] | null
   currentChatRoomId: string | null
+  todos: TodoData[]
 
   // Actions
   connect: (token: string) => Promise<void>
   disconnect: () => void
   joinChatRoom: (chatRoomId: string) => void
   leaveChatRoom: (chatRoomId: string) => void
-  sendMessage: (message: { chatRoomId: string; content: string; isHuman?: boolean; attachments?: SocketAttachment[] }) => void
+  sendMessage: (message: { chatRoomId: string; content: string; isHuman?: boolean; attachments?: SocketAttachment[]; replyMessageId?: string | null }) => void
   setCurrentChatRoomId: (id: string | null) => void
 
   // Event listeners (返回 unsubscribe 函数)
@@ -262,7 +280,7 @@ interface SocketStore {
   requestAgentStatus: (chatRoomId: string) => void
   onAgentResume: (callback: (data: AgentResumeData) => void) => () => void
   onCachedEvents: (callback: (data: CachedStreamEventData) => void) => () => void
-  stopAgent: (chatRoomId: string, agentId: string) => void
+  stopAgent: (chatRoomId: string, agentId: string, messageId?: string) => void
   onAgentStopped: (callback: (data: AgentStoppedData) => void) => () => void
   requestAgentTaskQueue: (chatRoomId: string, agentId: string) => void
   onAgentTaskQueue: (callback: (data: AgentTaskQueueData) => void) => () => void
@@ -281,6 +299,14 @@ interface SocketStore {
   onUnreadUpdate: (callback: (data: UnreadUpdateData) => void) => () => void
   requestUnreadCounts: () => void
 
+  // Todo 相关方法
+  requestTodos: () => void
+  onTodoList: (callback: (data: { todos: TodoData[] }) => void) => () => void
+  onTodoCreated: (callback: (todo: TodoData) => void) => () => void
+  completeTodo: (todoId: string) => void
+  dismissTodo: (todoId: string) => void
+  onTodoUpdated: (callback: (data: { todoId: string; status: string }) => void) => () => void
+
 }
 
 export const useSocketStore = create<SocketStore>((set, get) => ({
@@ -289,6 +315,7 @@ export const useSocketStore = create<SocketStore>((set, get) => ({
   username: null,
   user: null,
   currentChatRoomId: null,
+  todos: [],
 
   connect: async (token: string) => {
     const baseUrl = await getApiBaseUrl()
@@ -366,6 +393,7 @@ export const useSocketStore = create<SocketStore>((set, get) => ({
       content: message.content,
       time: new Date(),
       chatRoomId: message.chatRoomId,
+      replyMessageId: message.replyMessageId ?? null,
       isHuman: message.isHuman ?? true,
       attachments: message.attachments,
     })
@@ -457,10 +485,10 @@ export const useSocketStore = create<SocketStore>((set, get) => ({
     return () => socket?.off('agent:cached-events', callback)
   },
 
-  stopAgent: (chatRoomId: string, agentId: string) => {
+  stopAgent: (chatRoomId: string, agentId: string, messageId?: string) => {
     const socket = get().socket
     if (!socket) return
-    socket.emit('agent:stop', { chatRoomId, agentId })
+    socket.emit('agent:stop', { chatRoomId, agentId, messageId })
   },
 
   onAgentStopped: (callback) => {
@@ -561,6 +589,46 @@ export const useSocketStore = create<SocketStore>((set, get) => ({
     const socket = get().socket
     if (!socket) return
     socket.emit('unread:request')
+  },
+
+  // Todo 相关方法
+  requestTodos: () => {
+    const socket = get().socket
+    if (!socket) return
+    socket.emit('todo:request')
+  },
+
+  onTodoList: (callback) => {
+    const socket = get().socket
+    if (!socket) return () => {}
+    socket.on('todo:list', callback)
+    return () => socket?.off('todo:list', callback)
+  },
+
+  onTodoCreated: (callback) => {
+    const socket = get().socket
+    if (!socket) return () => {}
+    socket.on('todo:created', callback)
+    return () => socket?.off('todo:created', callback)
+  },
+
+  completeTodo: (todoId: string) => {
+    const socket = get().socket
+    if (!socket) return
+    socket.emit('todo:complete', { todoId })
+  },
+
+  dismissTodo: (todoId: string) => {
+    const socket = get().socket
+    if (!socket) return
+    socket.emit('todo:dismiss', { todoId })
+  },
+
+  onTodoUpdated: (callback) => {
+    const socket = get().socket
+    if (!socket) return () => {}
+    socket.on('todo:updated', callback)
+    return () => socket?.off('todo:updated', callback)
   },
 
 }))

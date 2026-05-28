@@ -7,7 +7,7 @@ import {
 } from '../../modules/speech/speech-config.js';
 import { invalidateSystemAgentsCache } from '../../modules/chatroom/system-agents-cache.js';
 import { normalizeAgentProxyConfig } from './proxy-config.js';
-import { HIDDEN_SYSTEM_AGENT_IDS } from './system-assistant.constants.js';
+import { GROUP_ASSISTANT_ID, GROUP_COORDINATOR_ID, HIDDEN_SYSTEM_AGENT_IDS } from './system-assistant.constants.js';
 import {
   DEFAULT_AGENT_THINKING_MODE,
   normalizeAgentThinkingMode,
@@ -40,6 +40,7 @@ export type CreateAgentInput = {
   workDir?: string;
   proxyConfig?: string | null;
   codexModel?: string | null;
+  codexFastMode?: boolean;
   claudeModel?: string | null;
   thinkingMode?: AgentThinkingMode | null;
   categoryId?: string;
@@ -227,6 +228,7 @@ export const agentService = {
           workDir: data.workDir,
           proxyConfig: normalizeAgentProxyConfig(data.proxyConfig),
           codexModel: normalizeNullableString(data.codexModel),
+          codexFastMode: data.codexFastMode ?? false,
           claudeModel: normalizeNullableString(data.claudeModel),
           thinkingMode: normalizeAgentThinkingMode(data.thinkingMode) ?? DEFAULT_AGENT_THINKING_MODE,
           categoryId,
@@ -292,7 +294,22 @@ export const agentService = {
   async update(id: string, data: UpdateAgentInput): Promise<AgentWithRelations> {
     // 系统助手允许更新的字段白名单（仅展示/偏好类字段）
     // 任何不在白名单中的字段（包括未来新增的字段）都会被拦截，避免字段保护失效
-    const SYSTEM_AGENT_UPDATABLE_FIELDS = ['speechConfig'] as const;
+    const SYSTEM_AGENT_UPDATABLE_FIELDS = [
+      'speechConfig',
+      ...([GROUP_ASSISTANT_ID, GROUP_COORDINATOR_ID].includes(id)
+        ? [
+            'type',
+            'acpTool',
+            'proxyConfig',
+            'codexModel',
+            'codexFastMode',
+            'claudeModel',
+            'thinkingMode',
+            'llmProviderId',
+            'imageGeneration',
+          ] as const
+        : []),
+    ] as const;
 
     const existingAgent = await prisma.agent.findUnique({
       where: { id },

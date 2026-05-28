@@ -2,6 +2,7 @@ import { SidePanel } from '@/components/ui/side-panel'
 import { AgentContextInfo, ChatRoom, debugApi, ExecutionRecord, Message } from '@/lib/agent-api'
 import { AgentAvatarImage } from '@/lib/agent-avatars'
 import { cn } from '@/lib/utils'
+import { isSystemAssistantDetailBlocked } from '@/lib/system-agents'
 import type { SidePanelMode } from '@/stores/chat-store'
 import type { AgentStatus, StreamEvent } from '@/stores/socket-store'
 import { Bot, ClipboardList, Clock, Info, List, Loader2, MessageSquareMore, Settings, Users } from 'lucide-react'
@@ -29,8 +30,8 @@ interface ChatSidePanelProps {
   sidePanelMode: SidePanelMode
   onClose: () => void
   chatRoom: ChatRoom
-  selectedRoomAgent: { id: string; name: string; avatar?: string | null; avatarColor?: string | null; description?: string | null; chatRoomAgentId?: string; agentType?: string; chatRoomId?: string; injectGroupHistory?: boolean } | null
-  setSelectedRoomAgent: (agent: { id: string; name: string; avatar?: string | null; avatarColor?: string | null; description?: string | null; chatRoomAgentId?: string; agentType?: string; chatRoomId?: string; injectGroupHistory?: boolean } | null) => void
+  selectedRoomAgent: { id: string; name: string; avatar?: string | null; avatarColor?: string | null; description?: string | null; chatRoomAgentId?: string; agentType?: string; agentLevel?: string; chatRoomId?: string; injectGroupHistory?: boolean } | null
+  setSelectedRoomAgent: (agent: { id: string; name: string; avatar?: string | null; avatarColor?: string | null; description?: string | null; chatRoomAgentId?: string; agentType?: string; agentLevel?: string; chatRoomId?: string; injectGroupHistory?: boolean } | null) => void
   setSidePanelMode: (mode: SidePanelMode) => void
   setStreamingViewAgent: (agent: { messageId: string; agentId: string; name: string } | null) => void
   streamingViewAgent: { messageId: string; agentId: string; name: string } | null
@@ -229,7 +230,8 @@ export function ChatSidePanel({
     return <Users className="size-4 text-muted-foreground" />
   }
 
-  const handleSelectAgent = (agent: { id: string; name: string; avatar?: string | null; avatarColor?: string | null; description?: string | null; chatRoomAgentId?: string; agentType?: string; chatRoomId?: string; injectGroupHistory?: boolean }) => {
+  const handleSelectAgent = (agent: { id: string; name: string; avatar?: string | null; avatarColor?: string | null; description?: string | null; chatRoomAgentId?: string; agentType?: string; agentLevel?: string; chatRoomId?: string; injectGroupHistory?: boolean }) => {
+    if (isSystemAssistantDetailBlocked(agent)) return
     setSelectedRoomAgent(agent)
     setSidePanelMode('agent-detail')
   }
@@ -306,6 +308,7 @@ export function ChatSidePanel({
       description: roomAgent.agent.description,
       chatRoomAgentId: roomAgent.id,
       agentType: roomAgent.agent.type,
+      agentLevel: roomAgent.agent.agentLevel,
       chatRoomId: chatRoom.id,
       injectGroupHistory: roomAgent.injectGroupHistory,
     })

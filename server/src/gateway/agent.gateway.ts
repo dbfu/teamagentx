@@ -37,6 +37,8 @@ function isAgentValidationError(error: unknown): error is Error {
     '图片能力只能绑定图片模型',
     '开启图片能力时必须选择图片模型',
     '图片模型供应商不存在',
+    'Claude 仅支持',
+    'Codex 仅支持',
     '代理配置',
     '代理地址',
     '思考模式',
@@ -74,6 +76,7 @@ const agentResponseSchema = {
     workDir: { type: 'string', nullable: true },
     proxyConfig: { type: 'string', nullable: true },
     codexModel: { type: 'string', nullable: true },
+    codexFastMode: { type: 'boolean' },
     claudeModel: { type: 'string', nullable: true },
     thinkingMode: { type: 'string', enum: ['off', 'low', 'medium', 'high'] },
     speechConfig: {
@@ -179,6 +182,7 @@ const createAgentBodySchema = {
     workDir: { type: 'string', description: '工作目录（适用于所有类型）' },
     proxyConfig: { type: 'string', nullable: true, description: 'ACP 工具代理配置（支持代理地址或 export 片段）' },
     codexModel: { type: 'string', nullable: true, description: 'Codex 本地配置模式下指定的模型名称' },
+    codexFastMode: { type: 'boolean', description: 'Codex Fast service tier 开关' },
     claudeModel: { type: 'string', nullable: true, description: 'Claude 本地配置模式下指定的模型名称' },
     thinkingMode: { type: 'string', enum: ['off', 'low', 'medium', 'high'], description: '思考模式，默认 high' },
     speechConfig: {
@@ -217,7 +221,7 @@ const createAgentBodySchema = {
       },
     },
     categoryId: { type: 'string', description: '分类 ID' },
-    llmProviderId: { type: 'string', description: 'LLM 供应商 ID（builtin 直接使用；acp 目前仅支持 claude/codex 最小闭环）' },
+    llmProviderId: { type: 'string', nullable: true, description: 'LLM 供应商 ID（builtin 直接使用；acp 目前仅支持 claude/codex 最小闭环）' },
     imageGeneration: {
       type: 'object',
       additionalProperties: false,
@@ -243,6 +247,7 @@ const updateAgentBodySchema = {
     workDir: { type: 'string' },
     proxyConfig: { type: 'string', nullable: true },
     codexModel: { type: 'string', nullable: true },
+    codexFastMode: { type: 'boolean' },
     claudeModel: { type: 'string', nullable: true },
     thinkingMode: { type: 'string', enum: ['off', 'low', 'medium', 'high'] },
     speechConfig: {
@@ -281,7 +286,7 @@ const updateAgentBodySchema = {
     },
     isActive: { type: 'boolean' },
     categoryId: { type: 'string', description: '分类 ID，设为 null 移除分类' },
-    llmProviderId: { type: 'string', description: 'LLM 供应商 ID，设为 null 移除供应商' },
+    llmProviderId: { type: 'string', nullable: true, description: 'LLM 供应商 ID，设为 null 移除供应商' },
     imageGeneration: {
       type: 'object',
       additionalProperties: false,
@@ -311,6 +316,7 @@ interface CreateAgentBody {
   workDir?: string;
   proxyConfig?: string | null;
   codexModel?: string | null;
+  codexFastMode?: boolean;
   claudeModel?: string | null;
   thinkingMode?: AgentThinkingMode | null;
   speechConfig?: UpdateAgentInput['speechConfig'];
@@ -330,6 +336,7 @@ interface UpdateAgentBody {
   workDir?: string;
   proxyConfig?: string | null;
   codexModel?: string | null;
+  codexFastMode?: boolean;
   claudeModel?: string | null;
   thinkingMode?: AgentThinkingMode | null;
   speechConfig?: UpdateAgentInput['speechConfig'];
@@ -609,7 +616,7 @@ export async function agentGateway(app: FastifyInstance) {
       },
     },
     async (request, reply) => {
-      const {name, avatar, avatarColor, description, prompt, type, acpTool, workDir, proxyConfig, codexModel, claudeModel, thinkingMode, speechConfig, categoryId, llmProviderId, imageGeneration} = request.body;
+      const {name, avatar, avatarColor, description, prompt, type, acpTool, workDir, proxyConfig, codexModel, codexFastMode, claudeModel, thinkingMode, speechConfig, categoryId, llmProviderId, imageGeneration} = request.body;
 
       try {
         const agent = await agentService.create({
@@ -623,6 +630,7 @@ export async function agentGateway(app: FastifyInstance) {
           workDir,
           proxyConfig,
           codexModel,
+          codexFastMode,
           claudeModel,
           thinkingMode,
           speechConfig,

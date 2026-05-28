@@ -383,9 +383,9 @@ export function RoomSettingsPanel({
           <div>
             <label className="mb-1.5 block text-sm font-medium text-muted-foreground">助手触发模式</label>
             <div className="text-xs text-muted-foreground mb-2">
-              协调模式：系统内置协调助手会接收未 @ 的消息并派发助手。<br />
-              自由协作：助手消息中的 @ 会触发其他助手。<br />
-              手动模式：助手消息中的 @ 仅作提及。
+              协调模式：用户 @ 指定助手会直接触发；未 @ 和助手消息交给系统内置协调助手派发。<br />
+              自由协作：有 @ 时直接触发指定助手；无 @ 的用户消息由默认接收助手处理。<br />
+              手动模式：用户 @ 指定助手会直接触发；助手消息中的 @ 仅作提及。
             </div>
             <Select
               value={agentTriggerMode}

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { DocsPage } from './docs-page'
-import { getResolvedDownloadHref } from './download-helper'
+import { getResolvedDownloadHref, trackBaiduDownload } from './download-helper'
 import { useSiteConfig } from './site-config'
+import communityTemplates from './community-templates.json'
 
 const GITHUB_URL = 'https://github.com/dbfu/teamagentx'
 
@@ -44,6 +45,25 @@ const openSourceItems = [
   { icon: 'opensource', title: 'MIT 开源', desc: '完整源代码在 GitHub 公开，MIT 协议授权，可自由部署、二次开发和商业使用，欢迎 PR 贡献。', tag: 'MIT License', tone: 'blue' },
   { icon: 'selfhost', title: '私有化部署', desc: '本地 SQLite 数据库，数据完全存储在自己的设备上，也支持桌面端一键安装，无需服务器。', tag: '数据自主', tone: 'purple' },
 ] as const
+
+type TemplateAccent = 'blue' | 'green' | 'purple' | 'amber'
+
+interface CommunityTemplate {
+  id: string
+  name: string
+  description: string
+  scenario: string
+  level: string
+  agents: string[]
+  highlights: string[]
+  downloadUrl: string
+  size: string
+  downloads: number
+  updatedAt: string
+  accent: TemplateAccent
+}
+
+const templates = communityTemplates as CommunityTemplate[]
 
 // ── showcase 静态卡片（用在协作展示区） ──
 const demoCards = [
@@ -330,6 +350,8 @@ function sectionIcon(kind: string) {
       return <svg width="12" height="12" viewBox="0 0 24 24" {...common}><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
     case 'showcase':
       return <svg width="12" height="12" viewBox="0 0 24 24" {...common}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>
+    case 'templates':
+      return <svg width="12" height="12" viewBox="0 0 24 24" {...common}><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><path d="M14 17h7M17.5 13.5v7" /></svg>
     case 'opensource':
       return <svg width="12" height="12" viewBox="0 0 24 24" {...common}><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22" /></svg>
     default:
@@ -467,6 +489,7 @@ function App() {
           <a href="#features">功能特性</a>
           <a href="#workflow">工作流程</a>
           <a href="#showcase">协作演示</a>
+          <a href="#templates">群组模板</a>
           <a href="#opensource">开源免费</a>
           <a href="/docs">使用文档</a>
         </nav>
@@ -486,6 +509,7 @@ function App() {
           <a href="#features" onClick={() => setMenuOpen(false)}>功能特性</a>
           <a href="#workflow" onClick={() => setMenuOpen(false)}>工作流程</a>
           <a href="#showcase" onClick={() => setMenuOpen(false)}>协作演示</a>
+          <a href="#templates" onClick={() => setMenuOpen(false)}>群组模板</a>
           <a href="#opensource" onClick={() => setMenuOpen(false)}>开源免费</a>
           <a href="/docs" onClick={() => setMenuOpen(false)}>使用文档</a>
           <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" onClick={() => setMenuOpen(false)}>GitHub 开源</a>
@@ -505,12 +529,14 @@ function App() {
             </p>
             <div className="hero-actions">
               <div className="hero-download-stack">
-                {IS_IOS && DOWNLOAD_URL_IOS ? (
-                  <a href={getResolvedDownloadHref(DOWNLOAD_URL_IOS)} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-hero">
-                    {downloadIcon(15)} 下载 iOS App
-                  </a>
-                ) : IS_ANDROID && DOWNLOAD_URL_ANDROID ? (
-                  <a href={getResolvedDownloadHref(DOWNLOAD_URL_ANDROID)} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-hero">
+                {IS_ANDROID && DOWNLOAD_URL_ANDROID ? (
+                  <a
+                    href={getResolvedDownloadHref(DOWNLOAD_URL_ANDROID, { platform: 'android' })}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn btn-primary btn-hero"
+                    onClick={() => trackBaiduDownload('android')}
+                  >
                     {downloadIcon(15)} 下载 Android App
                   </a>
                 ) : IS_MAC ? (
@@ -518,7 +544,13 @@ function App() {
                     {downloadIcon(15)} 下载 macOS 客户端
                   </button>
                 ) : (
-                  <a href={getResolvedDownloadHref(DOWNLOAD_URL_WIN)} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-hero">
+                  <a
+                    href={getResolvedDownloadHref(DOWNLOAD_URL_WIN, { platform: 'windows' })}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn btn-primary btn-hero"
+                    onClick={() => trackBaiduDownload('windows')}
+                  >
                     {downloadIcon(15)} 下载 Windows 客户端
                   </a>
                 )}
@@ -657,6 +689,68 @@ function App() {
           </div>
         </section>
 
+        {/* ── 社区群组模板 ── */}
+        <section id="templates" className="section section-tight">
+          <div className="section-inner templates-inner">
+            <div className="templates-head reveal">
+              <div>
+                <div className="section-label">{sectionIcon('templates')}社区群组模板</div>
+                <h2 className="section-title">把好用的 AI 群组直接带走</h2>
+                <p className="section-sub">
+                  桌面端导出的群组模板可以在这里集中展示和下载。每个模板都包含助手配置、群规则和协作方式，
+                  导入后就能继续按自己的项目调整。
+                </p>
+              </div>
+              <div className="templates-summary">
+                <span>{templates.length}</span>
+                <small>个精选模板</small>
+              </div>
+            </div>
+            <div className="templates-grid reveal">
+              {templates.map((template) => (
+                <article className={`template-card template-card-${template.accent}`} key={template.id}>
+                  <div className="template-card-top">
+                    <div>
+                      <div className={`template-scenario tone-${template.accent}`}>{template.scenario}</div>
+                      <h3>{template.name}</h3>
+                    </div>
+                    <span className={`template-level tone-${template.accent}`}>{template.level}</span>
+                  </div>
+                  <p className="template-desc">{template.description}</p>
+                  <div className="template-agents" aria-label={`${template.name} 助手列表`}>
+                    <div className="template-agent-stack">
+                      {template.agents.map((agent, index) => (
+                        <span className={`template-agent tone-bg-${template.accent}`} key={`${template.id}-${agent}`}>
+                          {index === 0 ? agent.slice(0, 1) : agent.slice(0, 2)}
+                        </span>
+                      ))}
+                    </div>
+                    <strong>{template.agents.join(' / ')}</strong>
+                  </div>
+                  <div className="template-highlights">
+                    {template.highlights.map((item) => (
+                      <span key={`${template.id}-${item}`}>{checkIcon()}{item}</span>
+                    ))}
+                  </div>
+                  <div className="template-meta">
+                    <span>{template.size}</span>
+                    <span>{template.downloads.toLocaleString('zh-CN')} 次下载</span>
+                    <span>{template.updatedAt}</span>
+                  </div>
+                  <a
+                    href={getResolvedDownloadHref(template.downloadUrl)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn btn-outline template-download"
+                  >
+                    {downloadIcon(14)}下载模板
+                  </a>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
         {/* ── 开源免费 ── */}
         <section id="opensource" className="section section-tight">
           <div className="section-inner">
@@ -707,29 +801,33 @@ function App() {
               {downloadIcon(16)}下载 macOS 客户端
             </button>
             <a
-              href={getResolvedDownloadHref(DOWNLOAD_URL_WIN)}
+              href={getResolvedDownloadHref(DOWNLOAD_URL_WIN, { platform: 'windows' })}
               target="_blank"
               rel="noopener noreferrer"
               className={`btn btn-lg ${!IS_MOBILE && !IS_MAC ? 'btn-primary' : 'btn-outline'}`}
+              onClick={() => trackBaiduDownload('windows')}
             >
               下载 Windows 客户端
             </a>
           </div>
           <div className="download-platform-row">
             <span className="download-platform-label">移动端</span>
-            {DOWNLOAD_URL_IOS ? (
-              <a href={getResolvedDownloadHref(DOWNLOAD_URL_IOS)} target="_blank" rel="noopener noreferrer" className={`btn btn-lg ${IS_IOS ? 'btn-primary' : 'btn-outline'}`}>{downloadIcon(16)}下载 iOS App</a>
-            ) : (
-              <span className="mobile-store-btn mobile-store-soon">iOS 即将上线</span>
-            )}
             {DOWNLOAD_URL_ANDROID ? (
-              <a href={getResolvedDownloadHref(DOWNLOAD_URL_ANDROID)} target="_blank" rel="noopener noreferrer" className={`btn btn-lg ${IS_ANDROID ? 'btn-primary' : 'btn-outline'}`}>{downloadIcon(16)}下载 Android App</a>
+              <a
+                href={getResolvedDownloadHref(DOWNLOAD_URL_ANDROID, { platform: 'android' })}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`btn btn-lg ${IS_ANDROID ? 'btn-primary' : 'btn-outline'}`}
+                onClick={() => trackBaiduDownload('android')}
+              >
+                {downloadIcon(16)}下载 Android App
+              </a>
             ) : (
               <span className="mobile-store-btn mobile-store-soon">Android 即将上线</span>
             )}
           </div>
         </div>
-        <p className="download-note reveal">当前版本 {APP_VERSION} · 支持 macOS 12+ / Windows 10+ / iOS / Android · Apache 2.0 开源协议</p>
+        <p className="download-note reveal">当前版本 {APP_VERSION} · 支持 macOS 12+ / Windows 10+ / Android · Apache 2.0 开源协议</p>
       </section>
 
       {/* ── macOS 芯片选择弹窗 ── */}
@@ -766,11 +864,14 @@ function App() {
               </button>
             </div>
             <a
-              href={getResolvedDownloadHref(selectedArch === 'arm64' ? DOWNLOAD_URL_MAC_ARM64 : DOWNLOAD_URL_MAC_X64)}
+              href={getResolvedDownloadHref(selectedArch === 'arm64' ? DOWNLOAD_URL_MAC_ARM64 : DOWNLOAD_URL_MAC_X64, {
+                platform: selectedArch === 'arm64' ? 'macos-arm64' : 'macos-x64',
+              })}
               target="_blank"
               rel="noopener noreferrer"
               className="btn btn-primary mac-modal-download-btn"
               onClick={() => {
+                trackBaiduDownload(selectedArch === 'arm64' ? 'macos-arm64' : 'macos-x64')
                 setShowMacModal(false)
               }}
             >
@@ -796,6 +897,7 @@ function App() {
               <a href="#features">功能特性</a>
               <a href="#workflow">工作流程</a>
               <a href="#showcase">协作演示</a>
+              <a href="#templates">群组模板</a>
               <a href="/docs">使用文档</a>
               <a href="#download">下载应用</a>
             </div>

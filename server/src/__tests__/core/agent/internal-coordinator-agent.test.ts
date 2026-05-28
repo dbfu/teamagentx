@@ -56,6 +56,52 @@ describe('internal coordinator no-dispatch handling', () => {
     assert.doesNotMatch(prompt, /无需调度：一句话原因/);
   });
 
+  test('prompt forbids expanding human user messages during dispatch', () => {
+    const prompt = buildInternalCoordinatorPrompt();
+
+    assert.match(prompt, /用户原始消息全文/);
+    assert.match(prompt, /不要扩写、总结、解释、拆解、补充验收标准/);
+    assert.match(prompt, /添加分支\/提交\/PR\/发布等操作/);
+    assert.match(prompt, /用户没有明确说出的内容，不能出现在你的调度消息里/);
+    assert.match(prompt, /不得添加、删除、改写任何内容/);
+  });
+
+  test('prompt allows only the coordinator to dispatch multiple assistants in coordinator mode', () => {
+    const prompt = buildInternalCoordinatorPrompt();
+
+    assert.match(prompt, /只有你（群调度助手）支持在一条调度消息中 @多个助手/);
+    assert.match(prompt, /多个助手同时执行任务/);
+    assert.match(prompt, /多个可并行推进的任务/);
+    assert.match(prompt, /同时 @多个助手 分配任务/);
+    assert.match(prompt, /必须等所有被并行调度的助手都明确完成各自任务后/);
+    assert.match(prompt, /才能调度下一个阶段任务/);
+    assert.match(prompt, /其他业务助手在协调模式下不能直接 @助手 触发任务/);
+    assert.match(prompt, /不会直接触发目标助手/);
+    assert.match(prompt, /@assistant_name @assistant_name original_content/);
+  });
+
+  test('prompt requires mentioning the chatroom owner for human answers', () => {
+    const prompt = buildInternalCoordinatorPrompt();
+
+    assert.match(prompt, /需要人类用户回答问题或确认事项/);
+    assert.match(prompt, /最终回复必须提及群主/);
+    assert.match(prompt, /不要为了提问或确认而 @其他人类成员/);
+    assert.match(prompt, /不要把需要用户回答或确认的问题输出为“无需调度”/);
+    assert.match(prompt, /不能在一条消息里同时 @业务助手 和 @群主/);
+    assert.match(prompt, /必须先只 @群主 提问/);
+    assert.match(prompt, /用户回答或确认后，再调度合适的助手处理/);
+  });
+
+  test('prompt blocks next phase until all parallel tasks finish', () => {
+    const prompt = buildInternalCoordinatorPrompt();
+
+    assert.match(prompt, /上一阶段是并行任务/);
+    assert.match(prompt, /任意一个并行助手尚未明确完成/);
+    assert.match(prompt, /无法确认所有并行任务都已完成/);
+    assert.match(prompt, /必须输出“无需调度”/);
+    assert.match(prompt, /不能进入下一个阶段任务/);
+  });
+
   test('suppresses only exact internal coordinator no-dispatch output', () => {
     assert.equal(
       shouldSuppressInternalCoordinatorMessage(

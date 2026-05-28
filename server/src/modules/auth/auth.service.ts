@@ -1,43 +1,12 @@
 import bcrypt from 'bcryptjs';
 import jwt, { SignOptions } from 'jsonwebtoken';
 import type { StringValue } from 'ms';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
 import prisma from '../../lib/prisma.js';
 import { config } from '../../config/index.js';
-import { randomUUID, randomBytes } from 'crypto';
-
-// 本地账号文件标记：DB 中存此占位符，真实密码在 user.json
-const LOCAL_USER_FILE_SENTINEL = '__TEAMAGENTX_LOCAL_USER_FILE__';
-
-interface LocalUser {
-  id: string;
-  username: string;
-  password: string;
-  avatar: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-function getUserFilePath(): string {
-  return process.env.TEAMAGENTX_USER_FILE || path.join(os.homedir(), '.teamagentx', 'user.json');
-}
-
-async function readLocalUser(): Promise<LocalUser | null> {
-  try {
-    const content = await fs.promises.readFile(getUserFilePath(), 'utf-8');
-    return JSON.parse(content) as LocalUser;
-  } catch {
-    return null;
-  }
-}
-
-async function writeLocalUser(user: LocalUser): Promise<void> {
-  const filePath = getUserFilePath();
-  await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.promises.writeFile(filePath, JSON.stringify(user, null, 2), 'utf-8');
-}
+import { randomBytes, randomUUID } from 'node:crypto';
+import { mkdir, readFile, writeFile, chmod } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
 export interface RegisterData {
   username: string;
@@ -67,158 +36,202 @@ export interface AuthResponse {
   token: string;
 }
 
+interface LocalUserConfig {
+  id: string;
+  username: string;
+  password: string;
+  avatar: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const LOCAL_USER_PASSWORD_SENTINEL = '__TEAMAGENTX_LOCAL_USER_FILE__';
+
+function getLocalUserPath() {
+  return process.env.TEAMAGENTX_USER_FILE
+    || path.join(os.homedir(), '.teamagentx', 'user.json');
+}
+
+function toUserResponse(user: LocalUserConfig): UserResponse {
+  return {
+    id: user.id,
+    username: user.username,
+    avatar: user.avatar,
+    createdAt: new Date(user.createdAt),
+  };
+}
+
+function createToken(user: LocalUserConfig) {
+  const signOptions: SignOptions = { expiresIn: config.jwt.expiresIn as StringValue };
+  return jwt.sign(
+    { userId: user.id, username: user.username },
+    config.jwt.secret,
+    signOptions
+  );
+}
+
+function normalizeLocalUser(data: unknown): LocalUserConfig {
+  if (!data || typeof data !== 'object') {
+    throw new Error('用户配置文件格式无效');
+  }
+
+  const raw = data as Partial<LocalUserConfig>;
+  if (typeof raw.username !== 'string' || !raw.username.trim()) {
+    throw new Error('用户配置文件缺少用户名');
+  }
+  if (typeof raw.password !== 'string' || !raw.password) {
+    throw new Error('用户配置文件缺少密码');
+  }
+
+  const now = new Date().toISOString();
+  return {
+    id: typeof raw.id === 'string' && raw.id ? raw.id : randomUUID(),
+    username: raw.username,
+    password: raw.password,
+    avatar: typeof raw.avatar === 'string' ? raw.avatar : null,
+    createdAt: typeof raw.createdAt === 'string' && raw.createdAt ? raw.createdAt : now,
+    updatedAt: typeof raw.updatedAt === 'string' && raw.updatedAt ? raw.updatedAt : now,
+  };
+}
+
+async function readLocalUser(): Promise<LocalUserConfig | null> {
+  try {
+    const content = await readFile(getLocalUserPath(), 'utf8');
+    return normalizeLocalUser(JSON.parse(content));
+  } catch (error: any) {
+    if (error?.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+async function writeLocalUser(user: LocalUserConfig): Promise<LocalUserConfig> {
+  const userPath = getLocalUserPath();
+  await mkdir(path.dirname(userPath), { recursive: true, mode: 0o700 });
+  await writeFile(userPath, `${JSON.stringify(user, null, 2)}\n`, { mode: 0o600 });
+  await chmod(userPath, 0o600).catch(() => {});
+  return user;
+}
+
+function generateRecoveryPassword() {
+  return `tax-${randomBytes(12).toString('base64url')}`;
+}
+
+async function findLegacyUser(username?: string) {
+  if (username) {
+    const exactUser = await prisma.user.findUnique({ where: { username } });
+    if (exactUser) return exactUser;
+  }
+
+  return prisma.user.findFirst({
+    orderBy: { createdAt: 'asc' },
+  });
+}
+
+async function syncCompatibilityUser(user: LocalUserConfig, socketId?: string | null) {
+  const now = new Date();
+  await prisma.user.upsert({
+    where: { id: user.id },
+    update: {
+      username: user.username,
+      password: LOCAL_USER_PASSWORD_SENTINEL,
+      avatar: user.avatar,
+      ...(socketId !== undefined && { socketId }),
+      updatedAt: now,
+    },
+    create: {
+      id: user.id,
+      username: user.username,
+      password: LOCAL_USER_PASSWORD_SENTINEL,
+      avatar: user.avatar,
+      socketId: socketId ?? null,
+      updatedAt: now,
+    },
+  });
+}
+
+async function migrateLegacyUser(username?: string, password?: string): Promise<LocalUserConfig | null> {
+  const legacyUser = await findLegacyUser(username);
+  if (!legacyUser) return null;
+
+  let localPassword = generateRecoveryPassword();
+  if (username && password && legacyUser.username === username) {
+    const matchesLegacyPassword = await bcrypt.compare(password, legacyUser.password).catch(() => false);
+    if (matchesLegacyPassword) {
+      localPassword = password;
+    }
+  }
+
+  const user = await writeLocalUser({
+    id: legacyUser.id,
+    username: legacyUser.username,
+    password: localPassword,
+    avatar: legacyUser.avatar ?? '0',
+    createdAt: legacyUser.createdAt.toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+  await syncCompatibilityUser(user, legacyUser.socketId);
+  return user;
+}
+
+async function loadLocalUser(username?: string, password?: string): Promise<LocalUserConfig | null> {
+  const user = await readLocalUser();
+  if (user) {
+    await syncCompatibilityUser(user).catch((error) => {
+      console.warn('[Auth] 同步本地用户兼容记录失败:', error);
+    });
+    return user;
+  }
+  return migrateLegacyUser(username, password);
+}
+
 export const authService = {
   async register(data: RegisterData): Promise<AuthResponse> {
     const { username, password, avatar } = data;
-    const now = new Date();
 
-    // 本机单账号：user.json 已存在则禁止再注册
-    const existingLocalUser = await readLocalUser();
-    if (existingLocalUser) {
-      throw new Error('本机账号已存在');
-    }
-
-    // Check if username already exists
-    const existingUser = await prisma.user.findUnique({
-      where: { username },
-    });
-
+    const existingUser = await loadLocalUser();
     if (existingUser) {
-      throw new Error('用户名已存在');
+      throw new Error('本机账号已存在，请直接登录');
     }
 
-    const id = randomUUID();
-    const avatarValue = avatar || '0';
-
-    // Create user with sentinel password in DB
-    const user = await prisma.user.create({
-      data: {
-        id,
-        username,
-        password: LOCAL_USER_FILE_SENTINEL,
-        avatar: avatarValue,
-        updatedAt: now,
-      },
-    });
-
-    // Write plaintext password to local file
-    await writeLocalUser({
-      id: user.id,
-      username: user.username,
+    const now = new Date().toISOString();
+    const user = await writeLocalUser({
+      id: randomUUID(),
+      username,
       password,
-      avatar: avatarValue,
-      createdAt: user.createdAt.toISOString(),
-      updatedAt: now.toISOString(),
+      avatar: avatar || '0',
+      createdAt: now,
+      updatedAt: now,
     });
-
-    // Generate JWT token
-    const signOptions: SignOptions = { expiresIn: config.jwt.expiresIn as StringValue };
-    const token = jwt.sign(
-      { userId: user.id, username: user.username },
-      config.jwt.secret,
-      signOptions
-    );
+    await syncCompatibilityUser(user);
 
     return {
-      user: {
-        id: user.id,
-        username: user.username,
-        avatar: user.avatar,
-        createdAt: user.createdAt,
-      },
-      token,
+      user: toUserResponse(user),
+      token: createToken(user),
     };
   },
 
   async login(data: LoginData): Promise<AuthResponse> {
     const { username, password } = data;
 
-    // Find user
-    const user = await prisma.user.findUnique({
-      where: { username },
-    });
+    const user = await loadLocalUser(username, password);
 
-    if (!user) {
+    if (!user || user.username !== username) {
       throw new Error('用户不存在');
     }
 
-    if (user.password === LOCAL_USER_FILE_SENTINEL) {
-      // 新格式：从本地文件比对明文密码
-      const localUser = await readLocalUser();
-      if (!localUser || localUser.password !== password) {
-        throw new Error('密码错误');
-      }
-    } else {
-      // 旧格式（bcrypt）：校验后迁移到本地文件
-      const isValidPassword = await bcrypt.compare(password, user.password);
-      if (!isValidPassword) {
-        throw new Error('密码错误');
-      }
-
-      // 迁移：写 user.json，DB 换成占位符
-      const now = new Date();
-      await writeLocalUser({
-        id: user.id,
-        username: user.username,
-        password,
-        avatar: user.avatar || '0',
-        createdAt: user.createdAt.toISOString(),
-        updatedAt: now.toISOString(),
-      });
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { password: LOCAL_USER_FILE_SENTINEL, updatedAt: now },
-      });
+    if (password !== user.password) {
+      throw new Error('密码错误');
     }
 
-    // Generate JWT token
-    const signOptions: SignOptions = { expiresIn: config.jwt.expiresIn as StringValue };
-    const token = jwt.sign(
-      { userId: user.id, username: user.username },
-      config.jwt.secret,
-      signOptions
-    );
-
     return {
-      user: {
-        id: user.id,
-        username: user.username,
-        avatar: user.avatar,
-        createdAt: user.createdAt,
-      },
-      token,
+      user: toUserResponse(user),
+      token: createToken(user),
     };
   },
 
   async checkFirstUse(): Promise<{ isFirstUse: boolean }> {
-    const userCount = await prisma.user.count();
-    if (userCount === 0) {
-      return { isFirstUse: true };
-    }
-
-    // 若已有账号但 user.json 不存在，说明是旧 bcrypt 格式，自动生成恢复密码
-    const localUser = await readLocalUser();
-    if (!localUser) {
-      const existingUser = await prisma.user.findFirst();
-      if (existingUser && existingUser.password !== LOCAL_USER_FILE_SENTINEL) {
-        const recoveryPassword = `tax-${randomBytes(12).toString('base64url')}`;
-        const now = new Date();
-        await writeLocalUser({
-          id: existingUser.id,
-          username: existingUser.username,
-          password: recoveryPassword,
-          avatar: existingUser.avatar || '0',
-          createdAt: existingUser.createdAt.toISOString(),
-          updatedAt: now.toISOString(),
-        });
-        await prisma.user.update({
-          where: { id: existingUser.id },
-          data: { password: LOCAL_USER_FILE_SENTINEL, updatedAt: now },
-        });
-      }
-    }
-
-    return { isFirstUse: false };
+    const user = await loadLocalUser();
+    return { isFirstUse: !user };
   },
 
   async getUserFromToken(token: string): Promise<UserResponse | null> {
@@ -228,71 +241,74 @@ export const authService = {
         username: string;
       };
 
-      const user = await prisma.user.findUnique({
-        where: { id: decoded.userId },
-      });
-
-      if (!user) {
+      const user = await loadLocalUser(decoded.username);
+      if (!user || user.id !== decoded.userId) {
         return null;
       }
 
-      return {
-        id: user.id,
-        username: user.username,
-        avatar: user.avatar,
-        createdAt: user.createdAt,
-      };
+      return toUserResponse(user);
     } catch {
       return null;
     }
   },
 
   async findById(id: string) {
-    return prisma.user.findUnique({
-      where: { id },
-    });
+    const user = await loadLocalUser();
+    if (!user || user.id !== id) return null;
+
+    return {
+      id: user.id,
+      socketId: null,
+      clientId: null,
+      username: user.username,
+      password: LOCAL_USER_PASSWORD_SENTINEL,
+      avatar: user.avatar,
+      avatarColor: null,
+      createdAt: new Date(user.createdAt),
+      updatedAt: new Date(user.updatedAt),
+    };
   },
 
   async updateSocketId(userId: string, socketId: string) {
-    return prisma.user.update({
-      where: { id: userId },
-      data: { socketId, updatedAt: new Date() },
-    });
+    const user = await loadLocalUser();
+    if (!user || user.id !== userId) return null;
+    await syncCompatibilityUser(user, socketId);
+    return {
+      id: user.id,
+      socketId,
+      clientId: null,
+      username: user.username,
+      password: LOCAL_USER_PASSWORD_SENTINEL,
+      avatar: user.avatar,
+      avatarColor: null,
+      createdAt: new Date(user.createdAt),
+      updatedAt: new Date(user.updatedAt),
+    };
   },
 
   async updateProfile(userId: string, data: UpdateProfileData): Promise<UserResponse> {
     const { username, avatar } = data;
-    const now = new Date();
+    const user = await loadLocalUser();
 
-    // 如果要更新用户名，检查是否已存在
-    if (username) {
-      const existingUser = await prisma.user.findFirst({
-        where: {
-          username,
-          id: { not: userId },
-        },
-      });
-
-      if (existingUser) {
-        throw new Error('用户名已存在');
-      }
+    if (!user || user.id !== userId) {
+      throw new Error('用户不存在');
     }
 
-    // 更新用户信息
-    const user = await prisma.user.update({
-      where: { id: userId },
-      data: {
-        ...(username && { username }),
-        ...(avatar !== undefined && { avatar }),
-        updatedAt: now,
-      },
-    });
+    if (username && username !== user.username) {
+      const existingUser = await prisma.user.findFirst({
+        where: { username, id: { not: userId } },
+      });
+      if (existingUser) throw new Error('用户名已存在');
+    }
 
-    return {
-      id: user.id,
-      username: user.username,
-      avatar: user.avatar,
-      createdAt: user.createdAt,
-    };
+    const updatedUser = await writeLocalUser({
+      ...user,
+      ...(username && { username }),
+      ...(avatar !== undefined && { avatar }),
+      updatedAt: new Date().toISOString(),
+    });
+    await syncCompatibilityUser(updatedUser);
+
+    return toUserResponse(updatedUser);
   },
 };

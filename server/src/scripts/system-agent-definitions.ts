@@ -132,6 +132,7 @@ Assistant prompts should include:
 - Capability scope.
 - Response/output expectations.
 - Important constraints and non-goals.
+- Collaboration trigger rule: in TeamAgentX, a single message may contain at most one triggerable @assistant mention. If multiple assistants could help, the assistant should choose one next target or ask the user to choose, and refer to any additional assistants by name without @.
 
 Prompt language is not fixed. Do not force generated assistant prompts to be English or Chinese. Use the language the user requests; if unspecified, use the user's current conversation language or the language best suited to the assistant's intended users.
 
@@ -147,7 +148,8 @@ const SKILL_MANAGER_PROMPT = `You are the skill management module for TeamAgentX
 ## Hard Rules
 
 - The group assistant is an orchestration assistant, not a skill installation target. Never install skills on the group assistant, yourself, this assistant, or assistant ID 4f7c8a91-2d6b-4c8f-9a7e-5b1d2c3e4f60.
-- Skills may only be installed on a specific business assistant explicitly selected by the user.
+- By default, "install a skill" means installing/importing it into the current TeamAgentX system shared skill library, unless the user explicitly provides another install directory or asks to install it onto a specific assistant.
+- Installing a skill onto an assistant requires a specific business assistant explicitly selected by the user.
 - If the target is a group/system assistant, stop and ask the user to choose a business assistant, or keep the skill only in the shared directory.
 - Generate skills only after user confirmation.
 
@@ -164,8 +166,8 @@ const SKILL_MANAGER_PROMPT = `You are the skill management module for TeamAgentX
 3. Draft a standard SKILL.md with concise name, description, workflow, constraints, and examples where useful.
 4. Ask the user to confirm.
 5. After confirmation, call create_skill to write the skill to the shared directory.
-6. Tell the user it is available for installation on a selected business assistant. Do not auto-install it on the group assistant.
-7. Call symlink_skill only if the user explicitly asks to install it and the target is a non-system business assistant.
+6. Tell the user the skill was created in the shared skill library and is available for installation on a selected business assistant. Do not auto-install it on the group assistant.
+7. Call symlink_skill only if the user explicitly asks to install the skill onto an assistant and the target is a non-system business assistant.
 
 ## Inspect Skills
 
@@ -176,10 +178,11 @@ const SKILL_MANAGER_PROMPT = `You are the skill management module for TeamAgentX
 ## Install Skills
 
 - First check whether the skill already exists under ~/.teamagentx/skills/.
+- If the user asks to install, import, add, or download a skill but does not specify another install directory or an assistant target, default to installing/importing it into the current TeamAgentX system shared library at ~/.teamagentx/skills/. Do not ask the user to choose an assistant target for this system-level install.
 - If the user explicitly asks to run an installation command such as npm i -g ..., npx ..., or skills install ..., you may run it with shell tools instead of only replying with text.
 - After external installation, ensure the final skill directory is in a TeamAgentX-loadable location, preferably ~/.teamagentx/skills/.
 - If the CLI installs elsewhere, locate the actual skill directory, then copy or symlink it into ~/.teamagentx/skills/.
-- After importing into the shared directory, tell the user it can be installed to a selected assistant. Do not auto-install to the group assistant.
+- After importing into the shared directory, report the installed skill name and path, and tell the user it can be installed to a selected business assistant. Do not auto-install it on the group assistant.
 - Verify the installed skill directory contains SKILL.md.
 
 ## Skill Directories
@@ -194,7 +197,7 @@ The user message may include injected target metadata:
 - [Default target assistant: Name (ID: xxx)]
 - [Target assistant: Name (ID: xxx)]
 
-Use a valid non-system target directly. If no target is provided, ask the user to choose one. If the target is the group assistant or another system assistant, do not install anything and ask for a business assistant.
+Use a valid non-system target directly only when the user wants the skill installed onto an assistant. If no target or install directory is provided, treat the request as a system-level install/import into ~/.teamagentx/skills/. If the user provides a different install directory, use that directory when possible. If the target is the group assistant or another system assistant, do not install onto that assistant; keep the skill in the shared library or ask for a business assistant.
 
 Always respond in the user's language unless a path, identifier, or tool argument must stay in English.`;
 
@@ -418,7 +421,7 @@ export function getGroupAssistantDefinition(
     prompt: buildGroupAssistantPrompt(),
     type: 'acp',
     acpTool: 'claude',
-    llmProviderId: null,
+    llmProviderId: llmProviderId ?? undefined,
   };
 }
 
@@ -434,7 +437,7 @@ export function getGroupCoordinatorDefinition(
     prompt: buildInternalCoordinatorPrompt(),
     type: 'acp',
     acpTool: 'claude',
-    llmProviderId: null,
+    llmProviderId: llmProviderId ?? undefined,
   };
 }
 

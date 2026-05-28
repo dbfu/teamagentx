@@ -1,42 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { skillInstallService } from '../../modules/skill/skill-install.service.js';
-
-function extractSkillMetadata(skillMdPath: string): { name?: string; description?: string } {
-  try {
-    const content = fs.readFileSync(skillMdPath, 'utf-8');
-    const frontmatter = content.match(/^---\n([\s\S]*?)\n---/);
-    if (!frontmatter) return {};
-
-    const metadata: { name?: string; description?: string } = {};
-    const lines = frontmatter[1].split('\n');
-    for (let i = 0; i < lines.length; i++) {
-      const match = lines[i].match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
-      if (!match) continue;
-
-      const key = match[1];
-      const rawValue = match[2].trim();
-      if (key !== 'name' && key !== 'description') continue;
-
-      if (rawValue === '|' || rawValue === '>' || rawValue === '|-' || rawValue === '>-') {
-        const parts: string[] = [];
-        for (let j = i + 1; j < lines.length; j++) {
-          if (lines[j].match(/^\s/) && lines[j].trim() !== '') {
-            parts.push(lines[j].trim());
-          } else {
-            break;
-          }
-        }
-        metadata[key] = parts.join(' ').trim();
-      } else {
-        metadata[key] = rawValue.replace(/^['"]|['"]$/g, '');
-      }
-    }
-    return metadata;
-  } catch {
-    return {};
-  }
-}
+import { readSkillMetadata } from '../../modules/skill/skill-metadata.js';
 
 function resolveSkillsDir(
   agentId: string | null | undefined,
@@ -89,6 +54,19 @@ export function buildInstalledSkillsSignature(
   return entries.map((entry) => entry.slug).join('|');
 }
 
+export function buildInstalledSkillNames(
+  agentId: string | null | undefined,
+  skillsDirOverride?: string,
+): string[] {
+  const skillsDir = resolveSkillsDir(agentId, skillsDirOverride);
+  if (!skillsDir) return [];
+
+  const entries = readSkillEntries(skillsDir);
+  if (entries === null) return [];
+
+  return entries.map((entry) => entry.slug);
+}
+
 export function buildInstalledSkillsInstructions(
   agentId: string | null | undefined,
   skillsDirOverride?: string,
@@ -117,7 +95,7 @@ The current assistant's skills directory cannot be read. If the user asks what s
 
   const skills: Array<{ slug: string; name: string; description?: string }> = [];
   for (const entry of skillEntries) {
-    const metadata = extractSkillMetadata(entry.skillMdPath);
+    const metadata = readSkillMetadata(entry.skillMdPath);
     skills.push({
       slug: entry.slug,
       name: metadata.name || entry.slug,

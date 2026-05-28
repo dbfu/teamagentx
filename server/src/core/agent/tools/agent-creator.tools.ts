@@ -11,6 +11,7 @@ import {
 } from '../../../modules/skill/preinstalled-skills.js';
 import { skillInstallService } from '../../../modules/skill/skill-install.service.js';
 import { createSkillDirectoryLink } from '../../../modules/skill/skill-link.js';
+import { readSkillMetadata } from '../../../modules/skill/skill-metadata.js';
 import { installSkillFromSourceTool } from './skills-helper.tools.js';
 import { getChatHistoryTool, listSharedSkillsTool } from './skill-manager.tools.js';
 import {
@@ -79,43 +80,6 @@ function normalizeAgentTypeConfig(config: Pick<AgentConfig, 'type' | 'acpTool'>)
   };
 }
 
-function parseSkillMetadata(skillMdPath: string): { name?: string; description?: string } {
-  try {
-    const content = fs.readFileSync(skillMdPath, 'utf-8');
-    const frontmatter = content.match(/^---\n([\s\S]*?)\n---/);
-    if (!frontmatter) return {};
-
-    const metadata: { name?: string; description?: string } = {};
-    const lines = frontmatter[1].split('\n');
-    for (let i = 0; i < lines.length; i++) {
-      const match = lines[i].match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
-      if (!match) continue;
-
-      const key = match[1];
-      const rawValue = match[2].trim();
-      if (key !== 'name' && key !== 'description') continue;
-
-      if (rawValue === '|' || rawValue === '>' || rawValue === '|-' || rawValue === '>-') {
-        const parts: string[] = [];
-        for (let j = i + 1; j < lines.length; j++) {
-          if (lines[j].match(/^\s/) && lines[j].trim() !== '') {
-            parts.push(lines[j].trim());
-          } else {
-            break;
-          }
-        }
-        metadata[key] = parts.join(' ').trim();
-      } else {
-        metadata[key] = rawValue.replace(/^['"]|['"]$/g, '');
-      }
-    }
-
-    return metadata;
-  } catch {
-    return {};
-  }
-}
-
 function listSharedSkillSummaries(): SkillSummary[] {
   const sharedSkillsDir = getSharedSkillsDir();
   if (!fs.existsSync(sharedSkillsDir)) return [];
@@ -131,7 +95,7 @@ function listSharedSkillSummaries(): SkillSummary[] {
     const skillMdPath = path.join(sourceDir, 'SKILL.md');
     if (!fs.existsSync(skillMdPath)) continue;
 
-    const metadata = parseSkillMetadata(skillMdPath);
+    const metadata = readSkillMetadata(skillMdPath);
     if (!metadata.name || !metadata.description) continue;
 
     summaries.push({

@@ -1,0 +1,1 @@
+ALTER TABLE "Agent" ADD COLUMN "codexFastMode" BOOLEAN NOT NULL DEFAULT false;

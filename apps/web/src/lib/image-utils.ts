@@ -11,6 +11,12 @@ const compressionOptions = {
   initialQuality: 0.8,
 };
 
+const MAX_UPLOAD_SIZE_MB = 10;
+const TALL_IMAGE_MIN_ASPECT_RATIO = 3;
+const TALL_IMAGE_MAX_WIDTH = 1440;
+const TALL_IMAGE_MAX_CANVAS_HEIGHT = 30000;
+const TALL_IMAGE_JPEG_QUALITY = 0.92;
+
 // MIME 类型到扩展名的映射
 const MIME_TO_EXT: Record<string, string> = {
   'image/jpeg': 'jpg',
@@ -18,6 +24,77 @@ const MIME_TO_EXT: Record<string, string> = {
   'image/gif': 'gif',
   'image/webp': 'webp',
 };
+
+function isTallImage(dimensions: { width: number; height: number }): boolean {
+  return dimensions.width > 0 && dimensions.height / dimensions.width >= TALL_IMAGE_MIN_ASPECT_RATIO;
+}
+
+function withImageExtension(file: File, mimeType: string): string {
+  const ext = MIME_TO_EXT[mimeType] || 'jpg';
+  const originalName = file.name.replace(/\.[^.]+$/, '') || 'image';
+  return `${originalName}.${ext}`;
+}
+
+function loadImage(file: File): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(img);
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('无法加载图片'));
+    };
+
+    img.src = url;
+  });
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+      } else {
+        reject(new Error('图片压缩失败'));
+      }
+    }, type, quality);
+  });
+}
+
+async function compressTallImage(file: File, dimensions: { width: number; height: number }): Promise<File> {
+  if (file.size <= MAX_UPLOAD_SIZE_MB * 1024 * 1024 && dimensions.width <= TALL_IMAGE_MAX_WIDTH) {
+    return file;
+  }
+
+  const widthScale = Math.min(1, TALL_IMAGE_MAX_WIDTH / dimensions.width);
+  const heightScale = Math.min(1, TALL_IMAGE_MAX_CANVAS_HEIGHT / dimensions.height);
+  const scale = Math.min(widthScale, heightScale);
+  const targetWidth = Math.max(1, Math.round(dimensions.width * scale));
+  const targetHeight = Math.max(1, Math.round(dimensions.height * scale));
+
+  const img = await loadImage(file);
+  const canvas = document.createElement('canvas');
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+
+  const context = canvas.getContext('2d');
+  if (!context) {
+    return file;
+  }
+
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = 'high';
+  context.drawImage(img, 0, 0, targetWidth, targetHeight);
+
+  const mimeType = 'image/jpeg';
+  const blob = await canvasToBlob(canvas, mimeType, TALL_IMAGE_JPEG_QUALITY);
+  return new File([blob], withImageExtension(file, mimeType), { type: mimeType });
+}
 
 /**
  * 压缩图片文件
@@ -30,12 +107,16 @@ export async function compressImage(file: File): Promise<File> {
   }
 
   try {
+    const dimensions = await getImageDimensions(file);
+    if (isTallImage(dimensions)) {
+      return await compressTallImage(file, dimensions);
+    }
+
     const compressedFile = await imageCompression(file, compressionOptions);
 
     // 确保压缩后的文件有正确的文件名（带扩展名，且与 MIME 类型匹配）
+    const properName = withImageExtension(file, compressedFile.type);
     const ext = MIME_TO_EXT[compressedFile.type] || 'jpg';
-    const originalName = file.name.replace(/\.[^.]+$/, '') || 'image';
-    const properName = `${originalName}.${ext}`;
 
     // 检查文件名是否与 MIME 类型匹配（如 test-image.png 但 MIME 是 jpeg）
     const currentExt = compressedFile.name.split('.').pop()?.toLowerCase() || '';

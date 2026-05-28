@@ -1,7 +1,7 @@
 import * as React from 'react'
 
 type Theme = 'dark' | 'light' | 'system'
-type BrandTheme = 'enterprise' | 'graphite' | 'emerald' | 'ruby'
+type BrandTheme = 'enterprise' | 'graphite' | 'violet' | 'emerald' | 'ruby'
 
 interface ThemeProviderProps {
   children: React.ReactNode
@@ -53,7 +53,7 @@ export function ThemeProvider({
   const [brandTheme, setBrandTheme] = React.useState<BrandTheme>(() => {
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem(brandStorageKey) as BrandTheme
-      if (stored && ['enterprise', 'graphite', 'emerald', 'ruby'].includes(stored)) {
+      if (stored && ['enterprise', 'graphite', 'violet', 'emerald', 'ruby'].includes(stored)) {
         return stored
       }
     }

@@ -4,6 +4,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Agent, AgentSpeechConfig, agentApi, type AgentThinkingMode } from '@/lib/agent-api'
 import { cn } from '@/lib/utils'
+import { isSystemAssistantDetailBlocked } from '@/lib/system-agents'
 import { useAuthStore, useChatRoomStore } from '@/stores'
 import {
   ArrowLeft,
@@ -292,6 +293,7 @@ export function AssistantDetailPage() {
     acpTool: string
     proxyConfig?: string | null
     codexModel?: string | null
+    codexFastMode?: boolean
     claudeModel?: string | null
     thinkingMode?: AgentThinkingMode | null
     categoryId: string | null
@@ -309,6 +311,7 @@ export function AssistantDetailPage() {
       acpTool: data.acpTool || undefined,
       proxyConfig: data.proxyConfig || null,
       codexModel: data.codexModel || null,
+      codexFastMode: Boolean(data.codexFastMode),
       claudeModel: data.claudeModel || null,
       thinkingMode: data.thinkingMode || 'high',
       categoryId: data.categoryId,
@@ -355,6 +358,10 @@ export function AssistantDetailPage() {
 
   if (error || !agent) {
     return <ErrorState error={error || '助手不存在'} onBack={handleBack} />
+  }
+
+  if (isSystemAssistantDetailBlocked(agent)) {
+    return <ErrorState error="系统群助手不支持查看详情" onBack={handleBack} />
   }
 
   const showVoiceSettings = agent.agentLevel !== 'system'
