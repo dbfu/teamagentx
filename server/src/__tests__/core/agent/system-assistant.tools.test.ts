@@ -1,6 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert';
 import type { z } from 'zod';
+import prisma from '../../../lib/prisma.js';
 import {
   AGENT_CREATOR_ID,
   GROUP_ASSISTANT_ID,
@@ -50,6 +51,50 @@ describe('System assistant tools', () => {
     assert.ok(!groupToolNames.includes('get_recent_room_messages'));
     assert.ok(!groupToolNames.includes('search_room_messages'));
     assert.ok(groupToolNames.includes('create_agent'));
+  });
+
+  test('群助手创建群聊时沿用当前群主', async () => {
+    const ownerId = 'system-tools-owner';
+    const sourceRoomId = 'system-tools-source-room';
+    await prisma.user.upsert({
+      where: { id: ownerId },
+      update: { username: 'system-tools-owner', password: 'password', updatedAt: new Date() },
+      create: {
+        id: ownerId,
+        username: 'system-tools-owner',
+        password: 'password',
+        updatedAt: new Date(),
+      },
+    });
+    await prisma.chatRoom.create({
+      data: {
+        id: sourceRoomId,
+        name: '系统工具来源群',
+        ownerId,
+        updatedAt: new Date(),
+      },
+    });
+
+    const tool = getSystemAssistantTools(GROUP_ASSISTANT_ID, sourceRoomId, {
+      includeRoomContextTools: false,
+    }).find((item) => item.name === 'create_chatroom');
+    assert.ok(tool);
+
+    const result = JSON.parse(String(await tool.invoke({
+      name: '系统工具新群',
+      description: '由群助手创建',
+    })));
+    assert.equal(result.success, true);
+
+    const created = await prisma.chatRoom.findUniqueOrThrow({
+      where: { id: result.chatRoom.id },
+      include: { chatRoomAgents: true },
+    });
+    assert.equal(created.ownerId, ownerId);
+    assert.ok(created.chatRoomAgents.some((item) => (
+      item.userId === ownerId &&
+      item.role === 'OWNER'
+    )));
   });
 
   test('群消息查询工具参数校验', () => {

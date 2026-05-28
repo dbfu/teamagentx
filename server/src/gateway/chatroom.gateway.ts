@@ -1517,7 +1517,11 @@ export async function chatRoomGateway(app: FastifyInstance) {
         ? await chatRoomService.findById(id)
         : null;
       const chatRoom = await chatRoomService.update(id, data);
-      if (data.workDir !== undefined || data.rules !== undefined) {
+      if (
+        data.workDir !== undefined ||
+        data.rules !== undefined ||
+        data.agentTriggerMode !== undefined
+      ) {
         clearExecutorCache(undefined, id);
       }
       if (

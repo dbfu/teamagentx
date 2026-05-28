@@ -28,6 +28,7 @@ export {
 // 群聊管理助手工具
 export {
   CHATROOM_HELPER_AGENT_ID,
+  createChatRoomHelperTools,
   chatroomHelperTools,
 } from './chatroom-helper.tools.js';
 

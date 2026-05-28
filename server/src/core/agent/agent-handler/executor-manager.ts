@@ -1,7 +1,12 @@
 import { writeFileSync, unlinkSync, existsSync } from 'fs';
 import { chatRoomService } from '../../../modules/chatroom/chatroom.service.js';
 import { llmProviderService } from '../../../modules/llm-provider/llm-provider.service.js';
-import type { IAgentExecutor, AgentDebugInfo, ChatRoomAgentInfo } from '../executor.interface.js';
+import type {
+  AgentDebugInfo,
+  AgentTriggerMode,
+  ChatRoomAgentInfo,
+  IAgentExecutor,
+} from '../executor.interface.js';
 import { createExecutor } from '../executor.factory.js';
 import { resolveAgentImageProvider } from '../image-generation.service.js';
 import { clearAgentLog } from '../agent-log.js';
@@ -142,6 +147,7 @@ export async function getExecutor(
     imageGenerationProvider,
     lastInjectedMessageId,  // 传递上次注入位置
     chatRoomRules,  // 传递群规则
+    agentTriggerMode: (chatRoom?.agentTriggerMode ?? 'coordinator') as AgentTriggerMode,
     stateless: agent.id === GROUP_COORDINATOR_ID,
   });
   executorCache.set(cacheKey, executor);

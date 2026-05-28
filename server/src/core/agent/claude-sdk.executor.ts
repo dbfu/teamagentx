@@ -33,6 +33,7 @@ import { buildAgentLongTermMemorySection } from './agent-long-term-memory.js';
 import type {
     AgentDebugInfo,
     AgentExecResult,
+    AgentTriggerMode,
     ChatRoomAgentInfo,
     HistoryMessage,
     IAgentExecutor,
@@ -536,6 +537,7 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
     thinkingMode?: AgentThinkingMode | null,
     chatRoomRules?: string,
     stateless: boolean = false,
+    agentTriggerMode?: AgentTriggerMode,
   ) {
     this.name = name;
     this.chatRoomId = chatRoomId;
@@ -571,6 +573,10 @@ You are using the model service provided by ${this.llmProvider.name}.
 The following rules come from the current chatroom and apply to all assistants in this chatroom. You must follow them in replies and collaboration in this chatroom:
 ${chatRoomRules.trim()}`
       : '';
+    const collaborationTriggerCheckSection = agentTriggerMode === 'auto'
+      ? `
+Before final output, run a collaboration trigger check: if your reply asks another assistant to continue, validate, supplement, take over, or perform work, the final reply must explicitly mention exactly one target assistant. Only mention an assistant when the target is unambiguous and action from that assistant is required. If the target assistant is unclear, ask the user to choose instead. Do not create triggerable assistant mentions in code blocks, quoted text, or examples. If no assistant action is needed, do not mention an assistant.`
+      : '';
 
     this.systemPrompt = `${modelInfo}
 ${systemPrompt}
@@ -580,6 +586,7 @@ ${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
 
 ## Assistant Mentions
 In TeamAgentX, an @assistant mention can trigger another assistant task. A single message may contain at most one triggerable @assistant mention. When handing off or asking another assistant, choose one target assistant and mention only that assistant. If multiple assistants could help, choose the best next assistant or ask the user to choose; refer to any additional assistants by name without @.
+${collaborationTriggerCheckSection}
 
 ## Working Directory
 Your working directory is: ${this.workDir}

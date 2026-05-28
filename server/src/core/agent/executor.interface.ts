@@ -9,6 +9,8 @@ export interface AgentAction {
   target?: string;
 }
 
+export type AgentTriggerMode = 'auto' | 'manual' | 'coordinator';
+
 // 历史消息类型
 export interface HistoryMessage {
   content: string;

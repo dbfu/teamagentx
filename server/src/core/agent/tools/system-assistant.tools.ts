@@ -1,6 +1,6 @@
 import { GROUP_ASSISTANT_ID } from '../system-assistant.constants.js';
 import { createAgentCreatorTools } from './agent-creator.tools.js';
-import { chatroomHelperTools } from './chatroom-helper.tools.js';
+import { createChatRoomHelperTools } from './chatroom-helper.tools.js';
 import { createChatHistorySearchTools } from './chat-history-search.tools.js';
 import { cronTaskHelperTools } from './cron-task-helper.tools.js';
 import { createExternalPlatformHelperTools } from './external-platform-helper.tools.js';
@@ -42,7 +42,7 @@ export function getSystemAssistantTools(
     ...createAgentCreatorTools(chatRoomId),
     ...skillManagerTools,
     ...cronTaskHelperTools,
-    ...chatroomHelperTools,
+    ...createChatRoomHelperTools(chatRoomId),
     ...createExternalPlatformHelperTools(chatRoomId),
   ]);
 }

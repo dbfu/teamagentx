@@ -1,5 +1,9 @@
 import type { Agent, LlmProvider } from '@prisma/client';
-import type { IAgentExecutor, ChatRoomAgentInfo } from './executor.interface.js';
+import type {
+  AgentTriggerMode,
+  IAgentExecutor,
+  ChatRoomAgentInfo,
+} from './executor.interface.js';
 import { ClaudeAgentSdkExecutor } from './claude-sdk.executor.js';
 import { CodexSdkExecutor } from './codex-sdk.executor.js';
 import {
@@ -20,6 +24,7 @@ export interface CreateExecutorOptions {
   imageGenerationProvider?: LlmProvider | null; // 默认图片模型配置
   lastInjectedMessageId?: string;  // 上次注入群历史的最后消息 ID（用于增量注入）
   chatRoomRules?: string;  // 群规则/指南
+  agentTriggerMode?: AgentTriggerMode;  // 助手触发模式
   stateless?: boolean;  // 每次执行使用新会话，不恢复 SDK session/thread
 }
 
@@ -44,9 +49,13 @@ export function createExecutor(options: CreateExecutorOptions): IAgentExecutor {
     imageGenerationProvider,
     lastInjectedMessageId,
     chatRoomRules,
+    agentTriggerMode,
     stateless,
   } = options;
   const thinkingMode = getAgentThinkingMode(agent);
+  const collaborationTriggerMode = agent.agentLevel === 'system'
+    ? undefined
+    : agentTriggerMode;
 
   switch (agent.type) {
     case 'acp':
@@ -68,6 +77,7 @@ export function createExecutor(options: CreateExecutorOptions): IAgentExecutor {
           thinkingMode,
           chatRoomRules,
           stateless,
+          collaborationTriggerMode,
         );
       }
       if (acpTool === 'codex') {
@@ -90,6 +100,7 @@ export function createExecutor(options: CreateExecutorOptions): IAgentExecutor {
           thinkingMode,
           chatRoomRules,
           stateless,
+          collaborationTriggerMode,
         );
       }
       throw new Error(`Unsupported agent tool: ${acpTool}`);
@@ -112,6 +123,7 @@ export function createExecutor(options: CreateExecutorOptions): IAgentExecutor {
         thinkingMode,
         chatRoomRules,
         stateless,
+        collaborationTriggerMode,
       );
   }
 }

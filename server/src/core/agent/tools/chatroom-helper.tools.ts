@@ -22,32 +22,54 @@ function getRandomGroupAvatarValue(): string {
   return String(Math.floor(Math.random() * (GROUP_AVATAR_COUNT - 1)) + 1);
 }
 
+async function resolveOwnerIdForNewChatRoom(sourceChatRoomId?: string): Promise<string | undefined> {
+  if (!sourceChatRoomId) return undefined;
+
+  const sourceChatRoom = await chatRoomService.findById(sourceChatRoomId);
+  if (!sourceChatRoom) {
+    throw new Error(`当前群聊不存在: ${sourceChatRoomId}`);
+  }
+  if (!sourceChatRoom.ownerId) {
+    throw new Error(`当前群聊"${sourceChatRoom.name}"没有群主，无法创建新的归属群聊`);
+  }
+
+  return sourceChatRoom.ownerId;
+}
+
 // 创建群聊工具
-export const createChatRoomTool = tool(
-  async ({
-    name,
-    description,
-    avatar,
-    avatarColor,
-    rules,
-    agentIds,
-  }: {
-    name: string;
-    description?: string;
-    avatar?: string;
-    avatarColor?: string;
-    rules?: string;
-    agentIds?: string[];
-  }) => {
-    try {
-      // 创建群聊
-      const chatRoom = await chatRoomService.create({
+export function createChatRoomToolForSource(sourceChatRoomId?: string) {
+  return tool(
+    async ({
+      name,
+      description,
+      avatar,
+      avatarColor,
+      rules,
+      agentIds,
+    }: {
+      name: string;
+      description?: string;
+      avatar?: string;
+      avatarColor?: string;
+      rules?: string;
+      agentIds?: string[];
+    }) => {
+      try {
+        const ownerId = await resolveOwnerIdForNewChatRoom(sourceChatRoomId);
+        const createData = {
         name,
         description,
         avatar: avatar || getRandomGroupAvatarValue(),
         avatarColor,
         rules: rules?.trim() || undefined,
-      });
+      };
+      // 创建群聊
+      const chatRoom = ownerId
+        ? await chatRoomService.createWithOwner({
+            ...createData,
+            ownerId,
+          })
+        : await chatRoomService.create(createData);
 
       if (!chatRoom) {
         return JSON.stringify({
@@ -106,6 +128,9 @@ export const createChatRoomTool = tool(
     }),
   },
 );
+}
+
+export const createChatRoomTool = createChatRoomToolForSource();
 
 // 列出所有群聊工具
 export const listChatRoomsTool = tool(
@@ -349,12 +374,16 @@ export const deleteChatRoomTool = tool(
 );
 
 // 群聊管理助手的工具列表
-export const chatroomHelperTools = [
-  createChatRoomTool,
-  listChatRoomsTool,
-  listAgentsTool,
-  addAgentToChatRoomTool,
-  removeAgentFromChatRoomTool,
-  updateChatRoomRulesTool,
-  deleteChatRoomTool,
-];
+export function createChatRoomHelperTools(sourceChatRoomId?: string) {
+  return [
+    createChatRoomToolForSource(sourceChatRoomId),
+    listChatRoomsTool,
+    listAgentsTool,
+    addAgentToChatRoomTool,
+    removeAgentFromChatRoomTool,
+    updateChatRoomRulesTool,
+    deleteChatRoomTool,
+  ];
+}
+
+export const chatroomHelperTools = createChatRoomHelperTools();
