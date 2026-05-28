@@ -57,64 +57,64 @@ export function createChatRoomToolForSource(sourceChatRoomId?: string) {
       try {
         const ownerId = await resolveOwnerIdForNewChatRoom(sourceChatRoomId);
         const createData = {
-        name,
-        description,
-        avatar: avatar || getRandomGroupAvatarValue(),
-        avatarColor,
-        rules: rules?.trim() || undefined,
-      };
-      // 创建群聊
-      const chatRoom = ownerId
-        ? await chatRoomService.createWithOwner({
-            ...createData,
-            ownerId,
-          })
-        : await chatRoomService.create(createData);
+          name,
+          description,
+          avatar: avatar || getRandomGroupAvatarValue(),
+          avatarColor,
+          rules: rules?.trim() || undefined,
+        };
+        // 创建群聊
+        const chatRoom = ownerId
+          ? await chatRoomService.createWithOwner({
+              ...createData,
+              ownerId,
+            })
+          : await chatRoomService.create(createData);
 
-      if (!chatRoom) {
-        return JSON.stringify({
-          success: false,
-          error: '创建群聊失败：返回结果为空',
-        });
-      }
+        if (!chatRoom) {
+          return JSON.stringify({
+            success: false,
+            error: '创建群聊失败：返回结果为空',
+          });
+        }
 
-      // 如果指定了助手列表，添加到群聊
-      const addedAgents: string[] = [];
-      if (agentIds && agentIds.length > 0) {
-        for (const agentId of agentIds) {
-          const agent = await agentService.findById(agentId);
-          if (agent) {
-            await chatRoomService.addAgent({
-              chatRoomId: chatRoom.id,
-              agentId,
-              role: 'MEMBER',
-            });
-            addedAgents.push(agent.name);
+        // 如果指定了助手列表，添加到群聊
+        const addedAgents: string[] = [];
+        if (agentIds && agentIds.length > 0) {
+          for (const agentId of agentIds) {
+            const agent = await agentService.findById(agentId);
+            if (agent) {
+              await chatRoomService.addAgent({
+                chatRoomId: chatRoom.id,
+                agentId,
+                role: 'MEMBER',
+              });
+              addedAgents.push(agent.name);
+            }
           }
         }
+
+        const latestChatRoom = await chatRoomService.findById(chatRoom.id);
+        broadcastChatRoomCreated(latestChatRoom ?? chatRoom);
+
+        return JSON.stringify({
+          success: true,
+          chatRoom: {
+            id: chatRoom.id,
+            name: chatRoom.name,
+            description: chatRoom.description,
+            rules: latestChatRoom?.rules ?? chatRoom.rules,
+          },
+          addedAgents,
+          message: `成功创建群聊"${name}"${rules?.trim() ? '，已设置群规则' : ''}${addedAgents.length > 0 ? `，已添加助手: ${addedAgents.join(', ')}` : ''}`,
+        });
+      } catch (error) {
+        return JSON.stringify({
+          success: false,
+          error: error instanceof Error ? error.message : '创建群聊失败',
+        });
       }
-
-      const latestChatRoom = await chatRoomService.findById(chatRoom.id);
-      broadcastChatRoomCreated(latestChatRoom ?? chatRoom);
-
-      return JSON.stringify({
-        success: true,
-        chatRoom: {
-          id: chatRoom.id,
-          name: chatRoom.name,
-          description: chatRoom.description,
-          rules: latestChatRoom?.rules ?? chatRoom.rules,
-        },
-        addedAgents,
-        message: `成功创建群聊"${name}"${rules?.trim() ? '，已设置群规则' : ''}${addedAgents.length > 0 ? `，已添加助手: ${addedAgents.join(', ')}` : ''}`,
-      });
-    } catch (error) {
-      return JSON.stringify({
-        success: false,
-        error: error instanceof Error ? error.message : '创建群聊失败',
-      });
-    }
-  },
+    },
   {
     name: 'create_chatroom',
     description: '【必须用户确认后才能调用】创建一个新的群聊，可同时设置群规则。⚠️ 重要：调用前必须先向用户展示群聊配置（名称、描述、群规则、要添加的助手），并询问确认。',
