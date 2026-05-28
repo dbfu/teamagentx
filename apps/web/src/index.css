@@ -453,6 +453,44 @@
     overflow-y: hidden !important;
   }
 
+  /* Electron: modal/popover layers must not inherit app window drag regions. */
+  [data-slot="dialog-overlay"],
+  [data-slot="dialog-content"],
+  [data-slot="dialog-header"],
+  [data-slot="dialog-close"],
+  [data-slot="alert-dialog-overlay"],
+  [data-slot="alert-dialog-content"],
+  [data-slot="alert-dialog-header"],
+  [data-slot="sheet-overlay"],
+  [data-slot="sheet-content"],
+  [data-slot="sheet-header"],
+  [data-slot="sheet-close"],
+  [data-slot="drawer-overlay"],
+  [data-slot="drawer-content"],
+  [data-slot="drawer-header"],
+  [data-slot="drawer-close"],
+  [data-slot="select-content"],
+  [data-slot="dropdown-menu-content"],
+  [data-slot="dropdown-menu-sub-content"],
+  [data-slot="context-menu-content"],
+  [data-slot="context-menu-sub-content"],
+  [data-slot="popover-content"],
+  [data-slot="tooltip-content"],
+  [data-slot="hover-card-content"],
+  [data-slot="menubar-content"],
+  [data-slot="menubar-sub-content"],
+  [data-radix-popper-content-wrapper],
+  [role="dialog"],
+  [role="dialog"] *,
+  [role="alertdialog"],
+  [role="alertdialog"] *,
+  [class*="fixed"][class*="inset-0"][class*="bg-black/"],
+  [class*="fixed"][class*="inset-0"][class*="bg-black/"] *,
+  [class*="fixed"][class*="inset-0"]:has(> [class*="bg-black/"]),
+  [class*="fixed"][class*="inset-0"]:has(> [class*="bg-black/"]) * {
+    -webkit-app-region: no-drag;
+  }
+
   /* Global scrollbar - hidden by default, show on hover */
   * {
     scrollbar-width: thin;
