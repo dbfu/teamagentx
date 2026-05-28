@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { sendMessageToAgent } from '../core/agent/agent-handler/agent-dispatch.service.js';
 import { isValidInternalAgentToolToken } from '../core/agent/agent-handler/internal-agent-tool-auth.js';
 import { generateImageForAgent } from '../core/agent/image-generation.service.js';
+import { shouldEnableRoomHistoryByDefault } from '../core/agent/system-assistant.constants.js';
 import { getSystemAssistantTools } from '../core/agent/tools/index.js';
 import { backgroundCommandService } from '../core/shell/background-command.service.js';
 import prisma from '../lib/prisma.js';
@@ -83,7 +84,7 @@ async function isRoomHistoryAccessEnabled(chatRoomId: string, sourceAgentId: str
     where: {chatRoomId, agentId: sourceAgentId},
     select: {injectGroupHistory: true},
   });
-  return member?.injectGroupHistory ?? false;
+  return member?.injectGroupHistory ?? shouldEnableRoomHistoryByDefault(sourceAgentId);
 }
 
 export async function internalAgentToolsGateway(app: FastifyInstance) {

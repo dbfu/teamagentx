@@ -340,7 +340,16 @@ export const agentService = {
     }
 
     // 处理外键字段：空字符串转换为 undefined（表示不更新），'null' 字符串转换为 null（表示移除）
-    const { categoryId, llmProviderId, speechConfig, imageGeneration, proxyConfig, codexModel, claudeModel, thinkingMode, ...restData } = effectiveData;
+    const normalizedEffectiveData: UpdateAgentInput = existingAgent.agentLevel === 'system' && effectiveData.imageGeneration
+      ? {
+          ...effectiveData,
+          imageGeneration: {
+            enabled: false,
+            llmProviderId: null,
+          },
+        }
+      : effectiveData;
+    const { categoryId, llmProviderId, speechConfig, imageGeneration, proxyConfig, codexModel, claudeModel, thinkingMode, ...restData } = normalizedEffectiveData;
     const processedCategoryId = categoryId === '' ? undefined : categoryId === 'null' ? null : categoryId;
     const processedLlmProviderId = llmProviderId === '' ? undefined : llmProviderId === 'null' ? null : llmProviderId;
     const processedProxyConfig = normalizeAgentProxyConfig(proxyConfig);

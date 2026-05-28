@@ -3,14 +3,14 @@ import prisma from '../../../lib/prisma.js';
 import { messageService } from '../../../modules/message/message.service.js';
 import { createSystemTool as tool } from './system-tool.js';
 
-const MAX_LIMIT = 5;
+const MAX_LIMIT = 50;
 const MAX_CONTEXT_MESSAGES = 3;
 const MAX_CONTEXT_LINES = 5;
-const MAX_CANDIDATES = 500;
+const MAX_CANDIDATES = 2000;
+const MAX_SKIP = 1000;
 const MAX_SNIPPETS_PER_MESSAGE = 3;
 const MAX_LINE_LENGTH = 320;
 const MAX_MESSAGE_PREVIEW_LENGTH = 240;
-const MAX_RECENT_MESSAGE_CONTENT_LENGTH = 1200;
 const MAX_DETAIL_MATCH_OFFSET = 500;
 const DEFAULT_DETAIL_CONTENT_LIMIT = 4000;
 const MAX_DETAIL_CONTENT_LIMIT = 12000;
@@ -28,6 +28,8 @@ type SearchRoomMessagesInput = {
 
 type GetRecentRoomMessagesInput = {
   limit?: number;
+  skip?: number;
+  order?: 'asc' | 'desc';
   beforeMessageId?: string;
   afterMessageId?: string;
   senderType?: 'user' | 'agent';
@@ -83,20 +85,6 @@ function formatCompactMessage(message: MessageRecord) {
     sender: getSenderName(message),
     senderType: getSenderType(message),
     preview: truncateText(message.content.replace(/\s+/g, ' ').trim(), MAX_MESSAGE_PREVIEW_LENGTH),
-  };
-}
-
-function formatRecentMessage(message: MessageRecord) {
-  return {
-    messageId: message.id,
-    time: message.time.toISOString(),
-    sender: getSenderName(message),
-    senderType: getSenderType(message),
-    content: truncateText(message.content, MAX_RECENT_MESSAGE_CONTENT_LENGTH),
-    attachments: (message.attachments || []).map((attachment) => ({
-      filename: attachment.filename,
-      type: attachment.type,
-    })),
   };
 }
 
@@ -265,6 +253,8 @@ export function createChatHistorySearchTools(chatRoomId: string) {
     tool(
       async (input: GetRecentRoomMessagesInput = {}) => {
         const limit = clampInt(input.limit, 5, 1, MAX_LIMIT);
+        const skip = clampInt(input.skip, 0, 0, MAX_SKIP);
+        const order = input.order === 'asc' ? 'asc' : 'desc';
         const senderName = input.senderName?.trim();
         const normalizedSenderName = senderName ? normalizeText(senderName) : '';
         const beforeMessage = await findAnchorMessage(chatRoomId, input.beforeMessageId);
@@ -302,34 +292,39 @@ export function createChatHistorySearchTools(chatRoomId: string) {
             ...(timeFilters.length > 0 ? {AND: timeFilters} : {}),
           },
           include: {user: true, agent: true, attachments: true},
-          orderBy: [{time: 'desc'}, {id: 'desc'}],
-          take: Math.min(MAX_CANDIDATES, Math.max(limit * 3, 80)),
+          orderBy: [{time: order}, {id: order}],
+          take: Math.min(MAX_CANDIDATES, Math.max((skip + limit) * 3, 80)),
         }) as MessageRecord[];
 
-        const messages = [];
+        const filteredMessages = [];
         for (const message of candidates) {
-          if (messages.length >= limit) break;
+          if (filteredMessages.length >= skip + limit) break;
 
           const senderType = getSenderType(message);
           if (input.senderType && senderType !== input.senderType) continue;
           if (normalizedSenderName && !normalizeText(getSenderName(message)).includes(normalizedSenderName)) continue;
 
-          messages.push(formatRecentMessage(message));
+          filteredMessages.push(formatCompactMessage(message));
         }
+        const messages = filteredMessages.slice(skip, skip + limit);
 
         return {
           chatRoomScope: 'current',
           totalReturned: messages.length,
           limit,
-          messages: messages.reverse(),
+          skip,
+          order,
+          messages,
         };
       },
       {
         name: 'get_recent_room_messages',
         description:
-          'Get the most recent messages in the current chatroom. The chatroom is fixed to the current execution context; do not provide a chatRoomId. Return at most 5 messages per call; page with beforeMessageId/afterMessageId if more context is needed. Prefer search_room_messages when you know a keyword.',
+          'Get message indexes in the current chatroom. The chatroom is fixed to the current execution context; do not provide a chatRoomId. Return at most 50 message indexes per call with short previews only; use skip for offset pagination and order asc/desc for chronological direction. Use get_room_message_detail with messageId to inspect full content. Prefer search_room_messages when you know a keyword.',
         schema: z.object({
-          limit: z.number().int().min(1).max(MAX_LIMIT).optional().describe('Maximum recent messages to return. Default 5, maximum 5.'),
+          limit: z.number().int().min(1).max(MAX_LIMIT).optional().describe('Maximum recent message indexes to return. Default 5, maximum 50.'),
+          skip: z.number().int().min(0).max(MAX_SKIP).optional().describe('Number of matching message indexes to skip before returning results. Default 0, maximum 1000.'),
+          order: z.enum(['asc', 'desc']).optional().describe('Sort order by message time and id. Use asc for oldest first, desc for newest first. Default desc.'),
           beforeMessageId: z.string().optional().describe('Only return messages before this message ID. The ID must belong to the current chatroom.'),
           afterMessageId: z.string().optional().describe('Only return messages after this message ID. The ID must belong to the current chatroom.'),
           senderType: z.enum(['user', 'agent']).optional().describe('Optional sender type filter.'),
@@ -428,10 +423,10 @@ export function createChatHistorySearchTools(chatRoomId: string) {
       {
         name: 'search_room_messages',
         description:
-          'Search messages in the current chatroom by keyword. The chatroom is fixed to the current execution context; do not provide a chatRoomId. Return at most 5 matching messages per call. It behaves like grep -n -C: returns matching message snippets, line numbers, and optional nearby messages instead of dumping full history.',
+          'Search message indexes in the current chatroom by keyword. The chatroom is fixed to the current execution context; do not provide a chatRoomId. Return at most 50 matching message indexes per call. It behaves like grep -n -C: returns matching message snippets, line numbers, and optional nearby message indexes instead of dumping full history. Use get_room_message_detail with messageId to inspect full content.',
         schema: z.object({
           query: z.string().min(1).max(120).describe('Keyword to search for in the current chatroom. Literal substring search; regex is not supported.'),
-          limit: z.number().int().min(1).max(MAX_LIMIT).optional().describe('Maximum matching messages to return. Default 5, maximum 5.'),
+          limit: z.number().int().min(1).max(MAX_LIMIT).optional().describe('Maximum matching message indexes to return. Default 5, maximum 50.'),
           beforeMessageId: z.string().optional().describe('Only search messages before this message ID. The ID must belong to the current chatroom.'),
           afterMessageId: z.string().optional().describe('Only search messages after this message ID. The ID must belong to the current chatroom.'),
           senderType: z.enum(['user', 'agent']).optional().describe('Optional sender type filter.'),

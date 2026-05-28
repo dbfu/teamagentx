@@ -7,12 +7,12 @@ import {
   shouldTriggerCoordinatorAgent,
 } from '../../../../core/agent/agent-handler/handler.js';
 import { GROUP_COORDINATOR_ID } from '../../../../core/agent/system-assistant.constants.js';
-import { agentMemoryService } from '../../../../modules/agent-memory/agent-memory.service.js';
+import { roomMessageIndexService } from '../../../../modules/message/room-message-index.service.js';
 
-const originalBuildRecentHistory = agentMemoryService.buildRecentHistory;
+const originalBuildMessageIndex = roomMessageIndexService.buildMessageIndex;
 
 test.afterEach(() => {
-  agentMemoryService.buildRecentHistory = originalBuildRecentHistory;
+  roomMessageIndexService.buildMessageIndex = originalBuildMessageIndex;
 });
 
 test('coordinator mode lets explicit user mentions trigger the target assistant directly', () => {
@@ -54,30 +54,46 @@ test('coordinator mode routes unmentioned messages through the coordinator', () 
   );
 });
 
-test('coordinator dispatch includes short recent history for routing context', async () => {
+test('coordinator dispatch includes the latest message indexes for routing context', async () => {
   const history = [
     {
-      kind: 'message' as const,
-      content: '产品给谁用？A 内部 B 垂直 C 大众',
+      kind: 'message_index' as const,
+      content: '旧消息',
+      preview: '旧消息',
       senderName: '产品经理',
       isHuman: false,
+      messageId: 'old-message',
+      time: '2026-05-28T10:00:00.000Z',
+      senderType: 'agent' as const,
+      attachments: [],
     },
+    ...Array.from({length: COORDINATOR_RECENT_HISTORY_LIMIT}, (_, index) => ({
+      kind: 'message_index' as const,
+      content: `消息 ${index + 1}`,
+      preview: `消息 ${index + 1}`,
+      senderName: 'admin',
+      isHuman: true,
+      messageId: `message-${index + 1}`,
+      time: `2026-05-28T10:0${index + 1}:00.000Z`,
+      senderType: 'user' as const,
+      attachments: [],
+    })),
   ];
-  const calls: Array<{chatRoomId: string; currentMessageId: string; take: number}> = [];
+  const calls: Array<{chatRoomId: string; currentMessageId: string; afterMessageId?: string}> = [];
 
-  agentMemoryService.buildRecentHistory = (async (chatRoomId, currentMessageId, take) => {
-    calls.push({chatRoomId, currentMessageId, take: take ?? 0});
+  roomMessageIndexService.buildMessageIndex = (async (chatRoomId, currentMessageId, afterMessageId) => {
+    calls.push({chatRoomId, currentMessageId, afterMessageId});
     return history;
-  }) as typeof agentMemoryService.buildRecentHistory;
+  }) as typeof roomMessageIndexService.buildMessageIndex;
 
   const options = await buildCoordinatorDispatchOptions('room-1', 'message-1');
 
-  assert.deepEqual(options, {history});
+  assert.deepEqual(options, {history: history.slice(-COORDINATOR_RECENT_HISTORY_LIMIT)});
   assert.deepEqual(calls, [
     {
       chatRoomId: 'room-1',
       currentMessageId: 'message-1',
-      take: COORDINATOR_RECENT_HISTORY_LIMIT,
+      afterMessageId: undefined,
     },
   ]);
 });

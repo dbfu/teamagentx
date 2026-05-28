@@ -943,7 +943,7 @@ Use TeamAgentX MCP shell tools for shell execution. For normal foreground shell 
       }
 
       fullMessage += `[Group History Access]
-You may access current chatroom history through tools. Use \`get_recent_room_messages\` for recent context, \`search_room_messages\` to search messages by keyword, or \`get_room_message_detail\` to inspect exact message content by messageId. These tools automatically use the current chatroom; do not ask for or provide a chatRoomId. Fetch at most 5 messages per recent-history call; if you need more context, page through multiple calls or use keyword search instead of requesting a large limit. If the current request depends on prior discussion, use these tools instead of guessing from previews or memory.
+You may access current chatroom history through tools. Use \`get_recent_room_messages\` for message indexes, \`search_room_messages\` to search indexes by keyword, or \`get_room_message_detail\` to inspect exact message content by messageId. These tools automatically use the current chatroom; do not ask for or provide a chatRoomId. Fetch at most 50 message indexes per call; use \`skip\` for pagination and \`order\` as \`asc\` or \`desc\` for chronological direction. Recent/search results are navigation previews, so call \`get_room_message_detail\` before relying on exact prior content.
 
 `;
     }

@@ -460,6 +460,17 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
 
   const loadAssistantForModal = async (assistant: Agent): Promise<Agent> => {
     const response = await agentApi.getById(assistant.id)
+    // DEBUG: 打印 API 返回的数据
+    console.log('[assistant-page] loadAssistantForModal 返回:', {
+      success: response.success,
+      assistantId: assistant.id,
+      returnedData: response.success && response.data ? {
+        id: response.data.id,
+        name: response.data.name,
+        llmProviderId: response.data.llmProviderId,
+        llmProvider: response.data.llmProvider,
+      } : null,
+    })
     return response.success && response.data ? response.data : assistant
   }
 
@@ -630,6 +641,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     const response = await agentApi.update(systemModelAgent.id, data)
     if (response.success) {
       toast.success(`${systemModelAgent.name}已更新`)
+      // fetchData 会获取最新数据并更新状态，不需要再用旧数据覆盖
       await fetchData()
       await loadChatRooms()
       setSystemModelAgent(null)

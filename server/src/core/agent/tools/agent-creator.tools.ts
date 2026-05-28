@@ -13,7 +13,7 @@ import { skillInstallService } from '../../../modules/skill/skill-install.servic
 import { createSkillDirectoryLink } from '../../../modules/skill/skill-link.js';
 import { readSkillMetadata } from '../../../modules/skill/skill-metadata.js';
 import { installSkillFromSourceTool } from './skills-helper.tools.js';
-import { getChatHistoryTool, listSharedSkillsTool } from './skill-manager.tools.js';
+import { listSharedSkillsTool } from './skill-manager.tools.js';
 import {
   deserializeAgentSpeechConfig,
   normalizeAgentSpeechConfig,
@@ -816,5 +816,4 @@ export const agentCreatorTools = [
   listLlmProvidersTool,
   createLlmProviderTool,
   installSkillFromSourceTool,
-  getChatHistoryTool,
 ];

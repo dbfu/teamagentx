@@ -154,3 +154,46 @@ The following are message indexes for group-chat messages before the current mes
 ${lines.join('\n')}
 `;
 }
+
+export function buildRoomHistorySection(
+  history?: Array<{
+    kind?: string;
+    content?: string;
+    senderName?: string;
+    isHuman?: boolean;
+    messageId?: string;
+    time?: string;
+    senderType?: string;
+    preview?: string;
+    attachments?: Array<{filename?: string | null; type?: string | null}>;
+  }>,
+): string {
+  const messageIndexSection = buildRoomMessageIndexSection(history);
+  const recentMessages = (history || []).filter(
+    (message) =>
+      message.kind !== 'message_index' &&
+      typeof message.content === 'string' &&
+      message.content.trim().length > 0,
+  );
+
+  if (recentMessages.length === 0) return messageIndexSection;
+
+  const lines = recentMessages.map((message) => {
+    const senderType = message.senderType || (message.isHuman ? 'user' : 'agent');
+    const metadata = [
+      message.messageId ? `messageId=${message.messageId}` : null,
+      message.time ? `time=${message.time}` : null,
+      `sender=${message.senderName || 'unknown'}`,
+      `senderType=${senderType}`,
+    ].filter(Boolean).join(' ');
+    const content = JSON.stringify(message.content!.trim());
+    return `- ${metadata} content=${content}`;
+  });
+
+  const recentHistorySection = `[Recent Group History]
+The following are recent group-chat messages before the current message. Use them as context for routing and follow-up decisions.
+${lines.join('\n')}
+`;
+
+  return [messageIndexSection, recentHistorySection].filter(Boolean).join('\n');
+}

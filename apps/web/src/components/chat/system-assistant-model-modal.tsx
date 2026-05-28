@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { Image, Loader2, Settings, X } from 'lucide-react'
+import { useEffect, useLayoutEffect, useMemo, useState, type FormEvent } from 'react'
+import { Loader2, Settings, X } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import {
@@ -14,6 +14,8 @@ import { getClaudeModelOptions } from '@/lib/claude-models'
 import { llmProviderApi, type LlmProvider } from '@/lib/llm-provider-api'
 import { getProviderProtocolHint, isProviderCompatibleWithAgent } from '@/lib/llm-provider-compat'
 import { toast } from 'sonner'
+
+const NO_PROVIDER_VALUE = '__none__'
 
 export interface SystemAssistantRuntimeConfig {
   type: 'acp'
@@ -44,20 +46,28 @@ export function SystemAssistantModelModal({
   const [acpTools, setAcpTools] = useState<AcpToolInfo[]>([])
   const [acpTool, setAcpTool] = useState('claude')
   const [selectedProviderId, setSelectedProviderId] = useState('')
+  const [providerSelectionTouched, setProviderSelectionTouched] = useState(false)
   const [thinkingMode, setThinkingMode] = useState<AgentThinkingMode>('high')
   const [codexModel, setCodexModel] = useState('')
   const [codexFastMode, setCodexFastMode] = useState(false)
   const [claudeModel, setClaudeModel] = useState('')
   const [proxyConfig, setProxyConfig] = useState('')
-  const [imageGenerationEnabled, setImageGenerationEnabled] = useState(false)
-  const [imageProviderId, setImageProviderId] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const compatibleProviders = providers.filter(
     (provider) => provider.isActive && isProviderCompatibleWithAgent(provider, 'acp', acpTool)
   )
-  const selectedProvider = providers.find((provider) => provider.id === selectedProviderId)
+  const boundProviderId = assistant?.llmProviderId || assistant?.llmProvider?.id || ''
+  const effectiveSelectedProviderId = providerSelectionTouched
+    ? selectedProviderId
+    : (selectedProviderId || boundProviderId)
+  const selectedProvider = providers.find((provider) => provider.id === effectiveSelectedProviderId)
+    || (
+      assistant?.llmProvider?.id === effectiveSelectedProviderId
+        ? assistant.llmProvider
+        : undefined
+    )
   const displayedProviders = useMemo(() => [
     ...(
       selectedProvider
@@ -67,30 +77,53 @@ export function SystemAssistantModelModal({
     ),
     ...compatibleProviders,
   ], [compatibleProviders, selectedProvider])
-  const imageProviders = providers.filter(
-    (provider) => provider.isActive && provider.modelType === 'image'
-  )
   const selectedAcpTool = acpTools.find((tool) => tool.id === acpTool)
   const selectedAcpToolLabel = selectedAcpTool?.name
     || (acpTool === 'codex' ? 'Codex' : acpTool === 'claude' ? 'Claude' : acpTool)
   const hasSelectedAcpToolOption = acpTools.some((tool) => tool.id === acpTool)
-  const showLocalCodexConfig = acpTool === 'codex' && !selectedProviderId
+  const showLocalCodexConfig = acpTool === 'codex' && !effectiveSelectedProviderId
   const showCodexFastMode = acpTool === 'codex'
-  const showLocalClaudeConfig = acpTool === 'claude' && !selectedProviderId
+  const showLocalClaudeConfig = acpTool === 'claude' && !effectiveSelectedProviderId
+  const providerSelectLabel = selectedProvider
+    ? `${selectedProvider.name} · ${selectedProvider.model}`
+    : '不绑定模型供应商，使用本地 Agent 配置'
 
-  useEffect(() => {
-    if (!isOpen || !assistant) return
+  useLayoutEffect(() => {
+    // DEBUG: 打印每次初始化 useEffect 运行
+    console.log('[SystemAssistantModelModal] 初始化 useEffect 触发:', {
+      isOpen,
+      assistant: assistant ? {
+        id: assistant.id,
+        name: assistant.name,
+        llmProviderId: assistant.llmProviderId,
+      } : null,
+    })
 
-    const imageCapability = assistant.capabilities?.find((capability) => capability.capabilityType === 'image')
+    if (!isOpen || !assistant) {
+      console.log('[SystemAssistantModelModal] 初始化 useEffect guard 条件激活，跳过')
+      return
+    }
+
+    // DEBUG: 打印 assistant 数据
+    console.log('[SystemAssistantModelModal] 初始化 useEffect 执行:', {
+      isOpen,
+      assistantId: assistant.id,
+      assistantName: assistant.name,
+      llmProviderId: assistant.llmProviderId,
+      llmProvider: assistant.llmProvider,
+      acpTool: assistant.acpTool,
+    })
+
     setAcpTool(assistant.acpTool || 'claude')
-    setSelectedProviderId(assistant.llmProviderId || assistant.llmProvider?.id || '')
+    const providerId = assistant.llmProviderId || assistant.llmProvider?.id || ''
+    console.log('[SystemAssistantModelModal] 设置 selectedProviderId:', providerId)
+    setSelectedProviderId(providerId)
+    setProviderSelectionTouched(false)
     setThinkingMode(assistant.thinkingMode || 'high')
     setCodexModel(assistant.codexModel || '')
     setCodexFastMode(Boolean(assistant.codexFastMode))
     setClaudeModel(assistant.claudeModel || '')
     setProxyConfig(assistant.proxyConfig || '')
-    setImageGenerationEnabled(Boolean(imageCapability?.enabled))
-    setImageProviderId(imageCapability?.llmProviderId || imageCapability?.llmProvider?.id || '')
   }, [isOpen, assistant])
 
   useEffect(() => {
@@ -105,8 +138,17 @@ export function SystemAssistantModelModal({
       .then(([providersRes, toolsRes]) => {
         if (cancelled) return
         if (providersRes.success && providersRes.data) {
+          // DEBUG: 打印加载的 providers
+          console.log('[SystemAssistantModelModal] 加载 providers:', providersRes.data.map(p => ({
+            id: p.id,
+            name: p.name,
+            apiProtocol: p.apiProtocol,
+            modelType: p.modelType,
+            isActive: p.isActive,
+          })))
           setProviders(providersRes.data)
         } else {
+          console.log('[SystemAssistantModelModal] 加载 providers 失败:', providersRes.error)
           toast.error(providersRes.error || '加载模型供应商失败')
         }
         if (toolsRes.success && toolsRes.data) {
@@ -123,23 +165,56 @@ export function SystemAssistantModelModal({
   }, [isOpen])
 
   useEffect(() => {
-    if (!selectedProviderId) return
-    const provider = providers.find((item) => item.id === selectedProviderId)
-    if (provider && !isProviderCompatibleWithAgent(provider, 'acp', acpTool)) {
-      setSelectedProviderId('')
-      toast.warning('已清除不兼容的模型供应商')
+    // DEBUG: 打印每次兼容性检查 useEffect 运行
+    console.log('[SystemAssistantModelModal] 兼容性检查 useEffect 运行:', {
+      selectedProviderId,
+      effectiveSelectedProviderId,
+      providerSelectionTouched,
+      providersCount: providers.length,
+      acpTool,
+    })
+
+    if (!effectiveSelectedProviderId) {
+      console.log('[SystemAssistantModelModal] effectiveSelectedProviderId 为空，跳过检查')
+      return
     }
-  }, [acpTool, providers, selectedProviderId])
+
+    if (providers.length === 0) {
+      console.log('[SystemAssistantModelModal] providers 尚未加载，跳过检查')
+      return
+    }
+
+    const provider = providers.find((item) => item.id === effectiveSelectedProviderId)
+
+    // DEBUG: 打印兼容性检查
+    console.log('[SystemAssistantModelModal] 兼容性检查详情:', {
+      selectedProviderId: effectiveSelectedProviderId,
+      foundProvider: provider ? {
+        id: provider.id,
+        name: provider.name,
+        apiProtocol: provider.apiProtocol,
+        modelType: provider.modelType,
+        isActive: provider.isActive,
+      } : null,
+      acpTool,
+      providersCount: providers.length,
+    })
+
+    if (provider && !isProviderCompatibleWithAgent(provider, 'acp', acpTool)) {
+      console.log('[SystemAssistantModelModal] 兼容性检查失败，清空 selectedProviderId')
+      setSelectedProviderId('')
+      setProviderSelectionTouched(true)
+      toast.warning('已清除不兼容的模型供应商')
+    } else if (provider) {
+      console.log('[SystemAssistantModelModal] 兼容性检查通过')
+    }
+  }, [acpTool, effectiveSelectedProviderId, providerSelectionTouched, providers, selectedProviderId])
 
   if (!isOpen || !assistant) return null
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     if (isSubmitting) return
-    if (imageGenerationEnabled && !imageProviderId) {
-      toast.error('请先选择图片模型')
-      return
-    }
 
     setIsSubmitting(true)
     try {
@@ -151,10 +226,10 @@ export function SystemAssistantModelModal({
         codexFastMode: showCodexFastMode && codexFastMode,
         claudeModel: showLocalClaudeConfig ? claudeModel.trim() || null : null,
         thinkingMode,
-        llmProviderId: selectedProviderId || null,
+        llmProviderId: effectiveSelectedProviderId || null,
         imageGeneration: {
-          enabled: imageGenerationEnabled,
-          llmProviderId: imageGenerationEnabled ? imageProviderId || null : null,
+          enabled: false,
+          llmProviderId: null,
         },
       })
       if (success) onClose()
@@ -222,15 +297,26 @@ export function SystemAssistantModelModal({
                 模型供应商
               </label>
               <Select
-                value={selectedProviderId || '__none__'}
-                onValueChange={(value) => setSelectedProviderId(value === '__none__' ? '' : value)}
+                value={effectiveSelectedProviderId || NO_PROVIDER_VALUE}
+                onValueChange={(value) => {
+                  const nextProviderId = value === NO_PROVIDER_VALUE ? '' : value
+                  console.log('[SystemAssistantModelModal] 模型供应商选择变更:', {
+                    value,
+                    nextProviderId,
+                    previousProviderId: effectiveSelectedProviderId,
+                  })
+                  setProviderSelectionTouched(true)
+                  setSelectedProviderId(nextProviderId)
+                }}
                 disabled={isLoading}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="选择模型供应商" />
+                  <SelectValue placeholder="选择模型供应商">
+                    {providerSelectLabel}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__none__">不绑定模型供应商，使用本地 Agent 配置</SelectItem>
+                  <SelectItem value={NO_PROVIDER_VALUE}>不绑定模型供应商，使用本地 Agent 配置</SelectItem>
                   {displayedProviders.map((provider) => (
                     <SelectItem key={provider.id} value={provider.id}>
                       <span className="flex items-center gap-2">
@@ -349,43 +435,6 @@ export function SystemAssistantModelModal({
               </div>
             )}
 
-            <div className="rounded-lg border border-border p-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <Image className="size-4 text-muted-foreground" />
-                  <div>
-                    <div className="text-sm font-medium text-foreground">图片生成能力</div>
-                    <div className="text-xs text-muted-foreground">开启后可通过受控工具生成图片</div>
-                  </div>
-                </div>
-                <Switch checked={imageGenerationEnabled} onCheckedChange={setImageGenerationEnabled} />
-              </div>
-              {imageGenerationEnabled && (
-                <div className="mt-3">
-                  <Select value={imageProviderId || '__none__'} onValueChange={(value) => setImageProviderId(value === '__none__' ? '' : value)}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="选择图片模型" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">选择图片模型</SelectItem>
-                      {imageProviders.map((provider) => (
-                        <SelectItem key={provider.id} value={provider.id}>
-                          <span className="flex items-center gap-2">
-                            {provider.name}
-                            <span className="text-xs text-muted-foreground">{provider.model}</span>
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {imageProviders.length === 0 ? (
-                    <p className="mt-1 text-xs text-muted-foreground">暂无可用图片模型，请先在模型配置中添加图片模型</p>
-                  ) : !imageProviderId ? (
-                    <p className="mt-1 text-xs text-red-500">开启图片能力后必须选择图片模型</p>
-                  ) : null}
-                </div>
-              )}
-            </div>
           </div>
 
           <div className="flex justify-end gap-3 border-t border-border px-6 py-4">

@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events';
 import { chatRoomService } from '../../../modules/chatroom/chatroom.service.js';
-import { agentMemoryService } from '../../../modules/agent-memory/agent-memory.service.js';
 import { messageService } from '../../../modules/message/message.service.js';
+import { roomMessageIndexService } from '../../../modules/message/room-message-index.service.js';
 import { agentService } from '../agent.service.js';
 import { recoveryService } from '../../../modules/recovery/recovery.service.js';
 import type { Message } from '../../../types/message.js';
@@ -20,13 +20,20 @@ export async function buildCoordinatorDispatchOptions(
   chatRoomId: string,
   currentMessageId: string,
 ) {
-  const history = await agentMemoryService.buildRecentHistory(
-    chatRoomId,
-    currentMessageId,
-    COORDINATOR_RECENT_HISTORY_LIMIT,
-  );
+  try {
+    const history = await roomMessageIndexService.buildMessageIndex(
+      chatRoomId,
+      currentMessageId,
+    );
 
-  return {history};
+    return {history: history.slice(-COORDINATOR_RECENT_HISTORY_LIMIT)};
+  } catch (error) {
+    console.error(
+      `[Coordinator] ${chatRoomId} 构建最近群消息索引失败，降级为空历史:`,
+      error,
+    );
+    return {history: []};
+  }
 }
 
 // 消息接收事件接口

@@ -107,4 +107,71 @@ describe('ClaudeAgentSdkExecutor background idle finish', () => {
       fs.rmSync(workDir, {recursive: true, force: true});
     }
   });
+
+  test('does not inject full group history when group history tools are disabled', () => {
+    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-claude-history-'));
+    const executor = new ClaudeAgentSdkExecutor(
+      '群调度助手',
+      'route messages',
+      'room-history-test',
+      workDir,
+      false,
+      'coordinator-agent',
+    );
+
+    try {
+      const fullMessage = (executor as any).buildFullMessage('A', [
+        {
+          kind: 'message',
+          content: '这个 todolist 给谁用？A 自己用 B 团队用',
+          senderName: '产品经理',
+          isHuman: false,
+        },
+      ]);
+
+      assert.doesNotMatch(fullMessage, /\[Recent Group History\]/);
+      assert.doesNotMatch(fullMessage, /sender=产品经理/);
+      assert.doesNotMatch(fullMessage, /这个 todolist 给谁用/);
+      assert.doesNotMatch(fullMessage, /\[Group History Access\]/);
+      assert.match(fullMessage, /\[Current Message\]\nA$/);
+    } finally {
+      fs.rmSync(workDir, {recursive: true, force: true});
+    }
+  });
+
+  test('injects only group message indexes when group history tools are enabled', () => {
+    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-claude-index-'));
+    const executor = new ClaudeAgentSdkExecutor(
+      '群调度助手',
+      'route messages',
+      'room-index-test',
+      workDir,
+      true,
+      'coordinator-agent',
+    );
+
+    try {
+      const fullMessage = (executor as any).buildFullMessage('A', [
+        {
+          kind: 'message_index',
+          messageId: 'message-1',
+          time: '2026-05-28T09:33:46.000Z',
+          senderName: '产品经理',
+          senderType: 'agent',
+          isHuman: false,
+          preview: '这个 todolist 给谁用？',
+          content: '完整正文不应直接注入',
+          attachments: [],
+        },
+      ]);
+
+      assert.match(fullMessage, /\[New Group Message Index\]/);
+      assert.match(fullMessage, /messageId=message-1/);
+      assert.match(fullMessage, /preview="这个 todolist 给谁用？"/);
+      assert.doesNotMatch(fullMessage, /完整正文不应直接注入/);
+      assert.match(fullMessage, /\[Group History Access\]/);
+    } finally {
+      fs.rmSync(workDir, {recursive: true, force: true});
+    }
+  });
 });

@@ -373,6 +373,17 @@ describe('Agent Gateway API', () => {
           model: 'claude-test-model',
         },
       });
+      const imageProvider = await prisma.llmProvider.create({
+        data: {
+          name: 'System Image Provider ' + Date.now(),
+          modelType: 'image',
+          apiProtocol: 'openai',
+          apiKey: 'test-image-key',
+          model: 'image-test-model',
+          imageProvider: 'openai',
+          imageApiType: 'sync',
+        },
+      });
       await syncSystemAgents([
         getGroupAssistantDefinition(),
         getGroupCoordinatorDefinition(),
@@ -444,6 +455,36 @@ describe('Agent Gateway API', () => {
         assert.strictEqual(preserved.codexFastMode, true);
         assert.strictEqual(preserved.thinkingMode, 'medium');
 
+        const imageCapabilityResponse = await app.inject({
+          method: 'PUT',
+          url: `/agents/${GROUP_ASSISTANT_ID}`,
+          payload: {
+            imageGeneration: {
+              enabled: true,
+              llmProviderId: imageProvider.id,
+            },
+          },
+        });
+
+        assert.strictEqual(imageCapabilityResponse.statusCode, 200);
+        const imageCapabilityBody = imageCapabilityResponse.json();
+        const imageCapability = imageCapabilityBody.data.capabilities.find(
+          (capability: any) => capability.capabilityType === 'image',
+        );
+        assert.strictEqual(imageCapability.enabled, false);
+        assert.strictEqual(imageCapability.llmProviderId, null);
+
+        const storedImageCapability = await prisma.agentCapability.findUniqueOrThrow({
+          where: {
+            agentId_capabilityType: {
+              agentId: GROUP_ASSISTANT_ID,
+              capabilityType: 'image',
+            },
+          },
+        });
+        assert.strictEqual(storedImageCapability.enabled, false);
+        assert.strictEqual(storedImageCapability.llmProviderId, null);
+
         const rejectedResponse = await app.inject({
           method: 'PUT',
           url: `/agents/${GROUP_ASSISTANT_ID}`,
@@ -464,12 +505,21 @@ describe('Agent Gateway API', () => {
             thinkingMode: 'high',
           },
         }).catch(() => null);
+        await prisma.agentCapability.deleteMany({
+          where: {
+            agentId: { in: [GROUP_ASSISTANT_ID, GROUP_COORDINATOR_ID] },
+            capabilityType: 'image',
+          },
+        }).catch(() => null);
         await prisma.agent.update({
           where: { id: GROUP_COORDINATOR_ID },
           data: { llmProviderId: null },
         }).catch(() => null);
         await prisma.llmProvider.delete({
           where: { id: provider.id },
+        }).catch(() => null);
+        await prisma.llmProvider.delete({
+          where: { id: imageProvider.id },
         }).catch(() => null);
       }
     });

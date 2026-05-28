@@ -26,3 +26,7 @@ export function isLegacySystemAgentId(agentId: string | null | undefined): boole
 export function isHiddenSystemAgentId(agentId: string | null | undefined): boolean {
   return !!agentId && HIDDEN_SYSTEM_AGENT_IDS.includes(agentId);
 }
+
+export function shouldEnableRoomHistoryByDefault(agentId: string | null | undefined): boolean {
+  return agentId === GROUP_ASSISTANT_ID || agentId === GROUP_COORDINATOR_ID;
+}

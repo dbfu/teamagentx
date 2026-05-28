@@ -5,7 +5,6 @@ import {
   AGENT_CREATOR_ID,
   GROUP_ASSISTANT_ID,
 } from '../../../core/agent/system-assistant.constants.js';
-import { getChatHistoryTool } from '../../../core/agent/tools/skill-manager.tools.js';
 import { getSystemAssistantTools } from '../../../core/agent/tools/system-assistant.tools.js';
 
 describe('System assistant tools', () => {
@@ -18,6 +17,7 @@ describe('System assistant tools', () => {
     assert.ok(toolNames.includes('get_room_message_detail'));
     assert.ok(toolNames.includes('get_recent_room_messages'));
     assert.ok(toolNames.includes('search_room_messages'));
+    assert.ok(!toolNames.includes('get_chat_history'));
     assert.ok(toolNames.includes('create_agent'));
     assert.ok(toolNames.includes('create_llm_provider'));
     assert.ok(toolNames.includes('create_skill'));
@@ -52,18 +52,19 @@ describe('System assistant tools', () => {
     assert.ok(groupToolNames.includes('create_agent'));
   });
 
-  test('群消息查询工具单次最多返回 5 条', () => {
+  test('群消息查询工具参数校验', () => {
     const tools = getSystemAssistantTools(AGENT_CREATOR_ID, 'room-1');
     const recentTool = tools.find((tool) => tool.name === 'get_recent_room_messages');
     const searchTool = tools.find((tool) => tool.name === 'search_room_messages');
 
     assert.ok(recentTool);
     assert.ok(searchTool);
-    assert.equal(schemaOf(recentTool.schema).safeParse({limit: 5}).success, true);
-    assert.equal(schemaOf(recentTool.schema).safeParse({limit: 50}).success, false);
-    assert.equal(schemaOf(searchTool.schema).safeParse({query: '关键字', limit: 5}).success, true);
-    assert.equal(schemaOf(searchTool.schema).safeParse({query: '关键字', limit: 50}).success, false);
-    assert.equal(getChatHistoryTool.schema.safeParse({chatRoomId: 'room-1', limit: 5}).success, true);
-    assert.equal(getChatHistoryTool.schema.safeParse({chatRoomId: 'room-1', limit: 50}).success, false);
+    assert.equal(schemaOf(recentTool.schema).safeParse({limit: 50, skip: 1000, order: 'asc'}).success, true);
+    assert.equal(schemaOf(recentTool.schema).safeParse({limit: 50, skip: 1000, order: 'desc'}).success, true);
+    assert.equal(schemaOf(recentTool.schema).safeParse({limit: 50, skip: 1001}).success, false);
+    assert.equal(schemaOf(recentTool.schema).safeParse({limit: 50, order: 'latest'}).success, false);
+    assert.equal(schemaOf(recentTool.schema).safeParse({limit: 51}).success, false);
+    assert.equal(schemaOf(searchTool.schema).safeParse({query: '关键字', limit: 50}).success, true);
+    assert.equal(schemaOf(searchTool.schema).safeParse({query: '关键字', limit: 51}).success, false);
   });
 });

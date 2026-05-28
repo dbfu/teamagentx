@@ -234,9 +234,9 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
         </div>
       )}
 
-      {/* 置顶群聊区域 - 卡片形式，不参与滚动，移动端一行5个，桌面端一行3个 */}
+      {/* 置顶群聊区域 - 卡片形式，不参与滚动，移动端一行5个，桌面端一行4个 */}
       {chatRooms.some(room => room.isPinned) && (
-        <div className={cn("mx-2 grid gap-1.5 px-1 py-1 pb-2", isMobile ? "grid-cols-5" : "grid-cols-3")}>
+        <div className={cn("mx-2 grid gap-1 px-1 py-1 pb-2", isMobile ? "grid-cols-5" : "grid-cols-4")}>
           {chatRooms.filter(room => room.isPinned).sort((a, b) => {
             // 置顶群聊按置顶时间倒序
             const aPinnedAt = a.pinnedAt ? new Date(a.pinnedAt).getTime() : 0
@@ -260,7 +260,7 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
                     : 'bg-muted/50 hover:bg-accent'
                 )}
               >
-                <div className="relative shrink-0">
+                <div className={cn("relative shrink-0", isMobile ? "" : "scale-90")}>
                   {/* 快速对话群聊使用助手头像，普通群聊使用群聊头像 */}
                   {room.isQuickChatRoom ? (
                     <AgentAvatarImage avatar={room.avatar ?? null} className="size-10 rounded-full" />
@@ -269,19 +269,20 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
                   )}
                   {/* 未读数红点 */}
                   {unreadDisplay && (
-                    <div className="absolute -right-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-xs font-medium text-white">
+                    <div className={cn("absolute -right-1 -top-1 flex items-center justify-center rounded-full bg-red-500 font-medium text-white", isMobile ? "min-h-5 min-w-5 px-1.5 text-xs" : "min-h-4 min-w-4 px-1 text-[10px]")}>
                       {unreadDisplay}
                     </div>
                   )}
                   {/* 助手执行中标识 */}
                   {isExecuting && (
-                    <div className="absolute -bottom-1 -right-1 flex size-4 items-center justify-center rounded-full bg-primary">
-                      <Loader2 className="size-3 animate-spin text-white" />
+                    <div className={cn("absolute -bottom-1 -right-1 flex items-center justify-center rounded-full bg-primary", isMobile ? "size-4" : "size-3")}>
+                      <Loader2 className={cn("animate-spin text-white", isMobile ? "size-3" : "size-2.5")} />
                     </div>
                   )}
                 </div>
                 <span className={cn(
-                  "max-w-16 truncate text-xs",
+                  "truncate text-xs",
+                  isMobile ? "max-w-16" : "max-w-14",
                   unreadCount > 0 ? "font-medium text-foreground" : "text-muted-foreground"
                 )}>{room.name}</span>
                 {hasOwnerMention && (

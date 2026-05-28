@@ -11,7 +11,6 @@ export {
   SKILL_MANAGER_AGENT_ID,
   skillManagerTools,
   getSharedSkillsDir,
-  getChatHistoryTool, // 导出供其他工具复用
 } from './skill-manager.tools.js';
 
 // 助手生成助手工具
