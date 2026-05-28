@@ -1,12 +1,16 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert';
+import type { z } from 'zod';
 import {
   AGENT_CREATOR_ID,
   GROUP_ASSISTANT_ID,
 } from '../../../core/agent/system-assistant.constants.js';
+import { getChatHistoryTool } from '../../../core/agent/tools/skill-manager.tools.js';
 import { getSystemAssistantTools } from '../../../core/agent/tools/system-assistant.tools.js';
 
 describe('System assistant tools', () => {
+  const schemaOf = (schema: unknown) => schema as z.ZodTypeAny;
+
   test('群助手聚合所有系统工具', () => {
     const toolNames = getSystemAssistantTools(GROUP_ASSISTANT_ID, 'room-1')
       .map((tool) => tool.name);
@@ -46,5 +50,20 @@ describe('System assistant tools', () => {
     assert.ok(!groupToolNames.includes('get_recent_room_messages'));
     assert.ok(!groupToolNames.includes('search_room_messages'));
     assert.ok(groupToolNames.includes('create_agent'));
+  });
+
+  test('群消息查询工具单次最多返回 5 条', () => {
+    const tools = getSystemAssistantTools(AGENT_CREATOR_ID, 'room-1');
+    const recentTool = tools.find((tool) => tool.name === 'get_recent_room_messages');
+    const searchTool = tools.find((tool) => tool.name === 'search_room_messages');
+
+    assert.ok(recentTool);
+    assert.ok(searchTool);
+    assert.equal(schemaOf(recentTool.schema).safeParse({limit: 5}).success, true);
+    assert.equal(schemaOf(recentTool.schema).safeParse({limit: 50}).success, false);
+    assert.equal(schemaOf(searchTool.schema).safeParse({query: '关键字', limit: 5}).success, true);
+    assert.equal(schemaOf(searchTool.schema).safeParse({query: '关键字', limit: 50}).success, false);
+    assert.equal(getChatHistoryTool.schema.safeParse({chatRoomId: 'room-1', limit: 5}).success, true);
+    assert.equal(getChatHistoryTool.schema.safeParse({chatRoomId: 'room-1', limit: 50}).success, false);
   });
 });

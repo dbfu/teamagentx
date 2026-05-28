@@ -3,7 +3,7 @@ import prisma from '../../../lib/prisma.js';
 import { messageService } from '../../../modules/message/message.service.js';
 import { createSystemTool as tool } from './system-tool.js';
 
-const MAX_LIMIT = 50;
+const MAX_LIMIT = 5;
 const MAX_CONTEXT_MESSAGES = 3;
 const MAX_CONTEXT_LINES = 5;
 const MAX_CANDIDATES = 500;
@@ -264,7 +264,7 @@ export function createChatHistorySearchTools(chatRoomId: string) {
     ),
     tool(
       async (input: GetRecentRoomMessagesInput = {}) => {
-        const limit = clampInt(input.limit, 20, 1, MAX_LIMIT);
+        const limit = clampInt(input.limit, 5, 1, MAX_LIMIT);
         const senderName = input.senderName?.trim();
         const normalizedSenderName = senderName ? normalizeText(senderName) : '';
         const beforeMessage = await findAnchorMessage(chatRoomId, input.beforeMessageId);
@@ -327,9 +327,9 @@ export function createChatHistorySearchTools(chatRoomId: string) {
       {
         name: 'get_recent_room_messages',
         description:
-          'Get the most recent messages in the current chatroom. The chatroom is fixed to the current execution context; do not provide a chatRoomId. Use this when you need recent group context without passive history injection.',
+          'Get the most recent messages in the current chatroom. The chatroom is fixed to the current execution context; do not provide a chatRoomId. Return at most 5 messages per call; page with beforeMessageId/afterMessageId if more context is needed. Prefer search_room_messages when you know a keyword.',
         schema: z.object({
-          limit: z.number().int().min(1).max(MAX_LIMIT).optional().describe('Maximum recent messages to return. Default 20, maximum 50.'),
+          limit: z.number().int().min(1).max(MAX_LIMIT).optional().describe('Maximum recent messages to return. Default 5, maximum 5.'),
           beforeMessageId: z.string().optional().describe('Only return messages before this message ID. The ID must belong to the current chatroom.'),
           afterMessageId: z.string().optional().describe('Only return messages after this message ID. The ID must belong to the current chatroom.'),
           senderType: z.enum(['user', 'agent']).optional().describe('Optional sender type filter.'),
@@ -344,7 +344,7 @@ export function createChatHistorySearchTools(chatRoomId: string) {
           throw new Error('query is required');
         }
 
-        const limit = clampInt(input.limit, 20, 1, MAX_LIMIT);
+        const limit = clampInt(input.limit, 5, 1, MAX_LIMIT);
         const contextMessages = clampInt(input.contextMessages, 0, 0, MAX_CONTEXT_MESSAGES);
         const contextLines = clampInt(input.contextLines, 2, 0, MAX_CONTEXT_LINES);
         const senderName = input.senderName?.trim();
@@ -428,10 +428,10 @@ export function createChatHistorySearchTools(chatRoomId: string) {
       {
         name: 'search_room_messages',
         description:
-          'Search messages in the current chatroom by keyword. The chatroom is fixed to the current execution context; do not provide a chatRoomId. Use this when you need prior group context. It behaves like grep -n -C: returns matching message snippets, line numbers, and optional nearby messages instead of dumping full history.',
+          'Search messages in the current chatroom by keyword. The chatroom is fixed to the current execution context; do not provide a chatRoomId. Return at most 5 matching messages per call. It behaves like grep -n -C: returns matching message snippets, line numbers, and optional nearby messages instead of dumping full history.',
         schema: z.object({
           query: z.string().min(1).max(120).describe('Keyword to search for in the current chatroom. Literal substring search; regex is not supported.'),
-          limit: z.number().int().min(1).max(MAX_LIMIT).optional().describe('Maximum matching messages to return. Default 20, maximum 50.'),
+          limit: z.number().int().min(1).max(MAX_LIMIT).optional().describe('Maximum matching messages to return. Default 5, maximum 5.'),
           beforeMessageId: z.string().optional().describe('Only search messages before this message ID. The ID must belong to the current chatroom.'),
           afterMessageId: z.string().optional().describe('Only search messages after this message ID. The ID must belong to the current chatroom.'),
           senderType: z.enum(['user', 'agent']).optional().describe('Optional sender type filter.'),

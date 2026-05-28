@@ -1457,7 +1457,7 @@ process.stdin.on("data", (chunk) => {
       }
 
       fullMessage += `[Group History Access]
-You may access current chatroom history through tools. Use \`get_recent_room_messages\` for recent context, \`search_room_messages\` to search messages by keyword, or \`get_room_message_detail\` to inspect exact message content by messageId. These tools automatically use the current chatroom; do not ask for or provide a chatRoomId. If the current request depends on prior discussion, use these tools instead of guessing from previews or memory.
+You may access current chatroom history through tools. Use \`get_recent_room_messages\` for recent context, \`search_room_messages\` to search messages by keyword, or \`get_room_message_detail\` to inspect exact message content by messageId. These tools automatically use the current chatroom; do not ask for or provide a chatRoomId. Fetch at most 5 messages per recent-history call; if you need more context, page through multiple calls or use keyword search instead of requesting a large limit. If the current request depends on prior discussion, use these tools instead of guessing from previews or memory.
 
 `;
     }

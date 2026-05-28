@@ -20,16 +20,21 @@ export const SKILL_MANAGER_AGENT_ID = '596667f7-f901-4613-92a7-cc71d859fa22';
 
 export { getSharedSkillsDir };
 
+function clampHistoryLimit(limit: number): number {
+  if (!Number.isFinite(limit)) return 5;
+  return Math.min(Math.max(Math.trunc(limit), 1), 5);
+}
+
 // 获取对话历史工具
 export const getChatHistoryTool = tool(
-  async ({ chatRoomId, limit = 50 }: { chatRoomId?: string; limit?: number }) => {
+  async ({ chatRoomId, limit = 5 }: { chatRoomId?: string; limit?: number }) => {
     if (!chatRoomId) {
       return '错误：缺少 chatRoomId 参数';
     }
 
     try {
       const messages = await messageService.findByChatRoomId(chatRoomId, {
-        take: limit,
+        take: clampHistoryLimit(limit),
         order: 'asc',
       });
 
@@ -57,7 +62,7 @@ export const getChatHistoryTool = tool(
     description: '获取指定群聊的对话历史，用于分析并生成技能。返回格式化的对话记录。',
     schema: z.object({
       chatRoomId: z.string().describe('群聊 ID'),
-      limit: z.number().optional().default(50).describe('消息数量限制，默认 50'),
+      limit: z.number().int().min(1).max(5).optional().default(5).describe('消息数量限制，默认 5，最大 5'),
     }),
   },
 );
