@@ -712,8 +712,6 @@ function prunePlatformPackages(nodeModulesDir, targetPlatform, targetArch) {
       )),
       ...prunePnpmPackagesByPattern(nodeModulesDir, (packageName) => (
         packageName.startsWith('@esbuild+')
-        || packageName.startsWith('@img+sharp-')
-        || packageName.startsWith('sharp@')
       )),
     );
 
@@ -743,8 +741,6 @@ function prunePlatformPackages(nodeModulesDir, targetPlatform, targetArch) {
     )),
     ...prunePnpmPackagesByPattern(nodeModulesDir, (packageName) => (
       packageName.startsWith('@esbuild+')
-      || packageName.startsWith('@img+sharp-')
-      || packageName.startsWith('sharp@')
     )),
   );
 

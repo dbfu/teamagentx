@@ -6,6 +6,7 @@ export {
   processingMap,
   abortControllers,
   discardExecutionResultKeys,
+  taskExecutionStartedAt,
   streamEventsCache,
   getCachedStreamEvents,
   clearCachedStreamEvents,

@@ -5,7 +5,7 @@ import { AgentAvatarImage } from '@/lib/agent-avatars';
 import { GroupAvatarImage } from '@/lib/group-avatars';
 import { cn } from '@/lib/utils';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Camera, ClipboardList, Clock, Eraser, Loader2, MoreHorizontal, Play, Scroll, Settings, Square, TerminalSquare, UserPlus, Users } from 'lucide-react';
+import { Camera, ClipboardList, Clock, Eraser, History, Loader2, MoreHorizontal, Play, Scroll, Settings, Square, TerminalSquare, UserPlus, Users } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { useUIStore } from '@/stores';
@@ -20,6 +20,7 @@ interface ChatAreaHeaderProps {
   onClearMessages?: () => void
   onOpenCronTasks?: () => void
   onOpenTaskBoard?: () => void
+  onOpenMessageArchives?: () => void
   taskBoardActive?: boolean
   hasActiveTasks?: boolean
   onStopAllTasks?: () => void
@@ -36,6 +37,7 @@ export function ChatAreaHeader({
   onClearMessages,
   onOpenCronTasks,
   onOpenTaskBoard,
+  onOpenMessageArchives,
   taskBoardActive,
   hasActiveTasks,
   onStopAllTasks,
@@ -377,6 +379,17 @@ export function ChatAreaHeader({
               </TooltipTrigger>
               <TooltipContent side="bottom">任务看板</TooltipContent>
             </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
+                  onClick={onOpenMessageArchives}
+                >
+                  <History className="size-5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">历史记录</TooltipContent>
+            </Tooltip>
             {/* 清空消息按钮 */}
             <Tooltip>
               <TooltipTrigger asChild>
@@ -484,6 +497,13 @@ export function ChatAreaHeader({
                 >
                   <Clock className="size-4 text-current" />
                   定时任务
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="hover:bg-primary/10 hover:text-primary hover:[&_svg]:text-primary focus:bg-primary/10 focus:text-primary focus:[&_svg]:text-primary"
+                  onClick={onOpenMessageArchives}
+                >
+                  <History className="size-4 text-current" />
+                  历史记录
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   className="hover:bg-red-500/10 hover:text-red-500 hover:[&_svg]:text-red-500 focus:bg-red-500/10 focus:text-red-500 focus:[&_svg]:text-red-500"

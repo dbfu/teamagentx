@@ -93,6 +93,7 @@ interface AgentTypingData {
   agentId: string
   agentName: string
   status?: 'pending' | 'executing'
+  startedAt?: number
 }
 
 interface AgentDoneData {
@@ -146,6 +147,7 @@ export interface AgentResumeData {
   agentId: string
   agentName: string
   status?: 'pending' | 'executing'
+  startedAt?: number
 }
 
 // 缓存的流式事件数据类型
@@ -262,7 +264,7 @@ interface SocketStore {
   disconnect: () => void
   joinChatRoom: (chatRoomId: string) => void
   leaveChatRoom: (chatRoomId: string) => void
-  sendMessage: (message: { chatRoomId: string; content: string; isHuman?: boolean; attachments?: SocketAttachment[] }) => void
+  sendMessage: (message: { chatRoomId: string; content: string; isHuman?: boolean; attachments?: SocketAttachment[]; replyMessageId?: string | null }) => void
   setCurrentChatRoomId: (id: string | null) => void
 
   // Event listeners (返回 unsubscribe 函数)
@@ -391,6 +393,7 @@ export const useSocketStore = create<SocketStore>((set, get) => ({
       content: message.content,
       time: new Date(),
       chatRoomId: message.chatRoomId,
+      replyMessageId: message.replyMessageId ?? null,
       isHuman: message.isHuman ?? true,
       attachments: message.attachments,
     })

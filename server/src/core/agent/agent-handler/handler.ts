@@ -1,5 +1,7 @@
 import { EventEmitter } from 'events';
 import { chatRoomService } from '../../../modules/chatroom/chatroom.service.js';
+import { agentMemoryService } from '../../../modules/agent-memory/agent-memory.service.js';
+import { messageService } from '../../../modules/message/message.service.js';
 import { agentService } from '../agent.service.js';
 import { recoveryService } from '../../../modules/recovery/recovery.service.js';
 import type { Message } from '../../../types/message.js';
@@ -60,7 +62,7 @@ export const messageEventEmitter = emitter as {
 export function setupAIHandlers(
   emit: (msg: Message, chatRoomId: string) => Promise<void> | void,
   emitTyping: (
-    data: {messageId: string; agentId: string; agentName: string},
+    data: {messageId: string; agentId: string; agentName: string; status?: 'pending' | 'executing'; startedAt?: number},
     chatRoomId: string,
   ) => void,
   emitDone: (
@@ -231,10 +233,18 @@ export function setupAIHandlers(
             hasMentions,
           });
 
+          const coordinatorHistory = await agentMemoryService.buildRecentHistory(
+            chatRoomId,
+            message.id,
+            5,
+          );
+
           await enqueueAgentTask(
             chatRoomId,
             message,
             createInternalCoordinatorAgent(coordinatorAgent),
+            undefined,
+            { history: coordinatorHistory },
           );
         } else {
           console.warn(`[coordinatorAgentTrigger] 内置协调助手不存在或未启用: ${GROUP_COORDINATOR_ID}`);
@@ -246,6 +256,50 @@ export function setupAIHandlers(
       // Socket 入口已校验发送者是群聊成员；这里不再限制必须由群主触发，
       // 避免多人群聊或历史 ownerId 漂移时默认助手静默失效。
       if (!hasMentions) {
+        if (
+          message.isHuman &&
+          chatRoom &&
+          agentTriggerMode === 'auto' &&
+          !chatRoom.isQuickChatRoom &&
+          !chatRoom.defaultAgentId &&
+          message.replyMessageId
+        ) {
+          const replyTargetMessage = await messageService.findById(message.replyMessageId);
+          const replyTargetAgentId = replyTargetMessage?.chatRoomId === chatRoomId && !replyTargetMessage.isHuman
+            ? replyTargetMessage.agentId
+            : null;
+
+          if (replyTargetAgentId) {
+            const agent = await agentService.findById(replyTargetAgentId);
+
+            if (agent && agent.isActive) {
+              if (agent.agentLevel !== 'system') {
+                const isMember = await chatRoomService.isAgentMember(
+                  chatRoomId,
+                  agent.id,
+                );
+                if (!isMember) {
+                  console.log(
+                    `Reply target agent ${agent.name} is not a member of chatRoom ${chatRoomId}`,
+                  );
+                  return;
+                }
+              }
+
+              debugLog('ownerMentionReplyTrigger', {
+                chatRoomId,
+                agentId: agent.id,
+                agentName: agent.name,
+                triggerMessageId: message.id,
+                replyMessageId: message.replyMessageId,
+              });
+
+              await enqueueAgentTask(chatRoomId, message, agent);
+            }
+          }
+          return;
+        }
+
         if (
           message.isHuman &&
           chatRoom &&

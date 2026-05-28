@@ -419,6 +419,7 @@ export const chatRoomService = {
           include: agentInclude,
         },
         messages: {
+          where: { archiveId: null },
           include: agentInclude,
           orderBy: { time: 'asc' },
         },
@@ -454,6 +455,7 @@ export const chatRoomService = {
           },
         },
         messages: {
+          where: { archiveId: null },
           orderBy: { time: 'desc' },
           take: 1,
           select: {
@@ -777,6 +779,7 @@ export const chatRoomService = {
     const count = await prisma.message.count({
       where: {
         chatRoomId,
+        archiveId: null,
         time: {
           gt: chatRoomAgent.lastReadAt,
         },
@@ -813,6 +816,7 @@ export const chatRoomService = {
         const count = await prisma.message.count({
           where: {
             chatRoomId: agent.chatRoomId,
+            archiveId: null,
             time: {
               gt: agent.lastReadAt,
             },

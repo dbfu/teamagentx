@@ -487,6 +487,7 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
   readonly llmProvider?: LlmProvider;
   readonly imageGenerationProvider?: LlmProvider | null;
   readonly thinkingMode: AgentThinkingMode;
+  readonly stateless: boolean;
 
   private _lastInjectedMessageId?: string;
   private systemPrompt: string;
@@ -533,6 +534,7 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
     imageGenerationProvider?: LlmProvider | null,
     thinkingMode?: AgentThinkingMode | null,
     chatRoomRules?: string,
+    stateless: boolean = false,
   ) {
     this.name = name;
     this.chatRoomId = chatRoomId;
@@ -544,13 +546,14 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
     this.llmProvider = llmProvider;
     this.imageGenerationProvider = imageGenerationProvider;
     this.thinkingMode = thinkingMode || DEFAULT_AGENT_THINKING_MODE;
+    this.stateless = stateless;
     this.workDir = resolveAgentWorkDir({
       chatRoomId,
       sessionDir,
       customWorkDir,
       agentWorkDir: workDir,
     });
-    const savedSession = this.loadSessionState();
+    const savedSession = this.stateless ? null : this.loadSessionState();
     this.sessionId = savedSession?.sessionId || randomUUID();
     this.hasStartedSession = savedSession?.hasStartedSession ?? false;
 
@@ -714,6 +717,8 @@ Use TeamAgentX MCP shell tools for shell execution. For normal foreground shell 
   }
 
   private saveSessionId(): void {
+    if (this.stateless) return;
+
     try {
       const statePath = this.getSessionStatePath();
       fs.mkdirSync(path.dirname(statePath), {recursive: true});
@@ -1710,7 +1715,7 @@ Other assistants: ${othersInfo}${mentionTip}
         this.sessionId !== sdkSessionId || !this.hasStartedSession;
       this.sessionId = sdkSessionId;
       this.hasStartedSession = true;
-      if (shouldSaveSession) this.saveSessionId();
+      if (shouldSaveSession && !this.stateless) this.saveSessionId();
     }
 
     switch (message.type) {
@@ -1751,7 +1756,7 @@ Other assistants: ${othersInfo}${mentionTip}
         if ((message as any).session_id) {
           this.sessionId = (message as any).session_id;
           this.hasStartedSession = true;
-          this.saveSessionId();
+          if (!this.stateless) this.saveSessionId();
         }
         if (
           (message as any).subtype === 'success' &&
@@ -1928,6 +1933,10 @@ Other assistants: ${othersInfo}${mentionTip}
 
     const fullMessage = this.buildFullMessage(message, history);
     this.lastContext = fullMessage;
+    if (this.stateless) {
+      this.sessionId = randomUUID();
+      this.hasStartedSession = false;
+    }
 
     const abortController = new AbortController();
     this.currentAbortController = abortController;

@@ -23,6 +23,8 @@ export function ImageViewerModal({
 }: ImageViewerModalProps) {
   const [isLoading, setIsLoading] = useState(true)
   const [copied, setCopied] = useState(false)
+  const [naturalSize, setNaturalSize] = useState<{ width: number; height: number } | null>(null)
+  const isTallImage = Boolean(naturalSize && naturalSize.width > 0 && naturalSize.height / naturalSize.width >= 3)
 
   useEffect(() => {
     if (!isOpen) return
@@ -112,7 +114,8 @@ export function ImageViewerModal({
 
         {/* 图片 */}
         <div className={cn(
-          "relative rounded-lg overflow-hidden bg-black",
+          "relative rounded-lg bg-black",
+          isTallImage ? "max-h-[85vh] overflow-y-auto" : "overflow-hidden",
           isLoading && "flex items-center justify-center min-w-[200px] min-h-[200px]"
         )}>
           {isLoading && (
@@ -122,10 +125,18 @@ export function ImageViewerModal({
             src={imageUrl}
             alt={imageName}
             className={cn(
-              "max-w-[90vw] max-h-[85vh] object-contain",
+              isTallImage
+                ? "h-auto w-[min(90vw,720px)] max-w-none"
+                : "max-w-[90vw] max-h-[85vh] object-contain",
               isLoading && "hidden"
             )}
-            onLoad={() => setIsLoading(false)}
+            onLoad={(event) => {
+              setNaturalSize({
+                width: event.currentTarget.naturalWidth,
+                height: event.currentTarget.naturalHeight,
+              })
+              setIsLoading(false)
+            }}
             onError={() => setIsLoading(false)}
           />
         </div>

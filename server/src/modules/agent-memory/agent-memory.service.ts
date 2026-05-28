@@ -238,6 +238,19 @@ function triggerCompaction(chatRoomId: string, agentId: string, currentMessageId
 }
 
 export const agentMemoryService = {
+  async buildRecentHistory(chatRoomId: string, currentMessageId: string, take = 3): Promise<HistoryMessage[]> {
+    try {
+      const messagesBeforeCurrent = await findMessagesBefore(chatRoomId, currentMessageId);
+      return messagesBeforeCurrent.slice(-Math.max(0, take)).map(toHistoryMessage);
+    } catch (error) {
+      console.error(
+        `[AgentMemory] ${chatRoomId} 构建最近群历史失败，降级为空历史:`,
+        error,
+      );
+      return [];
+    }
+  },
+
   async buildHistory(chatRoomId: string, agentId: string, currentMessageId: string): Promise<HistoryMessage[]> {
     const messagesBeforeCurrent = await findMessagesBefore(chatRoomId, currentMessageId);
     const recentMessages = messagesBeforeCurrent.slice(-config.agent.memoryRecentMessages);

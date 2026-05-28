@@ -9,6 +9,7 @@ import { ClearMessagesDialog } from './dialogs/clear-messages-dialog'
 import { RoomRulesDialog } from './dialogs/room-rules-dialog'
 import { StopAllTasksDialog } from './dialogs/stop-all-tasks-dialog'
 import { ScreenshotModal } from './screenshot-modal'
+import { MessageArchivesModal } from './message-archives-modal'
 import { useSocketStore, useChatRoomStore } from '@/stores'
 import { useChatStore } from '@/stores/chat-store'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -29,6 +30,7 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
   const selectRoom = useChatRoomStore((s) => s.selectRoom)
   const [showRoomRules, setShowRoomRules] = useState(false)
   const [showScreenshot, setShowScreenshot] = useState(false)
+  const [showMessageArchives, setShowMessageArchives] = useState(false)
   const [showStopAllConfirm, setShowStopAllConfirm] = useState(false)
   const [stopAllTargetAgentIds, setStopAllTargetAgentIds] = useState<string[]>([])
   const [visibleOwnerMentionTodoIds, setVisibleOwnerMentionTodoIds] = useState<Set<string>>(new Set())
@@ -274,6 +276,10 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
     setSidePanelMode('task-board')
   }
 
+  const handleOpenMessageArchives = () => {
+    setShowMessageArchives(true)
+  }
+
   const handleDeleteChatRoom = () => {
     if (chatRoom) {
       setSidePanelMode(null)
@@ -313,6 +319,7 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
           onClearMessages={() => setShowClearConfirm(true)}
           onOpenCronTasks={handleOpenCronTasks}
           onOpenTaskBoard={handleOpenTaskBoard}
+          onOpenMessageArchives={handleOpenMessageArchives}
           taskBoardActive={isTaskBoardOpen}
           hasActiveTasks={activeTaskAgentIds.length > 0}
           onStopAllTasks={handleStopAllTasks}
@@ -364,7 +371,6 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
               onLoadOlderMessages={loadOlderMessages}
               currentUser={currentUser}
               isSidePanelOpen={!isMobile && sidePanelMode !== null}
-              isStreamPanelOpen={!isMobile && sidePanelMode === 'stream'}
             />
 
             {/* Input area */}
@@ -435,6 +441,13 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
         onOpenChange={setShowClearConfirm}
         clearing={clearing}
         onClear={handleClearMessages}
+      />
+
+      <MessageArchivesModal
+        open={showMessageArchives}
+        onOpenChange={setShowMessageArchives}
+        chatRoom={chatRoom}
+        currentUser={currentUser}
       />
 
       {/* Stop All Tasks Confirm Dialog */}

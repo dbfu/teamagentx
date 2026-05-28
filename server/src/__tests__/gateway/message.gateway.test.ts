@@ -201,7 +201,7 @@ describe('Message Gateway API', () => {
   });
 
   describe('DELETE /messages/chatroom/:chatRoomId', () => {
-    test('应该清空聊天室中的所有消息', async () => {
+    test('应该将聊天室当前消息归档并从当前消息列表隐藏', async () => {
       const chatRoomId = randomUUID();
       const otherChatRoomId = randomUUID();
 
@@ -250,8 +250,39 @@ describe('Message Gateway API', () => {
       const body = response.json();
       assert.strictEqual(body.success, true);
       assert.strictEqual(body.count, 2);
-      assert.strictEqual(await prisma.message.count({ where: { chatRoomId } }), 0);
+      assert.ok(body.archiveId);
+      assert.strictEqual(await prisma.message.count({ where: { chatRoomId, archiveId: null } }), 0);
+      assert.strictEqual(await prisma.message.count({ where: { chatRoomId, archiveId: body.archiveId } }), 2);
       assert.strictEqual(await prisma.message.count({ where: { chatRoomId: otherChatRoomId } }), 1);
+
+      const currentMessagesResponse = await app.inject({
+        method: 'GET',
+        url: `/messages?chatRoomId=${chatRoomId}`,
+      });
+      const currentMessagesBody = currentMessagesResponse.json();
+      assert.strictEqual(currentMessagesBody.success, true);
+      assert.deepStrictEqual(currentMessagesBody.data, []);
+
+      const archivesResponse = await app.inject({
+        method: 'GET',
+        url: `/chatrooms/${chatRoomId}/message-archives`,
+      });
+      const archivesBody = archivesResponse.json();
+      assert.strictEqual(archivesBody.success, true);
+      assert.strictEqual(archivesBody.data.length, 1);
+      assert.strictEqual(archivesBody.data[0].id, body.archiveId);
+      assert.strictEqual(archivesBody.data[0].messageCount, 2);
+
+      const archiveMessagesResponse = await app.inject({
+        method: 'GET',
+        url: `/message-archives/${body.archiveId}/messages`,
+      });
+      const archiveMessagesBody = archiveMessagesResponse.json();
+      assert.strictEqual(archiveMessagesBody.success, true);
+      assert.deepStrictEqual(
+        archiveMessagesBody.data.map((message: { content: string }) => message.content),
+        ['target message 1', 'target message 2'],
+      );
     });
   });
 });

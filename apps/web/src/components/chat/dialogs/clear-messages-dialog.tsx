@@ -19,7 +19,7 @@ export function ClearMessagesDialog({
       open={open}
       onOpenChange={onOpenChange}
       title="清空消息"
-      description="确定要清空该群组的所有消息吗？此操作不可撤销。"
+      description="确定要清空当前消息吗？现有消息会保存到历史记录，当前聊天将重新开始。"
       confirmText="确定"
       onConfirm={onClear}
       loading={clearing}

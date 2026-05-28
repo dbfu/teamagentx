@@ -447,6 +447,11 @@ interface MessageListResponse extends ApiResponse<Message[]> {
   pagination?: MessagePagination
 }
 
+interface MessageArchiveMessagesResponse extends ApiResponse<Message[]> {
+  archive?: ChatRoomMessageArchive
+  pagination?: MessagePagination
+}
+
 async function request<T>(
   endpoint: string,
   options?: RequestInit
@@ -811,6 +816,7 @@ export interface Message {
   replyMessageId: string | null
   isHuman: boolean
   executionRecordId?: string | null  // 关联的执行记录 ID
+  archiveId?: string | null
   executionDuration?: number | null  // 执行耗时（毫秒）
   totalTokens?: number | null        // 消息消耗的 token 数
   cacheReadTokens?: number | null    // 缓存读取 token 数
@@ -831,6 +837,19 @@ export interface Message {
     avatarColor: string | null
   } | null
   attachments?: Attachment[]  // 消息附件（图片等）
+}
+
+export interface ChatRoomMessageArchive {
+  id: string
+  chatRoomId: string
+  title: string
+  messageCount: number
+  startedAt: string | null
+  endedAt: string | null
+  archivedAt: string
+  createdBy: string | null
+  createdAt: string
+  updatedAt: string
 }
 
 // Agent 调试信息类型
@@ -1031,10 +1050,27 @@ export const messageApi = {
   },
 
   // 清空群组消息
-  async clearByChatRoomId(chatRoomId: string): Promise<ApiResponse<void>> {
-    return request<void>(`/messages/chatroom/${chatRoomId}`, {
+  async clearByChatRoomId(chatRoomId: string): Promise<ApiResponse<{ count: number; archiveId: string | null }>> {
+    return request<{ count: number; archiveId: string | null }>(`/messages/chatroom/${chatRoomId}`, {
       method: 'DELETE',
     })
+  },
+
+  async getArchives(chatRoomId: string): Promise<ApiResponse<ChatRoomMessageArchive[]>> {
+    return request<ChatRoomMessageArchive[]>(`/chatrooms/${chatRoomId}/message-archives`)
+  },
+
+  async getArchiveMessages(archiveId: string, options?: { beforeMessageId?: string; take?: number }): Promise<MessageArchiveMessagesResponse> {
+    const params = new URLSearchParams()
+    if (options?.beforeMessageId) {
+      params.set('beforeMessageId', options.beforeMessageId)
+    }
+    if (options?.take) {
+      params.set('take', String(options.take))
+    }
+
+    const query = params.toString()
+    return request<Message[]>(`/message-archives/${archiveId}/messages${query ? `?${query}` : ''}`)
   },
 
   // 获取消息的执行记录

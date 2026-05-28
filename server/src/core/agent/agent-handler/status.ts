@@ -12,7 +12,7 @@ export let globalBroadcastMessage:
   | null = null;
 export let globalEmitTyping:
   | ((
-      data: {messageId: string; agentId: string; agentName: string; status?: 'pending' | 'executing'},
+      data: {messageId: string; agentId: string; agentName: string; status?: 'pending' | 'executing'; startedAt?: number},
       chatRoomId: string,
     ) => void)
   | null = null;
@@ -68,7 +68,7 @@ export function setGlobalBroadcastMessage(
 // 设置全局回调
 export function setGlobalCallbacks(callbacks: {
   emit: (msg: any, chatRoomId: string) => Promise<void> | void;
-  emitTyping: (data: {messageId: string; agentId: string; agentName: string; status?: 'pending' | 'executing'}, chatRoomId: string) => void;
+  emitTyping: (data: {messageId: string; agentId: string; agentName: string; status?: 'pending' | 'executing'; startedAt?: number}, chatRoomId: string) => void;
   emitDone: (data: {agentId: string; agentName: string; triggerMessageId: string; executionRecordId?: string; messageIds?: string[]; duration?: number; totalTokens?: number; cacheReadTokens?: number}, chatRoomId: string) => void;
   emitStream: (data: { messageId: string; agentId: string; agentName: string; content: string }, chatRoomId: string) => void;
   emitToolCall: (data: { messageId: string; agentId: string; agentName: string; toolCall: any }, chatRoomId: string) => void;

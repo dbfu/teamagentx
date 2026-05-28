@@ -1,4 +1,4 @@
-import { ArrowLeft, ChevronLeft, ClipboardList, Eraser, Loader2, MoreVertical, RefreshCw, Square } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ClipboardList, Eraser, History, Loader2, MoreVertical, RefreshCw, Square } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Route, Routes, useLocation, useNavigate, useSearchParams, useParams } from 'react-router-dom'
 import { LoginModal } from './components/auth/login-modal'
@@ -10,6 +10,7 @@ import { ConversationList } from './components/chat/conversation-list'
 import { CreateGroupModal } from './components/chat/create-group-modal'
 import { MobileTabBar } from './components/chat/mobile-tab-bar'
 import { IntegrationPage } from './components/chat/integration-page'
+import { MessageArchivesModal } from './components/chat/message-archives-modal'
 import { ModelPage } from './components/chat/model-page'
 import { SkillPage } from './components/chat/skill-page'
 import { SidebarNav } from './components/chat/sidebar-nav'
@@ -132,7 +133,9 @@ function MobileChatDetailPage({
   const agentStatuses = useChatStore((s) => s.agentStatuses)
   const typingAgents = useChatStore((s) => s.typingAgents)
   const stopAgent = useSocketStore((s) => s.stopAgent)
+  const currentUser = useSocketStore((s) => s.user)
   const [showStopAllConfirm, setShowStopAllConfirm] = useState(false)
+  const [showMessageArchives, setShowMessageArchives] = useState(false)
   const [stopAllTargetAgentIds, setStopAllTargetAgentIds] = useState<string[]>([])
 
   const activeTaskAgentIds = useMemo(() => {
@@ -268,6 +271,13 @@ function MobileChatDetailPage({
                 停止所有任务
               </DropdownMenuItem>
               <DropdownMenuItem
+                className="hover:bg-primary/10 hover:text-primary hover:[&_svg]:text-primary focus:bg-primary/10 focus:text-primary focus:[&_svg]:text-primary"
+                onClick={() => setShowMessageArchives(true)}
+              >
+                <History className="size-4 mr-2" />
+                历史记录
+              </DropdownMenuItem>
+              <DropdownMenuItem
                 className="hover:bg-red-500/10 hover:text-red-500 hover:[&_svg]:text-red-500 focus:bg-red-500/10 focus:text-red-500 focus:[&_svg]:text-red-500"
                 onClick={() => setShowClearConfirm(true)}
               >
@@ -294,6 +304,12 @@ function MobileChatDetailPage({
         onOpenChange={handleStopAllConfirmOpenChange}
         taskCount={stopAllTargetAgentIds.length}
         onConfirm={confirmStopAllTasks}
+      />
+      <MessageArchivesModal
+        open={showMessageArchives}
+        onOpenChange={setShowMessageArchives}
+        chatRoom={selectedRoom}
+        currentUser={currentUser}
       />
     </div>
   )

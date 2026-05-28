@@ -37,6 +37,8 @@ function isAgentValidationError(error: unknown): error is Error {
     '图片能力只能绑定图片模型',
     '开启图片能力时必须选择图片模型',
     '图片模型供应商不存在',
+    'Claude 仅支持',
+    'Codex 仅支持',
     '代理配置',
     '代理地址',
     '思考模式',

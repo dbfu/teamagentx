@@ -1,0 +1,9 @@
+# VitePress cache
+docs/.vitepress/cache/
+.vitepress/cache/
+
+# Node modules
+node_modules/
+
+# Dist
+dist/

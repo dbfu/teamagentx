@@ -3,7 +3,7 @@ import { tokenUsageApi } from '@/lib/token-usage-api'
 import { cn, formatDateTime } from '@/lib/utils'
 import { copyToClipboard } from '@/lib/copy-utils'
 import { Bot, CheckSquare, MessageSquareMore, Info, Copy, XCircle, Trash2, Volume2, ChevronDown, ChevronUp, Clock } from 'lucide-react'
-import { memo, useEffect, useState, useCallback, useMemo } from 'react'
+import { memo, useEffect, useState, useCallback, useMemo, type SyntheticEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { toast } from 'sonner'
 import { ImageViewerModal } from './image-viewer-modal'
@@ -104,13 +104,14 @@ interface ChatMessageProps {
   onToggleSelection?: (messageId: string) => void
   selectionMode?: boolean
   isSelected?: boolean
+  copyOnlyContextMenu?: boolean
   disableContentCollapse?: boolean
   onStopSpeak?: (messageId: string) => void
   onStartManualSpeak?: (messageId: string) => void
   onCompleteManualSpeak?: (messageId: string) => void
 }
 
-export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = true, isRight, replyTo, replyCount, showSpeechButton = true, typingAgents, mentionAgents, currentUser, onMarkPlayed, onAgentAvatarClick, onTypingAgentClick, onMentionClick, onReplyClick, onExecutionDetailClick, onMentionAgent, onDeleteMessage, onStartMultiSelect, onToggleSelection, selectionMode, isSelected, disableContentCollapse = false, onStopSpeak, onStartManualSpeak, onCompleteManualSpeak }: ChatMessageProps) {
+export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = true, isRight, replyTo, replyCount, showSpeechButton = true, typingAgents, mentionAgents, currentUser, onMarkPlayed, onAgentAvatarClick, onTypingAgentClick, onMentionClick, onReplyClick, onExecutionDetailClick, onMentionAgent, onDeleteMessage, onStartMultiSelect, onToggleSelection, selectionMode, isSelected, copyOnlyContextMenu = false, disableContentCollapse = false, onStopSpeak, onStartManualSpeak, onCompleteManualSpeak }: ChatMessageProps) {
   const isMobile = useIsMobile()
   const allAgents = useChatStore((s) => s.allAgents)
   const isCurrentlyPlaying = useChatStore((s) => s.playingVoiceMessageId === message.id)
@@ -187,7 +188,9 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
   }, [longPressTimer])
 
   // 复制消息内容
-  const handleCopy = useCallback(async () => {
+  const handleCopy = useCallback(async (event?: SyntheticEvent) => {
+    event?.preventDefault()
+    event?.stopPropagation()
     const success = await copyToClipboard(message.content)
     if (success) {
       toast.success('已复制到剪贴板')
@@ -467,12 +470,22 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
 
           if (attachmentType === 'image') {
             const imageUrl = resolveAssetUrl(attachment.url)
+            const isTallImage = Boolean(
+              attachment.width &&
+              attachment.height &&
+              attachment.height / attachment.width >= 3
+            )
             return (
               <div key={attachment.id} className="relative">
                 <img
                   src={imageUrl}
                   alt={attachment.filename}
-                  className="max-h-[260px] w-auto max-w-[min(360px,70vw)] rounded-lg cursor-pointer object-contain transition-opacity hover:opacity-90"
+                  className={cn(
+                    'rounded-lg cursor-pointer transition-opacity hover:opacity-90',
+                    isTallImage
+                      ? 'h-[260px] w-[min(220px,70vw)] object-cover object-top'
+                      : 'max-h-[260px] w-auto max-w-[min(360px,70vw)] object-contain'
+                  )}
                   onClick={() => imageUrl && setViewerImage({ url: imageUrl, name: attachment.filename })}
                   loading="lazy"
                 />
@@ -612,14 +625,16 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
 
     return (
       <>
-        <button
-          onClick={() => onExecutionDetailClick?.(message.id, message.executionRecordId!)}
-          className="inline-flex items-center gap-1 rounded-full bg-purple-100 dark:bg-purple-900/30 px-2 py-0.5 text-xs text-purple-600 dark:text-purple-400 hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors"
-          title="查看执行详情"
-        >
-          <Info className="size-3" />
-          <span>查看执行详情</span>
-        </button>
+        {onExecutionDetailClick && (
+          <button
+            onClick={() => onExecutionDetailClick(message.id, message.executionRecordId!)}
+            className="inline-flex items-center gap-1 rounded-full bg-purple-100 dark:bg-purple-900/30 px-2 py-0.5 text-xs text-purple-600 dark:text-purple-400 hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors"
+            title="查看执行详情"
+          >
+            <Info className="size-3" />
+            <span>查看执行详情</span>
+          </button>
+        )}
         {message.executionDuration && (
           <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
             耗时：{formatDuration(message.executionDuration)}
@@ -640,18 +655,24 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
 
     return (
       <div
-        className="fixed z-50 min-w-[120px] rounded-lg bg-popover py-1 shadow-lg border border-border"
+        className={cn(
+          "fixed min-w-[120px] rounded-lg bg-popover py-1 shadow-lg border border-border pointer-events-auto",
+          copyOnlyContextMenu ? "z-[1000]" : "z-50"
+        )}
         style={{ left: contextMenuPos.x, top: contextMenuPos.y }}
         onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
       >
         <button
-          onClick={handleCopy}
+          type="button"
+          onPointerDown={copyOnlyContextMenu ? handleCopy : undefined}
+          onClick={copyOnlyContextMenu ? undefined : handleCopy}
           className="flex w-full items-center gap-2 px-3 py-2 text-sm text-popover-foreground hover:bg-accent"
         >
           <Copy className="size-4" />
           复制内容
         </button>
-        {!message.isHuman && message.agentId && message.agent?.name && (
+        {!copyOnlyContextMenu && !message.isHuman && message.agentId && message.agent?.name && (
           <button
             onClick={handleReplyToAgent}
             className="flex w-full items-center gap-2 px-3 py-2 text-sm text-popover-foreground hover:bg-accent"
@@ -660,7 +681,7 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
             回复
           </button>
         )}
-        {onDeleteMessage && (
+        {!copyOnlyContextMenu && onDeleteMessage && (
           <button
             onClick={openDeleteDialog}
             className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
@@ -669,7 +690,7 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
             删除消息
           </button>
         )}
-        {onStartMultiSelect && (
+        {!copyOnlyContextMenu && onStartMultiSelect && (
           <button
             onClick={handleStartMultiSelect}
             className="flex w-full items-center gap-2 px-3 py-2 text-sm text-popover-foreground hover:bg-accent"
@@ -687,7 +708,7 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
 
     const layer = (
       <>
-        <div className="fixed inset-0 z-40" onClick={handleClickOutside} />
+        <div className={cn("fixed inset-0", copyOnlyContextMenu ? "z-[999]" : "z-40")} onClick={handleClickOutside} />
         {renderContextMenu()}
       </>
     )

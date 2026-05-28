@@ -32,6 +32,7 @@ const messageSchema = {
     replyMessageId: { type: 'string', nullable: true },
     isHuman: { type: 'boolean' },
     executionRecordId: { type: 'string', nullable: true },
+    archiveId: { type: 'string', nullable: true },
     executionDuration: { type: 'integer', nullable: true },
     totalTokens: { type: 'integer', nullable: true },
     cacheReadTokens: { type: 'integer', nullable: true },
@@ -56,6 +57,22 @@ const messageSchema = {
         avatarColor: { type: 'string', nullable: true },
       },
     },
+  },
+};
+
+const messageArchiveSchema = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    chatRoomId: { type: 'string' },
+    title: { type: 'string' },
+    messageCount: { type: 'integer' },
+    startedAt: { type: 'string', nullable: true },
+    endedAt: { type: 'string', nullable: true },
+    archivedAt: { type: 'string' },
+    createdBy: { type: 'string', nullable: true },
+    createdAt: { type: 'string' },
+    updatedAt: { type: 'string' },
   },
 };
 
@@ -172,6 +189,99 @@ export async function messageGateway(app: FastifyInstance) {
 
     const messages = await messageService.findMany({ take });
     return reply.send({ success: true, data: await applyBridgeMessageSenders(messages) });
+  });
+
+  app.get<{ Params: { chatRoomId: string } }>('/chatrooms/:chatRoomId/message-archives', {
+    schema: {
+      description: '获取群聊消息归档列表',
+      tags: ['Messages'],
+      params: {
+        type: 'object',
+        properties: { chatRoomId: { type: 'string' } },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: { type: 'array', items: messageArchiveSchema },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { chatRoomId } = request.params;
+    const archives = await messageService.findArchivesByChatRoomId(chatRoomId);
+    return reply.send({ success: true, data: archives });
+  });
+
+  app.get<{ Params: { archiveId: string }; Querystring: Pick<MessageQuery, 'beforeMessageId' | 'take'> }>('/message-archives/:archiveId/messages', {
+    schema: {
+      description: '获取消息归档详情',
+      tags: ['Messages'],
+      params: {
+        type: 'object',
+        properties: { archiveId: { type: 'string' } },
+      },
+      querystring: {
+        type: 'object',
+        properties: {
+          beforeMessageId: { type: 'string', description: 'Load messages older than this message ID' },
+          take: { type: 'integer', minimum: 1, maximum: MAX_MESSAGE_PAGE_SIZE, description: 'Page size' },
+        },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: { type: 'array', items: messageSchema },
+            archive: messageArchiveSchema,
+            pagination: {
+              type: 'object',
+              properties: {
+                hasMore: { type: 'boolean' },
+                limit: { type: 'integer' },
+                beforeMessageId: { type: 'string', nullable: true },
+              },
+            },
+          },
+        },
+        404: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { archiveId } = request.params;
+    const archive = await messageService.findArchiveById(archiveId);
+    if (!archive) {
+      return reply.code(404).send({ success: false, error: '消息归档不存在' });
+    }
+
+    const take = normalizeMessagePageSize(request.query.take);
+    const messages = await messageService.findByArchiveId(archiveId, {
+      take: take + 1,
+      order: 'desc',
+      beforeMessageId: request.query.beforeMessageId,
+    });
+    const hasMore = messages.length > take;
+    const page = (hasMore ? messages.slice(0, take) : messages).reverse();
+
+    return reply.send({
+      success: true,
+      archive,
+      data: await applyBridgeMessageSenders(page),
+      pagination: {
+        hasMore,
+        limit: take,
+        beforeMessageId: page[0]?.id ?? null,
+      },
+    });
   });
 
   // Get single message by ID
@@ -423,6 +533,7 @@ export async function messageGateway(app: FastifyInstance) {
           properties: {
             success: { type: 'boolean' },
             count: { type: 'integer' },
+            archiveId: { type: 'string', nullable: true },
           },
         },
       },
@@ -452,11 +563,8 @@ export async function messageGateway(app: FastifyInstance) {
     // 2. 删除群聊的所有待处理任务
     await taskQueueService.deleteByChatRoomId(chatRoomId);
 
-    // 2.25. 删除群聊的所有消息
-    const deletedMessages = await messageService.deleteByChatRoomId(chatRoomId);
-
-    // 2.5. 删除群聊的所有执行记录
-    await executionRecordService.deleteByChatRoomId(chatRoomId);
+    // 2.25. 归档群聊当前消息；历史查看需要保留消息、附件和执行记录
+    const archiveResult = await messageService.archiveByChatRoomId(chatRoomId);
 
     const io = (app as any).io as { to: (room: string) => { emit: (event: string, payload: unknown) => void } } | undefined;
 
@@ -523,7 +631,7 @@ export async function messageGateway(app: FastifyInstance) {
     io?.to(chatRoomId).emit('agent:inactive-tasks', { chatRoomId, tasks: [] });
     await broadcastAgentStatus(chatRoomId);
 
-    return reply.send({ success: true, count: deletedMessages.count });
+    return reply.send({ success: true, count: archiveResult.count, archiveId: archiveResult.archive?.id ?? null });
   });
 
   // Clear execution records for a chatRoom and agent

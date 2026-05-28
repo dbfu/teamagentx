@@ -132,7 +132,7 @@ flutter test
 
 ## 环境变量
 
-后端配置集中在 `server/src/config/index.ts`。
+后端配置集中在 `server/src/config/index.ts`，前端构建变量以 `VITE_` 开头。
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -145,6 +145,7 @@ flutter test
 | `AGENT_MEMORY_RECENT_MESSAGES` | `10` | 记忆摘要保留的近期消息数 |
 | `AGENT_MEMORY_COMPACT_MESSAGES` | `40` | 触发记忆压缩的消息数 |
 | `AGENT_MEMORY_SUMMARY_TARGET_TOKENS` | `2000` | 记忆摘要目标 token 数 |
+| `VITE_SHOW_EXECUTION_CONTEXT` | `true` | 前端构建变量，设为 `false` 时隐藏执行详情里的上下文 |
 | `OPENCLAW_GATEWAY_TOKEN` | 无 | OpenClaw ACP 网关 token，`start.sh` 可从 `~/.openclaw/openclaw.json` 自动读取 |
 
 LLM 凭证主要保存在本地数据库的 `LlmProvider` 表中。ACP 执行器会按工具映射为环境变量，例如 Claude 使用 `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL`，Codex 使用 `OPENAI_API_KEY` / `OPENAI_MODEL`。

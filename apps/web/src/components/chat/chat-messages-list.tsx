@@ -53,7 +53,7 @@ interface ChatMessagesListProps {
   onLoadOlderMessages?: () => Promise<void> | void
   currentUser?: CurrentUser
   isSidePanelOpen?: boolean
-  isStreamPanelOpen?: boolean
+  readOnly?: boolean
 }
 
 interface MessageRowProps {
@@ -79,8 +79,9 @@ interface MessageRowProps {
   onExecutionDetailClick?: (messageId: string, executionRecordId: string) => void
   onMentionAgent?: (agentId: string, agentName: string) => void
   onDeleteMessage?: (messageId: string) => Promise<void> | void
-  onStartMultiSelect: (messageId: string) => void
+  onStartMultiSelect?: (messageId: string) => void
   onToggleSelection: (messageId: string) => void
+  copyOnlyContextMenu?: boolean
 }
 
 type PreparedAutoSpeakItem = {
@@ -89,6 +90,9 @@ type PreparedAutoSpeakItem = {
   text: string
   voiceConfig: AgentVoicePanelConfig
 }
+
+const SIDE_PANEL_BOTTOM_LOCK_MS = 1200
+const SIDE_PANEL_BOTTOM_LOCK_FRAMES = 75
 
 function logVoiceQueue(event: string, details: Record<string, unknown>): void {
   console.debug(`[voice-queue] ${event}`, details)
@@ -270,6 +274,7 @@ const MessageRow = memo(function MessageRow({
   onDeleteMessage,
   onStartMultiSelect,
   onToggleSelection,
+  copyOnlyContextMenu,
 }: MessageRowProps) {
   const handleRowClick = useCallback(() => {
     if (isMultiSelectMode) onToggleSelection(message.id)
@@ -343,6 +348,7 @@ const MessageRow = memo(function MessageRow({
         onToggleSelection={onToggleSelection}
         selectionMode={isMultiSelectMode}
         isSelected={isSelected}
+        copyOnlyContextMenu={copyOnlyContextMenu}
       />
       {isMultiSelectMode && (
         <div className="pointer-events-none absolute left-3 top-4 z-30 flex size-5 items-center justify-center rounded-full border border-blue-500 bg-background text-blue-500 shadow-sm">
@@ -385,7 +391,7 @@ export function ChatMessagesList({
   onLoadOlderMessages,
   currentUser,
   isSidePanelOpen = false,
-  isStreamPanelOpen = false,
+  readOnly = false,
 }: ChatMessagesListProps) {
   const isMobile = useIsMobile()
   const scrollToMessageId = useChatStore((s) => s.scrollToMessageId)
@@ -451,8 +457,6 @@ export function ChatMessagesList({
     [chatRoomId, messages],
   )
 
-  // 是否在底部附近（距离底部 100px 以内算"在底部"）
-  const [isNearBottom, setIsNearBottom] = useState(true)
   // 是否显示新消息提示
   const [showNewMessageHint, setShowNewMessageHint] = useState(false)
   const [showScrollToBottomHint, setShowScrollToBottomHint] = useState(false)
@@ -462,7 +466,7 @@ export function ChatMessagesList({
   const [deletingSelected, setDeletingSelected] = useState(false)
   // 上一次消息数量，用于检测新消息
   const prevMessageCountRef = useRef(messages.length)
-  const prevLastMessageIdRef = useRef(messages[messages.length - 1]?.id ?? null)
+  const prevLastMessageIdRef = useRef<string | null>(messages[messages.length - 1]?.id ?? null)
   // 记录上一次的群聊 ID，用于检测群聊切换
   const prevChatRoomIdRef = useRef(chatRoomId)
   // 是否已完成初始滚动位置恢复（切换群聊时重置）
@@ -477,10 +481,14 @@ export function ChatMessagesList({
   const pendingHighlightMessageIdRef = useRef<string | null>(null)
   const hasUserScrollIntentRef = useRef(false)
   const userScrollIntentUntilRef = useRef(0)
+  const userLeavingBottomUntilRef = useRef(0)
+  const isNearBottomRef = useRef(true)
+  const pendingScrollToBottomFrameRef = useRef<number | null>(null)
   const suppressScrollSaveUntilRef = useRef(0)
   const pendingScrollSaveFrameRef = useRef<number | null>(null)
   const latestScrollAnchorRef = useRef<CapturedScrollAnchor | null>(null)
   const wasSidePanelOpenRef = useRef(isSidePanelOpen)
+  const sidePanelBottomLockUntilRef = useRef(0)
 
   const selectedCount = selectedMessageIds.size
   const getVirtualItemKey = useCallback((index: number) => messages[index]?.id ?? index, [messages])
@@ -493,6 +501,7 @@ export function ChatMessagesList({
     overscan: isMobile ? 8 : 12,
   })
   const virtualItems = rowVirtualizer.getVirtualItems()
+  const virtualTotalSize = rowVirtualizer.getTotalSize()
 
   const exitMultiSelect = useCallback(() => {
     setIsMultiSelectMode(false)
@@ -500,9 +509,10 @@ export function ChatMessagesList({
   }, [])
 
   const startMultiSelect = useCallback((messageId: string) => {
+    if (readOnly) return
     setIsMultiSelectMode(true)
     setSelectedMessageIds(new Set([messageId]))
-  }, [])
+  }, [readOnly])
 
   const toggleMessageSelection = useCallback((messageId: string) => {
     setSelectedMessageIds((current) => {
@@ -685,6 +695,13 @@ export function ChatMessagesList({
     suppressScrollSaveUntilRef.current = Math.max(suppressScrollSaveUntilRef.current, Date.now() + durationMs)
   }, [])
 
+  const cancelPendingScrollToBottom = useCallback(() => {
+    if (pendingScrollToBottomFrameRef.current !== null) {
+      cancelAnimationFrame(pendingScrollToBottomFrameRef.current)
+      pendingScrollToBottomFrameRef.current = null
+    }
+  }, [])
+
   const tryLoadOlderMessages = useCallback(() => {
     const container = containerRef.current
     if (
@@ -701,30 +718,39 @@ export function ChatMessagesList({
     }
   }, [capturePrependAnchor, hasOlderMessages, loading, loadingOlderMessages, messages.length, onLoadOlderMessages])
 
-  const markUserScrollIntent = useCallback(() => {
+  const markUserScrollIntent = useCallback((options?: { cancelAutoBottom?: boolean }) => {
     hasUserScrollIntentRef.current = true
     const durationMs = 1600
-    userScrollIntentUntilRef.current = Math.max(userScrollIntentUntilRef.current, Date.now() + durationMs)
-  }, [])
+    const intentUntil = Date.now() + durationMs
+    userScrollIntentUntilRef.current = Math.max(userScrollIntentUntilRef.current, intentUntil)
+    if (options?.cancelAutoBottom) {
+      userLeavingBottomUntilRef.current = Math.max(userLeavingBottomUntilRef.current, intentUntil)
+      sidePanelBottomLockUntilRef.current = 0
+      cancelPendingScrollToBottom()
+    }
+  }, [cancelPendingScrollToBottom])
 
-  const handlePointerDown = useCallback(() => {
-    markUserScrollIntent()
+  const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget) return
+    markUserScrollIntent({ cancelAutoBottom: true })
   }, [markUserScrollIntent])
 
   const handleWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
-    markUserScrollIntent()
+    markUserScrollIntent({ cancelAutoBottom: event.deltaY < 0 })
     if (event.deltaY < 0) {
       tryLoadOlderMessages()
     }
   }, [markUserScrollIntent, tryLoadOlderMessages])
 
   const handleTouchStart = useCallback(() => {
-    markUserScrollIntent()
+    markUserScrollIntent({ cancelAutoBottom: true })
   }, [markUserScrollIntent])
 
   const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key) || event.key === ' ') {
-      markUserScrollIntent()
+      markUserScrollIntent({
+        cancelAutoBottom: ['ArrowUp', 'PageUp', 'Home'].includes(event.key) || (event.key === ' ' && event.shiftKey),
+      })
     }
     if (['ArrowUp', 'PageUp', 'Home'].includes(event.key) || (event.key === ' ' && event.shiftKey)) {
       tryLoadOlderMessages()
@@ -735,7 +761,7 @@ export function ChatMessagesList({
   const handleScroll = useCallback(() => {
     tryLoadOlderMessages()
     const nearBottom = checkIsNearBottom()
-    setIsNearBottom(nearBottom)
+    isNearBottomRef.current = nearBottom
 
     const now = Date.now()
     const hasRecentUserScroll = hasUserScrollIntentRef.current || now <= userScrollIntentUntilRef.current
@@ -805,8 +831,10 @@ export function ChatMessagesList({
   }, [loadingOlderMessages, messageIndexById, messages.length, rowVirtualizer, suppressProgrammaticScrollSave])
 
   // 滚动到底部
-  const scrollToBottom = useCallback((options?: { save?: boolean; frames?: number }) => {
+  const scrollToBottom = useCallback((options?: { save?: boolean; frames?: number; respectUserScroll?: boolean }) => {
     if (messages.length === 0) return
+
+    cancelPendingScrollToBottom()
 
     const alignToBottom = () => {
       const container = containerRef.current
@@ -815,6 +843,7 @@ export function ChatMessagesList({
       rowVirtualizer.scrollToIndex(messages.length - 1, { align: 'end', behavior: 'auto' })
       messagesEndRef.current?.scrollIntoView({ block: 'end', behavior: 'auto' })
       container.scrollTop = container.scrollHeight
+      isNearBottomRef.current = true
     }
 
     alignToBottom()
@@ -822,10 +851,15 @@ export function ChatMessagesList({
     let frame = 0
     const maxFrames = options?.frames ?? 3
     const tick = () => {
+      pendingScrollToBottomFrameRef.current = null
+      if (options?.respectUserScroll && Date.now() <= userLeavingBottomUntilRef.current) {
+        return
+      }
+
       alignToBottom()
       frame += 1
       if (frame < maxFrames) {
-        requestAnimationFrame(tick)
+        pendingScrollToBottomFrameRef.current = requestAnimationFrame(tick)
       } else if (options?.save) {
         const scrollAnchor = captureScrollAnchor()
         if (scrollAnchor) {
@@ -834,27 +868,86 @@ export function ChatMessagesList({
         }
       }
     }
-    requestAnimationFrame(tick)
-  }, [captureScrollAnchor, chatRoomId, messages.length, messagesEndRef, rowVirtualizer, saveLatestScrollAnchor, suppressProgrammaticScrollSave])
+    pendingScrollToBottomFrameRef.current = requestAnimationFrame(tick)
+  }, [cancelPendingScrollToBottom, captureScrollAnchor, chatRoomId, messages.length, messagesEndRef, rowVirtualizer, saveLatestScrollAnchor, suppressProgrammaticScrollSave])
 
   useLayoutEffect(() => {
     const wasSidePanelOpen = wasSidePanelOpenRef.current
+    const wasPinnedToBottom = isNearBottomRef.current || checkIsNearBottom()
+    const userIsLeavingBottom = Date.now() <= userLeavingBottomUntilRef.current
     wasSidePanelOpenRef.current = isSidePanelOpen
 
+    if (!isSidePanelOpen) {
+      sidePanelBottomLockUntilRef.current = 0
+      return
+    }
+
     if (
-      !isStreamPanelOpen
-      || wasSidePanelOpen
-      || !isNearBottom
+      wasSidePanelOpen
+      || !wasPinnedToBottom
+      || userIsLeavingBottom
       || !messagesBelongToCurrentRoom
       || !hasRestoredPositionRef.current
     ) {
       return
     }
 
-    scrollToBottom({ save: true, frames: 14 })
+    sidePanelBottomLockUntilRef.current = Date.now() + SIDE_PANEL_BOTTOM_LOCK_MS
+    scrollToBottom({ save: true, frames: SIDE_PANEL_BOTTOM_LOCK_FRAMES })
     setShowNewMessageHint(false)
     setShowScrollToBottomHint(false)
-  }, [isNearBottom, isSidePanelOpen, isStreamPanelOpen, messagesBelongToCurrentRoom, scrollToBottom])
+  }, [checkIsNearBottom, isSidePanelOpen, messagesBelongToCurrentRoom, scrollToBottom])
+
+  useLayoutEffect(() => {
+    if (
+      !isSidePanelOpen
+      || Date.now() > sidePanelBottomLockUntilRef.current
+      || !messagesBelongToCurrentRoom
+      || !hasRestoredPositionRef.current
+    ) {
+      return
+    }
+
+    scrollToBottom({ save: true, frames: SIDE_PANEL_BOTTOM_LOCK_FRAMES })
+    setShowNewMessageHint(false)
+    setShowScrollToBottomHint(false)
+  }, [isSidePanelOpen, messagesBelongToCurrentRoom, scrollToBottom, virtualTotalSize])
+
+  useEffect(() => {
+    if (!isSidePanelOpen || typeof ResizeObserver === 'undefined') return
+
+    const container = containerRef.current
+    if (!container) return
+
+    let frameId: number | null = null
+    const keepBottomIfLocked = () => {
+      frameId = null
+      if (
+        Date.now() > sidePanelBottomLockUntilRef.current
+        || !messagesBelongToCurrentRoom
+        || !hasRestoredPositionRef.current
+      ) {
+        return
+      }
+
+      scrollToBottom({ save: true, frames: SIDE_PANEL_BOTTOM_LOCK_FRAMES })
+      setShowNewMessageHint(false)
+      setShowScrollToBottomHint(false)
+    }
+
+    const observer = new ResizeObserver(() => {
+      if (frameId !== null) return
+      frameId = requestAnimationFrame(keepBottomIfLocked)
+    })
+    observer.observe(container)
+
+    return () => {
+      observer.disconnect()
+      if (frameId !== null) {
+        cancelAnimationFrame(frameId)
+      }
+    }
+  }, [isSidePanelOpen, messagesBelongToCurrentRoom, scrollToBottom])
 
   const highlightMessage = useCallback((messageId: string) => {
     const messageEl = messageRefs.current.get(messageId)
@@ -905,7 +998,6 @@ export function ChatMessagesList({
       scrollToBottom({ save: true })
       setShowNewMessageHint(false)
       setShowScrollToBottomHint(false)
-      setIsNearBottom(true)
       setForceScrollToBottom(false)
     }
   }, [chatRoomId, forceScrollToBottom, messages.length, scrollToBottom, setForceScrollToBottom])
@@ -913,6 +1005,17 @@ export function ChatMessagesList({
   // 检测新消息
   useEffect(() => {
     const currentLastMessageId = messages[messages.length - 1]?.id ?? null
+    if (messages.length === 0) {
+      prevMessageCountRef.current = 0
+      prevLastMessageIdRef.current = null
+      isNearBottomRef.current = true
+      userLeavingBottomUntilRef.current = 0
+      sidePanelBottomLockUntilRef.current = 0
+      setShowNewMessageHint(false)
+      setShowScrollToBottomHint(false)
+      return
+    }
+
     if (prevChatRoomIdRef.current !== chatRoomId) {
       prevMessageCountRef.current = messages.length
       prevLastMessageIdRef.current = currentLastMessageId
@@ -932,15 +1035,15 @@ export function ChatMessagesList({
     prevLastMessageIdRef.current = currentLastMessageId
 
     if (hasNewMessages) {
-      if (isNearBottom) {
+      if (isNearBottomRef.current && Date.now() > userLeavingBottomUntilRef.current) {
         // 在底部，自动滚动
-        scrollToBottom({ save: true })
+        scrollToBottom({ save: true, respectUserScroll: true })
       } else {
         // 不在底部，显示新消息提示
         setShowNewMessageHint(true)
       }
     }
-  }, [chatRoomId, messages, messagesBelongToCurrentRoom, isNearBottom, scrollToBottom])
+  }, [chatRoomId, messages, messagesBelongToCurrentRoom, scrollToBottom])
 
   // typingAgents 变化时，如果在底部也滚动
   useEffect(() => {
@@ -948,17 +1051,19 @@ export function ChatMessagesList({
       prevChatRoomIdRef.current === chatRoomId
       && messagesBelongToCurrentRoom
       && hasRestoredPositionRef.current
-      && isNearBottom
+      && isNearBottomRef.current
+      && Date.now() > userLeavingBottomUntilRef.current
       && typingAgents.size > 0
     ) {
-      scrollToBottom()
+      scrollToBottom({ respectUserScroll: true })
     }
-  }, [chatRoomId, typingAgents, messagesBelongToCurrentRoom, isNearBottom, scrollToBottom])
+  }, [chatRoomId, typingAgents, messagesBelongToCurrentRoom, scrollToBottom])
 
   // 检测群聊切换，重置恢复标记
   useEffect(() => {
     if (prevChatRoomIdRef.current !== chatRoomId) {
       const previousChatRoomId = prevChatRoomIdRef.current
+      cancelPendingScrollToBottom()
       flushLatestScrollAnchor(previousChatRoomId)
       prevChatRoomIdRef.current = chatRoomId
       hasRestoredPositionRef.current = false
@@ -967,18 +1072,19 @@ export function ChatMessagesList({
       recentlyStoppedVoiceMessageIdsRef.current.clear()
       hasUserScrollIntentRef.current = false
       userScrollIntentUntilRef.current = 0
+      userLeavingBottomUntilRef.current = 0
       prependAnchorRef.current = null
       pendingHighlightMessageIdRef.current = null
       latestScrollAnchorRef.current = null
       prevMessageCountRef.current = messages.length
       prevLastMessageIdRef.current = messages[messages.length - 1]?.id ?? null
       // 重置底部状态
-      setIsNearBottom(true)
+      isNearBottomRef.current = true
       setShowNewMessageHint(false)
       setShowScrollToBottomHint(false)
       exitMultiSelect()
     }
-  }, [chatRoomId, exitMultiSelect, flushLatestScrollAnchor, messages])
+  }, [cancelPendingScrollToBottom, chatRoomId, exitMultiSelect, flushLatestScrollAnchor, messages])
 
   useEffect(() => {
     const handleVisibilityChange = () => {
@@ -999,8 +1105,9 @@ export function ChatMessagesList({
     return () => {
       window.removeEventListener('pagehide', persistCurrentScrollState)
       window.removeEventListener('beforeunload', persistCurrentScrollState)
+      cancelPendingScrollToBottom()
     }
-  }, [persistCurrentScrollState])
+  }, [cancelPendingScrollToBottom, persistCurrentScrollState])
 
   // 消息加载完成后恢复上次滚动位置（只在切换群聊后的首次加载时执行）
   useEffect(() => {
@@ -1432,7 +1539,7 @@ export function ChatMessagesList({
         ) : (
           <div
             className="relative w-full"
-            style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+            style={{ height: `${virtualTotalSize}px` }}
           >
             {virtualItems.map((virtualItem) => {
               const message = messages[virtualItem.index]
@@ -1468,9 +1575,10 @@ export function ChatMessagesList({
                     onReplyClick={onReplyClick}
                     onExecutionDetailClick={onExecutionDetailClick}
                     onMentionAgent={onMentionAgent}
-                    onDeleteMessage={handleDeleteMessage}
-                    onStartMultiSelect={startMultiSelect}
+                    onDeleteMessage={readOnly ? undefined : handleDeleteMessage}
+                    onStartMultiSelect={readOnly ? undefined : startMultiSelect}
                     onToggleSelection={toggleMessageSelection}
+                    copyOnlyContextMenu={readOnly}
                   />
                 </div>
               )
@@ -1489,7 +1597,7 @@ export function ChatMessagesList({
         </div>
       )}
 
-      {isMultiSelectMode && (
+      {!readOnly && isMultiSelectMode && (
         <div className="absolute inset-x-4 bottom-4 z-30 flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-background px-4 py-3 shadow-lg dark:border-border">
           <div className="flex min-w-0 items-center gap-2 text-sm text-foreground">
             <CheckSquare className="size-4 text-blue-500" />
@@ -1529,7 +1637,7 @@ export function ChatMessagesList({
       />
 
       {/* 新消息提示 */}
-      {showNewMessageHint && (
+      {messages.length > 0 && showNewMessageHint && (
         <button
           onClick={() => {
             scrollToBottom({ save: true })
@@ -1543,7 +1651,7 @@ export function ChatMessagesList({
         </button>
       )}
 
-      {!showNewMessageHint && showScrollToBottomHint && (
+      {messages.length > 0 && !showNewMessageHint && showScrollToBottomHint && (
         <button
           type="button"
           aria-label="滚动到底部"
