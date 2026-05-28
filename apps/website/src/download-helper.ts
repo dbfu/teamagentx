@@ -1,4 +1,4 @@
-const RESOLVER_BASE_PATH = '/download-resolver'
+const RESOLVER_BASE_PATH = '/website-server'
 
 export type DownloadPlatform = 'macos-arm64' | 'macos-x64' | 'windows' | 'android'
 

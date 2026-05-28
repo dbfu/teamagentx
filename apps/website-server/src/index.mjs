@@ -1,5 +1,8 @@
 import http from 'node:http';
+import { config } from 'dotenv';
 import { resolveLanzouDownloadUrl } from './lanzou-resolver.mjs';
+
+config();
 
 const HOST = process.env.HOST || '0.0.0.0';
 const PORT = Number.parseInt(process.env.PORT || '3207', 10);
@@ -78,6 +81,13 @@ function getClientIp(req) {
   return req.socket.remoteAddress || '';
 }
 
+function toFeishuUrlField(value) {
+  if (!isHttpUrl(value)) {
+    return null;
+  }
+  return { link: value, text: value };
+}
+
 async function getFeishuTenantAccessToken() {
   const now = Date.now();
   if (feishuTokenCache.token && feishuTokenCache.expiresAt > now + 60_000) {
@@ -130,14 +140,20 @@ async function recordDownloadEvent(req, originalUrl, platform) {
     return;
   }
 
+  // 飞书多维表格字段格式：
+  // - 时间字段：毫秒时间戳（数字）
+  // - URL字段：{ link: "url", text: "显示文本" } 对象格式
   const fields = {
-    [FEISHU_DOWNLOAD_FIELD_TIME]: new Date().toISOString(),
+    [FEISHU_DOWNLOAD_FIELD_TIME]: Date.now(),
     [FEISHU_DOWNLOAD_FIELD_PLATFORM]: platform,
-    [FEISHU_DOWNLOAD_FIELD_URL]: originalUrl,
-    [FEISHU_DOWNLOAD_FIELD_PAGE]: req.headers.referer || '',
+    [FEISHU_DOWNLOAD_FIELD_URL]: toFeishuUrlField(originalUrl),
     [FEISHU_DOWNLOAD_FIELD_USER_AGENT]: req.headers['user-agent'] || '',
     [FEISHU_DOWNLOAD_FIELD_IP]: getClientIp(req),
   };
+  const refererField = toFeishuUrlField(req.headers.referer || '');
+  if (refererField) {
+    fields[FEISHU_DOWNLOAD_FIELD_PAGE] = refererField;
+  }
 
   await writeDownloadEventToFeishu(fields);
 }
@@ -204,7 +220,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     recordDownloadEvent(req, originalUrl, platform).catch((error) => {
-      console.error('[download-resolver] failed to record download event:', error);
+      console.error('[website-server] failed to record download event:', error);
     });
 
     try {
@@ -220,5 +236,5 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`[download-resolver] listening on http://${HOST}:${PORT}`);
+  console.log(`[website-server] listening on http://${HOST}:${PORT}`);
 });
