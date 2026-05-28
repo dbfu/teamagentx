@@ -234,9 +234,9 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
         </div>
       )}
 
-      {/* 置顶群聊区域 - 卡片形式，不参与滚动 */}
+      {/* 置顶群聊区域 - 卡片形式，不参与滚动，移动端一行5个，桌面端一行3个 */}
       {chatRooms.some(room => room.isPinned) && (
-        <div className="mx-2 flex flex-wrap gap-1.5 px-1 py-1 pb-2">
+        <div className={cn("mx-2 grid gap-1.5 px-1 py-1 pb-2", isMobile ? "grid-cols-5" : "grid-cols-3")}>
           {chatRooms.filter(room => room.isPinned).sort((a, b) => {
             // 置顶群聊按置顶时间倒序
             const aPinnedAt = a.pinnedAt ? new Date(a.pinnedAt).getTime() : 0
@@ -254,7 +254,7 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
                 onClick={() => onSelect(room.id)}
                 onContextMenu={(e) => handleContextMenu(e, room)}
                 className={cn(
-                  'flex shrink-0 cursor-pointer flex-col items-center gap-1 rounded-lg px-2 py-1 transition-colors',
+                  'flex cursor-pointer flex-col items-center gap-1 rounded-lg px-2 py-1 transition-colors',
                   selectedId === room.id
                     ? 'bg-primary/10 ring-1 ring-primary/20'
                     : 'bg-muted/50 hover:bg-accent'
