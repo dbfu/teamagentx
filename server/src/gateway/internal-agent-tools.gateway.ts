@@ -78,6 +78,14 @@ async function getAgentName(agentId: string): Promise<string> {
   return agent?.name || agentId;
 }
 
+async function isRoomHistoryAccessEnabled(chatRoomId: string, sourceAgentId: string): Promise<boolean> {
+  const member = await prisma.chatRoomAgent.findFirst({
+    where: {chatRoomId, agentId: sourceAgentId},
+    select: {injectGroupHistory: true},
+  });
+  return member?.injectGroupHistory ?? false;
+}
+
 export async function internalAgentToolsGateway(app: FastifyInstance) {
   app.post<{ Body: SendMessageBody }>('/internal/agent-tools/send-message-to-agent', {
     schema: {
@@ -129,9 +137,15 @@ export async function internalAgentToolsGateway(app: FastifyInstance) {
       return reply.code(401).send({ success: false, error: 'Unauthorized' });
     }
 
+    const includeRoomContextTools = await isRoomHistoryAccessEnabled(
+      request.body.chatRoomId,
+      request.body.sourceAgentId,
+    );
+
     const tools = getSystemAssistantTools(
       request.body.sourceAgentId,
       request.body.chatRoomId,
+      { includeRoomContextTools },
     ).map((tool) => ({
       name: tool.name,
       description: tool.description || tool.name,
@@ -162,9 +176,15 @@ export async function internalAgentToolsGateway(app: FastifyInstance) {
       return reply.code(401).send({ success: false, error: 'Unauthorized' });
     }
 
+    const includeRoomContextTools = await isRoomHistoryAccessEnabled(
+      request.body.chatRoomId,
+      request.body.sourceAgentId,
+    );
+
     const tool = getSystemAssistantTools(
       request.body.sourceAgentId,
       request.body.chatRoomId,
+      { includeRoomContextTools },
     ).find((item) => item.name === request.body.name);
 
     if (!tool) {

@@ -271,6 +271,16 @@ export function ChatSidePanel({
     setSidePanelMode('task-queue')
   }
 
+  const handleAgentSettingsChange = (settings: { injectGroupHistory: boolean }) => {
+    if (selectedRoomAgent) {
+      setSelectedRoomAgent({
+        ...selectedRoomAgent,
+        injectGroupHistory: settings.injectGroupHistory,
+      })
+    }
+    onChatRoomChange?.()
+  }
+
   const handleViewStreamFromTaskQueue = (messageId: string, agentId: string, agentName: string) => {
     setStreamingViewAgent({ messageId, agentId, name: agentName })
     setSidePanelMode('stream')
@@ -400,6 +410,7 @@ export function ChatSidePanel({
           onViewHistory={handleViewHistory}
           onViewStream={handleViewStream}
           onViewTaskQueue={handleViewTaskQueue}
+          onAgentSettingsChange={handleAgentSettingsChange}
         />
       )}
 

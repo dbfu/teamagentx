@@ -1,8 +1,8 @@
 import { randomUUID } from 'crypto';
 import type { Agent } from '@prisma/client';
-import { agentMemoryService } from '../../../modules/agent-memory/agent-memory.service.js';
 import { chatRoomService } from '../../../modules/chatroom/chatroom.service.js';
 import { messageService } from '../../../modules/message/message.service.js';
+import { roomMessageIndexService } from '../../../modules/message/room-message-index.service.js';
 import { taskQueueService } from '../../../modules/task-queue/task-queue.service.js';
 import type { AttachmentData } from '../../../modules/task-queue/task-queue.service.js';
 import { agentService } from '../agent.service.js';
@@ -41,8 +41,12 @@ export async function enqueueAgentTask(
 
   let history = options?.history;
   if (!options?.skipHistory && history === undefined && injectGroupHistory && executor) {
-    history = await agentMemoryService.buildHistory(chatRoomId, agent.id, message.id);
-    console.log(`${agent.name}: 构建群历史上下文 ${history.length} 条（摘要 + 最近消息）`);
+    history = await roomMessageIndexService.buildMessageIndex(
+      chatRoomId,
+      message.id,
+      executor.lastInjectedMessageId,
+    );
+    console.log(`${agent.name}: 构建群消息索引 ${history.length} 条`);
   }
 
   debugLog('taskEnqueue', {

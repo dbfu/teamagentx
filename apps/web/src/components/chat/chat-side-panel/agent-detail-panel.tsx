@@ -20,6 +20,7 @@ interface AgentDetailPanelProps {
   onViewHistory: () => void
   onViewStream?: () => void
   onViewTaskQueue?: () => void
+  onAgentSettingsChange?: (settings: { injectGroupHistory: boolean }) => void
 }
 
 // 状态配置
@@ -39,6 +40,7 @@ export function AgentDetailPanel({
   onViewHistory,
   onViewStream,
   onViewTaskQueue,
+  onAgentSettingsChange,
 }: AgentDetailPanelProps) {
   const navigate = useNavigate()
   const isActive = agentStatus === 'executing' || agentStatus === 'busy'
@@ -62,9 +64,34 @@ export function AgentDetailPanel({
   // 清空上下文相关状态
   const [isClearing, setIsClearing] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
+  const [isSavingHistoryAccess, setIsSavingHistoryAccess] = useState(false)
 
   // 是否是可以清空上下文的助手（原生助手和 ACP 助手都支持）
   const canClearContext = selectedRoomAgent?.agentType === 'builtin' || selectedRoomAgent?.agentType === 'acp'
+  const canConfigureHistoryAccess = Boolean(selectedRoomAgent?.id && selectedRoomAgent?.chatRoomAgentId)
+
+  const handleToggleHistoryAccess = async () => {
+    if (!selectedRoomAgent?.id || isSavingHistoryAccess) return
+
+    const nextValue = !selectedRoomAgent.injectGroupHistory
+    setIsSavingHistoryAccess(true)
+    try {
+      const result = await chatRoomApi.updateAgentSettings(chatRoomId, selectedRoomAgent.id, {
+        injectGroupHistory: nextValue,
+      })
+
+      if (result.success && result.data) {
+        onAgentSettingsChange?.({ injectGroupHistory: result.data.injectGroupHistory })
+        toast.success(result.data.injectGroupHistory ? '已开启群历史访问' : '已关闭群历史访问')
+      } else {
+        toast.error(result.error || '保存失败')
+      }
+    } catch (error) {
+      toast.error('保存群历史访问设置失败')
+    } finally {
+      setIsSavingHistoryAccess(false)
+    }
+  }
 
   // 清空上下文
   const handleClearContext = async () => {
@@ -123,6 +150,35 @@ export function AgentDetailPanel({
         <div className="text-xs text-muted-foreground mb-1">描述</div>
         <div className="text-sm text-foreground">{selectedRoomAgent?.description || '暂无描述'}</div>
       </div>
+
+      {canConfigureHistoryAccess && (
+        <div className="rounded-lg border border-border bg-background p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-foreground">群历史访问</div>
+              <div className="mt-0.5 text-xs text-muted-foreground">注入消息索引并允许查询群消息</div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={Boolean(selectedRoomAgent?.injectGroupHistory)}
+              disabled={isSavingHistoryAccess}
+              onClick={handleToggleHistoryAccess}
+              className={cn(
+                'relative h-5 w-10 shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+                selectedRoomAgent?.injectGroupHistory ? 'bg-blue-500' : 'bg-gray-200'
+              )}
+            >
+              <span
+                className={cn(
+                  'absolute left-0.5 top-0.5 size-4 rounded-full bg-white shadow-sm transition-transform',
+                  selectedRoomAgent?.injectGroupHistory ? 'translate-x-5' : 'translate-x-0'
+                )}
+              />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 操作按钮 */}
       <div className="space-y-2 pt-2">

@@ -32,4 +32,19 @@ describe('System assistant tools', () => {
       'search_room_messages',
     ]);
   });
+
+  test('关闭群历史访问时不暴露房间上下文工具', () => {
+    const legacyToolNames = getSystemAssistantTools(AGENT_CREATOR_ID, 'room-1', {
+      includeRoomContextTools: false,
+    }).map((tool) => tool.name);
+    const groupToolNames = getSystemAssistantTools(GROUP_ASSISTANT_ID, 'room-1', {
+      includeRoomContextTools: false,
+    }).map((tool) => tool.name);
+
+    assert.deepStrictEqual(legacyToolNames, []);
+    assert.ok(!groupToolNames.includes('get_room_message_detail'));
+    assert.ok(!groupToolNames.includes('get_recent_room_messages'));
+    assert.ok(!groupToolNames.includes('search_room_messages'));
+    assert.ok(groupToolNames.includes('create_agent'));
+  });
 });

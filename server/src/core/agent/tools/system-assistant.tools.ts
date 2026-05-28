@@ -29,8 +29,11 @@ function dedupeTools(tools: SystemTool[]): SystemTool[] {
 export function getSystemAssistantTools(
   agentId: string | undefined | null,
   chatRoomId: string,
+  options?: { includeRoomContextTools?: boolean },
 ): SystemTool[] {
-  const roomContextTools = createChatHistorySearchTools(chatRoomId);
+  const roomContextTools = options?.includeRoomContextTools === false
+    ? []
+    : createChatHistorySearchTools(chatRoomId);
 
   if (agentId !== GROUP_ASSISTANT_ID) return dedupeTools(roomContextTools);
 

@@ -9,6 +9,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { config as appConfig } from '../../config/index.js';
 import { agentMemoryService } from '../../modules/agent-memory/agent-memory.service.js';
+import { buildRoomMessageIndexSection } from '../../modules/message/room-message-index.service.js';
 import { skillInstallService } from '../../modules/skill/skill-install.service.js';
 import type { AttachmentData } from '../../modules/task-queue/task-queue.service.js';
 import { buildAgentLongTermMemorySection } from './agent-long-term-memory.js';
@@ -1430,9 +1431,13 @@ process.stdin.on("data", (chunk) => {
 
   private buildFullMessage(message: string, history?: HistoryMessage[]): string {
     let fullMessage = '';
+    const responseStyleInstruction =
+      'Write the final answer in human-readable Markdown. Do not explain the internal steps, context assembly, or tools used unless the user explicitly asks for that.';
 
     if (this.systemPrompt) {
-      fullMessage += `[System Instructions]\n${this.systemPrompt}\n\n`;
+      fullMessage += `[System Instructions]\n${this.systemPrompt}\n\n${responseStyleInstruction}\n\n`;
+    } else {
+      fullMessage += `[System Instructions]\n${responseStyleInstruction}\n\n`;
     }
 
     const longTermMemorySection = buildAgentLongTermMemorySection(this.chatRoomId, this.agentId, this.name);
@@ -1445,34 +1450,17 @@ process.stdin.on("data", (chunk) => {
       fullMessage += `${skillsUpdateSection}\n\n`;
     }
 
-    if (this.injectGroupHistory && history && history.length > 0) {
-      const memorySummary = history.find((msg) => msg.kind === 'memory_summary')?.content;
-      const recentHistory = history.filter((msg) => msg.kind !== 'memory_summary');
-
-      if (memorySummary) {
-        fullMessage += `[Group Chat Long-Term Memory Summary]
-${memorySummary}
-
-`;
+    if (this.injectGroupHistory) {
+      const messageIndexSection = buildRoomMessageIndexSection(history);
+      if (messageIndexSection) {
+        fullMessage += `${messageIndexSection}\n\n`;
       }
 
-      if (recentHistory.length > 0) {
-        const historyText = recentHistory
-          .map((msg) => `[${msg.senderName}]: ${msg.content}`)
-          .join('\n');
-
-        fullMessage += `[Recent Group Chat Messages]
-The following are the most recent group-chat messages before the current message (${recentHistory.length} total):
-${historyText}
+      fullMessage += `[Group History Access]
+You may access current chatroom history through tools. Use \`get_recent_room_messages\` for recent context, \`search_room_messages\` to search messages by keyword, or \`get_room_message_detail\` to inspect exact message content by messageId. These tools automatically use the current chatroom; do not ask for or provide a chatRoomId. If the current request depends on prior discussion, use these tools instead of guessing from previews or memory.
 
 `;
-      }
     }
-
-    fullMessage += `[Group History Access]
-Full group history is not included by default. If the current request depends on earlier discussion, use \`get_recent_room_messages\` for recent chatroom context, \`search_room_messages\` to search messages by keyword, or \`get_room_message_detail\` to inspect a specific message or the Nth keyword match with offset. These tools automatically use the current chatroom; do not ask for or provide a chatRoomId.
-
-`;
 
     if (this.chatRoomAgents.length > 0) {
       const agentsInfo = this.chatRoomAgents.map((agent) => agent.name).join(', ');

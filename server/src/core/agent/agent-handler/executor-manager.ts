@@ -16,7 +16,7 @@ import { setBroadcastCronTriggerMessageFn } from '../../cron/cron-scheduler.serv
 import { broadcastCronTriggerMessage } from './message-utils.js';
 import { recoveryService } from '../../../modules/recovery/recovery.service.js';
 import { messageService } from '../../../modules/message/message.service.js';
-import { agentMemoryService } from '../../../modules/agent-memory/agent-memory.service.js';
+import { roomMessageIndexService } from '../../../modules/message/room-message-index.service.js';
 import type { HistoryMessage } from '../../../modules/task-queue/task-queue.service.js';
 import { globalEmit, globalEmitDone } from './status.js';
 import { buildAIMessage } from './message-utils.js';
@@ -297,12 +297,16 @@ export async function initAgents() {
         }
       };
 
-      // 获取群历史
+      // 恢复时只构建群消息索引，不触发长期摘要。
       let history: HistoryMessage[] | undefined;
       if (executor.injectGroupHistory) {
         const latestMessages = await messageService.findByChatRoomId(chatRoomId, { take: 1, order: 'desc' });
         history = latestMessages[0]
-          ? await agentMemoryService.buildHistory(chatRoomId, agent.id, latestMessages[0].id)
+          ? await roomMessageIndexService.buildMessageIndex(
+              chatRoomId,
+              latestMessages[0].id,
+              executor.lastInjectedMessageId,
+            )
           : [];
       }
 
