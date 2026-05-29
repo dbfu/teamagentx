@@ -458,8 +458,10 @@ async function request<T>(
 ): Promise<ApiResponse<T>> {
   const baseUrl = await getApiBaseUrl()
   const hasBody = options?.body !== undefined
+  const token = localStorage.getItem('auth_token')
   const headers: HeadersInit = {
     ...(hasBody && { 'Content-Type': 'application/json' }),
+    ...(token && { Authorization: `Bearer ${token}` }),
     ...options?.headers,
   }
 

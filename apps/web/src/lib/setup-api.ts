@@ -59,8 +59,12 @@ export interface CompleteSetupResponse {
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const baseUrl = await getApiBaseUrl()
+  const token = localStorage.getItem('auth_token')
   const res = await fetch(`${baseUrl}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token && { Authorization: `Bearer ${token}` }),
+    },
     ...options,
   })
   const json = await res.json()

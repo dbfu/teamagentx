@@ -37,6 +37,8 @@ import { checkpointService } from './modules/checkpoint/checkpoint.service.js';
 import { registerBridgePlatformAdapters } from './modules/bridge/platform-senders.js';
 import { initDb } from './lib/prisma.js';
 import { syncAllBridgeBotsRuntime } from './modules/bridge/bridge-runtime-sync.js';
+import { startLocalUserWatcher } from './modules/auth/local-user-watcher.js';
+import { authHook } from './modules/auth/auth.middleware.js';
 
 function findLocalIps() {
   const interfaces = os.networkInterfaces();
@@ -86,6 +88,9 @@ export async function createApp(options?: { enableSwagger?: boolean }) {
 
   // 初始化上传目录
   await uploadService.init();
+
+  // 添加认证钩子（验证所有非公开接口的 JWT token）
+  app.addHook('onRequest', authHook);
 
   // 创建 Socket.io
   const io = new Server(app.server, {
@@ -184,6 +189,9 @@ export async function createApp(options?: { enableSwagger?: boolean }) {
 
   // 设置 Socket.io
   setupSocket(io);
+
+  // 启动本地用户配置文件监听（密码变更推送）
+  startLocalUserWatcher(io);
 
   return { app, io };
 }
