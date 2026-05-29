@@ -44,6 +44,9 @@ declare global {
       filename: string;
     }) => Promise<{ success: boolean; filePath?: string; canceled?: boolean; error?: string }>;
     openExternal: (url: string) => Promise<{ success: boolean; error?: string }>;
+    setBadgeCount: (count: number) => Promise<{ success: boolean; error?: string }>;
+  showNotification: (payload: { title: string; body: string; chatRoomId?: string }) => Promise<{ success: boolean; error?: string }>;
+  onNotificationOpen: (callback: (chatRoomId: string) => void) => () => void;
     windowMinimize: () => Promise<void>;
     windowMaximize: () => Promise<void>;
     windowClose: () => Promise<void>;

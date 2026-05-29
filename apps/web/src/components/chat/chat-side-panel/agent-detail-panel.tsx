@@ -182,53 +182,55 @@ export function AgentDetailPanel({
 
       {/* 操作按钮 */}
       <div className="space-y-2 pt-2">
-        {/* 查看任务队列按钮 */}
+        {/* 主要操作：正在执行时显示查看执行 */}
+        {onViewStream && isActive && (
+          <button
+            className="w-full flex items-center justify-center gap-2 rounded-lg bg-green-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-green-600 transition-colors"
+            onClick={onViewStream}
+          >
+            <Eye className="size-4" />
+            查看当前执行任务
+          </button>
+        )}
+
+        {/* 任务队列 */}
         {onViewTaskQueue && (
           <button
             className="w-full flex items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 py-2.5 text-sm font-medium text-foreground hover:bg-accent transition-colors"
             onClick={onViewTaskQueue}
           >
             <List className="size-4" />
-            查看任务队列{totalTaskCount > 0 && <span className="text-muted-foreground">({totalTaskCount})</span>}
+            任务队列{totalTaskCount > 0 && <span className="ml-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-xs text-primary">{totalTaskCount}</span>}
           </button>
         )}
 
-        {/* 查看执行任务按钮 - 只有正在执行或有执行记录时才显示 */}
-        {onViewStream && (isActive || hasExecutionRecords) && (
+        {/* 次要操作：历史和详情放一行 */}
+        <div className="flex gap-2">
           <button
-            className="w-full flex items-center justify-center gap-2 rounded-lg bg-green-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-green-600 transition-colors"
-            onClick={onViewStream}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-border bg-background px-3 py-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+            onClick={onViewHistory}
           >
-            <Eye className="size-4" />
-            {isActive ? '查看当前执行任务' : '查看最近执行'}
+            <History className="size-3.5" />
+            {!isActive && hasExecutionRecords ? '最近执行' : '执行历史'}
           </button>
-        )}
-        <button
-          className="w-full flex items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 py-2.5 text-sm font-medium text-foreground hover:bg-accent transition-colors"
-          onClick={onViewHistory}
-        >
-          <History className="size-4" />
-          历史执行结果
-        </button>
+          {!blocksAssistantDetail && (
+            <button
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-border bg-background px-3 py-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+              onClick={() => navigate(`/assistant/${selectedRoomAgent?.id}`)}
+            >
+              <ExternalLink className="size-3.5" />
+              助手详情
+            </button>
+          )}
+        </div>
 
-        {/* 跳转助手详情页 */}
-        {!blocksAssistantDetail && (
-          <button
-            className="w-full flex items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 py-2.5 text-sm font-medium text-foreground hover:bg-accent transition-colors"
-            onClick={() => navigate(`/assistant/${selectedRoomAgent?.id}`)}
-          >
-            <ExternalLink className="size-4" />
-            助手详情
-          </button>
-        )}
-
-        {/* 清空上下文按钮 - 原生助手和 ACP 助手都支持 */}
+        {/* 清空上下文 */}
         {canClearContext && selectedRoomAgent?.chatRoomAgentId && (
           <button
-            className="w-full flex items-center justify-center gap-2 rounded-lg border border-red-300 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-600 hover:bg-red-100 transition-colors"
+            className="w-full flex items-center justify-center gap-2 rounded-lg border border-red-200 px-4 py-2 text-xs text-red-500 hover:bg-red-50 transition-colors"
             onClick={() => setShowConfirm(true)}
           >
-            <Trash2 className="size-4" />
+            <Trash2 className="size-3.5" />
             清空上下文
           </button>
         )}

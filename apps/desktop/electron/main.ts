@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, Tray, utilityProcess } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, shell, Tray, utilityProcess } from 'electron';
 import { UtilityProcess } from 'electron/main';
 import { execFileSync, execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -2225,6 +2225,9 @@ app.whenReady().then(async () => {
   writeLog(`User data path: ${app.getPath('userData')}`);
   writeLog(`Resources path: ${process.resourcesPath}`);
   writeLog(`Is packaged: ${app.isPackaged}`);
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('com.teamagentx.desktop');
+  }
 
   ipcMain.handle('get-server-url', () => {
     return serverPort ? `http://localhost:${serverPort}` : null;
@@ -2421,6 +2424,41 @@ app.whenReady().then(async () => {
       await shell.openExternal(url);
       return { success: true };
     } catch (error) {
+      return { success: false, error: String(error) };
+    }
+  });
+
+  ipcMain.handle('notification:set-badge-count', async (_event, count: number) => {
+    try {
+      const normalizedCount = Number.isFinite(count) && count > 0 ? Math.trunc(count) : 0;
+      app.setBadgeCount(normalizedCount);
+      return { success: true };
+    } catch (error) {
+      writeLog(`Failed to set badge count: ${String(error)}`);
+      return { success: false, error: String(error) };
+    }
+  });
+
+  ipcMain.handle('notification:show', async (_event, payload: { title?: string; body?: string; chatRoomId?: string }) => {
+    try {
+      if (!Notification.isSupported()) {
+        return { success: false, error: 'Notifications are not supported on this platform' };
+      }
+
+      const notification = new Notification({
+        title: payload.title || 'TeamAgentX',
+        body: payload.body || '有新消息',
+      });
+      notification.on('click', () => {
+        showMainWindow();
+        if (payload.chatRoomId) {
+          mainWindow?.webContents.send('notification:open-chatroom', payload.chatRoomId);
+        }
+      });
+      notification.show();
+      return { success: true };
+    } catch (error) {
+      writeLog(`Failed to show notification: ${String(error)}`);
       return { success: false, error: String(error) };
     }
   });

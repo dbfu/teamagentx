@@ -27,6 +27,7 @@ import { WindowTitleBar } from './components/ui/window-title-bar'
 import { useIsMobile } from './hooks/use-mobile'
 import { playMessageSound } from './lib/message-sound'
 import { updateManager } from './lib/update-manager'
+import { getTotalUnreadForNotifications, showMessageNotification, syncAppBadge } from './lib/notification-service'
 import { cn } from './lib/utils'
 import { SetupWizard } from './components/setup/setup-wizard'
 import { UpdateNotification } from './components/update/update-notification'
@@ -379,6 +380,7 @@ function AppContent() {
   const addRoom = useChatRoomStore((s) => s.addRoom)
   const updateRoomLastMessage = useChatRoomStore((s) => s.updateRoomLastMessage)
   const unreadCounts = useChatStore((s) => s.unreadCounts)
+  const totalUnreadCount = getTotalUnreadForNotifications(unreadCounts)
   const setUnreadCounts = useChatStore((s) => s.setUnreadCounts)
   const updateUnreadCount = useChatStore((s) => s.updateUnreadCount)
   const executingChatRooms = useChatStore((s) => s.executingChatRooms)
@@ -448,10 +450,25 @@ function AppContent() {
     navigate('/')
   }
 
+  const openChatRoomFromNotification = useCallback(async (roomId: string) => {
+    await loadChatRooms()
+    selectRoomAndClearUnread(roomId)
+    navigate('/')
+  }, [loadChatRooms, navigate, selectRoomAndClearUnread])
+
   // 加载聊天室列表
   useEffect(() => {
     loadChatRooms()
   }, [loadChatRooms])
+
+  useEffect(() => {
+    const unsubscribeElectron = window.electronAPI?.onNotificationOpen?.((roomId) => {
+      void openChatRoomFromNotification(roomId)
+    })
+    return () => {
+      unsubscribeElectron?.()
+    }
+  }, [openChatRoomFromNotification])
 
   // 全局消息监听 - 更新群聊列表的 lastMessage + 播放提示音
   useEffect(() => {
@@ -474,9 +491,20 @@ function AppContent() {
       if (msg.agentId) {
         playMessageSound()
       }
+
+      if (msg.chatRoomId !== selectedRoomId && msg.userId !== user?.id) {
+        const room = chatRooms.find((chatRoom) => chatRoom.id === msg.chatRoomId)
+        void showMessageNotification({
+          title: room?.name || 'TeamAgentX',
+          content: msg.content,
+          attachments: msg.attachments,
+          chatRoomId: msg.chatRoomId,
+          totalUnreadCount,
+        })
+      }
     })
     return unsubscribe
-  }, [isConnected, onMessage, updateRoomLastMessage])
+  }, [chatRooms, isConnected, onMessage, selectedRoomId, totalUnreadCount, updateRoomLastMessage, user?.id])
 
   // 监听新群聊创建事件（其他端创建的群聊会同步过来）
   useEffect(() => {
@@ -682,8 +710,10 @@ function AppContent() {
     }
   }, [])
 
-  // 计算总未读数
-  const totalUnreadCount = Object.values(unreadCounts).reduce((sum, count) => sum + count, 0)
+  useEffect(() => {
+    void syncAppBadge(totalUnreadCount)
+  }, [totalUnreadCount])
+
   // 移动端导航到群聊
   const handleMobileNavigateToChatRoom = (roomId: string) => {
     selectRoomAndClearUnread(roomId)
