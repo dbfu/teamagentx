@@ -2511,6 +2511,34 @@ app.whenReady().then(async () => {
     return userConfigPath;
   });
 
+  // 获取本地用户账号密码（用于自动填充登录表单）
+  ipcMain.handle('get-local-user-credentials', async () => {
+    try {
+      const homeDir = os.homedir();
+      const userConfigPath = path.join(homeDir, '.teamagentx', 'user.json');
+
+      if (!fs.existsSync(userConfigPath)) {
+        return { success: false, error: '用户配置文件不存在' };
+      }
+
+      const content = await fs.promises.readFile(userConfigPath, 'utf8');
+      const userConfig = JSON.parse(content);
+
+      // 返回用户名和密码，用于自动填充登录表单
+      // 这是本地 Electron 环境，密码本身就在本地文件中，安全可控
+      return {
+        success: true,
+        data: {
+          username: userConfig.username || '',
+          password: userConfig.password || '',
+        }
+      };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return { success: false, error: msg };
+    }
+  });
+
   // 先创建窗口和托盘（用户立即看到界面），再后台启动服务
   createTray();
   createWindow();

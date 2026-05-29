@@ -21,6 +21,18 @@ export function LoginModal({ isOpen, onLogin }: LoginModalProps) {
     }
   }, [isOpen])
 
+  // Electron 环境：自动填充账号密码
+  useEffect(() => {
+    if (isOpen && window.electronAPI?.getLocalUserCredentials) {
+      window.electronAPI.getLocalUserCredentials().then((result) => {
+        if (result.success && result.data) {
+          setUsername(result.data.username)
+          setPassword(result.data.password)
+        }
+      })
+    }
+  }, [isOpen])
+
   if (!isOpen) return null
 
   const handleSubmit = async (e: React.FormEvent) => {

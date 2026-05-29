@@ -72,6 +72,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openLogFolder: () => ipcRenderer.invoke('open-log-folder'),
   // 获取用户配置文件路径（用于登录界面提示）
   getUserConfigPath: () => ipcRenderer.invoke('get-user-config-path'),
+  // 获取本地用户账号密码（用于自动填充登录表单）
+  getLocalUserCredentials: () => ipcRenderer.invoke('get-local-user-credentials'),
   appendDebugLog: (message: string, payload?: unknown) => ipcRenderer.invoke('debug:append-log', { message, payload }),
   // Runtime（server 从 resources 解压/拷贝到 userData）准备事件。
   // 首次启动或升级后会触发 start → progress* → done/error，

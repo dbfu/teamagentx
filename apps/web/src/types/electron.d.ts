@@ -65,6 +65,15 @@ declare global {
     }>;
     // 获取用户配置文件路径（用于登录界面提示）
     getUserConfigPath?: () => Promise<string>;
+    // 获取本地用户账号密码（用于自动填充登录表单，仅 Electron 环境）
+    getLocalUserCredentials?: () => Promise<{
+      success: boolean;
+      data?: {
+        username: string;
+        password: string;
+      };
+      error?: string;
+    }>;
     appendDebugLog?: (message: string, payload?: unknown) => Promise<{ success: boolean; error?: string }>;
     openLogFolder?: () => Promise<{ success: boolean; error?: string }>;
     onRuntimePrepareStart?: (callback: () => void) => () => void;
