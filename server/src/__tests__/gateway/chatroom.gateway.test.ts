@@ -1,5 +1,6 @@
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
+import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -11,6 +12,7 @@ import { getDefaultChatRoomWorkDir } from '../../core/agent/work-dir.js';
 import { GROUP_ASSISTANT_ID, GROUP_COORDINATOR_ID } from '../../core/agent/system-assistant.constants.js';
 import { chatRoomGateway } from '../../gateway/chatroom.gateway.js';
 import { internalAgentToolsGateway } from '../../gateway/internal-agent-tools.gateway.js';
+import prisma from '../../lib/prisma.js';
 import { getGroupAssistantDefinition, getGroupCoordinatorDefinition } from '../../scripts/system-agent-definitions.js';
 import { syncSystemAgent, syncSystemAgents } from '../../scripts/system-agent-sync.js';
 
@@ -662,6 +664,124 @@ describe('ChatRoom Gateway API', () => {
           { name: 'root', relativeDir: '' },
           { name: 'web', relativeDir: path.join('apps', 'web') },
         ],
+      );
+    });
+  });
+
+  describe('GET /chatrooms/:id/tasks/board', () => {
+    test('应该只返回当前消息周期的执行记录', async () => {
+      const chatRoomId = randomUUID();
+      const agentId = randomUUID();
+      const archiveId = randomUUID();
+      const archivedRecordId = randomUUID();
+      const currentRecordId = randomUUID();
+      const oldFailedRecordId = randomUUID();
+      const currentFailedRecordId = randomUUID();
+      const archiveTime = new Date('2026-05-29T08:00:00.000Z');
+
+      await prisma.chatRoom.create({
+        data: {
+          id: chatRoomId,
+          name: 'Task Board Current Room',
+          updatedAt: new Date(),
+        },
+      });
+      await prisma.chatRoomMessageArchive.create({
+        data: {
+          id: archiveId,
+          chatRoomId,
+          title: 'Archived messages',
+          messageCount: 1,
+          archivedAt: archiveTime,
+        },
+      });
+      await prisma.executionRecord.createMany({
+        data: [
+          {
+            id: archivedRecordId,
+            chatRoomId,
+            agentId,
+            agentName: 'codex',
+            triggerMessage: 'archived task',
+            events: '[]',
+            systemPrompt: 'test',
+            status: 'completed',
+            createdAt: new Date('2026-05-29T07:50:00.000Z'),
+          },
+          {
+            id: currentRecordId,
+            chatRoomId,
+            agentId,
+            agentName: 'codex',
+            triggerMessage: 'current task',
+            events: '[]',
+            systemPrompt: 'test',
+            status: 'completed',
+            createdAt: new Date('2026-05-29T08:10:00.000Z'),
+          },
+          {
+            id: oldFailedRecordId,
+            chatRoomId,
+            agentId,
+            agentName: 'codex',
+            triggerMessage: 'old failed task',
+            events: '[]',
+            systemPrompt: 'test',
+            status: 'failed',
+            errorMessage: 'old failure',
+            createdAt: new Date('2026-05-29T07:55:00.000Z'),
+          },
+          {
+            id: currentFailedRecordId,
+            chatRoomId,
+            agentId,
+            agentName: 'codex',
+            triggerMessage: 'current failed task',
+            events: '[]',
+            systemPrompt: 'test',
+            status: 'failed',
+            errorMessage: 'current failure',
+            createdAt: new Date('2026-05-29T08:15:00.000Z'),
+          },
+        ],
+      });
+      await prisma.message.createMany({
+        data: [
+          {
+            id: randomUUID(),
+            content: 'archived output',
+            chatRoomId,
+            isHuman: false,
+            executionRecordId: archivedRecordId,
+            archiveId,
+            updatedAt: new Date(),
+          },
+          {
+            id: randomUUID(),
+            content: 'current output',
+            chatRoomId,
+            isHuman: false,
+            executionRecordId: currentRecordId,
+            updatedAt: new Date(),
+          },
+        ],
+      });
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/chatrooms/${chatRoomId}/tasks/board`,
+      });
+
+      assert.strictEqual(response.statusCode, 200);
+      const body = response.json();
+      assert.strictEqual(body.success, true);
+      assert.deepStrictEqual(
+        body.data.completed.map((item: { executionRecordId: string }) => item.executionRecordId),
+        [currentRecordId],
+      );
+      assert.deepStrictEqual(
+        body.data.failed.map((item: { executionRecordId: string }) => item.executionRecordId),
+        [currentFailedRecordId],
       );
     });
   });

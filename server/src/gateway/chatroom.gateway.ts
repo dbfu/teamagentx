@@ -1380,7 +1380,7 @@ export async function chatRoomGateway(app: FastifyInstance) {
     try {
       const [queueTasks, completedRecords] = await Promise.all([
         taskQueueService.getChatRoomBoardTasks(id),
-        executionRecordService.findByChatRoom(id, { take }),
+        executionRecordService.findByChatRoom(id, { take, currentOnly: true }),
       ]);
 
       const queueItems = queueTasks.map(task => ({
