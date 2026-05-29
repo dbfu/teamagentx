@@ -28,9 +28,34 @@ function Tooltip({
 }
 
 function TooltipTrigger({
+  asChild,
+  children,
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Trigger>) {
-  return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />
+  // 如果使用 asChild，需要在子元素的 onClick 中添加 blur
+  if (asChild && React.isValidElement(children)) {
+    const childProps = children.props as Record<string, unknown>
+    const originalOnClick = childProps.onClick as React.MouseEventHandler | undefined
+    const blendedOnClick = (e: React.MouseEvent<HTMLElement>) => {
+      e.currentTarget.blur()
+      originalOnClick?.(e)
+    }
+    return (
+      <TooltipPrimitive.Trigger data-slot="tooltip-trigger" asChild {...props}>
+        {React.cloneElement(children, { onClick: blendedOnClick } as Record<string, unknown>)}
+      </TooltipPrimitive.Trigger>
+    )
+  }
+  // 非 asChild 模式，直接在触发元素上处理
+  return (
+    <TooltipPrimitive.Trigger
+      data-slot="tooltip-trigger"
+      onClick={(e: React.MouseEvent<HTMLButtonElement>) => e.currentTarget.blur()}
+      {...props}
+    >
+      {children}
+    </TooltipPrimitive.Trigger>
+  )
 }
 
 function TooltipContent({
