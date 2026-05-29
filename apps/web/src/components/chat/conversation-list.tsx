@@ -5,7 +5,7 @@ import { GroupAvatarImage } from '@/lib/group-avatars'
 import { cn, formatDateTime } from '@/lib/utils'
 import { useSocketStore } from '@/stores/socket-store'
 import { Copy, Download, Loader2, MessageSquare, Pin, Plus, RefreshCw, Trash2, Upload } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { GroupTemplateImportModal } from './group-template-import-modal'
 
@@ -32,6 +32,11 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
       .map((todo) => todo.chatRoomId),
   ), [todos])
 
+  // 滚动容器 ref
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+  // 群聊项 ref 映射
+  const roomItemRefs = useRef<Map<string, HTMLDivElement>>(new Map())
+
   // 右键菜单状态
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; room: ChatRoom } | null>(null)
   const [pinning, setPinning] = useState(false)
@@ -41,6 +46,31 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [showImportModal, setShowImportModal] = useState(false)
   const [exportingTemplate, setExportingTemplate] = useState(false)
+
+  // 当选中群聊变化时，自动滚动到该群聊位置
+  useEffect(() => {
+    if (!selectedId || !scrollContainerRef.current) return
+
+    // 尝试滚动到选中的群聊，使用 requestAnimationFrame 确保 DOM 已渲染
+    const scrollToSelected = () => {
+      const roomElement = roomItemRefs.current.get(selectedId)
+      if (roomElement) {
+        roomElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      }
+    }
+
+    // 立即尝试一次
+    scrollToSelected()
+
+    // 如果第一次没找到元素，延迟再试（等待列表刷新和渲染）
+    const timer = requestAnimationFrame(() => {
+      scrollToSelected()
+      // 再延迟一次确保
+      requestAnimationFrame(scrollToSelected)
+    })
+
+    return () => cancelAnimationFrame(timer)
+  }, [selectedId, chatRooms])
 
   // 格式化未读数显示
   const formatUnreadCount = (count: number) => {
@@ -93,7 +123,8 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
       const response = await chatRoomApi.duplicate(room.id)
       if (response.success && response.data) {
         toast.success('群聊已复制')
-        onRefresh?.()
+        // 等待刷新完成后再选中新群聊，确保列表已更新
+        await onRefresh?.()
         onSelect(response.data.id)
       } else {
         toast.error(response.error || '复制失败')
@@ -297,7 +328,7 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
       )}
 
       {/* Conversation list - 不支持拖动 */}
-      <div className="scrollbar-hover flex-1 overflow-y-auto pb-3">
+      <div ref={scrollContainerRef} className="scrollbar-hover flex-1 overflow-y-auto pb-3">
         {chatRooms.length === 0 ? (
           <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
             暂无群聊，点击左上角 + 创建
@@ -320,6 +351,13 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
                   return (
                     <div
                       key={room.id}
+                      ref={(el) => {
+                        if (el) {
+                          roomItemRefs.current.set(room.id, el)
+                        } else {
+                          roomItemRefs.current.delete(room.id)
+                        }
+                      }}
                       onClick={() => onSelect(room.id)}
                       onContextMenu={(e) => handleContextMenu(e, room)}
                       className={cn(

@@ -28,8 +28,17 @@ import {
     buildAcpProviderEnv,
     type AcpProviderInfo,
 } from './acp-provider.adapter.js';
+import {
+  buildAgentBaseSystemPrompt,
+  buildGroupChatMemberInfoSection,
+  CLAUDE_SHELL_COMMANDS_SECTION,
+  RESPONSE_STYLE_INSTRUCTION,
+} from './agent-system-prompt.js';
 import { debugLog } from './agent-handler/debug.js';
-import { buildAgentLongTermMemorySection } from './agent-long-term-memory.js';
+import {
+  buildAgentLongTermMemoryContentSection,
+  buildAgentLongTermMemoryInstructions,
+} from './agent-long-term-memory.js';
 import type {
     AgentDebugInfo,
     AgentExecResult,
@@ -44,7 +53,6 @@ import type {
     ToolCall,
     ToolCallEmitCallback,
 } from './executor.interface.js';
-import { getImageGenerationSkillInstructions } from './image-generation-config.js';
 import { generateImageForAgent } from './image-generation.service.js';
 import { buildInstalledSkillNames } from './skill-instructions.js';
 import { syncGlobalClaudeLocalConfig } from './claude-local-config.js';
@@ -246,7 +254,6 @@ function isRecoverableSessionError(message: string): boolean {
 }
 
 const DEFAULT_BACKGROUND_IDLE_FINISH_MS = 60 * 1000;
-
 function getBackgroundIdleFinishMs(): number {
   const rawValue = process.env.CLAUDE_AGENT_BACKGROUND_IDLE_FINISH_MS;
   if (!rawValue) return DEFAULT_BACKGROUND_IDLE_FINISH_MS;
@@ -560,40 +567,15 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
     this.sessionId = savedSession?.sessionId || randomUUID();
     this.hasStartedSession = savedSession?.hasStartedSession ?? false;
 
-    const modelInfo = this.llmProvider
-      ? `
-## Current Model
-You are using the model service provided by ${this.llmProvider.name}.
-- Model name: ${this.llmProvider.model}
-- Provider type: ${this.llmProvider.type}`
-      : '';
-    const chatRoomRulesSection = chatRoomRules?.trim()
-      ? `
-## Group Rules
-The following rules come from the current chatroom and apply to all assistants in this chatroom. You must follow them in replies and collaboration in this chatroom:
-${chatRoomRules.trim()}`
-      : '';
-    const collaborationTriggerCheckSection = agentTriggerMode === 'auto'
-      ? `
-Before final output, run a collaboration trigger check: if your reply asks another assistant to continue, validate, supplement, take over, or perform work, the final reply must explicitly mention exactly one target assistant. Only mention an assistant when the target is unambiguous and action from that assistant is required. If the target assistant is unclear, ask the user to choose instead. Do not create triggerable assistant mentions in code blocks, quoted text, or examples. If no assistant action is needed, do not mention an assistant.`
-      : '';
-
-    this.systemPrompt = `${modelInfo}
-${systemPrompt}
-${chatRoomRulesSection}
-
-${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
-
-## Assistant Mentions
-In TeamAgentX, an @assistant mention can trigger another assistant task. A single message may contain at most one triggerable @assistant mention. When handing off or asking another assistant, choose one target assistant and mention only that assistant. If multiple assistants could help, choose the best next assistant or ask the user to choose; refer to any additional assistants by name without @.
-${collaborationTriggerCheckSection}
-
-## Working Directory
-Your working directory is: ${this.workDir}
-When you perform file operations or run commands, operate in this directory by default. Resolve relative paths from this directory.
-
-## Shell Commands
-Use TeamAgentX MCP shell tools for shell execution. For normal foreground shell commands, use \`mcp__tax__run_shell_command\`. For long-running services or commands that should keep running after this turn, such as \`pnpm dev\`, \`npm run dev\`, \`vite\`, \`next dev\`, watch modes, servers, listeners, and \`tail -f\`, use \`mcp__tax__start_background_command\`. Use \`mcp__tax__read_background_command_output\` to inspect logs, \`mcp__tax__list_background_commands\` to find existing tasks, and \`mcp__tax__stop_background_command\` when the user asks to stop one. Do not block the turn waiting for a dev server to exit.`;
+    this.systemPrompt = buildAgentBaseSystemPrompt({
+      agentPrompt: systemPrompt,
+      llmProvider: this.llmProvider,
+      imageGenerationProvider: this.imageGenerationProvider,
+      chatRoomRules,
+      workDir: this.workDir,
+      agentTriggerMode,
+      commandSection: CLAUDE_SHELL_COMMANDS_SECTION,
+    });
 
     this.ensureWorkDirectory();
   }
@@ -920,21 +902,37 @@ Use TeamAgentX MCP shell tools for shell execution. For normal foreground shell 
     return {};
   }
 
+  private buildSdkSystemPrompt(): string {
+    return [
+      this.systemPrompt,
+      buildAgentLongTermMemoryInstructions(
+        this.chatRoomId,
+        this.agentId,
+        this.name,
+      ),
+      this.buildGroupChatMemberInfoSection(),
+      RESPONSE_STYLE_INSTRUCTION,
+    ]
+      .filter((section) => section.trim().length > 0)
+      .join('\n\n');
+  }
+
+  private buildGroupChatMemberInfoSection(): string {
+    return buildGroupChatMemberInfoSection({
+      chatRoomAgents: this.chatRoomAgents,
+      agentName: this.name,
+      workDir: this.workDir,
+      includeAssistantTriggerNecessityReminder: true,
+    });
+  }
+
   private buildFullMessage(
     message: string,
     history?: HistoryMessage[],
   ): string {
     let fullMessage = '';
-    const responseStyleInstruction =
-      'Write the final answer in human-readable Markdown. Do not explain the internal steps, context assembly, or tools used unless the user explicitly asks for that.';
 
-    if (this.systemPrompt) {
-      fullMessage += `[System Instructions]\n${this.systemPrompt}\n\n${responseStyleInstruction}\n\n`;
-    } else {
-      fullMessage += `[System Instructions]\n${responseStyleInstruction}\n\n`;
-    }
-
-    const longTermMemorySection = buildAgentLongTermMemorySection(
+    const longTermMemorySection = buildAgentLongTermMemoryContentSection(
       this.chatRoomId,
       this.agentId,
       this.name,
@@ -951,29 +949,6 @@ Use TeamAgentX MCP shell tools for shell execution. For normal foreground shell 
 
       fullMessage += `[Group History Access]
 You may access current chatroom history through tools. Use \`get_recent_room_messages\` for message indexes, \`search_room_messages\` to search indexes by keyword, or \`get_room_message_detail\` to inspect exact message content by messageId. These tools automatically use the current chatroom; do not ask for or provide a chatRoomId. Fetch at most 50 message indexes per call; use \`skip\` for pagination and \`order\` as \`asc\` or \`desc\` for chronological direction. Recent/search results are navigation previews, so call \`get_room_message_detail\` before relying on exact prior content.
-
-`;
-    }
-
-    if (this.chatRoomAgents.length > 0) {
-      const agentsInfo = this.chatRoomAgents
-        .map((agent) => agent.name)
-        .join(', ');
-      const otherAgents = this.chatRoomAgents.filter(
-        (agent) => agent.name !== this.name,
-      );
-      const otherAgentsList = otherAgents.map((agent) => agent.name).join(', ');
-      const othersInfo = otherAgents.length > 0 ? otherAgentsList : 'none';
-      const mentionTip =
-        otherAgents.length > 0
-          ? '\n[Tip]\nWhen you need to message another assistant, write "@assistant_name message content" directly in your final reply. You may also mention an assistant in body text when the @ is preceded by a space. A target assistant is triggered only when @ is at the start of a line or the previous character is a space; @ immediately after punctuation will not trigger. A single message may contain at most one triggerable @assistant mention. If you need to refer to additional assistants, write their names without @. If the user only asks you to send a message to another assistant, output only that @assistant message in the final reply, with no explanation, pleasantries, summary, or expanded collaboration invitation. Before sending such a message, decide whether triggering another assistant is actually necessary.'
-          : '';
-
-      fullMessage += `[Group Chat Member Info]
-Chatroom working directory: ${this.workDir}
-Assistants in the current chatroom: ${agentsInfo}
-You are: ${this.name}
-Other assistants: ${othersInfo}${mentionTip}
 
 `;
     }
@@ -1806,6 +1781,7 @@ Other assistants: ${othersInfo}${mentionTip}
       options: {
         cwd: this.workDir,
         env,
+        systemPrompt: this.buildSdkSystemPrompt(),
         model: this.llmProvider?.model,
         includePartialMessages: true,
         maxTurns,

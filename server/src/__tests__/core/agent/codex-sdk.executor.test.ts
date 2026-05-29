@@ -8,6 +8,10 @@ import {
   buildCodexModelProviderConfig,
   CodexSdkExecutor,
 } from '../../../core/agent/codex-sdk.executor.js';
+import {
+  ensureAgentLongTermMemoryFile,
+  ensureRoomAgentLongTermMemoryFile,
+} from '../../../core/agent/agent-long-term-memory.js';
 
 function provider(overrides: Record<string, unknown> = {}) {
   return {
@@ -126,6 +130,78 @@ describe('Codex SDK Executor builtin MCP servers', () => {
 });
 
 describe('Codex SDK Executor message context', () => {
+  test('keeps system instructions in Codex developer_instructions instead of the task prompt', () => {
+    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-codex-system-prompt-'));
+    const chatRoomId = 'room-codex-system-prompt-test';
+    const agentId = 'agent-codex-system-prompt-test';
+    const roomMemoryFile = ensureRoomAgentLongTermMemoryFile(
+      chatRoomId,
+      agentId,
+      'CodexAgent',
+    );
+    const agentMemoryFile = ensureAgentLongTermMemoryFile(
+      agentId,
+      'CodexAgent',
+    );
+    fs.writeFileSync(roomMemoryFile, 'Room prefers direct answers.', 'utf-8');
+    fs.writeFileSync(agentMemoryFile, 'Global memory applies.', 'utf-8');
+
+    const executor = new CodexSdkExecutor(
+      'CodexAgent',
+      'You are a careful coding assistant.',
+      chatRoomId,
+      workDir,
+      false,
+      agentId,
+      undefined,
+      undefined,
+      undefined,
+      [
+        { name: 'CodexAgent', agentId },
+        { name: 'HelperAgent', agentId: 'helper-agent' },
+      ],
+    );
+
+    try {
+      const developerInstructions = (executor as any).buildDeveloperInstructions();
+      const fullMessage = (executor as any).buildFullMessage('Do the task');
+
+      assert.match(developerInstructions, /You are a careful coding assistant\./);
+      assert.match(developerInstructions, /\[Long-Term Memory Rules\]/);
+      assert.ok(developerInstructions.includes(roomMemoryFile));
+      assert.ok(developerInstructions.includes(agentMemoryFile));
+      assert.match(
+        developerInstructions,
+        /Write the final answer in human-readable Markdown\./,
+      );
+      assert.match(developerInstructions, /\[Group Chat Member Info\]/);
+      assert.match(
+        developerInstructions,
+        /Assistants in the current chatroom: CodexAgent, HelperAgent/,
+      );
+      assert.match(developerInstructions, /Other assistants: HelperAgent/);
+      assert.match(
+        developerInstructions,
+        /When you need to message another assistant/,
+      );
+      assert.doesNotMatch(developerInstructions, /Room prefers direct answers\./);
+      assert.doesNotMatch(developerInstructions, /Global memory applies\./);
+      assert.doesNotMatch(fullMessage, /\[System Instructions\]/);
+      assert.doesNotMatch(fullMessage, /\[Long-Term Memory Rules\]/);
+      assert.doesNotMatch(fullMessage, /\[Group Chat Member Info\]/);
+      assert.doesNotMatch(fullMessage, /You are a careful coding assistant\./);
+      assert.match(fullMessage, /\[Global Assistant Long-Term Memory\]/);
+      assert.match(fullMessage, /Global memory applies\./);
+      assert.match(fullMessage, /\[Current Room Assistant Long-Term Memory\]/);
+      assert.match(fullMessage, /Room prefers direct answers\./);
+      assert.match(fullMessage, /\[Current Message\]\nDo the task$/);
+    } finally {
+      fs.rmSync(workDir, { recursive: true, force: true });
+      fs.rmSync(roomMemoryFile, { force: true });
+      fs.rmSync(agentMemoryFile, { force: true });
+    }
+  });
+
   test('does not inject full group history when group history tools are disabled', () => {
     const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-codex-history-'));
     const executor = new CodexSdkExecutor(

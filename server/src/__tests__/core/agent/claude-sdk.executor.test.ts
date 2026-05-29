@@ -7,6 +7,10 @@ import {
   ClaudeAgentSdkExecutor,
   __claudeSdkTestUtils,
 } from '../../../core/agent/claude-sdk.executor.js';
+import {
+  ensureAgentLongTermMemoryFile,
+  ensureRoomAgentLongTermMemoryFile,
+} from '../../../core/agent/agent-long-term-memory.js';
 
 describe('ClaudeAgentSdkExecutor background idle finish', () => {
   test('uses a conservative default background idle finish timeout', () => {
@@ -136,6 +140,82 @@ describe('ClaudeAgentSdkExecutor background idle finish', () => {
       assert.match(fullMessage, /\[Current Message\]\nA$/);
     } finally {
       fs.rmSync(workDir, {recursive: true, force: true});
+    }
+  });
+
+  test('keeps system instructions in the Claude SDK systemPrompt instead of the task prompt', () => {
+    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-claude-system-prompt-'));
+    const chatRoomId = 'room-system-prompt-test';
+    const agentId = 'agent-system-prompt-test';
+    const roomMemoryFile = ensureRoomAgentLongTermMemoryFile(
+      chatRoomId,
+      agentId,
+      'ClaudeAgent',
+    );
+    const agentMemoryFile = ensureAgentLongTermMemoryFile(
+      agentId,
+      'ClaudeAgent',
+    );
+    fs.writeFileSync(roomMemoryFile, 'Room prefers concise answers.', 'utf-8');
+    fs.writeFileSync(agentMemoryFile, 'Global memory applies.', 'utf-8');
+
+    const executor = new ClaudeAgentSdkExecutor(
+      'ClaudeAgent',
+      'You are a careful coding assistant.',
+      chatRoomId,
+      workDir,
+      false,
+      agentId,
+      undefined,
+      undefined,
+      undefined,
+      [
+        {name: 'ClaudeAgent', agentId},
+        {name: 'HelperAgent', agentId: 'helper-agent'},
+      ],
+    );
+
+    try {
+      const sdkSystemPrompt = (executor as any).buildSdkSystemPrompt();
+      const fullMessage = (executor as any).buildFullMessage('Do the task');
+
+      assert.match(sdkSystemPrompt, /You are a careful coding assistant\./);
+      assert.match(sdkSystemPrompt, /\[Long-Term Memory Rules\]/);
+      assert.ok(sdkSystemPrompt.includes(roomMemoryFile));
+      assert.ok(sdkSystemPrompt.includes(agentMemoryFile));
+      assert.match(
+        sdkSystemPrompt,
+        /Write the final answer in human-readable Markdown\./,
+      );
+      assert.match(sdkSystemPrompt, /\[Group Chat Member Info\]/);
+      assert.match(
+        sdkSystemPrompt,
+        /Assistants in the current chatroom: ClaudeAgent, HelperAgent/,
+      );
+      assert.match(sdkSystemPrompt, /Other assistants: HelperAgent/);
+      assert.match(
+        sdkSystemPrompt,
+        /When you need to message another assistant/,
+      );
+      assert.doesNotMatch(sdkSystemPrompt, /Room prefers concise answers\./);
+      assert.doesNotMatch(sdkSystemPrompt, /Global memory applies\./);
+      assert.doesNotMatch(fullMessage, /\[System Instructions\]/);
+      assert.doesNotMatch(fullMessage, /\[Long-Term Memory Rules\]/);
+      assert.doesNotMatch(fullMessage, /\[Group Chat Member Info\]/);
+      assert.doesNotMatch(
+        fullMessage,
+        /When you need to message another assistant/,
+      );
+      assert.doesNotMatch(fullMessage, /You are a careful coding assistant\./);
+      assert.match(fullMessage, /\[Global Assistant Long-Term Memory\]/);
+      assert.match(fullMessage, /Global memory applies\./);
+      assert.match(fullMessage, /\[Current Room Assistant Long-Term Memory\]/);
+      assert.match(fullMessage, /Room prefers concise answers\./);
+      assert.match(fullMessage, /\[Current Message\]\nDo the task$/);
+    } finally {
+      fs.rmSync(workDir, {recursive: true, force: true});
+      fs.rmSync(roomMemoryFile, {force: true});
+      fs.rmSync(agentMemoryFile, {force: true});
     }
   });
 

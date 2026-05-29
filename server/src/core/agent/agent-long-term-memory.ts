@@ -70,17 +70,15 @@ export function readAgentLongTermMemory(agentId: string | null | undefined, agen
   return readMemoryFile(memoryFile);
 }
 
-export function buildAgentLongTermMemorySection(
+export function buildAgentLongTermMemoryInstructions(
   chatRoomId: string,
   agentId: string | null | undefined,
   agentName: string,
 ): string {
   const roomMemoryFile = ensureRoomAgentLongTermMemoryFile(chatRoomId, agentId, agentName);
   const agentMemoryFile = ensureAgentLongTermMemoryFile(agentId, agentName);
-  const roomMemory = readMemoryFile(roomMemoryFile);
-  const agentMemory = readMemoryFile(agentMemoryFile);
 
-  const instructions = `[Long-Term Memory Rules]
+  return `[Long-Term Memory Rules]
 You have two long-term memory files:
 1. Room-specific assistant memory (room + agent): ${roomMemoryFile}
 2. Global assistant memory (agent): ${agentMemoryFile}
@@ -92,6 +90,17 @@ Write rules:
 - Only write to global assistant memory when the user explicitly asks for "all chatrooms", "global", "this assistant should always remember", or clearly agrees to shared/global memory.
 - Do not write temporary tasks, pleasantries, one-off context, or information the user did not explicitly ask you to save into long-term memory.
 - When the user asks you to modify or forget a long-term memory item, edit the corresponding memory file yourself.`;
+}
+
+export function buildAgentLongTermMemoryContentSection(
+  chatRoomId: string,
+  agentId: string | null | undefined,
+  agentName: string,
+): string {
+  const roomMemoryFile = ensureRoomAgentLongTermMemoryFile(chatRoomId, agentId, agentName);
+  const agentMemoryFile = ensureAgentLongTermMemoryFile(agentId, agentName);
+  const roomMemory = readMemoryFile(roomMemoryFile);
+  const agentMemory = readMemoryFile(agentMemoryFile);
 
   const memorySections: string[] = [];
   if (agentMemory) {
@@ -105,11 +114,18 @@ The following content comes from the current room assistant memory file and only
 ${roomMemory}`);
   }
 
-  if (memorySections.length === 0) {
-    return instructions;
-  }
+  return memorySections.join('\n\n');
+}
 
-  return `${instructions}
-
-${memorySections.join('\n\n')}`;
+export function buildAgentLongTermMemorySection(
+  chatRoomId: string,
+  agentId: string | null | undefined,
+  agentName: string,
+): string {
+  return [
+    buildAgentLongTermMemoryInstructions(chatRoomId, agentId, agentName),
+    buildAgentLongTermMemoryContentSection(chatRoomId, agentId, agentName),
+  ]
+    .filter((section) => section.trim().length > 0)
+    .join('\n\n');
 }
