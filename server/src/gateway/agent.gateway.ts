@@ -221,7 +221,7 @@ const createAgentBodySchema = {
       },
     },
     categoryId: { type: 'string', description: '分类 ID' },
-    llmProviderId: { type: 'string', description: 'LLM 供应商 ID（builtin 直接使用；acp 目前仅支持 claude/codex 最小闭环）' },
+    llmProviderId: { type: 'string', nullable: true, description: 'LLM 供应商 ID（builtin 直接使用；acp 目前仅支持 claude/codex 最小闭环）' },
     imageGeneration: {
       type: 'object',
       additionalProperties: false,

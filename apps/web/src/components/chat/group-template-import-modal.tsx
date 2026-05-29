@@ -1,5 +1,6 @@
 import { TemplatePreviewResult, templatePackageApi } from '@/lib/agent-api'
 import { AlertCircle, CheckCircle2, Loader2, Upload, X } from 'lucide-react'
+import type { CSSProperties } from 'react'
 import { useRef, useState } from 'react'
 import { toast } from 'sonner'
 
@@ -40,6 +41,7 @@ export function GroupTemplateImportModal({
   }
 
   if (!isOpen) return null
+  const electronNoDragStyle = { WebkitAppRegion: 'no-drag' } as CSSProperties
 
   const triggerSelectFile = () => {
     importInputRef.current?.click()
@@ -146,9 +148,15 @@ export function GroupTemplateImportModal({
   const resolvedSummary = Array.from(resolvedSummaryMap.values())
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-black/50 py-12">
+    <div
+      className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-black/50 py-12"
+      style={electronNoDragStyle}
+    >
       <div className="w-full max-w-3xl shrink-0 rounded-2xl bg-card shadow-xl">
-        <div className="flex items-center justify-between border-b border-border px-6 py-4">
+        <div
+          className="flex items-center justify-between border-b border-border px-6 py-4"
+          style={electronNoDragStyle}
+        >
           <div className="flex items-center gap-3">
             <div className="flex size-9 items-center justify-center rounded-xl bg-blue-500 text-white">
               <Upload className="size-4" />
@@ -161,6 +169,7 @@ export function GroupTemplateImportModal({
           <button
             onClick={handleClose}
             className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            style={electronNoDragStyle}
           >
             <X className="size-5" />
           </button>

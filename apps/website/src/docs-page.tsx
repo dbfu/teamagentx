@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { getResolvedDownloadHref } from './download-helper'
+import { getResolvedDownloadHref, trackBaiduDownload } from './download-helper'
 import type { SiteConfig } from './site-config'
 
 const IS_MAC = /Mac|iPhone|iPad/.test(navigator.userAgent)
@@ -479,16 +479,23 @@ export function DocsPage({ siteConfig }: DocsPageProps) {
               <button type="button" className="btn btn-primary" onClick={() => setShowMacModal(true)}>
                 {downloadIcon(14)} 下载 macOS 客户端
               </button>
-              <a href={getResolvedDownloadHref(siteConfig.winUrl)} target="_blank" rel="noopener noreferrer" className="btn btn-outline">
+              <a
+                href={getResolvedDownloadHref(siteConfig.winUrl, { platform: 'windows' })}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn-outline"
+                onClick={() => trackBaiduDownload('windows')}
+              >
                 下载 Windows 客户端
               </a>
-              {siteConfig.iosUrl && (
-                <a href={getResolvedDownloadHref(siteConfig.iosUrl)} target="_blank" rel="noopener noreferrer" className="btn btn-outline">
-                  下载 iOS App
-                </a>
-              )}
               {siteConfig.androidUrl && (
-                <a href={getResolvedDownloadHref(siteConfig.androidUrl)} target="_blank" rel="noopener noreferrer" className="btn btn-outline">
+                <a
+                  href={getResolvedDownloadHref(siteConfig.androidUrl, { platform: 'android' })}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn btn-outline"
+                  onClick={() => trackBaiduDownload('android')}
+                >
                   下载 Android App
                 </a>
               )}
@@ -535,11 +542,14 @@ export function DocsPage({ siteConfig }: DocsPageProps) {
               </button>
             </div>
             <a
-              href={getResolvedDownloadHref(selectedArch === 'arm64' ? siteConfig.macUrlArm64 : siteConfig.macUrlX64)}
+              href={getResolvedDownloadHref(selectedArch === 'arm64' ? siteConfig.macUrlArm64 : siteConfig.macUrlX64, {
+                platform: selectedArch === 'arm64' ? 'macos-arm64' : 'macos-x64',
+              })}
               target="_blank"
               rel="noopener noreferrer"
               className="btn btn-primary mac-modal-download-btn"
               onClick={() => {
+                trackBaiduDownload(selectedArch === 'arm64' ? 'macos-arm64' : 'macos-x64')
                 setShowMacModal(false)
               }}
             >

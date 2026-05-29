@@ -1,13 +1,19 @@
 {
   "name": "@teamagentx/docs",
   "version": "1.0.0",
+  "private": true,
+  "type": "module",
   "description": "TeamAgentX 使用文档",
   "scripts": {
-    "dev": "vitepress dev docs",
+    "dev": "vitepress dev docs --host 0.0.0.0 --port 5190",
     "build": "vitepress build docs",
-    "preview": "vitepress preview docs"
+    "preview": "vitepress preview docs --host 0.0.0.0 --port 4190"
   },
-  "keywords": ["teamagentx", "docs", "vitepress"],
+  "keywords": [
+    "teamagentx",
+    "docs",
+    "vitepress"
+  ],
   "author": "TeamAgentX",
   "license": "MIT",
   "devDependencies": {

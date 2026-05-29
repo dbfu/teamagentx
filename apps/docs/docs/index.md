@@ -12,11 +12,11 @@ hero:
     alt: TeamAgentX
   actions:
     - theme: brand
+      text: 用户使用手册
+      link: /user-guide/
+    - theme: alt
       text: 快速开始
       link: /getting-started
-    - theme: alt
-      text: 功能介绍
-      link: /features
 
 features:
   - icon: 🤖

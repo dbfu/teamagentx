@@ -48,7 +48,13 @@
       "Bash(claude -p \"say hi\")",
       "Bash(chmod 600 /tmp/claude-test-cfg/.credentials.json)",
       "Bash(CLAUDE_CONFIG_DIR=/tmp/claude-test-cfg claude -p \"say hi briefly\")",
-      "Bash(kill 44825 *)"
+      "Bash(kill 44825 *)",
+      "Bash(sqlite3 dev.db 'PRAGMA table_info\\(\"writes\"\\);')",
+      "Bash(sqlite3 dev.db 'SELECT migration_name, finished_at FROM _prisma_migrations ORDER BY finished_at DESC LIMIT 10;')",
+      "Bash(sqlite3 dev.db \"INSERT INTO _prisma_migrations \\(id, checksum, migration_name, logs, finished_at, started_at, applied_steps_count\\) VALUES \\(lower\\(hex\\(randomblob\\(16\\)\\)\\), '', '20260525000000_add_langgraph_checkpoints', '', unixepoch\\(\\), unixepoch\\(\\), 1\\);\")",
+      "Bash(DATABASE_URL=file:./dev.db pnpm exec prisma migrate status)",
+      "Bash(DATABASE_URL=file:./dev.db pnpm exec prisma migrate deploy)",
+      "Bash(DATABASE_URL=file:./dev.db pnpm exec prisma generate)"
     ]
   }
 }

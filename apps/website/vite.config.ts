@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
-  const resolverProxyTarget = env.DOWNLOAD_RESOLVER_PROXY_TARGET || 'http://127.0.0.1:3207'
+  const resolverProxyTarget = env.WEBSITE_SERVER_PROXY_TARGET || 'http://127.0.0.1:3207'
 
   return {
     base: './',
@@ -12,10 +12,10 @@ export default defineConfig(({ mode }) => {
       host: true,
       port: 5184,
       proxy: {
-        '/download-resolver': {
+        '/website-server': {
           target: resolverProxyTarget,
           changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/download-resolver/, ''),
+          rewrite: (path) => path.replace(/^\/website-server/, ''),
         },
       },
     },

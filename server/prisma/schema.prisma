@@ -647,3 +647,31 @@ model ExternalChannel {
   @@unique([platform, externalId])
   @@index([chatRoomId])
 }
+
+// LangGraph checkpoint 存储（运行时由 LangGraph checkpointer 管理）
+model Checkpoint {
+  threadId          String  @map("thread_id")
+  checkpointNs      String  @default("") @map("checkpoint_ns")
+  checkpointId      String  @map("checkpoint_id")
+  parentCheckpointId String? @map("parent_checkpoint_id")
+  type              String?
+  checkpoint        Bytes?
+  metadata          Bytes?
+
+  @@id([threadId, checkpointNs, checkpointId])
+  @@map("checkpoints")
+}
+
+model CheckpointWrite {
+  threadId      String  @map("thread_id")
+  checkpointNs  String  @default("") @map("checkpoint_ns")
+  checkpointId  String  @map("checkpoint_id")
+  taskId        String  @map("task_id")
+  idx           Int     @map("idx")
+  channel       String
+  type          String?
+  value         Bytes?
+
+  @@id([threadId, checkpointNs, checkpointId, taskId, idx])
+  @@map("writes")
+}

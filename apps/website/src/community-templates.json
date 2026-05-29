@@ -1,0 +1,58 @@
+[
+  {
+    "id": "startup-growth-room",
+    "name": "创业增长作战室",
+    "description": "把增长负责人、内容策划、数据分析和复盘助手放进同一个群，适合冷启动、活动策划和每周增长实验。",
+    "scenario": "增长运营",
+    "level": "入门",
+    "agents": ["增长负责人", "内容策划", "数据分析", "复盘助手"],
+    "highlights": ["自动拆解增长实验", "沉淀渠道复盘", "生成周报"],
+    "downloadUrl": "https://github.com/dbfu/teamagentx/releases/download/templates/startup-growth-room.teamagentx-template.zip",
+    "size": "18 KB",
+    "downloads": 428,
+    "updatedAt": "2026-05-10",
+    "accent": "green"
+  },
+  {
+    "id": "product-launch-room",
+    "name": "产品发布指挥群",
+    "description": "覆盖 PRD 打磨、发布节奏、官网文案、公告校对和风险清单，适合小团队把一次发布推进到底。",
+    "scenario": "产品发布",
+    "level": "进阶",
+    "agents": ["产品经理", "技术负责人", "官网文案", "QA 审核"],
+    "highlights": ["发布清单追踪", "风险项巡检", "多角色审稿"],
+    "downloadUrl": "https://github.com/dbfu/teamagentx/releases/download/templates/product-launch-room.teamagentx-template.zip",
+    "size": "22 KB",
+    "downloads": 316,
+    "updatedAt": "2026-05-12",
+    "accent": "blue"
+  },
+  {
+    "id": "research-report-room",
+    "name": "深度调研报告组",
+    "description": "调研、资料整理、结构化写作和事实核查分工明确，适合竞品分析、行业报告和内部知识库建设。",
+    "scenario": "研究写作",
+    "level": "进阶",
+    "agents": ["调研助手", "资料管理员", "报告撰写", "事实核查"],
+    "highlights": ["资料来源归档", "报告大纲生成", "引用一致性检查"],
+    "downloadUrl": "https://github.com/dbfu/teamagentx/releases/download/templates/research-report-room.teamagentx-template.zip",
+    "size": "24 KB",
+    "downloads": 512,
+    "updatedAt": "2026-05-18",
+    "accent": "purple"
+  },
+  {
+    "id": "indie-dev-sprint-room",
+    "name": "独立开发冲刺队",
+    "description": "把需求拆解、代码执行、测试验证和发布记录串成一条流水线，适合独立开发者快速推进功能迭代。",
+    "scenario": "软件开发",
+    "level": "高级",
+    "agents": ["需求拆解", "代码助手", "测试工程师", "发布记录员"],
+    "highlights": ["任务队列执行", "变更记录整理", "测试建议输出"],
+    "downloadUrl": "https://github.com/dbfu/teamagentx/releases/download/templates/indie-dev-sprint-room.teamagentx-template.zip",
+    "size": "27 KB",
+    "downloads": 689,
+    "updatedAt": "2026-05-21",
+    "accent": "amber"
+  }
+]

@@ -13,8 +13,8 @@ pnpm install
 ```
 
 服务：
-- 前端: http://localhost:5173
-- 后端: http://localhost:3001
+- 前端: `http://localhost:5173`
+- 后端: `http://localhost:3001`
 - 数据库: SQLite (`server/dev.db`)
 
 ### Electron 桌面版
