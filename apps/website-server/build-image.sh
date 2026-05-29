@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REGISTRY="ccr.ccs.tencentyun.com"
-REPO="spark_ai/team-agent-x-download-resolver"
+REPO="spark_ai/team-agent-x-website-server"
 IMAGE="${REGISTRY}/${REPO}"
 
 if [ -n "${1:-}" ]; then

@@ -1,19 +1,19 @@
 {
-  "version": "v1.2.0",
-  "url": "https://wwbjc.lanzouu.com/i5DHP3pnjish",
-  "macUrlArm64": "https://wwbjc.lanzouu.com/i5DHP3pnjish",
-  "macUrlX64": "https://wwbjc.lanzouu.com/ikOUn3pfb5yj",
-  "macUrl": "https://wwbjc.lanzouu.com/i5DHP3pnjish",
-  "winUrl": "https://wwbjc.lanzouu.com/iDW313pfb0mh",
+  "version": "v0.1.25",
+  "url": "https://wwbjc.lanzouu.com/ijIzA3pxk0bi",
+  "macUrlArm64": "https://wwbjc.lanzouu.com/ijIzA3pxk0bi",
+  "macUrlX64": "https://wwbjc.lanzouu.com/iPj733pxk72b",
+  "macUrl": "https://wwbjc.lanzouu.com/ijIzA3pxk0bi",
+  "winUrl": "https://wwbjc.lanzouu.com/ikiPR3pxjtyj",
   "iosUrl": "https://wwbjc.lanzouu.com/iB17B3pqk04j",
-  "androidUrl": "https://apps.apple.com/app/teamagentx/id000000000",
+  "androidUrl": "https://wwbjc.lanzouu.com/iB17B3pqk04j",
   "downloads": {
-    "macArm64": "https://wwbjc.lanzouu.com/i5DHP3pnjish",
-    "macX64": "https://wwbjc.lanzouu.com/ikOUn3pfb5yj",
-    "mac": "https://wwbjc.lanzouu.com/i5DHP3pnjish",
-    "win": "https://wwbjc.lanzouu.com/iDW313pfb0mh",
+    "macArm64": "https://wwbjc.lanzouu.com/ijIzA3pxk0bi",
+    "macX64": "https://wwbjc.lanzouu.com/iPj733pxk72b",
+    "mac": "https://wwbjc.lanzouu.com/ijIzA3pxk0bi",
+    "win": "https://wwbjc.lanzouu.com/ikiPR3pxjtyj",
     "ios": "https://wwbjc.lanzouu.com/iB17B3pqk04j",
-    "android": "https://apps.apple.com/app/teamagentx/id000000000"
+    "android": "https://wwbjc.lanzouu.com/iB17B3pqk04j"
   },
-  "notes": "版本更新测试"
+  "notes": "版本更新"
 }
