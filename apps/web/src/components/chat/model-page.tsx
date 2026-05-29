@@ -385,12 +385,13 @@ export function ModelPage() {
 
   // 提交表单
   const handleSubmit = async () => {
-    const keepsExistingApiKey = Boolean(editingProvider && isMaskedApiKey(formData.apiKey))
-    if (!formData.name || (!formData.apiKey && !keepsExistingApiKey) || !formData.model || !formData.apiUrl) {
+    const apiKeyInput = formData.apiKey.trim()
+    const keepsExistingApiKey = Boolean(editingProvider && (!apiKeyInput || isMaskedApiKey(apiKeyInput)))
+    if (!formData.name || (!apiKeyInput && !keepsExistingApiKey) || !formData.model || !formData.apiUrl) {
       toast.error('请填写必填字段：名称、API URL、API Key、模型')
       return
     }
-    if (!editingProvider && isMaskedApiKey(formData.apiKey)) {
+    if (!editingProvider && isMaskedApiKey(apiKeyInput)) {
       toast.error('请填写完整 API Key，不能使用已遮罩的密钥')
       return
     }
@@ -402,7 +403,8 @@ export function ModelPage() {
     const payload = formData.modelType === 'audio' && formData.audioUsage === 'tts'
       ? { ...formData, isDefault: false }
       : { ...formData }
-    if (editingProvider && isMaskedApiKey(payload.apiKey)) {
+    payload.apiKey = apiKeyInput
+    if (editingProvider && (!payload.apiKey || isMaskedApiKey(payload.apiKey))) {
       delete (payload as Partial<typeof formData>).apiKey
     }
 
@@ -1079,14 +1081,18 @@ export function ModelPage() {
                 {/* API Key */}
                 <div className="mb-4">
                   <label className="mb-1.5 block text-sm font-medium text-foreground">
-                    API Key <span className="text-red-500">*</span>
+                    API Key {editingProvider ? (
+                      <span className="text-xs font-normal text-muted-foreground">留空则保持不变</span>
+                    ) : (
+                      <span className="text-red-500">*</span>
+                    )}
                   </label>
                   <div className="flex gap-2">
                     <input
                       type={showApiKey ? 'text' : 'password'}
                       value={formData.apiKey}
                       onChange={e => setFormData(prev => ({ ...prev, apiKey: e.target.value }))}
-                      placeholder="sk-..."
+                      placeholder={editingProvider ? '留空则保持不变' : 'sk-...'}
                       className="ta-input flex-1 shadow-none"
                     />
                     <button
