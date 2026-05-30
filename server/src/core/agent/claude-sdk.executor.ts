@@ -1619,7 +1619,8 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
           name: toolName,
           input: block.input || {},
           toolCallId: block.id || randomUUID(),
-          status: 'completed',
+          // assistant 消息在工具执行前到达，此时工具还未运行，不能标记为 completed
+          status: 'in_progress',
           timestamp: Date.now(),
         });
       }

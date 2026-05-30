@@ -216,6 +216,16 @@ class BackgroundCommandService {
         completedAt: new Date(),
       },
     });
+
+    // 任务结束后清理输出文件，目录为空时一并删除
+    for (const filePath of [current.stdoutPath, current.stderrPath]) {
+      try { await fsp.unlink(filePath); } catch { /* 文件可能已不存在 */ }
+    }
+    try {
+      const outputDir = path.dirname(current.stdoutPath);
+      const remaining = await fsp.readdir(outputDir);
+      if (remaining.length === 0) await fsp.rmdir(outputDir);
+    } catch { /* 目录不存在或非空时忽略 */ }
   }
 }
 
