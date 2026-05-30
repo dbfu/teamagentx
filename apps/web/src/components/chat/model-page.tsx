@@ -221,6 +221,9 @@ export function ModelPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [filterType, setFilterType] = useState<'all' | 'text' | 'image' | 'video' | 'audio'>('all')
 
+  // 导出选择
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+
   // 自动填充音频模型名：当 apiUrl 匹配已知供应商时，填入推荐模型名
   const autoFilledUrlRef = useRef<string | null>(null)
   useEffect(() => {
@@ -531,15 +534,19 @@ export function ModelPage() {
   }
 
   const handleExport = () => {
-    if (providers.length === 0) {
-      toast.error('暂无可导出的模型配置')
+    const toExport = selectedIds.size > 0
+      ? providers.filter(p => selectedIds.has(p.id))
+      : providers
+
+    if (toExport.length === 0) {
+      toast.error('请选择要导出的模型配置')
       return
     }
 
     const payload: ModelProvidersImportPayload = {
       version: 1,
       exportedAt: new Date().toISOString(),
-      providers: providers.map(toExportableProvider),
+      providers: toExport.map(toExportableProvider),
     }
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' })
     const url = URL.createObjectURL(blob)
@@ -549,7 +556,8 @@ export function ModelPage() {
     link.download = `teamagentx-model-providers-${date}.json`
     link.click()
     URL.revokeObjectURL(url)
-    toast.success(`已导出 ${providers.length} 个模型配置`)
+    toast.success(`已导出 ${toExport.length} 个模型配置`)
+    setSelectedIds(new Set())
   }
 
   const triggerImport = () => {
@@ -631,23 +639,25 @@ export function ModelPage() {
               </button>
             )}
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={loadProviders}
+          <Button variant="outline" size="sm" onClick={loadProviders}
             disabled={isLoading}
             className="h-8"
           >
             <RefreshCw className={cn('size-3.5', isLoading && 'animate-spin')} />
             刷新
           </Button>
+          {selectedIds.size > 0 && (
+            <span className="text-xs text-muted-foreground">
+              已选 {selectedIds.size} 项
+            </span>
+          )}
           <Button variant="outline" size="sm" onClick={handleExport} className="h-8">
             <Download className="size-3.5" />
-            导出 JSON
+            导出{selectedIds.size > 0 ? ` ${selectedIds.size}` : '全部'}
           </Button>
           <Button variant="outline" size="sm" onClick={triggerImport} className="h-8">
             <Upload className="size-3.5" />
-            导入 JSON
+            导入
           </Button>
           <Button size="sm" className="h-8 bg-primary text-primary-foreground hover:bg-primary/90" onClick={openCreateDialog}>
             <Plus className="size-3.5" />
@@ -722,7 +732,21 @@ export function ModelPage() {
             </div>
           ) : (
           <div className="overflow-x-auto rounded-md border border-border bg-[var(--surface-raised)]">
-            <div className="grid min-w-[820px] grid-cols-[minmax(220px,1.35fr)_minmax(180px,1fr)_120px_120px_176px] border-b border-border bg-[var(--surface-subtle)] px-3 py-2 text-xs font-medium text-muted-foreground">
+            <div className="grid min-w-[860px] grid-cols-[36px_minmax(220px,1.35fr)_minmax(180px,1fr)_120px_120px_176px] border-b border-border bg-[var(--surface-subtle)] px-3 py-2 text-xs font-medium text-muted-foreground">
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.size === filteredProviders.length && filteredProviders.length > 0}
+                  onChange={e => {
+                    if (e.target.checked) {
+                      setSelectedIds(new Set(filteredProviders.map(p => p.id)))
+                    } else {
+                      setSelectedIds(new Set())
+                    }
+                  }}
+                  className="size-4 rounded border-input"
+                />
+              </div>
               <div>模型配置</div>
               <div>模型</div>
               <div>Token</div>
@@ -732,8 +756,28 @@ export function ModelPage() {
             {filteredProviders.map(provider => {
               const usage = getTokenUsage(provider.id)
               const meta = getProviderMeta(provider)
+              const isSelected = selectedIds.has(provider.id)
               return (
-                <div key={provider.id} className="grid min-w-[820px] grid-cols-[minmax(220px,1.35fr)_minmax(180px,1fr)_120px_120px_176px] items-center border-b border-border/60 px-3 py-2.5 last:border-b-0 hover:bg-accent/60">
+                <div key={provider.id} className={cn(
+                  "grid min-w-[860px] grid-cols-[36px_minmax(220px,1.35fr)_minmax(180px,1fr)_120px_120px_176px] items-center border-b border-border/60 px-3 py-2.5 last:border-b-0",
+                  isSelected ? "bg-primary/5" : "hover:bg-accent/60"
+                )}>
+                  <div className="flex items-center">
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={e => {
+                        const newSet = new Set(selectedIds)
+                        if (e.target.checked) {
+                          newSet.add(provider.id)
+                        } else {
+                          newSet.delete(provider.id)
+                        }
+                        setSelectedIds(newSet)
+                      }}
+                      className="size-4 rounded border-input"
+                    />
+                  </div>
                   <div className="flex min-w-0 items-center gap-2.5">
                     <div className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-background">
                       {meta.icon}

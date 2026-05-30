@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import prisma from '../../../lib/prisma.js';
-import { agentCreatorTools } from './agent-creator.tools.js';
+import { agentCreatorTools, createAgentCreatorTools } from './agent-creator.tools.js';
 import { getSharedSkillsDir } from '../../../modules/skill/preinstalled-skills.js';
 import { skillInstallService } from '../../../modules/skill/skill-install.service.js';
 import {
@@ -29,6 +29,13 @@ function writeSharedSkill(slug: string, name: string, description: string): void
 }
 
 test.beforeEach(async () => {
+  await prisma.chatRoom.deleteMany({
+    where: {
+      name: {
+        startsWith: 'Agent Creator Tool Test',
+      },
+    },
+  });
   await prisma.agent.deleteMany({
     where: {
       name: {
@@ -91,6 +98,103 @@ test('list_categories returns category ids and names', async () => {
 
   assert.match(text, new RegExp(`ID: ${category.id}`));
   assert.match(text, /名称: Agent Creator Tool Test Audit/);
+});
+
+test('room-aware update_agent updates current room group history access', async () => {
+  const agent = await prisma.agent.create({
+    data: {
+      name: 'Agent Creator Tool Test Room History Agent',
+      prompt: 'test prompt',
+    },
+  });
+  const chatRoom = await prisma.chatRoom.create({
+    data: {
+      id: 'agent-creator-tool-test-room-history',
+      name: 'Agent Creator Tool Test Room History',
+      updatedAt: new Date(),
+    },
+  });
+  await prisma.chatRoomAgent.create({
+    data: {
+      id: 'agent-creator-tool-test-room-history-member',
+      chatRoomId: chatRoom.id,
+      agentId: agent.id,
+      role: 'MEMBER',
+      injectGroupHistory: false,
+    },
+  });
+
+  const tool = createAgentCreatorTools(chatRoom.id).find((item) => item.name === 'update_agent') as
+    | { invoke: (input: Record<string, unknown>) => Promise<unknown> }
+    | undefined;
+  assert.ok(tool);
+  const result = await tool.invoke({
+    agentId: agent.id,
+    injectGroupHistory: true,
+  });
+  const parsed = JSON.parse(String(result));
+
+  assert.equal(parsed.success, true);
+  assert.deepEqual(parsed.roomSettings, {
+    chatRoomId: chatRoom.id,
+    injectGroupHistory: true,
+  });
+
+  const roomAgent = await prisma.chatRoomAgent.findUnique({
+    where: {
+      chatRoomId_agentId: {
+        chatRoomId: chatRoom.id,
+        agentId: agent.id,
+      },
+    },
+  });
+
+  assert.equal(roomAgent?.injectGroupHistory, true);
+});
+
+test('room-aware create_agent adds new agent to current room with group history access', async () => {
+  const chatRoom = await prisma.chatRoom.create({
+    data: {
+      id: 'agent-creator-tool-test-create-room-history',
+      name: 'Agent Creator Tool Test Create Room History',
+      updatedAt: new Date(),
+    },
+  });
+
+  const tool = createAgentCreatorTools(chatRoom.id).find((item) => item.name === 'create_agent') as
+    | { invoke: (input: Record<string, unknown>) => Promise<unknown> }
+    | undefined;
+  assert.ok(tool);
+  const result = await tool.invoke({
+    name: 'Agent Creator Tool Test Create Room History Agent',
+    description: 'test description',
+    prompt: 'test prompt',
+    injectGroupHistory: true,
+  });
+  const parsed = JSON.parse(String(result));
+
+  assert.equal(parsed.success, true);
+  assert.deepEqual(parsed.roomMembership, {
+    chatRoomId: chatRoom.id,
+    injectGroupHistory: true,
+  });
+
+  const roomAgent = await prisma.chatRoomAgent.findUnique({
+    where: {
+      chatRoomId_agentId: {
+        chatRoomId: chatRoom.id,
+        agentId: parsed.agent.id,
+      },
+    },
+  });
+
+  assert.equal(roomAgent?.injectGroupHistory, true);
+  const createdAgent = await prisma.agent.findUnique({
+    where: { id: parsed.agent.id },
+  });
+  assert.match(createdAgent?.avatar ?? '', /^\d+$/);
+  assert.ok(Number(createdAgent?.avatar) >= 1 && Number(createdAgent?.avatar) < 30);
+  assert.equal(createdAgent?.avatarColor, null);
 });
 
 test('create_llm_provider supports image model configuration fields', async () => {

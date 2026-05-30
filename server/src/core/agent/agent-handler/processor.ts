@@ -1,10 +1,10 @@
 import type { ToolCall } from '../executor.interface.js';
 import { taskQueueService, type HistoryMessage } from '../../../modules/task-queue/task-queue.service.js';
-import { agentMemoryService } from '../../../modules/agent-memory/agent-memory.service.js';
 import { executionRecordService, type ExecutionEvent } from '../../../modules/execution-record/execution-record.service.js';
 import { recoveryService } from '../../../modules/recovery/recovery.service.js';
 import { stopTypingLoop } from '../../../modules/bridge/typing-loop.js';
 import { messageService } from '../../../modules/message/message.service.js';
+import { roomMessageIndexService } from '../../../modules/message/room-message-index.service.js';
 import { todoService } from '../../../modules/todo/todo.service.js';
 import { agentService } from '../agent.service.js';
 import {
@@ -88,9 +88,13 @@ export async function processQueue(chatRoomId: string, agentId: string) {
           // 使用入队时保存的历史消息，如果没有则获取当前历史
           let history: HistoryMessage[] | undefined = taskQueueService.parseHistory(task);
 
-          // 只有当任务没有保存历史且配置了注入群历史时，才构建摘要 + 最近消息上下文
+          // 只有当任务没有保存历史且配置了群历史访问时，才构建增量消息索引。
           if (!history && executor.injectGroupHistory) {
-            history = await agentMemoryService.buildHistory(chatRoomId, task.agentId, task.messageId);
+            history = await roomMessageIndexService.buildMessageIndex(
+              chatRoomId,
+              task.messageId,
+              executor.lastInjectedMessageId,
+            );
           }
 
           debugLog('taskHistory', {

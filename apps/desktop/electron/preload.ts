@@ -45,6 +45,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   exportPdf: (payload: { html: string; filename: string }) => ipcRenderer.invoke('pdf:export', payload),
   // 使用默认浏览器打开外部链接
   openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
+  setBadgeCount: (count: number) => ipcRenderer.invoke('notification:set-badge-count', count),
+  showNotification: (payload: { title: string; body: string; chatRoomId?: string }) => ipcRenderer.invoke('notification:show', payload),
+  onNotificationOpen: (callback: (chatRoomId: string) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, chatRoomId: string) => callback(chatRoomId);
+    ipcRenderer.on('notification:open-chatroom', handler);
+    return () => ipcRenderer.removeListener('notification:open-chatroom', handler);
+  },
   // 窗口控制 API (用于 Windows 无边框窗口)
   windowMinimize: () => ipcRenderer.invoke('window:minimize'),
   windowMaximize: () => ipcRenderer.invoke('window:maximize'),
@@ -63,6 +70,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   getServerStatus: () => ipcRenderer.invoke('get-server-status'),
   openLogFolder: () => ipcRenderer.invoke('open-log-folder'),
+  // 获取用户配置文件路径（用于登录界面提示）
+  getUserConfigPath: () => ipcRenderer.invoke('get-user-config-path'),
+  // 获取本地用户账号密码（用于自动填充登录表单）
+  getLocalUserCredentials: () => ipcRenderer.invoke('get-local-user-credentials'),
   appendDebugLog: (message: string, payload?: unknown) => ipcRenderer.invoke('debug:append-log', { message, payload }),
   // Runtime（server 从 resources 解压/拷贝到 userData）准备事件。
   // 首次启动或升级后会触发 start → progress* → done/error，

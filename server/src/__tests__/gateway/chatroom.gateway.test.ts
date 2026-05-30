@@ -1,14 +1,18 @@
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
+import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Fastify, { FastifyInstance } from 'fastify';
+import { getInternalAgentToolToken } from '../../core/agent/agent-handler/internal-agent-tool-auth.js';
 import { agentService } from '../../core/agent/agent.service.js';
 import { getDefaultChatRoomWorkDir } from '../../core/agent/work-dir.js';
 import { GROUP_ASSISTANT_ID, GROUP_COORDINATOR_ID } from '../../core/agent/system-assistant.constants.js';
 import { chatRoomGateway } from '../../gateway/chatroom.gateway.js';
+import { internalAgentToolsGateway } from '../../gateway/internal-agent-tools.gateway.js';
+import prisma from '../../lib/prisma.js';
 import { getGroupAssistantDefinition, getGroupCoordinatorDefinition } from '../../scripts/system-agent-definitions.js';
 import { syncSystemAgent, syncSystemAgents } from '../../scripts/system-agent-sync.js';
 
@@ -26,6 +30,7 @@ describe('ChatRoom Gateway API', () => {
     app = buildTestApp();
     workDirRoot = path.join(os.tmpdir(), `teamagentx-chatroom-tests-${Date.now()}`);
     await app.register(chatRoomGateway);
+    await app.register(internalAgentToolsGateway);
   });
 
   afterEach(async () => {
@@ -262,6 +267,7 @@ describe('ChatRoom Gateway API', () => {
       const body = response.json();
       const roomAgent = body.data.chatRoomAgents.find((item: any) => item.agent?.id === GROUP_ASSISTANT_ID);
       assert.ok(roomAgent);
+      assert.strictEqual(roomAgent.injectGroupHistory, true);
       assert.deepStrictEqual(roomAgent.agent.speechConfig, {
         behavior: {
           enabled: true,
@@ -288,6 +294,103 @@ describe('ChatRoom Gateway API', () => {
 
       const coordinatorAgent = body.data.chatRoomAgents.find((item: any) => item.agent?.id === GROUP_COORDINATOR_ID);
       assert.strictEqual(coordinatorAgent, undefined);
+    });
+
+    test('虚拟群助手默认开启群历史访问并允许按房间关闭', async () => {
+      await syncSystemAgent(getGroupAssistantDefinition());
+      await syncSystemAgent(getGroupCoordinatorDefinition());
+
+      const chatRoomResponse = await app.inject({
+        method: 'POST',
+        url: '/chatrooms',
+        payload: {
+          name: 'System History Room ' + Date.now(),
+          workDir: path.join(workDirRoot, 'system-history-room'),
+        },
+      });
+      assert.strictEqual(chatRoomResponse.statusCode, 201);
+      const createdRoom = chatRoomResponse.json();
+
+      const initialResponse = await app.inject({
+        method: 'GET',
+        url: `/chatrooms/${createdRoom.data.id}`,
+      });
+      assert.strictEqual(initialResponse.statusCode, 200);
+      const initialBody = initialResponse.json();
+      const initialGroupAgents = initialBody.data.chatRoomAgents.filter((item: any) => item.agent?.id === GROUP_ASSISTANT_ID);
+      assert.strictEqual(initialGroupAgents.length, 1);
+      assert.strictEqual(initialGroupAgents[0].injectGroupHistory, true);
+      assert.ok(initialGroupAgents[0].id.startsWith('system-'));
+
+      const initialToolsResponse = await app.inject({
+        method: 'POST',
+        url: '/internal/agent-tools/system-tools/list',
+        headers: {
+          authorization: `Bearer ${getInternalAgentToolToken()}`,
+        },
+        payload: {
+          chatRoomId: createdRoom.data.id,
+          sourceAgentId: GROUP_ASSISTANT_ID,
+        },
+      });
+      assert.strictEqual(initialToolsResponse.statusCode, 200);
+      const initialToolNames = initialToolsResponse.json().data.tools.map((tool: any) => tool.name);
+      assert.ok(initialToolNames.includes('get_recent_room_messages'));
+
+      const coordinatorToolsResponse = await app.inject({
+        method: 'POST',
+        url: '/internal/agent-tools/system-tools/list',
+        headers: {
+          authorization: `Bearer ${getInternalAgentToolToken()}`,
+        },
+        payload: {
+          chatRoomId: createdRoom.data.id,
+          sourceAgentId: GROUP_COORDINATOR_ID,
+        },
+      });
+      assert.strictEqual(coordinatorToolsResponse.statusCode, 200);
+      const coordinatorToolNames = coordinatorToolsResponse.json().data.tools.map((tool: any) => tool.name);
+      assert.ok(coordinatorToolNames.includes('get_recent_room_messages'));
+
+      const updateResponse = await app.inject({
+        method: 'PATCH',
+        url: `/chatrooms/${createdRoom.data.id}/agents/${GROUP_ASSISTANT_ID}/settings`,
+        payload: {
+          injectGroupHistory: false,
+        },
+      });
+      assert.strictEqual(updateResponse.statusCode, 200);
+      const updateBody = updateResponse.json();
+      assert.strictEqual(updateBody.success, true);
+      assert.strictEqual(updateBody.data.agentId, GROUP_ASSISTANT_ID);
+      assert.strictEqual(updateBody.data.injectGroupHistory, false);
+      assert.ok(!updateBody.data.id.startsWith('system-'));
+
+      const finalResponse = await app.inject({
+        method: 'GET',
+        url: `/chatrooms/${createdRoom.data.id}`,
+      });
+      assert.strictEqual(finalResponse.statusCode, 200);
+      const finalBody = finalResponse.json();
+      const finalGroupAgents = finalBody.data.chatRoomAgents.filter((item: any) => item.agent?.id === GROUP_ASSISTANT_ID);
+      assert.strictEqual(finalGroupAgents.length, 1);
+      assert.strictEqual(finalGroupAgents[0].injectGroupHistory, false);
+      assert.ok(!finalGroupAgents[0].id.startsWith('system-'));
+
+      const finalToolsResponse = await app.inject({
+        method: 'POST',
+        url: '/internal/agent-tools/system-tools/list',
+        headers: {
+          authorization: `Bearer ${getInternalAgentToolToken()}`,
+        },
+        payload: {
+          chatRoomId: createdRoom.data.id,
+          sourceAgentId: GROUP_ASSISTANT_ID,
+        },
+      });
+      assert.strictEqual(finalToolsResponse.statusCode, 200);
+      const finalToolNames = finalToolsResponse.json().data.tools.map((tool: any) => tool.name);
+      assert.ok(!finalToolNames.includes('get_recent_room_messages'));
     });
   });
 
@@ -561,6 +664,124 @@ describe('ChatRoom Gateway API', () => {
           { name: 'root', relativeDir: '' },
           { name: 'web', relativeDir: path.join('apps', 'web') },
         ],
+      );
+    });
+  });
+
+  describe('GET /chatrooms/:id/tasks/board', () => {
+    test('应该只返回当前消息周期的执行记录', async () => {
+      const chatRoomId = randomUUID();
+      const agentId = randomUUID();
+      const archiveId = randomUUID();
+      const archivedRecordId = randomUUID();
+      const currentRecordId = randomUUID();
+      const oldFailedRecordId = randomUUID();
+      const currentFailedRecordId = randomUUID();
+      const archiveTime = new Date('2026-05-29T08:00:00.000Z');
+
+      await prisma.chatRoom.create({
+        data: {
+          id: chatRoomId,
+          name: 'Task Board Current Room',
+          updatedAt: new Date(),
+        },
+      });
+      await prisma.chatRoomMessageArchive.create({
+        data: {
+          id: archiveId,
+          chatRoomId,
+          title: 'Archived messages',
+          messageCount: 1,
+          archivedAt: archiveTime,
+        },
+      });
+      await prisma.executionRecord.createMany({
+        data: [
+          {
+            id: archivedRecordId,
+            chatRoomId,
+            agentId,
+            agentName: 'codex',
+            triggerMessage: 'archived task',
+            events: '[]',
+            systemPrompt: 'test',
+            status: 'completed',
+            createdAt: new Date('2026-05-29T07:50:00.000Z'),
+          },
+          {
+            id: currentRecordId,
+            chatRoomId,
+            agentId,
+            agentName: 'codex',
+            triggerMessage: 'current task',
+            events: '[]',
+            systemPrompt: 'test',
+            status: 'completed',
+            createdAt: new Date('2026-05-29T08:10:00.000Z'),
+          },
+          {
+            id: oldFailedRecordId,
+            chatRoomId,
+            agentId,
+            agentName: 'codex',
+            triggerMessage: 'old failed task',
+            events: '[]',
+            systemPrompt: 'test',
+            status: 'failed',
+            errorMessage: 'old failure',
+            createdAt: new Date('2026-05-29T07:55:00.000Z'),
+          },
+          {
+            id: currentFailedRecordId,
+            chatRoomId,
+            agentId,
+            agentName: 'codex',
+            triggerMessage: 'current failed task',
+            events: '[]',
+            systemPrompt: 'test',
+            status: 'failed',
+            errorMessage: 'current failure',
+            createdAt: new Date('2026-05-29T08:15:00.000Z'),
+          },
+        ],
+      });
+      await prisma.message.createMany({
+        data: [
+          {
+            id: randomUUID(),
+            content: 'archived output',
+            chatRoomId,
+            isHuman: false,
+            executionRecordId: archivedRecordId,
+            archiveId,
+            updatedAt: new Date(),
+          },
+          {
+            id: randomUUID(),
+            content: 'current output',
+            chatRoomId,
+            isHuman: false,
+            executionRecordId: currentRecordId,
+            updatedAt: new Date(),
+          },
+        ],
+      });
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/chatrooms/${chatRoomId}/tasks/board`,
+      });
+
+      assert.strictEqual(response.statusCode, 200);
+      const body = response.json();
+      assert.strictEqual(body.success, true);
+      assert.deepStrictEqual(
+        body.data.completed.map((item: { executionRecordId: string }) => item.executionRecordId),
+        [currentRecordId],
+      );
+      assert.deepStrictEqual(
+        body.data.failed.map((item: { executionRecordId: string }) => item.executionRecordId),
+        [currentFailedRecordId],
       );
     });
   });

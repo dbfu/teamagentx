@@ -301,7 +301,7 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
     // 如果输入框已有内容且不以空格结尾，添加空格
     const prefix = currentValue && !currentValue.endsWith(' ') ? `${currentValue} ` : currentValue
     // 添加 @助手名 和一个空格
-    setInputValue(`${prefix}@${agentName} `)
+    setInputValue(`${prefix}@${agentName} `, chatRoom?.id)
   }
 
   const isTaskBoardOpen = sidePanelMode === 'task-board'

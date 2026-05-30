@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events';
 import { chatRoomService } from '../../../modules/chatroom/chatroom.service.js';
-import { agentMemoryService } from '../../../modules/agent-memory/agent-memory.service.js';
 import { messageService } from '../../../modules/message/message.service.js';
+import { roomMessageIndexService } from '../../../modules/message/room-message-index.service.js';
 import { agentService } from '../agent.service.js';
 import { recoveryService } from '../../../modules/recovery/recovery.service.js';
 import type { Message } from '../../../types/message.js';
@@ -13,6 +13,29 @@ import { debugLog } from './debug.js';
 import { enqueueAgentTask } from './agent-dispatch.service.js';
 import { GROUP_COORDINATOR_ID } from '../system-assistant.constants.js';
 import { createInternalCoordinatorAgent } from '../internal-coordinator-agent.js';
+
+export const COORDINATOR_RECENT_HISTORY_LIMIT = 5;
+
+export async function buildCoordinatorDispatchOptions(
+  chatRoomId: string,
+  currentMessageId: string,
+) {
+  try {
+    const history = await roomMessageIndexService.buildMessageIndex(
+      chatRoomId,
+      currentMessageId,
+    );
+
+    return {history: history.slice(-COORDINATOR_RECENT_HISTORY_LIMIT)};
+  } catch (error) {
+    console.error(
+      `[Coordinator] ${chatRoomId} 构建最近群消息索引失败，降级为空历史:`,
+      error,
+    );
+    return {history: []};
+  }
+}
+
 // 消息接收事件接口
 interface ReceivedMessageEvent {
   message: Message;
@@ -233,10 +256,9 @@ export function setupAIHandlers(
             hasMentions,
           });
 
-          const coordinatorHistory = await agentMemoryService.buildRecentHistory(
+          const coordinatorOptions = await buildCoordinatorDispatchOptions(
             chatRoomId,
             message.id,
-            5,
           );
 
           await enqueueAgentTask(
@@ -244,7 +266,7 @@ export function setupAIHandlers(
             message,
             createInternalCoordinatorAgent(coordinatorAgent),
             undefined,
-            { history: coordinatorHistory },
+            coordinatorOptions,
           );
         } else {
           console.warn(`[coordinatorAgentTrigger] 内置协调助手不存在或未启用: ${GROUP_COORDINATOR_ID}`);

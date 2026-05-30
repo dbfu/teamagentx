@@ -27,6 +27,7 @@ import { WindowTitleBar } from './components/ui/window-title-bar'
 import { useIsMobile } from './hooks/use-mobile'
 import { playMessageSound } from './lib/message-sound'
 import { updateManager } from './lib/update-manager'
+import { getTotalUnreadForNotifications, showMessageNotification, syncAppBadge } from './lib/notification-service'
 import { cn } from './lib/utils'
 import { SetupWizard } from './components/setup/setup-wizard'
 import { UpdateNotification } from './components/update/update-notification'
@@ -379,6 +380,7 @@ function AppContent() {
   const addRoom = useChatRoomStore((s) => s.addRoom)
   const updateRoomLastMessage = useChatRoomStore((s) => s.updateRoomLastMessage)
   const unreadCounts = useChatStore((s) => s.unreadCounts)
+  const totalUnreadCount = getTotalUnreadForNotifications(unreadCounts)
   const setUnreadCounts = useChatStore((s) => s.setUnreadCounts)
   const updateUnreadCount = useChatStore((s) => s.updateUnreadCount)
   const executingChatRooms = useChatStore((s) => s.executingChatRooms)
@@ -448,16 +450,61 @@ function AppContent() {
     navigate('/')
   }
 
+  const openChatRoomFromNotification = useCallback(async (roomId: string) => {
+    await loadChatRooms()
+    selectRoomAndClearUnread(roomId)
+    navigate('/')
+  }, [loadChatRooms, navigate, selectRoomAndClearUnread])
+
   // 加载聊天室列表
   useEffect(() => {
     loadChatRooms()
   }, [loadChatRooms])
 
-  // 全局消息监听 - 更新群聊列表的 lastMessage + 播放提示音
+  useEffect(() => {
+    const unsubscribeElectron = window.electronAPI?.onNotificationOpen?.((roomId) => {
+      void openChatRoomFromNotification(roomId)
+    })
+    return () => {
+      unsubscribeElectron?.()
+    }
+  }, [openChatRoomFromNotification])
+
+  // 全局消息监听 - 更新群聊列表的 lastMessage + 播放提示音 + 未读处理
+  // 使用固定队列存储已处理的消息 ID（最多 100 条），避免重复处理
+  const processedMessageIdsRef = useRef<{ queue: string[]; set: Set<string> }>({
+    queue: [],
+    set: new Set(),
+  })
+
+  // 检查并添加消息 ID，如果已存在返回 false，否则添加并返回 true
+  const checkAndAddMessageId = useCallback((id: string): boolean => {
+    const { queue, set } = processedMessageIdsRef.current
+    if (set.has(id)) {
+      return false // 已处理过
+    }
+    // 添加新消息 ID
+    set.add(id)
+    queue.push(id)
+    // 超过 100 条时删除最旧的
+    if (queue.length > 100) {
+      const oldest = queue.shift()
+      if (oldest) {
+        set.delete(oldest)
+      }
+    }
+    return true // 新消息
+  }, [])
+
   useEffect(() => {
     if (!isConnected) return
 
     const unsubscribe = onMessage((msg) => {
+      // 去重：避免同一消息被处理多次
+      if (!checkAndAddMessageId(msg.id)) {
+        return
+      }
+
       // 更新群聊的 lastMessage
       updateRoomLastMessage(msg.chatRoomId, {
         id: msg.id,
@@ -474,9 +521,40 @@ function AppContent() {
       if (msg.agentId) {
         playMessageSound()
       }
+
+      // 未读处理：忽略自己发的消息
+      if (msg.userId !== user?.id) {
+        const currentVisibleChatRoomId = visibleChatRoomIdRef.current
+        const isWindowFocused = document.hasFocus()
+        const isDocumentVisible = document.visibilityState === 'visible'
+
+        // 关键判断：只有"在当前群聊页面但窗口未聚焦"时才本地加未读
+        // 其他情况（不在群聊页面）服务端会推送 unread:update，不需要本地处理
+        const isInCurrentChatRoom = msg.chatRoomId === currentVisibleChatRoomId
+        const isNotFocusedOrNotVisible = !isWindowFocused || !isDocumentVisible
+
+        if (isInCurrentChatRoom && isNotFocusedOrNotVisible) {
+          // 在群聊页面但窗口未聚焦，服务端不会推送未读（因为 socket 已 join 群聊房间）
+          // 需要客户端自己加
+          const currentCount = unreadCounts[msg.chatRoomId] || 0
+          updateUnreadCount(msg.chatRoomId, currentCount + 1)
+        }
+
+        // 显示桌面通知：窗口未聚焦时都要发（不管是否在当前群聊）
+        if (isNotFocusedOrNotVisible) {
+          const room = chatRooms.find((chatRoom) => chatRoom.id === msg.chatRoomId)
+          void showMessageNotification({
+            title: room?.name || 'TeamAgentX',
+            content: msg.content,
+            attachments: msg.attachments,
+            chatRoomId: msg.chatRoomId,
+            totalUnreadCount,
+          })
+        }
+      }
     })
     return unsubscribe
-  }, [isConnected, onMessage, updateRoomLastMessage])
+  }, [chatRooms, isConnected, onMessage, selectedRoomId, totalUnreadCount, updateRoomLastMessage, user?.id, unreadCounts, updateUnreadCount])
 
   // 监听新群聊创建事件（其他端创建的群聊会同步过来）
   useEffect(() => {
@@ -682,8 +760,10 @@ function AppContent() {
     }
   }, [])
 
-  // 计算总未读数
-  const totalUnreadCount = Object.values(unreadCounts).reduce((sum, count) => sum + count, 0)
+  useEffect(() => {
+    void syncAppBadge(totalUnreadCount)
+  }, [totalUnreadCount])
+
   // 移动端导航到群聊
   const handleMobileNavigateToChatRoom = (roomId: string) => {
     selectRoomAndClearUnread(roomId)
@@ -757,8 +837,8 @@ function AppContent() {
 }
 
 export default function App() {
-  const { state, isFirstUse, setupCompleted, login, register, token, checkAuth, setupLogin, setSetupCompleted } = useAuthStore()
-  const { connect, disconnect, isConnected } = useSocketStore()
+  const { state, isFirstUse, setupCompleted, login, register, logout, token, checkAuth, setupLogin, setSetupCompleted } = useAuthStore()
+  const { connect, disconnect, isConnected, onAuthPasswordChanged } = useSocketStore()
   const { showLogin, showRegister, setShowLogin, setShowRegister } = useUIStore()
 
   // Track if we've already connected
@@ -840,6 +920,25 @@ export default function App() {
       disconnect()
     }
   }, [state, token, isConnected, connect, disconnect])
+
+  // 监听密码变更事件 - 收到后清除 token 并跳转登录页
+  useEffect(() => {
+    if (!isConnected || state !== 'authenticated') return
+
+    const unsubscribe = onAuthPasswordChanged((data) => {
+      console.log('[Auth] 收到密码变更通知:', data.message)
+      toast.warning('密码已变更', {
+        description: '请使用新密码重新登录',
+        duration: 5000,
+      })
+      // 延迟一小段时间让用户看到 toast，然后 logout
+      setTimeout(() => {
+        logout()
+      }, 1000)
+    })
+
+    return unsubscribe
+  }, [isConnected, state, onAuthPasswordChanged, logout])
 
   // Show disconnected banner when connection is lost
   useEffect(() => {
@@ -1017,22 +1116,27 @@ export default function App() {
     )
   }
 
+  // 未登录时只显示登录框，不显示任何其他内容
+  const isUnauthenticated = state === 'unauthenticated' && (showLogin || showRegister)
+
   return (
     <div className="flex flex-col h-screen w-full bg-[var(--surface)]">
       {/* Windows 自定义标题栏 */}
       <WindowTitleBar />
 
-      {/* 服务断开连接提示 */}
-      {showDisconnectedBanner && (
+      {/* 已登录后才显示服务断开连接提示 */}
+      {!isUnauthenticated && showDisconnectedBanner && (
         <div className="flex items-center justify-center gap-2 px-4 py-2 bg-yellow-500 text-white text-sm">
           <Loader2 className="size-4 animate-spin" />
           <span>服务已关闭，正在尝试重新连接...</span>
         </div>
       )}
 
-      <UpdateNotification />
+      {/* 已登录后才显示更新通知 */}
+      {!isUnauthenticated && <UpdateNotification />}
 
-      <AppContent />
+      {/* 已登录后才显示主内容 */}
+      {!isUnauthenticated && <AppContent />}
 
       {/* Login Modal */}
       <LoginModal

@@ -1,10 +1,8 @@
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Switch } from '@/components/ui/switch'
 import { Agent, agentApi, chatRoomApi } from '@/lib/agent-api'
 import { AgentAvatarImage } from '@/lib/agent-avatars'
-import { GroupAvatarImage, groupAvatarOptions } from '@/lib/group-avatars'
+import { getRandomGroupAvatarIndex, GroupAvatarImage, groupAvatarOptions } from '@/lib/group-avatars'
 import { cn } from '@/lib/utils'
-import { Check, FolderOpen, Settings2, X } from 'lucide-react'
+import { Check, FolderOpen, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 
@@ -19,10 +17,9 @@ export function CreateGroupModal({ isOpen, onClose, onSuccess, ownerId }: Create
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [workDir, setWorkDir] = useState('')
-  const [selectedAvatarIndex, setSelectedAvatarIndex] = useState(0)
+  const [selectedAvatarIndex, setSelectedAvatarIndex] = useState(() => getRandomGroupAvatarIndex())
   const [agents, setAgents] = useState<Agent[]>([])
   const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string>>(new Set())
-  const [agentInjectSettings, setAgentInjectSettings] = useState<Map<string, boolean>>(new Map())
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -42,22 +39,12 @@ export function CreateGroupModal({ isOpen, onClose, onSuccess, ownerId }: Create
 
   const toggleAgent = (agentId: string) => {
     const newSelected = new Set(selectedAgentIds)
-    const newSettings = new Map(agentInjectSettings)
     if (newSelected.has(agentId)) {
       newSelected.delete(agentId)
-      newSettings.delete(agentId)
     } else {
       newSelected.add(agentId)
-      newSettings.set(agentId, true) // 默认开启
     }
     setSelectedAgentIds(newSelected)
-    setAgentInjectSettings(newSettings)
-  }
-
-  const toggleInjectSetting = (agentId: string) => {
-    const newSettings = new Map(agentInjectSettings)
-    newSettings.set(agentId, !newSettings.get(agentId))
-    setAgentInjectSettings(newSettings)
   }
 
   const handleSelectFolder = async () => {
@@ -96,7 +83,6 @@ export function CreateGroupModal({ isOpen, onClose, onSuccess, ownerId }: Create
         await chatRoomApi.addAgent(chatRoomId, {
           agentId,
           role: 'MEMBER',
-          injectGroupHistory: agentInjectSettings.get(agentId) ?? true,
         })
       }
 
@@ -104,9 +90,8 @@ export function CreateGroupModal({ isOpen, onClose, onSuccess, ownerId }: Create
       setName('')
       setDescription('')
       setWorkDir('')
-      setSelectedAvatarIndex(0)
+      setSelectedAvatarIndex(getRandomGroupAvatarIndex())
       setSelectedAgentIds(new Set())
-      setAgentInjectSettings(new Map())
       onSuccess?.(chatRoomId)
       onClose()
     } finally {
@@ -256,31 +241,6 @@ export function CreateGroupModal({ isOpen, onClose, onSuccess, ownerId }: Create
                             {isSelected && <Check className="size-3" />}
                           </div>
                         </button>
-                        {isSelected && (
-                          <Popover>
-                            <PopoverTrigger asChild>
-                              <button
-                                type="button"
-                                className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-                              >
-                                <Settings2 className="size-4" />
-                              </button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-64" align="end">
-                              <div className="flex items-center justify-between">
-                                <div>
-                                  <div className="text-sm font-medium">注入群历史消息</div>
-                                  <div className="text-xs text-muted-foreground">开启后获取群聊上下文</div>
-                                </div>
-                                <Switch
-                                  checked={agentInjectSettings.get(agent.id) ?? true}
-                                  onCheckedChange={() => toggleInjectSetting(agent.id)}
-                                  className="data-[state=checked]:bg-primary"
-                                />
-                              </div>
-                            </PopoverContent>
-                          </Popover>
-                        )}
                       </div>
                     )
                   })}

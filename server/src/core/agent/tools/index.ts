@@ -11,7 +11,6 @@ export {
   SKILL_MANAGER_AGENT_ID,
   skillManagerTools,
   getSharedSkillsDir,
-  getChatHistoryTool, // 导出供其他工具复用
 } from './skill-manager.tools.js';
 
 // 助手生成助手工具
@@ -29,6 +28,7 @@ export {
 // 群聊管理助手工具
 export {
   CHATROOM_HELPER_AGENT_ID,
+  createChatRoomHelperTools,
   chatroomHelperTools,
 } from './chatroom-helper.tools.js';
 
@@ -37,4 +37,5 @@ export {
   createExternalPlatformHelperTools,
 } from './external-platform-helper.tools.js';
 
+export { createChatHistorySearchTools } from './chat-history-search.tools.js';
 export { getSystemAssistantTools } from './system-assistant.tools.js';

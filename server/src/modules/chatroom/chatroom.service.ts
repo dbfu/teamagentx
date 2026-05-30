@@ -9,6 +9,7 @@ import {
   getSystemAgentsCached,
   type SystemAgentInfo as CachedSystemAgentInfo,
 } from './system-agents-cache.js';
+import { shouldEnableRoomHistoryByDefault } from '../../core/agent/system-assistant.constants.js';
 
 export interface CreateChatRoomData {
   name: string;
@@ -100,6 +101,21 @@ async function getSystemAgents(): Promise<SystemAgentInfo[]> {
   return getSystemAgentsCached();
 }
 
+function createVirtualSystemAgentMember(chatRoomId: string, agentId: string) {
+  return {
+    id: `system-${agentId}`,
+    chatRoomId,
+    userId: null,
+    agentId,
+    role: 'MEMBER',
+    injectGroupHistory: shouldEnableRoomHistoryByDefault(agentId),
+    customWorkDir: null,
+    joinedAt: new Date(),
+    lastReadAt: new Date(),
+    lastInjectedMessageId: null,
+  };
+}
+
 async function normalizeDefaultAgentId(chatRoomId: string, defaultAgentId: string | null): Promise<string | null> {
   const normalizedAgentId = defaultAgentId?.trim() || null;
   if (!normalizedAgentId) return null;
@@ -147,15 +163,7 @@ function addVirtualSystemAgents<T extends { id: string; chatRoomAgents: any[] }>
   const virtualSystemAgents = systemAgents
     .filter((agent: SystemAgentInfo) => !existingAgentIds.has(agent.id))
     .map((agent: SystemAgentInfo) => ({
-      id: `system-${agent.id}`,
-      chatRoomId: chatRoom.id,
-      userId: null,
-      agentId: agent.id,
-      role: 'MEMBER',
-      injectGroupHistory: true,
-      customWorkDir: null,
-      joinedAt: new Date(),
-      lastReadAt: new Date(),
+      ...createVirtualSystemAgentMember(chatRoom.id, agent.id),
       user: null,
       agent: {
         id: agent.id,
@@ -306,7 +314,7 @@ export const chatRoomService = {
         chatRoomId: chatRoom.id,
         userId: ownerId,
         role: 'OWNER',
-        injectGroupHistory: true,
+        injectGroupHistory: false,
       },
     });
 
@@ -518,7 +526,7 @@ export const chatRoomService = {
   },
 
   async addAgent(data: AddAgentData) {
-    const { chatRoomId, userId, agentId, role = 'MEMBER', injectGroupHistory = true } = data;
+    const { chatRoomId, userId, agentId, role = 'MEMBER', injectGroupHistory = false } = data;
 
     // Validate that exactly one of userId or agentId is provided
     if ((!userId && !agentId) || (userId && agentId)) {
@@ -592,9 +600,12 @@ export const chatRoomService = {
   },
 
   async getAgentMember(chatRoomId: string, agentId: string) {
-    return prisma.chatRoomAgent.findFirst({
+    const member = await prisma.chatRoomAgent.findFirst({
       where: { chatRoomId, agentId },
     });
+    if (member) return member;
+    if (!shouldEnableRoomHistoryByDefault(agentId)) return null;
+    return createVirtualSystemAgentMember(chatRoomId, agentId);
   },
 
   async delete(id: string) {
@@ -649,34 +660,10 @@ export const chatRoomService = {
 
     // 获取所有系统助手
     const systemAgents = await getSystemAgents();
-
-    // 构造虚拟的 ChatRoomAgent 对象用于系统助手
-    const virtualSystemAgents = systemAgents.map((agent) => ({
-      id: `system-${agent.id}`, // 虚拟 ID，用于前端识别
-      chatRoomId,
-      userId: null,
-      agentId: agent.id,
-      role: 'MEMBER',
-      injectGroupHistory: true,
-      customWorkDir: null,
-      joinedAt: new Date(),
-      lastReadAt: new Date(),
-      user: null,
-      agent: {
-        id: agent.id,
-        name: agent.name,
-        avatar: agent.avatar,
-        avatarColor: agent.avatarColor,
-        description: agent.description,
-        type: agent.type,
-        agentLevel: agent.agentLevel,
-        workDir: agent.workDir,
-        speechConfig: agent.speechConfig,
-      },
-    }));
-
-    // 合并返回，系统助手放在最后
-    return [...regularAgents, ...virtualSystemAgents];
+    return addVirtualSystemAgents(
+      { id: chatRoomId, chatRoomAgents: regularAgents },
+      systemAgents,
+    ).chatRoomAgents;
   },
 
   /**
@@ -717,7 +704,7 @@ export const chatRoomService = {
         chatRoomId,
         userId,
         role: 'OWNER',
-        injectGroupHistory: true,
+        injectGroupHistory: false,
         lastReadAt: now,
       },
     });
@@ -732,6 +719,18 @@ export const chatRoomService = {
     });
 
     if (!chatRoomAgent) {
+      if (shouldEnableRoomHistoryByDefault(agentId)) {
+        return prisma.chatRoomAgent.create({
+          data: {
+            id: randomUUID(),
+            chatRoomId,
+            agentId,
+            role: 'MEMBER',
+            injectGroupHistory: data.injectGroupHistory ?? true,
+          },
+          include: agentInclude,
+        });
+      }
       throw new Error('该助手不在群聊中');
     }
 
@@ -897,7 +896,7 @@ export const chatRoomService = {
         chatRoomId: chatRoom.id,
         userId,
         role: 'OWNER',
-        injectGroupHistory: true,
+        injectGroupHistory: false,
       },
     });
 

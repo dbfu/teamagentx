@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { createSystemTool as tool } from './system-tool.js';
 import { agentService } from '../../../core/agent/agent.service.js';
+import { chatRoomService } from '../../../modules/chatroom/chatroom.service.js';
 import { categoryService } from '../../../modules/category/category.service.js';
 import { llmProviderService } from '../../../modules/llm-provider/llm-provider.service.js';
 import {
@@ -13,7 +14,7 @@ import { skillInstallService } from '../../../modules/skill/skill-install.servic
 import { createSkillDirectoryLink } from '../../../modules/skill/skill-link.js';
 import { readSkillMetadata } from '../../../modules/skill/skill-metadata.js';
 import { installSkillFromSourceTool } from './skills-helper.tools.js';
-import { getChatHistoryTool, listSharedSkillsTool } from './skill-manager.tools.js';
+import { listSharedSkillsTool } from './skill-manager.tools.js';
 import {
   deserializeAgentSpeechConfig,
   normalizeAgentSpeechConfig,
@@ -29,6 +30,7 @@ import {
   buildSpeechVoiceCatalog,
 } from '../../../modules/speech/voice-catalog.js';
 import { clearExecutorCacheEntries } from '../agent-handler/cache.js';
+import { broadcastAgentsUpdated } from '../agent-handler/status.js';
 
 // 助手生成助手的专用 ID
 export const AGENT_CREATOR_AGENT_ID = '29ffb519-82d2-4c32-8bc8-0b8d814a4eee';
@@ -44,14 +46,13 @@ export type AcpToolValue = (typeof ACP_TOOL_VALUES)[number];
 const LLM_MODEL_TYPES = ['text', 'image', 'video', 'audio'] as const;
 const IMAGE_GEN_API_TYPES = ['sync', 'async', 'auto'] as const;
 const AUDIO_USAGE_VALUES = ['tts', 'stt', 'both'] as const;
+const AGENT_AVATAR_COUNT = 30;
 
 // 单个助手配置类型
 type AgentConfig = {
   name: string;
   description: string;
   prompt: string;
-  avatar?: string;
-  avatarColor?: string;
   type?: 'builtin' | 'acp';
   acpTool?: AcpToolValue;
   workDir?: string;
@@ -60,6 +61,8 @@ type AgentConfig = {
   speechPresetId?: SpeechPresetId;
   speechConfig?: AgentSpeechConfig;
   autoInstallSkillNames?: string[];
+  chatRoomId?: string;
+  injectGroupHistory?: boolean;
 };
 
 type SkillSummary = {
@@ -68,6 +71,87 @@ type SkillSummary = {
   description: string;
   sourceDir: string;
 };
+
+type UpdateAgentConfig = {
+  agentId: string;
+  name?: string;
+  description?: string;
+  prompt?: string;
+  speechPresetId?: SpeechPresetId;
+  speechConfig?: AgentSpeechConfig;
+  llmProviderId?: string;
+  categoryId?: string;
+  chatRoomId?: string;
+  injectGroupHistory?: boolean;
+};
+
+function getRandomAgentAvatarValue(): string {
+  return String(Math.floor(Math.random() * (AGENT_AVATAR_COUNT - 1)) + 1);
+}
+
+async function updateAgentRoomHistoryAccess({
+  agentId,
+  agentName,
+  chatRoomId,
+  defaultChatRoomId,
+  injectGroupHistory,
+}: {
+  agentId: string;
+  agentName: string;
+  chatRoomId?: string;
+  defaultChatRoomId?: string;
+  injectGroupHistory?: boolean;
+}): Promise<{ chatRoomId: string; injectGroupHistory: boolean } | null> {
+  if (injectGroupHistory === undefined) return null;
+
+  const targetChatRoomId = chatRoomId || defaultChatRoomId;
+  if (!targetChatRoomId) {
+    throw new Error('修改群历史访问需要群聊上下文。群助手在群聊内调用时可直接设置 injectGroupHistory；外部调用请提供 chatRoomId。');
+  }
+
+  const roomAgent = await chatRoomService.updateAgentSettings(targetChatRoomId, agentId, {
+    injectGroupHistory,
+  });
+  clearExecutorCacheEntries(agentName, targetChatRoomId);
+  broadcastAgentsUpdated(targetChatRoomId);
+
+  return {
+    chatRoomId: targetChatRoomId,
+    injectGroupHistory: roomAgent.injectGroupHistory,
+  };
+}
+
+async function addCreatedAgentToRoom({
+  agentId,
+  chatRoomId,
+  defaultChatRoomId,
+  injectGroupHistory,
+}: {
+  agentId: string;
+  chatRoomId?: string;
+  defaultChatRoomId?: string;
+  injectGroupHistory?: boolean;
+}): Promise<{ chatRoomId: string; injectGroupHistory: boolean } | null> {
+  if (injectGroupHistory === undefined) return null;
+
+  const targetChatRoomId = chatRoomId || defaultChatRoomId;
+  if (!targetChatRoomId) {
+    throw new Error('创建助手时设置群历史访问需要群聊上下文。群助手在群聊内调用时可直接设置 injectGroupHistory；外部调用请提供 chatRoomId。');
+  }
+
+  const roomAgent = await chatRoomService.addAgent({
+    chatRoomId: targetChatRoomId,
+    agentId,
+    role: 'MEMBER',
+    injectGroupHistory,
+  });
+  broadcastAgentsUpdated(targetChatRoomId);
+
+  return {
+    chatRoomId: targetChatRoomId,
+    injectGroupHistory: roomAgent.injectGroupHistory,
+  };
+}
 
 function normalizeAgentTypeConfig(config: Pick<AgentConfig, 'type' | 'acpTool'>): {
   type: 'builtin' | 'acp';
@@ -190,225 +274,259 @@ const speechConfigSchema = z
   .describe('语音播报配置，不填则不设置语音');
 
 // 创建助手工具
-export const createAgentTool = tool(
-  async ({
-    name,
-    description,
-    prompt,
-    avatar,
-    avatarColor,
-    type,
-    acpTool,
-    workDir,
-    llmProviderId,
-    categoryId,
-    speechPresetId,
-    speechConfig,
-    autoInstallSkillNames,
-  }: AgentConfig) => {
-    try {
-      const normalizedType = normalizeAgentTypeConfig({ type, acpTool });
-
-      // 检查名称是否已存在
-      const existing = await agentService.findByName(name);
-      if (existing) {
-        return `助手名称 "${name}" 已存在，请使用其他名称。`;
-      }
-
-      const agent = await agentService.create({
-        name,
-        description,
-        prompt,
-        avatar: avatar || 'Bot',
-        avatarColor: avatarColor || 'bg-blue-500',
-        type: normalizedType.type,
-        acpTool: normalizedType.acpTool,
-        workDir,
-        llmProviderId,
-        categoryId,
-        speechConfig: resolveSpeechConfigInput({
-          speechPresetId,
-          speechConfig: speechConfig ?? null,
-          currentSpeechConfig: null,
-        }),
-      });
-      const installedDefaultSkills = await installDefaultSkillsForNewAgent(agent);
-      const selectedSkillsResult = await installModelSelectedSkills(agent, autoInstallSkillNames);
-
-      return JSON.stringify({
-        success: true,
-        agent: {
-          id: agent.id,
-          name: agent.name,
-          description: agent.description,
-          type: agent.type,
-        },
-        installedDefaultSkills,
-        modelSelectedSkills: selectedSkillsResult.installed,
-        skippedModelSelectedSkills: selectedSkillsResult.skipped,
-        message: `成功创建助手 "${name}"。用户可以在群聊中通过 @${name} 来使用它。`,
-      });
-    } catch (error) {
-      return JSON.stringify({
-        success: false,
-        error: error instanceof Error ? error.message : '创建失败',
-      });
-    }
-  },
-  {
-    name: 'create_agent',
-    description: '【必须用户确认后才能调用】创建一个新的AI助手。⚠️ 重要：调用此工具前，必须先向用户展示助手配置（名称、描述、核心能力），并明确询问"是否确认创建？"等待用户回复确认后才能调用。如果用户提出修改，调整配置后再次确认。',
-    schema: z.object({
-      name: z.string().describe('助手名称，必须唯一'),
-      description: z.string().describe('助手功能描述'),
-      prompt: z.string().describe('系统提示词，定义助手的行为和能力'),
-      avatar: z.string().optional().describe('头像图标名称'),
-      avatarColor: z
-        .string()
-        .optional()
-        .describe('头像背景颜色，Tailwind渐变类'),
-      type: z
-        .enum(['builtin', 'acp'])
-        .optional()
-        .describe('助手类型，默认 acp'),
-      acpTool: z.enum(ACP_TOOL_VALUES).optional().describe('本地 Agent 工具名称（type=acp 时默认 claude）'),
-      workDir: z.string().optional().describe('工作目录路径，可选'),
-      llmProviderId: z
-        .string()
-        .optional()
-        .describe('LLM供应商ID，可选；本地 Agent 仅支持 claude/anthropic 和 codex/openai'),
-      categoryId: z.string().optional().describe('分类ID，可选'),
-      speechPresetId: speechPresetIdSchema,
-      speechConfig: speechConfigSchema,
-      autoInstallSkillNames: z
-        .array(z.string())
-        .optional()
-        .describe('由模型根据 list_shared_skills 返回的共享技能列表自行选择要安装的技能名称或目录名。不要猜测；没有合适技能时传空数组或省略。'),
-    }),
-  },
-);
-
-// 批量创建助手工具
-export const createAgentsTool = tool(
-  async ({ agents }: { agents: AgentConfig[] }) => {
-    if (!agents || agents.length === 0) {
-      return JSON.stringify({
-        success: false,
-        error: '请提供至少一个助手配置',
-      });
-    }
-
-    const results: Array<{
-      name: string;
-      success: boolean;
-      agent?: { id: string; name: string; description: string; type: string };
-      installedDefaultSkills?: string[];
-      modelSelectedSkills?: string[];
-      skippedModelSelectedSkills?: string[];
-      error?: string;
-    }> = [];
-
-    let successCount = 0;
-    let failCount = 0;
-
-    for (const config of agents) {
+export function createCreateAgentTool(defaultChatRoomId?: string) {
+  return tool(
+    async ({
+      name,
+      description,
+      prompt,
+      type,
+      acpTool,
+      workDir,
+      llmProviderId,
+      categoryId,
+      speechPresetId,
+      speechConfig,
+      autoInstallSkillNames,
+      chatRoomId,
+      injectGroupHistory,
+    }: AgentConfig) => {
       try {
-        const normalizedType = normalizeAgentTypeConfig(config);
+        const normalizedType = normalizeAgentTypeConfig({ type, acpTool });
 
         // 检查名称是否已存在
-        const existing = await agentService.findByName(config.name);
+        const existing = await agentService.findByName(name);
         if (existing) {
-          results.push({
-            name: config.name,
-            success: false,
-            error: `助手名称 "${config.name}" 已存在`,
-          });
-          failCount++;
-          continue;
+          return `助手名称 "${name}" 已存在，请使用其他名称。`;
         }
 
         const agent = await agentService.create({
-          name: config.name,
-          description: config.description,
-          prompt: config.prompt,
-          avatar: config.avatar || 'Bot',
-          avatarColor: config.avatarColor || 'bg-blue-500',
+          name,
+          description,
+          prompt,
+          avatar: getRandomAgentAvatarValue(),
           type: normalizedType.type,
           acpTool: normalizedType.acpTool,
-          workDir: config.workDir,
-          llmProviderId: config.llmProviderId,
-          categoryId: config.categoryId,
+          workDir,
+          llmProviderId,
+          categoryId,
           speechConfig: resolveSpeechConfigInput({
-            speechPresetId: config.speechPresetId,
-            speechConfig: config.speechConfig ?? null,
+            speechPresetId,
+            speechConfig: speechConfig ?? null,
             currentSpeechConfig: null,
           }),
         });
+        let roomMembership: { chatRoomId: string; injectGroupHistory: boolean } | null = null;
+        try {
+          roomMembership = await addCreatedAgentToRoom({
+            agentId: agent.id,
+            chatRoomId,
+            defaultChatRoomId,
+            injectGroupHistory,
+          });
+        } catch (error) {
+          await agentService.delete(agent.id).catch((cleanupError) => {
+            console.warn('[agent-creator] 创建助手后加入群聊失败，回滚助手也失败:', cleanupError);
+          });
+          throw error;
+        }
         const installedDefaultSkills = await installDefaultSkillsForNewAgent(agent);
-        const selectedSkillsResult = await installModelSelectedSkills(agent, config.autoInstallSkillNames);
+        const selectedSkillsResult = await installModelSelectedSkills(agent, autoInstallSkillNames);
 
-        results.push({
-          name: config.name,
+        return JSON.stringify({
           success: true,
           agent: {
             id: agent.id,
             name: agent.name,
-            description: agent.description || '',
+            description: agent.description,
             type: agent.type,
           },
+          ...(roomMembership && { roomMembership }),
           installedDefaultSkills,
           modelSelectedSkills: selectedSkillsResult.installed,
           skippedModelSelectedSkills: selectedSkillsResult.skipped,
+          message: `成功创建助手 "${name}"。用户可以在群聊中通过 @${name} 来使用它。`,
         });
-        successCount++;
       } catch (error) {
-        results.push({
-          name: config.name,
+        return JSON.stringify({
           success: false,
           error: error instanceof Error ? error.message : '创建失败',
         });
-        failCount++;
       }
-    }
+    },
+    {
+      name: 'create_agent',
+      description: '【必须用户确认后才能调用】创建一个新的AI助手；如设置 injectGroupHistory，会同时把新助手加入当前/指定群聊并保存群历史访问。⚠️ 重要：调用此工具前，必须先向用户展示助手配置（名称、描述、核心能力），并明确询问"是否确认创建？"等待用户回复确认后才能调用。如果用户提出修改，调整配置后再次确认。',
+      schema: z.object({
+        name: z.string().describe('助手名称，必须唯一'),
+        description: z.string().describe('助手功能描述'),
+        prompt: z.string().describe('系统提示词，定义助手的行为和能力'),
+        type: z
+          .enum(['builtin', 'acp'])
+          .optional()
+          .describe('助手类型，默认 acp'),
+        acpTool: z.enum(ACP_TOOL_VALUES).optional().describe('本地 Agent 工具名称（type=acp 时默认 claude）'),
+        workDir: z.string().optional().describe('工作目录路径，可选'),
+        llmProviderId: z
+          .string()
+          .optional()
+          .describe('LLM供应商ID，可选；本地 Agent 仅支持 claude/anthropic 和 codex/openai'),
+        categoryId: z.string().optional().describe('分类ID，可选'),
+        speechPresetId: speechPresetIdSchema,
+        speechConfig: speechConfigSchema,
+        autoInstallSkillNames: z
+          .array(z.string())
+          .optional()
+          .describe('由模型根据 list_shared_skills 返回的共享技能列表自行选择要安装的技能名称或目录名。不要猜测；没有合适技能时传空数组或省略。'),
+        chatRoomId: z.string().optional().describe('要加入并设置群历史访问的群聊 ID；群助手在当前群聊内调用时可省略'),
+        injectGroupHistory: z.boolean().optional().describe('是否开启当前/指定群聊中的群历史访问；传此字段会把新助手加入该群聊'),
+      }),
+    },
+  );
+}
 
-    return JSON.stringify({
-      success: successCount > 0,
-      summary: `批量创建完成：成功 ${successCount} 个，失败 ${failCount} 个`,
-      results,
-    });
-  },
-  {
-    name: 'create_agents',
-    description: '【必须用户确认后才能调用】批量创建多个AI助手。⚠️ 重要：调用此工具前，必须先向用户展示所有助手配置（名称、描述、核心能力），并明确询问"是否确认创建这些助手？"等待用户回复确认后才能调用。如果用户提出修改，调整配置后再次确认。',
-    schema: z.object({
-      agents: z
-        .array(
-          z.object({
-            name: z.string().describe('助手名称，必须唯一'),
-            description: z.string().describe('助手功能描述'),
-            prompt: z.string().describe('系统提示词，定义助手的行为和能力'),
-            avatar: z.string().optional().describe('头像图标名称'),
-            avatarColor: z.string().optional().describe('头像背景颜色'),
-            type: z.enum(['builtin', 'acp']).optional().describe('助手类型，默认 acp'),
-            acpTool: z.enum(ACP_TOOL_VALUES).optional().describe('本地 Agent 工具名称（type=acp 时默认 claude）'),
-            workDir: z.string().optional().describe('工作目录路径'),
-            llmProviderId: z
-              .string()
-              .optional()
-              .describe('LLM供应商ID；本地 Agent 仅支持 claude/anthropic 和 codex/openai'),
-            categoryId: z.string().optional().describe('分类ID'),
-            speechPresetId: speechPresetIdSchema,
-            speechConfig: speechConfigSchema,
-            autoInstallSkillNames: z
-              .array(z.string())
-              .optional()
-              .describe('由模型根据 list_shared_skills 返回的共享技能列表自行选择要安装的技能名称或目录名。不要猜测；没有合适技能时传空数组或省略。'),
-          }),
-        )
-        .describe('助手配置数组'),
-    }),
-  },
-);
+export const createAgentTool = createCreateAgentTool();
+
+// 批量创建助手工具
+export function createCreateAgentsTool(defaultChatRoomId?: string) {
+  return tool(
+    async ({ agents }: { agents: AgentConfig[] }) => {
+      if (!agents || agents.length === 0) {
+        return JSON.stringify({
+          success: false,
+          error: '请提供至少一个助手配置',
+        });
+      }
+
+      const results: Array<{
+        name: string;
+        success: boolean;
+        agent?: { id: string; name: string; description: string; type: string };
+        roomMembership?: { chatRoomId: string; injectGroupHistory: boolean };
+        installedDefaultSkills?: string[];
+        modelSelectedSkills?: string[];
+        skippedModelSelectedSkills?: string[];
+        error?: string;
+      }> = [];
+
+      let successCount = 0;
+      let failCount = 0;
+
+      for (const config of agents) {
+        try {
+          const normalizedType = normalizeAgentTypeConfig(config);
+
+          // 检查名称是否已存在
+          const existing = await agentService.findByName(config.name);
+          if (existing) {
+            results.push({
+              name: config.name,
+              success: false,
+              error: `助手名称 "${config.name}" 已存在`,
+            });
+            failCount++;
+            continue;
+          }
+
+          const agent = await agentService.create({
+            name: config.name,
+            description: config.description,
+            prompt: config.prompt,
+            avatar: getRandomAgentAvatarValue(),
+            type: normalizedType.type,
+            acpTool: normalizedType.acpTool,
+            workDir: config.workDir,
+            llmProviderId: config.llmProviderId,
+            categoryId: config.categoryId,
+            speechConfig: resolveSpeechConfigInput({
+              speechPresetId: config.speechPresetId,
+              speechConfig: config.speechConfig ?? null,
+              currentSpeechConfig: null,
+            }),
+          });
+          let roomMembership: { chatRoomId: string; injectGroupHistory: boolean } | null = null;
+          try {
+            roomMembership = await addCreatedAgentToRoom({
+              agentId: agent.id,
+              chatRoomId: config.chatRoomId,
+              defaultChatRoomId,
+              injectGroupHistory: config.injectGroupHistory,
+            });
+          } catch (error) {
+            await agentService.delete(agent.id).catch((cleanupError) => {
+              console.warn('[agent-creator] 创建助手后加入群聊失败，回滚助手也失败:', cleanupError);
+            });
+            throw error;
+          }
+          const installedDefaultSkills = await installDefaultSkillsForNewAgent(agent);
+          const selectedSkillsResult = await installModelSelectedSkills(agent, config.autoInstallSkillNames);
+
+          results.push({
+            name: config.name,
+            success: true,
+            agent: {
+              id: agent.id,
+              name: agent.name,
+              description: agent.description || '',
+              type: agent.type,
+            },
+            ...(roomMembership && { roomMembership }),
+            installedDefaultSkills,
+            modelSelectedSkills: selectedSkillsResult.installed,
+            skippedModelSelectedSkills: selectedSkillsResult.skipped,
+          });
+          successCount++;
+        } catch (error) {
+          results.push({
+            name: config.name,
+            success: false,
+            error: error instanceof Error ? error.message : '创建失败',
+          });
+          failCount++;
+        }
+      }
+
+      return JSON.stringify({
+        success: successCount > 0,
+        summary: `批量创建完成：成功 ${successCount} 个，失败 ${failCount} 个`,
+        results,
+      });
+    },
+    {
+      name: 'create_agents',
+      description: '【必须用户确认后才能调用】批量创建多个AI助手；如设置 injectGroupHistory，会同时把新助手加入当前/指定群聊并保存群历史访问。⚠️ 重要：调用此工具前，必须先向用户展示所有助手配置（名称、描述、核心能力），并明确询问"是否确认创建这些助手？"等待用户回复确认后才能调用。如果用户提出修改，调整配置后再次确认。',
+      schema: z.object({
+        agents: z
+          .array(
+            z.object({
+              name: z.string().describe('助手名称，必须唯一'),
+              description: z.string().describe('助手功能描述'),
+              prompt: z.string().describe('系统提示词，定义助手的行为和能力'),
+              type: z.enum(['builtin', 'acp']).optional().describe('助手类型，默认 acp'),
+              acpTool: z.enum(ACP_TOOL_VALUES).optional().describe('本地 Agent 工具名称（type=acp 时默认 claude）'),
+              workDir: z.string().optional().describe('工作目录路径'),
+              llmProviderId: z
+                .string()
+                .optional()
+                .describe('LLM供应商ID；本地 Agent 仅支持 claude/anthropic 和 codex/openai'),
+              categoryId: z.string().optional().describe('分类ID'),
+              speechPresetId: speechPresetIdSchema,
+              speechConfig: speechConfigSchema,
+              autoInstallSkillNames: z
+                .array(z.string())
+                .optional()
+                .describe('由模型根据 list_shared_skills 返回的共享技能列表自行选择要安装的技能名称或目录名。不要猜测；没有合适技能时传空数组或省略。'),
+              chatRoomId: z.string().optional().describe('要加入并设置群历史访问的群聊 ID；群助手在当前群聊内调用时可省略'),
+              injectGroupHistory: z.boolean().optional().describe('是否开启当前/指定群聊中的群历史访问；传此字段会把新助手加入该群聊'),
+            }),
+          )
+          .describe('助手配置数组'),
+      }),
+    },
+  );
+}
+
+export const createAgentsTool = createCreateAgentsTool();
 
 // 列出可用 LLM 供应商工具
 export const listLlmProvidersTool = tool(
@@ -629,192 +747,212 @@ export const listVoiceCatalogTool = tool(
 );
 
 // 更新助手工具
-export const updateAgentTool = tool(
-  async ({
-    agentId,
-    name,
-    description,
-    prompt,
-    speechPresetId,
-    speechConfig,
-    llmProviderId,
-    categoryId,
-  }: {
-    agentId: string;
-    name?: string;
-    description?: string;
-    prompt?: string;
-    speechPresetId?: SpeechPresetId;
-    speechConfig?: AgentSpeechConfig;
-    llmProviderId?: string;
-    categoryId?: string;
-  }) => {
-    try {
-      const currentAgent = await agentService.findById(agentId);
-      if (!currentAgent) {
-        return JSON.stringify({
-          success: false,
-          error: '助手不存在',
-        });
-      }
-
-      const agent = await agentService.update(agentId, {
-        ...(name !== undefined && { name }),
-        ...(description !== undefined && { description }),
-        ...(prompt !== undefined && { prompt }),
-        ...(llmProviderId !== undefined && { llmProviderId }),
-        ...(categoryId !== undefined && { categoryId }),
-        ...((speechPresetId !== undefined || speechConfig !== undefined) && {
-          speechConfig: resolveSpeechConfigInput({
-            speechPresetId,
-            speechConfig: speechConfig ?? null,
-            currentSpeechConfig: deserializeAgentSpeechConfig(currentAgent.speechConfig),
-          }),
-        }),
-      });
-
-      return JSON.stringify({
-        success: true,
-        agent: {
-          id: agent.id,
-          name: agent.name,
-          speechConfig: agent.speechConfig,
-        },
-        message: `成功更新助手 "${agent.name}"。`,
-      });
-    } catch (error) {
-      return JSON.stringify({
-        success: false,
-        error: error instanceof Error ? error.message : '更新失败',
-      });
-    }
-  },
-  {
-    name: 'update_agent',
-    description: '【必须用户确认后才能调用】更新已有助手的配置，包括语音播报设置。先用 list_agents 获取助手 ID，再调用此工具。',
-    schema: z.object({
-      agentId: z.string().describe('要更新的助手 ID'),
-      name: z.string().optional().describe('新名称（可选）'),
-      description: z.string().optional().describe('新描述（可选）'),
-      prompt: z.string().optional().describe('新系统提示词（可选）'),
-      speechPresetId: speechPresetIdSchema,
-      speechConfig: speechConfigSchema,
-      llmProviderId: z.string().optional().describe('新 LLM 供应商 ID（可选）'),
-      categoryId: z.string().optional().describe('新分类 ID（可选）'),
-    }),
-  },
-);
-
-// 批量更新助手工具（串行执行，避免并发写库冲突）
-export const updateAgentsTool = tool(
-  async ({
-    agents,
-  }: {
-    agents: Array<{
-      agentId: string;
-      name?: string;
-      description?: string;
-      prompt?: string;
-      speechPresetId?: SpeechPresetId;
-      speechConfig?: AgentSpeechConfig;
-      llmProviderId?: string;
-      categoryId?: string;
-    }>;
-  }) => {
-    if (!agents || agents.length === 0) {
-      return JSON.stringify({ success: false, error: '请提供至少一个助手配置' });
-    }
-
-    const results: Array<{
-      agentId: string;
-      name?: string;
-      success: boolean;
-      error?: string;
-    }> = [];
-    let successCount = 0;
-    let failCount = 0;
-
-    for (const config of agents) {
+export function createUpdateAgentTool(defaultChatRoomId?: string) {
+  return tool(
+    async ({
+      agentId,
+      name,
+      description,
+      prompt,
+      speechPresetId,
+      speechConfig,
+      llmProviderId,
+      categoryId,
+      chatRoomId,
+      injectGroupHistory,
+    }: UpdateAgentConfig) => {
       try {
-        const currentAgent = await agentService.findById(config.agentId);
+        const currentAgent = await agentService.findById(agentId);
         if (!currentAgent) {
-          results.push({
-            agentId: config.agentId,
+          return JSON.stringify({
             success: false,
             error: '助手不存在',
           });
-          failCount++;
-          continue;
         }
 
-        const agent = await agentService.update(config.agentId, {
-          ...(config.name !== undefined && { name: config.name }),
-          ...(config.description !== undefined && { description: config.description }),
-          ...(config.prompt !== undefined && { prompt: config.prompt }),
-          ...(config.llmProviderId !== undefined && { llmProviderId: config.llmProviderId }),
-          ...(config.categoryId !== undefined && { categoryId: config.categoryId }),
-          ...((config.speechPresetId !== undefined || config.speechConfig !== undefined) && {
+        const agent = await agentService.update(agentId, {
+          ...(name !== undefined && { name }),
+          ...(description !== undefined && { description }),
+          ...(prompt !== undefined && { prompt }),
+          ...(llmProviderId !== undefined && { llmProviderId }),
+          ...(categoryId !== undefined && { categoryId }),
+          ...((speechPresetId !== undefined || speechConfig !== undefined) && {
             speechConfig: resolveSpeechConfigInput({
-              speechPresetId: config.speechPresetId,
-              speechConfig: config.speechConfig ?? null,
+              speechPresetId,
+              speechConfig: speechConfig ?? null,
               currentSpeechConfig: deserializeAgentSpeechConfig(currentAgent.speechConfig),
             }),
           }),
         });
-        results.push({ agentId: config.agentId, name: agent.name, success: true });
-        successCount++;
+        const roomSettings = await updateAgentRoomHistoryAccess({
+          agentId,
+          agentName: agent.name,
+          chatRoomId,
+          defaultChatRoomId,
+          injectGroupHistory,
+        });
+
+        return JSON.stringify({
+          success: true,
+          agent: {
+            id: agent.id,
+            name: agent.name,
+            speechConfig: agent.speechConfig,
+          },
+          ...(roomSettings && { roomSettings }),
+          message: `成功更新助手 "${agent.name}"。`,
+        });
       } catch (error) {
-        results.push({
-          agentId: config.agentId,
+        return JSON.stringify({
           success: false,
           error: error instanceof Error ? error.message : '更新失败',
         });
-        failCount++;
       }
-    }
+    },
+    {
+      name: 'update_agent',
+      description: '【必须用户确认后才能调用】更新已有助手的配置，包括语音播报设置；也可设置当前/指定群聊中该助手的群历史访问 injectGroupHistory。先用 list_agents 获取助手 ID，再调用此工具。',
+      schema: z.object({
+        agentId: z.string().describe('要更新的助手 ID'),
+        name: z.string().optional().describe('新名称（可选）'),
+        description: z.string().optional().describe('新描述（可选）'),
+        prompt: z.string().optional().describe('新系统提示词（可选）'),
+        speechPresetId: speechPresetIdSchema,
+        speechConfig: speechConfigSchema,
+        llmProviderId: z.string().optional().describe('新 LLM 供应商 ID（可选）'),
+        categoryId: z.string().optional().describe('新分类 ID（可选）'),
+        chatRoomId: z.string().optional().describe('要修改群历史访问的群聊 ID；群助手在当前群聊内调用时可省略'),
+        injectGroupHistory: z.boolean().optional().describe('是否开启当前/指定群聊中的群历史访问（按群聊保存，不是助手全局字段）'),
+      }),
+    },
+  );
+}
 
-    return JSON.stringify({
-      success: successCount > 0,
-      summary: `批量更新完成：成功 ${successCount} 个，失败 ${failCount} 个`,
-      results,
-    });
-  },
-  {
-    name: 'update_agents',
-    description:
-      '【必须用户确认后才能调用】批量更新多个助手配置，串行执行避免并发冲突。需要同时更新多个助手时优先使用此工具，而非多次调用 update_agent。先用 list_agents 获取助手 ID，再调用此工具。',
-    schema: z.object({
-      agents: z
-        .array(
-          z.object({
-            agentId: z.string().describe('要更新的助手 ID'),
-            name: z.string().optional().describe('新名称（可选）'),
-            description: z.string().optional().describe('新描述（可选）'),
-            prompt: z.string().optional().describe('新系统提示词（可选）'),
-            speechPresetId: speechPresetIdSchema,
-            speechConfig: speechConfigSchema,
-            llmProviderId: z.string().optional().describe('新 LLM 供应商 ID（可选）'),
-            categoryId: z.string().optional().describe('新分类 ID（可选）'),
-          }),
-        )
-        .describe('要更新的助手配置数组'),
-    }),
-  },
-);
+export const updateAgentTool = createUpdateAgentTool();
+
+// 批量更新助手工具（串行执行，避免并发写库冲突）
+export function createUpdateAgentsTool(defaultChatRoomId?: string) {
+  return tool(
+    async ({
+      agents,
+    }: {
+      agents: UpdateAgentConfig[];
+    }) => {
+      if (!agents || agents.length === 0) {
+        return JSON.stringify({ success: false, error: '请提供至少一个助手配置' });
+      }
+
+      const results: Array<{
+        agentId: string;
+        name?: string;
+        success: boolean;
+        error?: string;
+        roomSettings?: { chatRoomId: string; injectGroupHistory: boolean };
+      }> = [];
+      let successCount = 0;
+      let failCount = 0;
+
+      for (const config of agents) {
+        try {
+          const currentAgent = await agentService.findById(config.agentId);
+          if (!currentAgent) {
+            results.push({
+              agentId: config.agentId,
+              success: false,
+              error: '助手不存在',
+            });
+            failCount++;
+            continue;
+          }
+
+          const agent = await agentService.update(config.agentId, {
+            ...(config.name !== undefined && { name: config.name }),
+            ...(config.description !== undefined && { description: config.description }),
+            ...(config.prompt !== undefined && { prompt: config.prompt }),
+            ...(config.llmProviderId !== undefined && { llmProviderId: config.llmProviderId }),
+            ...(config.categoryId !== undefined && { categoryId: config.categoryId }),
+            ...((config.speechPresetId !== undefined || config.speechConfig !== undefined) && {
+              speechConfig: resolveSpeechConfigInput({
+                speechPresetId: config.speechPresetId,
+                speechConfig: config.speechConfig ?? null,
+                currentSpeechConfig: deserializeAgentSpeechConfig(currentAgent.speechConfig),
+              }),
+            }),
+          });
+          const roomSettings = await updateAgentRoomHistoryAccess({
+            agentId: config.agentId,
+            agentName: agent.name,
+            chatRoomId: config.chatRoomId,
+            defaultChatRoomId,
+            injectGroupHistory: config.injectGroupHistory,
+          });
+          results.push({
+            agentId: config.agentId,
+            name: agent.name,
+            success: true,
+            ...(roomSettings && { roomSettings }),
+          });
+          successCount++;
+        } catch (error) {
+          results.push({
+            agentId: config.agentId,
+            success: false,
+            error: error instanceof Error ? error.message : '更新失败',
+          });
+          failCount++;
+        }
+      }
+
+      return JSON.stringify({
+        success: successCount > 0,
+        summary: `批量更新完成：成功 ${successCount} 个，失败 ${failCount} 个`,
+        results,
+      });
+    },
+    {
+      name: 'update_agents',
+      description:
+        '【必须用户确认后才能调用】批量更新多个助手配置，串行执行避免并发冲突；也可设置当前/指定群聊中各助手的群历史访问 injectGroupHistory。需要同时更新多个助手时优先使用此工具，而非多次调用 update_agent。先用 list_agents 获取助手 ID，再调用此工具。',
+      schema: z.object({
+        agents: z
+          .array(
+            z.object({
+              agentId: z.string().describe('要更新的助手 ID'),
+              name: z.string().optional().describe('新名称（可选）'),
+              description: z.string().optional().describe('新描述（可选）'),
+              prompt: z.string().optional().describe('新系统提示词（可选）'),
+              speechPresetId: speechPresetIdSchema,
+              speechConfig: speechConfigSchema,
+              llmProviderId: z.string().optional().describe('新 LLM 供应商 ID（可选）'),
+              categoryId: z.string().optional().describe('新分类 ID（可选）'),
+              chatRoomId: z.string().optional().describe('要修改群历史访问的群聊 ID；群助手在当前群聊内调用时可省略'),
+              injectGroupHistory: z.boolean().optional().describe('是否开启当前/指定群聊中的群历史访问（按群聊保存，不是助手全局字段）'),
+            }),
+          )
+          .describe('要更新的助手配置数组'),
+      }),
+    },
+  );
+}
+
+export const updateAgentsTool = createUpdateAgentsTool();
 
 // 助手生成助手的工具列表
-export const agentCreatorTools = [
-  createAgentTool,
-  createAgentsTool,
-  listAgentsTool,
-  listCategoriesTool,
-  listVoicePresetsTool,
-  listVoiceCatalogTool,
-  listSharedSkillsTool,
-  updateAgentTool,
-  updateAgentsTool,
-  listLlmProvidersTool,
-  createLlmProviderTool,
-  installSkillFromSourceTool,
-  getChatHistoryTool,
-];
+export function createAgentCreatorTools(defaultChatRoomId?: string) {
+  return [
+    createCreateAgentTool(defaultChatRoomId),
+    createCreateAgentsTool(defaultChatRoomId),
+    listAgentsTool,
+    listCategoriesTool,
+    listVoicePresetsTool,
+    listVoiceCatalogTool,
+    listSharedSkillsTool,
+    createUpdateAgentTool(defaultChatRoomId),
+    createUpdateAgentsTool(defaultChatRoomId),
+    listLlmProvidersTool,
+    createLlmProviderTool,
+    installSkillFromSourceTool,
+  ];
+}
+
+export const agentCreatorTools = createAgentCreatorTools();

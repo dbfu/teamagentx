@@ -4,6 +4,10 @@ import { isElectron } from '@/lib/config'
 export const GROUP_AVATAR_COUNT = 24
 export const groupAvatarOptions = Array.from({ length: GROUP_AVATAR_COUNT }, (_, index) => index)
 
+export function getRandomGroupAvatarIndex() {
+  return Math.floor(Math.random() * (GROUP_AVATAR_COUNT - 1)) + 1
+}
+
 function hashAvatarValue(value: string) {
   let hash = 0
   for (let i = 0; i < value.length; i += 1) {

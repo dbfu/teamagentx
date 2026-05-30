@@ -44,6 +44,9 @@ declare global {
       filename: string;
     }) => Promise<{ success: boolean; filePath?: string; canceled?: boolean; error?: string }>;
     openExternal: (url: string) => Promise<{ success: boolean; error?: string }>;
+    setBadgeCount: (count: number) => Promise<{ success: boolean; error?: string }>;
+  showNotification: (payload: { title: string; body: string; chatRoomId?: string }) => Promise<{ success: boolean; error?: string }>;
+  onNotificationOpen: (callback: (chatRoomId: string) => void) => () => void;
     windowMinimize: () => Promise<void>;
     windowMaximize: () => Promise<void>;
     windowClose: () => Promise<void>;
@@ -59,6 +62,17 @@ declare global {
         phase: 'idle' | 'preparing' | 'ready' | 'failed';
         progress: RuntimePrepareProgress | null;
       };
+    }>;
+    // 获取用户配置文件路径（用于登录界面提示）
+    getUserConfigPath?: () => Promise<string>;
+    // 获取本地用户账号密码（用于自动填充登录表单，仅 Electron 环境）
+    getLocalUserCredentials?: () => Promise<{
+      success: boolean;
+      data?: {
+        username: string;
+        password: string;
+      };
+      error?: string;
     }>;
     appendDebugLog?: (message: string, payload?: unknown) => Promise<{ success: boolean; error?: string }>;
     openLogFolder?: () => Promise<{ success: boolean; error?: string }>;

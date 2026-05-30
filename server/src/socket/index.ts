@@ -150,7 +150,7 @@ export function setupSocket(io: Server) {
   };
 
   const emitAgentsUpdated = (chatRoomId: string) => {
-    io.to(chatRoomId).emit('chatroom:agents-updated', { chatRoomId });
+    io.emit('chatroom:agents-updated', { chatRoomId });
   };
 
   // 推送所有正在执行的群聊状态给指定 socket

@@ -12,6 +12,13 @@ import {spawnAcpToolInstall} from '../core/agent/acp-tool-install.service.js';
 import { deserializeAgentSpeechConfig } from '../modules/speech/speech-config.js';
 import { installDefaultSkillsForNewAgent } from '../modules/skill/preinstalled-skills.js';
 import type { AgentThinkingMode } from '../core/agent/thinking-mode.js';
+import {
+  getAgentLongTermMemoryFile,
+  getRoomAgentLongTermMemoryFile,
+  ensureAgentLongTermMemoryFile,
+  ensureRoomAgentLongTermMemoryFile,
+} from '../core/agent/agent-long-term-memory.js';
+import * as fs from 'fs';
 
 // 所有支持的 LLM 供应商类型（与 Prisma 保持一致）
 const LLM_PROVIDER_TYPES = [
@@ -1396,6 +1403,122 @@ export async function agentGateway(app: FastifyInstance) {
         console.error('[UpdateSortOrder] 批量更新排序失败:', error);
         return reply.code(500).send({ success: false, error: error.message || '更新排序失败' });
       }
+    },
+  );
+
+  // 获取助手全局长期记忆
+  app.get<{Params: {agentId: string}}>(
+    '/agents/:agentId/memory',
+    {
+      schema: {
+        description: '获取助手全局长期记忆',
+        tags: ['Agents'],
+        params: { type: 'object', properties: { agentId: { type: 'string' } } },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              data: { type: 'object', properties: { content: { type: 'string' }, filePath: { type: 'string' } } },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { agentId } = request.params;
+      const agent = await agentService.findById(agentId);
+      if (!agent) return reply.code(404).send({ success: false, error: '助手不存在' });
+      const filePath = ensureAgentLongTermMemoryFile(agentId, agent.name);
+      const content = fs.readFileSync(filePath, 'utf-8');
+      return reply.send({ success: true, data: { content, filePath } });
+    },
+  );
+
+  // 更新助手全局长期记忆
+  app.put<{Params: {agentId: string}; Body: {content: string}}>(
+    '/agents/:agentId/memory',
+    {
+      schema: {
+        description: '更新助手全局长期记忆',
+        tags: ['Agents'],
+        params: { type: 'object', properties: { agentId: { type: 'string' } } },
+        body: {
+          type: 'object',
+          required: ['content'],
+          properties: { content: { type: 'string' } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { agentId } = request.params;
+      const { content } = request.body;
+      const agent = await agentService.findById(agentId);
+      if (!agent) return reply.code(404).send({ success: false, error: '助手不存在' });
+      const filePath = ensureAgentLongTermMemoryFile(agentId, agent.name);
+      fs.writeFileSync(filePath, content, 'utf-8');
+      return reply.send({ success: true });
+    },
+  );
+
+  // 获取助手在某个房间的长期记忆
+  app.get<{Params: {agentId: string; chatRoomId: string}}>(
+    '/agents/:agentId/memory/room/:chatRoomId',
+    {
+      schema: {
+        description: '获取助手在某个房间的长期记忆',
+        tags: ['Agents'],
+        params: {
+          type: 'object',
+          properties: { agentId: { type: 'string' }, chatRoomId: { type: 'string' } },
+        },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              data: { type: 'object', properties: { content: { type: 'string' }, filePath: { type: 'string' } } },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { agentId, chatRoomId } = request.params;
+      const agent = await agentService.findById(agentId);
+      if (!agent) return reply.code(404).send({ success: false, error: '助手不存在' });
+      const filePath = ensureRoomAgentLongTermMemoryFile(chatRoomId, agentId, agent.name);
+      const content = fs.readFileSync(filePath, 'utf-8');
+      return reply.send({ success: true, data: { content, filePath } });
+    },
+  );
+
+  // 更新助手在某个房间的长期记忆
+  app.put<{Params: {agentId: string; chatRoomId: string}; Body: {content: string}}>(
+    '/agents/:agentId/memory/room/:chatRoomId',
+    {
+      schema: {
+        description: '更新助手在某个房间的长期记忆',
+        tags: ['Agents'],
+        params: {
+          type: 'object',
+          properties: { agentId: { type: 'string' }, chatRoomId: { type: 'string' } },
+        },
+        body: {
+          type: 'object',
+          required: ['content'],
+          properties: { content: { type: 'string' } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { agentId, chatRoomId } = request.params;
+      const { content } = request.body;
+      const agent = await agentService.findById(agentId);
+      if (!agent) return reply.code(404).send({ success: false, error: '助手不存在' });
+      const filePath = ensureRoomAgentLongTermMemoryFile(chatRoomId, agentId, agent.name);
+      fs.writeFileSync(filePath, content, 'utf-8');
+      return reply.send({ success: true });
     },
   );
 }

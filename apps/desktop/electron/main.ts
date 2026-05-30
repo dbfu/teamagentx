@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, Tray, utilityProcess } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, shell, Tray, utilityProcess } from 'electron';
 import { UtilityProcess } from 'electron/main';
 import { execFileSync, execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -2225,6 +2225,9 @@ app.whenReady().then(async () => {
   writeLog(`User data path: ${app.getPath('userData')}`);
   writeLog(`Resources path: ${process.resourcesPath}`);
   writeLog(`Is packaged: ${app.isPackaged}`);
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('com.teamagentx.desktop');
+  }
 
   ipcMain.handle('get-server-url', () => {
     return serverPort ? `http://localhost:${serverPort}` : null;
@@ -2425,6 +2428,41 @@ app.whenReady().then(async () => {
     }
   });
 
+  ipcMain.handle('notification:set-badge-count', async (_event, count: number) => {
+    try {
+      const normalizedCount = Number.isFinite(count) && count > 0 ? Math.trunc(count) : 0;
+      app.setBadgeCount(normalizedCount);
+      return { success: true };
+    } catch (error) {
+      writeLog(`Failed to set badge count: ${String(error)}`);
+      return { success: false, error: String(error) };
+    }
+  });
+
+  ipcMain.handle('notification:show', async (_event, payload: { title?: string; body?: string; chatRoomId?: string }) => {
+    try {
+      if (!Notification.isSupported()) {
+        return { success: false, error: 'Notifications are not supported on this platform' };
+      }
+
+      const notification = new Notification({
+        title: payload.title || 'TeamAgentX',
+        body: payload.body || '有新消息',
+      });
+      notification.on('click', () => {
+        showMainWindow();
+        if (payload.chatRoomId) {
+          mainWindow?.webContents.send('notification:open-chatroom', payload.chatRoomId);
+        }
+      });
+      notification.show();
+      return { success: true };
+    } catch (error) {
+      writeLog(`Failed to show notification: ${String(error)}`);
+      return { success: false, error: String(error) };
+    }
+  });
+
   // 服务状态查询（供渲染器判断后端是否就绪）
   ipcMain.handle('get-server-status', () => {
     let error: string | null = null;
@@ -2463,6 +2501,41 @@ app.whenReady().then(async () => {
       return { success: true };
     } catch (e) {
       return { success: false, error: String(e) };
+    }
+  });
+
+  // 获取用户配置文件路径（用于登录界面提示）
+  ipcMain.handle('get-user-config-path', () => {
+    const homeDir = os.homedir();
+    const userConfigPath = path.join(homeDir, '.teamagentx', 'user.json');
+    return userConfigPath;
+  });
+
+  // 获取本地用户账号密码（用于自动填充登录表单）
+  ipcMain.handle('get-local-user-credentials', async () => {
+    try {
+      const homeDir = os.homedir();
+      const userConfigPath = path.join(homeDir, '.teamagentx', 'user.json');
+
+      if (!fs.existsSync(userConfigPath)) {
+        return { success: false, error: '用户配置文件不存在' };
+      }
+
+      const content = await fs.promises.readFile(userConfigPath, 'utf8');
+      const userConfig = JSON.parse(content);
+
+      // 返回用户名和密码，用于自动填充登录表单
+      // 这是本地 Electron 环境，密码本身就在本地文件中，安全可控
+      return {
+        success: true,
+        data: {
+          username: userConfig.username || '',
+          password: userConfig.password || '',
+        }
+      };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return { success: false, error: msg };
     }
   });
 

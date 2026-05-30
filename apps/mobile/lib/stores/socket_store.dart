@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import '../models/models.dart';
+import '../services/mobile_notification_service.dart';
 import '../services/socket_service.dart';
 import 'chat_store.dart';
 
@@ -40,6 +41,13 @@ class SocketStore extends ChangeNotifier {
         if (msgChatRoomId == _currentChatRoomId) {
           final message = Message.fromJson(jsonData);
           chatStore.addMessage(message);
+        } else if (jsonData['userId'] != _user?.id) {
+          MobileNotificationService.showMessage(
+            title: 'TeamAgentX',
+            body: _buildMessagePreview(jsonData),
+            chatRoomId: msgChatRoomId,
+            count: chatStore.totalUnreadCount,
+          );
         }
       });
 
@@ -127,6 +135,7 @@ class SocketStore extends ChangeNotifier {
             jsonData['count'] as int,
           );
         }
+        MobileNotificationService.setBadgeCount(chatStore.totalUnreadCount);
       });
 
       // 监听聊天室加入响应
@@ -201,5 +210,23 @@ class SocketStore extends ChangeNotifier {
   /// 停止 Agent
   void stopAgent(String chatRoomId, String agentId) {
     SocketService.emit('agent:stop', {'chatRoomId': chatRoomId, 'agentId': agentId});
+  }
+
+  String _buildMessagePreview(Map<String, dynamic> data) {
+    final content = data['content'] as String?;
+    if (content != null && content.trim().isNotEmpty) {
+      final trimmed = content.trim();
+      return trimmed.length > 120 ? '${trimmed.substring(0, 117)}...' : trimmed;
+    }
+
+    final attachments = data['attachments'];
+    if (attachments is List &&
+        attachments.any((attachment) =>
+            attachment is Map<String, dynamic> &&
+            (attachment['mimeType'] as String?)?.startsWith('image/') == true)) {
+      return '[图片]';
+    }
+
+    return '有新消息';
   }
 }

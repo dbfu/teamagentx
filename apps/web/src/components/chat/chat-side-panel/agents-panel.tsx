@@ -62,7 +62,7 @@ function getAgentInfo(roomAgent: ChatRoomAgent): AgentInfo | null {
       type: 'user' as const,
       agentType: undefined,
       agentLevel: undefined,
-      injectGroupHistory: true,
+      injectGroupHistory: false,
       chatRoomAgentId: roomAgent.id,
     }
   }
@@ -277,7 +277,6 @@ export function AgentsPanel({ chatRoom, agentStatuses, onSelectAgent, onAgentSet
         const response = await chatRoomApi.addAgent(chatRoom.id, {
           agentId,
           role: 'MEMBER',
-          injectGroupHistory: true,
         })
 
         if (!response.success) {

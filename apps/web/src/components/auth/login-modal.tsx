@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 interface LoginModalProps {
   isOpen: boolean
@@ -10,6 +10,28 @@ export function LoginModal({ isOpen, onLogin }: LoginModalProps) {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [userConfigPath, setUserConfigPath] = useState('')
+
+  // Electron 环境：获取用户配置文件真实路径
+  useEffect(() => {
+    if (isOpen && window.electronAPI?.getUserConfigPath) {
+      window.electronAPI.getUserConfigPath().then((path) => {
+        setUserConfigPath(path)
+      })
+    }
+  }, [isOpen])
+
+  // Electron 环境：自动填充账号密码
+  useEffect(() => {
+    if (isOpen && window.electronAPI?.getLocalUserCredentials) {
+      window.electronAPI.getLocalUserCredentials().then((result) => {
+        if (result.success && result.data) {
+          setUsername(result.data.username)
+          setPassword(result.data.password)
+        }
+      })
+    }
+  }, [isOpen])
 
   if (!isOpen) return null
 
@@ -85,6 +107,12 @@ export function LoginModal({ isOpen, onLogin }: LoginModalProps) {
                 className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
                 required
               />
+              {/* 仅 Electron 环境显示密码提示 */}
+              {userConfigPath && (
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  如忘记密码，可查看 {userConfigPath}
+                </p>
+              )}
             </div>
 
             {/* Error message */}

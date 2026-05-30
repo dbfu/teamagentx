@@ -206,7 +206,7 @@ model ChatRoomAgent {
   userId                String?
   agentId               String?
   role                  String   @default("MEMBER")
-  injectGroupHistory    Boolean  @default(true)
+  injectGroupHistory    Boolean  @default(false)
   customWorkDir         String? // 当前群聊中的自定义工作目录
   lastInjectedMessageId String? // 上次注入群历史的最后消息 ID（用于增量注入）
   joinedAt              DateTime @default(now())

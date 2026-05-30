@@ -259,6 +259,7 @@ interface ChatStore {
   loadingOlderMessagesByRoom: Record<string, boolean>
   hasOlderMessagesByRoom: Record<string, boolean>
   inputValue: string
+  inputDraftsByRoom: Record<string, string>
   inputHistory: string[]
   inputHistoryCursor: number
   inputHistoryDraft: string
@@ -323,7 +324,7 @@ interface ChatStore {
   playedVoiceMessageIdsByRoom: Record<string, string[]>
 
   // Actions
-  setInputValue: (value: string) => void
+  setInputValue: (value: string, chatRoomId?: string | null) => void
   addInputHistory: (value: string) => void
   navigateInputHistory: (direction: 'previous' | 'next') => boolean
   setActiveChatRoomId: (chatRoomId: string | null) => void
@@ -491,6 +492,26 @@ function mergeUniqueIds(current: string[] | undefined, incoming: string[]): stri
   return result
 }
 
+function getNextInputDrafts(
+  draftsByRoom: Record<string, string>,
+  chatRoomId: string | null | undefined,
+  value: string,
+): Record<string, string> {
+  if (!chatRoomId) return draftsByRoom
+
+  if (!value) {
+    if (!(chatRoomId in draftsByRoom)) return draftsByRoom
+    const { [chatRoomId]: _removed, ...rest } = draftsByRoom
+    return rest
+  }
+
+  if (draftsByRoom[chatRoomId] === value) return draftsByRoom
+  return {
+    ...draftsByRoom,
+    [chatRoomId]: value,
+  }
+}
+
 export const useChatStore = create<ChatStore>()(
   persist((set, get) => ({
   // 消息状态
@@ -502,6 +523,7 @@ export const useChatStore = create<ChatStore>()(
   loadingOlderMessagesByRoom: {},
   hasOlderMessagesByRoom: {},
   inputValue: '',
+  inputDraftsByRoom: {},
   inputHistory: [],
   inputHistoryCursor: -1,
   inputHistoryDraft: '',
@@ -561,11 +583,16 @@ export const useChatStore = create<ChatStore>()(
   pendingImages: [],
 
   // Actions
-  setInputValue: (value) => set({
+  setInputValue: (value, chatRoomId) => set((state) => ({
     inputValue: value,
+    inputDraftsByRoom: getNextInputDrafts(
+      state.inputDraftsByRoom,
+      chatRoomId ?? state.activeChatRoomId,
+      value,
+    ),
     inputHistoryCursor: -1,
     inputHistoryDraft: '',
-  }),
+  })),
   addInputHistory: (value) => set((state) => {
     const historyValue = value.trim()
     if (!historyValue) return state
@@ -594,6 +621,7 @@ export const useChatStore = create<ChatStore>()(
 
       set({
         inputValue: nextValue,
+        inputDraftsByRoom: getNextInputDrafts(state.inputDraftsByRoom, state.activeChatRoomId, nextValue),
         inputHistoryCursor: nextCursor,
         inputHistoryDraft: nextDraft,
       })
@@ -608,6 +636,7 @@ export const useChatStore = create<ChatStore>()(
 
     set({
       inputValue: nextValue,
+      inputDraftsByRoom: getNextInputDrafts(state.inputDraftsByRoom, state.activeChatRoomId, nextValue),
       inputHistoryCursor: returningToDraft ? -1 : nextCursor,
       inputHistoryDraft: returningToDraft ? '' : state.inputHistoryDraft,
     })
@@ -615,9 +644,13 @@ export const useChatStore = create<ChatStore>()(
   },
   setActiveChatRoomId: (chatRoomId) => set((state) => {
     const roomMessages = chatRoomId ? state.messagesByRoom[chatRoomId] ?? [] : []
+    const inputValue = chatRoomId ? state.inputDraftsByRoom[chatRoomId] ?? '' : ''
     return {
       activeChatRoomId: chatRoomId,
       messages: roomMessages,
+      inputValue,
+      inputHistoryCursor: -1,
+      inputHistoryDraft: '',
       loading: chatRoomId ? state.loadingByRoom[chatRoomId] ?? false : false,
       loadingOlderMessages: chatRoomId ? state.loadingOlderMessagesByRoom[chatRoomId] ?? false : false,
       hasOlderMessages: chatRoomId ? state.hasOlderMessagesByRoom[chatRoomId] ?? true : true,
@@ -1187,6 +1220,7 @@ export const useChatStore = create<ChatStore>()(
     partialize: (state) => ({
       scrollPositions: state.scrollPositions,
       scrollAnchors: state.scrollAnchors,
+      inputDraftsByRoom: state.inputDraftsByRoom,
       handledVoiceMessageIdsByRoom: state.handledVoiceMessageIdsByRoom,
       playedVoiceMessageIdsByRoom: state.playedVoiceMessageIdsByRoom,
     }),
@@ -1201,7 +1235,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
 
   // 使用 selectors 选择具体的值，避免整个 store 对象变化
   const messages = useChatStore((s) => chatRoomId ? s.messagesByRoom[chatRoomId] ?? EMPTY_MESSAGES : EMPTY_MESSAGES)
-  const inputValue = useChatStore((s) => s.inputValue)
+  const inputValue = useChatStore((s) => chatRoomId ? s.inputDraftsByRoom[chatRoomId] ?? '' : s.inputValue)
   const loading = useChatStore((s) => chatRoomId ? s.loadingByRoom[chatRoomId] ?? false : false)
   const loadingOlderMessages = useChatStore((s) => chatRoomId ? s.loadingOlderMessagesByRoom[chatRoomId] ?? false : false)
   const hasOlderMessages = useChatStore((s) => chatRoomId ? s.hasOlderMessagesByRoom[chatRoomId] ?? true : true)
@@ -1922,9 +1956,10 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
   // 处理函数
   const handleSend = useCallback(async () => {
     // 直接从 store 获取最新值，避免闭包延迟问题
-    const { inputValue: currentInputValue, pendingImages: currentPendingImages } = useChatStore.getState()
-
     if (!chatRoom) return
+    const storeState = useChatStore.getState()
+    const currentInputValue = storeState.inputDraftsByRoom[chatRoom.id] ?? ''
+    const currentPendingImages = storeState.pendingImages
 
     const trimmedInput = currentInputValue.trim()
 
@@ -1941,11 +1976,8 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     if (isRoomNewCommand) {
       addInputHistory(trimmedInput)
       await clearMessages(chatRoom.id)
-      setInputValue('')
+      setInputValue('', chatRoom.id)
       useChatStore.getState().setForceScrollToBottom(true)
-      if (document.activeElement instanceof HTMLElement) {
-        document.activeElement.blur()
-      }
       return
     }
 
@@ -2004,7 +2036,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
       useChatStore.getState().addMessage(humanMessage)
       useChatRoomStore.getState().updateRoomLastMessage(chatRoom.id, humanMessage)
       addInputHistory(trimmedInput)
-      setInputValue('')
+      setInputValue('', chatRoom.id)
       useChatStore.getState().setForceScrollToBottom(true)
 
       try {
@@ -2127,7 +2159,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
       agent: null,
     })
 
-    setInputValue('')
+    setInputValue('', chatRoom.id)
     // 清理已发送的图片
     useChatStore.getState().clearPendingImages()
     // 发送消息后强制滚动到底部
@@ -2158,11 +2190,10 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     if (!chatRoom) return
     setAddingAgentIds(new Set(agentIds))
     try {
-      // 依次添加每个助手（默认注入群历史消息）
+      // 依次添加每个助手，群历史按需通过工具检索
       for (const agentId of agentIds) {
         await chatRoomApi.addAgent(chatRoom.id, {
           agentId,
-          injectGroupHistory: true,
         })
       }
       onChatRoomChange?.()
@@ -2198,7 +2229,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
         agentType: roomAgent?.agent?.type,
         agentLevel: found.agentLevel,
         chatRoomId: chatRoom?.id,
-        injectGroupHistory: roomAgent?.injectGroupHistory ?? true,
+        injectGroupHistory: roomAgent?.injectGroupHistory ?? false,
       })
       setSidePanelMode('agent-detail')
     }

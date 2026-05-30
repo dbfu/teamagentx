@@ -1,6 +1,6 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AcpToolInfo, AgentSpeechConfig, acpToolsApi, AgentCategory, categoryApi, type AgentThinkingMode } from '@/lib/agent-api';
-import { AgentAvatarImage, agentAvatarOptions } from '@/lib/agent-avatars';
+import { AgentAvatarImage, agentAvatarOptions, getRandomAgentAvatarValue } from '@/lib/agent-avatars';
 import { AvatarSelector } from './avatar-selector';
 import { getCodexModelOptions } from '@/lib/codex-models';
 import { getClaudeModelOptions } from '@/lib/claude-models';
@@ -161,7 +161,7 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [prompt, setPrompt] = useState('')
-  const [selectedAvatar, setSelectedAvatar] = useState('0')
+  const [selectedAvatar, setSelectedAvatar] = useState(() => getRandomAgentAvatarValue())
   const [assistantType, setAssistantType] = useState<'builtin' | 'acp'>('acp')
   const [acpTool, setAcpTool] = useState('claude')
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -278,7 +278,7 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
         setName('')
         setDescription('')
         setPrompt('')
-        setSelectedAvatar('0')
+        setSelectedAvatar(getRandomAgentAvatarValue())
         setAssistantType('acp')
         setAcpTool('claude')
         setCategoryId('')

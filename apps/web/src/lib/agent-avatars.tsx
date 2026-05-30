@@ -5,6 +5,10 @@ export const AGENT_AVATAR_COUNT = 30
 export const agentAvatarOptions = Array.from({ length: AGENT_AVATAR_COUNT }, (_, index) => index)
 const IMAGE_AVATAR_PATTERN = /^(data:image\/|blob:|https?:\/\/|file:\/\/|\/|\.{1,2}\/)/i
 
+export function getRandomAgentAvatarValue() {
+  return String(Math.floor(Math.random() * (AGENT_AVATAR_COUNT - 1)) + 1)
+}
+
 function hashAvatarValue(value: string) {
   let hash = 0
   for (let i = 0; i < value.length; i += 1) {

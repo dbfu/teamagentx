@@ -7,7 +7,6 @@ import * as path from 'path';
 import { z } from 'zod';
 import { createSystemTool as tool } from './system-tool.js';
 import { agentService } from '../../../core/agent/agent.service.js';
-import { messageService } from '../../../modules/message/message.service.js';
 import { skillInstallService } from '../../../modules/skill/skill-install.service.js';
 import { replaceWithSkillDirectoryLink } from '../../../modules/skill/skill-link.js';
 import { readSkillMetadata } from '../../../modules/skill/skill-metadata.js';
@@ -19,48 +18,6 @@ import { clearExecutorCacheEntries } from '../agent-handler/cache.js';
 export const SKILL_MANAGER_AGENT_ID = '596667f7-f901-4613-92a7-cc71d859fa22';
 
 export { getSharedSkillsDir };
-
-// 获取对话历史工具
-export const getChatHistoryTool = tool(
-  async ({ chatRoomId, limit = 50 }: { chatRoomId?: string; limit?: number }) => {
-    if (!chatRoomId) {
-      return '错误：缺少 chatRoomId 参数';
-    }
-
-    try {
-      const messages = await messageService.findByChatRoomId(chatRoomId, {
-        take: limit,
-        order: 'asc',
-      });
-
-      if (messages.length === 0) {
-        return '该群聊暂无对话历史';
-      }
-
-      const formattedHistory = messages
-        .map((msg) => {
-          const senderName = msg.user?.username || msg.agent?.name || '未知';
-          const role = msg.isHuman ? '用户' : '助手';
-          const time = new Date(msg.time).toLocaleString('zh-CN');
-          return `[${time}] ${role}(${senderName}): ${msg.content}`;
-        })
-        .join('\n\n');
-
-      return `对话历史（共 ${messages.length} 条消息）：\n\n${formattedHistory}`;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return `获取对话历史失败: ${message}`;
-    }
-  },
-  {
-    name: 'get_chat_history',
-    description: '获取指定群聊的对话历史，用于分析并生成技能。返回格式化的对话记录。',
-    schema: z.object({
-      chatRoomId: z.string().describe('群聊 ID'),
-      limit: z.number().optional().default(50).describe('消息数量限制，默认 50'),
-    }),
-  },
-);
 
 // 创建技能工具
 export const createSkillTool = tool(
@@ -370,7 +327,6 @@ export const listAgentSkillsTool = tool(
 
 // 技能管理助手的工具列表
 export const skillManagerTools = [
-  getChatHistoryTool,
   createSkillTool,
   symlinkSkillTool,
   listSharedSkillsTool,

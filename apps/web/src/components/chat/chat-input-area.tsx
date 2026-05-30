@@ -44,7 +44,7 @@ export const ChatInputArea = memo(function ChatInputArea({
   onImageSelect,
   onImageRemove,
 }: ChatInputAreaProps) {
-  const inputValue = useChatStore((s) => s.inputValue)
+  const inputValue = useChatStore((s) => s.inputDraftsByRoom[chatRoomId] ?? '')
   const setInputValue = useChatStore((s) => s.setInputValue)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const mentionInputRef = useRef<MentionInputRef>(null)
@@ -259,8 +259,8 @@ export const ChatInputArea = memo(function ChatInputArea({
         const json = await response.json() as { text?: string }
         const text = (json.text ?? '').trim()
         if (text) {
-          const current = useChatStore.getState().inputValue
-          setInputValue(current ? `${current} ${text}` : text)
+          const current = useChatStore.getState().inputDraftsByRoom[chatRoomId] ?? ''
+          setInputValue(current ? `${current} ${text}` : text, chatRoomId)
         } else {
           toast.info('未识别到语音内容，请重试')
         }
@@ -339,7 +339,7 @@ export const ChatInputArea = memo(function ChatInputArea({
     <MentionInput
       ref={mentionInputRef}
       value={inputValue}
-      onChange={setInputValue}
+      onChange={(value) => setInputValue(value, chatRoomId)}
       onKeyDown={handleKeyDown}
       placeholder={`发送至${chatRoomName}`}
       agents={mentionAgents}
@@ -393,7 +393,7 @@ export const ChatInputArea = memo(function ChatInputArea({
         title="发送"
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => {
-          const currentInputValue = useChatStore.getState().inputValue
+          const currentInputValue = useChatStore.getState().inputDraftsByRoom[chatRoomId] ?? ''
           const currentPendingImages = useChatStore.getState().pendingImages
           const trimmedInput = currentInputValue.trim()
           const uploadedImages = currentPendingImages.filter(img => img.uploadedData && !img.error)

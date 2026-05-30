@@ -1,9 +1,11 @@
 import { GROUP_ASSISTANT_ID } from '../system-assistant.constants.js';
-import { agentCreatorTools } from './agent-creator.tools.js';
-import { chatroomHelperTools } from './chatroom-helper.tools.js';
+import { createAgentCreatorTools } from './agent-creator.tools.js';
+import { createChatRoomHelperTools } from './chatroom-helper.tools.js';
+import { createChatHistorySearchTools } from './chat-history-search.tools.js';
 import { cronTaskHelperTools } from './cron-task-helper.tools.js';
 import { createExternalPlatformHelperTools } from './external-platform-helper.tools.js';
 import { skillManagerTools } from './skill-manager.tools.js';
+import { createExecutionContextTools } from './execution-context.tools.js';
 
 type SystemTool = {
   name?: string;
@@ -28,14 +30,21 @@ function dedupeTools(tools: SystemTool[]): SystemTool[] {
 export function getSystemAssistantTools(
   agentId: string | undefined | null,
   chatRoomId: string,
+  options?: { includeRoomContextTools?: boolean },
 ): SystemTool[] {
-  if (agentId !== GROUP_ASSISTANT_ID) return [];
+  const roomContextTools = options?.includeRoomContextTools === false
+    ? []
+    : createChatHistorySearchTools(chatRoomId);
+
+  if (agentId !== GROUP_ASSISTANT_ID) return dedupeTools(roomContextTools);
 
   return dedupeTools([
-    ...agentCreatorTools,
+    ...roomContextTools,
+    ...createAgentCreatorTools(chatRoomId),
     ...skillManagerTools,
     ...cronTaskHelperTools,
-    ...chatroomHelperTools,
+    ...createChatRoomHelperTools(chatRoomId),
     ...createExternalPlatformHelperTools(chatRoomId),
+    ...createExecutionContextTools(chatRoomId),
   ]);
 }

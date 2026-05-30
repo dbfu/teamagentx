@@ -3,6 +3,7 @@ import { AgentAvatarImage } from '@/lib/agent-avatars'
 import { cn } from '@/lib/utils'
 import { useSocketStore } from '@/stores/socket-store'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { GROUP_COORDINATOR_ID } from '@/lib/system-agents'
 import type { LucideIcon } from 'lucide-react'
 import { AlertCircle, CheckCircle2, ChevronDown, Clock3, Eye, EyeOff, Loader2, PlayCircle, XCircle } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -266,20 +267,30 @@ export function TaskBoardPanel({ chatRoom, onViewStream, onViewExecutionRecord, 
     scheduleRefresh,
   ])
 
-  // 获取列的任务数据，处理合并列的情况
+  // 获取列的任务数据，处理合并列的情况，并过滤掉群调度助手
   const getColumnTasks = useCallback((column: BoardColumnConfig): ChatTaskBoardItem[] => {
+    let tasks: ChatTaskBoardItem[]
     if (column.dataKeys) {
       // 合并列：把多个数据源的数组合并
-      return column.dataKeys.flatMap((key) => board[key])
+      tasks = column.dataKeys.flatMap((key) => board[key])
+    } else if (column.key === 'completed') {
+      tasks = board.completed
+    } else if (column.key === 'executing') {
+      tasks = board.executing
+    } else if (column.key === 'pending') {
+      tasks = board.pending
+    } else {
+      tasks = []
     }
-    // 单一列：直接取对应 key 的数据
-    if (column.key === 'completed') return board.completed
-    if (column.key === 'executing') return board.executing
-    if (column.key === 'pending') return board.pending
-    return []
+
+    // 过滤掉群调度助手的任务
+    return tasks.filter(task => task.agentId !== GROUP_COORDINATOR_ID)
   }, [board])
 
-  const totalCount = board.completed.length + board.failed.length + board.executing.length + board.pending.length + board.cancelled.length
+  // 过滤后的总任务数
+  const totalCount = useMemo(() => {
+    return columns.reduce((sum, col) => sum + getColumnTasks(col).length, 0)
+  }, [getColumnTasks])
   const visibleCount = visibleColumns.length
 
   // 移动端：当前选中的列

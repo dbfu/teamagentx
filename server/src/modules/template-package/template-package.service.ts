@@ -7,6 +7,7 @@ import {
   LEGACY_SYSTEM_AGENT_IDS,
   SYSTEM_AGENT_IDS,
 } from '../../core/agent/system-assistant.constants.js';
+import { SYSTEM_CATEGORY_ID } from '../../scripts/system-agent-sync.js';
 import { cronTaskService } from '../cron-task/cron-task.service.js';
 import { deserializeAgentSpeechConfig } from '../speech/speech-config.js';
 import { serializeAgentSpeechConfig } from '../speech/speech-config.js';
@@ -32,6 +33,18 @@ const TEMPLATE_EXCLUDED_AGENT_IDS = new Set([
   ...SYSTEM_AGENT_IDS,
   ...LEGACY_SYSTEM_AGENT_IDS,
 ]);
+
+const TEMPLATE_EXCLUDED_AGENT_NAMES = new Set([
+  '群助手',
+  '群调度助手',
+  '助手管理',
+  '技能管理',
+  '定时任务',
+  '群聊管理',
+  '外部平台接入',
+]);
+
+const TEMPLATE_COPY_NAME_PATTERN = /^群助手（模板副本 \d+）$/;
 
 export const templatePackageService = {
   async exportChatRoomTemplate(input: {
@@ -309,8 +322,19 @@ export const templatePackageService = {
         },
       });
 
+      const excludedCategoryIds = new Set(
+        input.snapshot.categories
+          .filter((category) => isTemplateExcludedCategory(category))
+          .map((category) => category.id),
+      );
+
       const categoryIdBySource = new Map<string, string | null>();
       for (const category of input.snapshot.categories) {
+        if (excludedCategoryIds.has(category.id)) {
+          categoryIdBySource.set(category.id, null);
+          continue;
+        }
+
         const existing = await tx.agentCategory.findUnique({
           where: { name: category.name },
           select: { id: true },
@@ -334,7 +358,11 @@ export const templatePackageService = {
         categoryIdBySource.set(category.id, newCategoryId);
       }
 
-      const importableAgents = input.snapshot.agents.filter((agent) => !isTemplateExcludedAgentId(agent.id));
+      const importableAgents = input.snapshot.agents.filter((agent) => !isTemplateExcludedAgent({
+        id: agent.id,
+        name: agent.name,
+        categoryId: agent.categoryId,
+      }) && !excludedCategoryIds.has(agent.categoryId ?? ''));
 
       for (const agent of importableAgents) {
         const resolvedTextProvider = preview.compatibility.resolved.find(
@@ -392,7 +420,7 @@ export const templatePackageService = {
             chatRoomId: roomId,
             agentId: importedAgentId,
             role: 'MEMBER',
-            injectGroupHistory: true,
+            injectGroupHistory: false,
           },
         });
 
@@ -564,8 +592,20 @@ function isTemplateExcludedAgentId(agentId: string | null | undefined): boolean 
   return !!agentId && TEMPLATE_EXCLUDED_AGENT_IDS.has(agentId);
 }
 
-function isTemplateExcludedAgent(agent: { id: string; agentLevel?: string | null }): boolean {
-  return agent.agentLevel === 'system' || isTemplateExcludedAgentId(agent.id);
+function isTemplateExcludedCategory(category: { id?: string | null; name?: string | null }): boolean {
+  return category.id === SYSTEM_CATEGORY_ID || category.name === '系统';
+}
+
+function isTemplateExcludedAgent(agent: {
+  id: string;
+  agentLevel?: string | null;
+  name?: string | null;
+  categoryId?: string | null;
+}): boolean {
+  return agent.agentLevel === 'system'
+    || isTemplateExcludedAgentId(agent.id)
+    || agent.categoryId === SYSTEM_CATEGORY_ID
+    || (agent.name ? TEMPLATE_EXCLUDED_AGENT_NAMES.has(agent.name) || TEMPLATE_COPY_NAME_PATTERN.test(agent.name) : false);
 }
 
 function parseCronTaskAgentIds(value: string | null): string[] {

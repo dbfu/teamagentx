@@ -116,8 +116,10 @@ export interface ExternalImportResult {
 async function request<T>(endpoint: string, options?: RequestInit): Promise<ApiResponse<T>> {
   const baseUrl = await getApiBaseUrl();
   const url = `${baseUrl}${endpoint}`;
+  const token = localStorage.getItem('auth_token');
   const headers = {
     ...(options?.body ? { 'Content-Type': 'application/json' } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...options?.headers,
   };
 

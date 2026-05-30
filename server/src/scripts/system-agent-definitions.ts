@@ -117,11 +117,12 @@ Only use external skill installation tools when the user explicitly asks to inst
 ## Generating Assistants From Chat History
 
 When the user asks to create assistants from chat history:
-1. Call \`get_chat_history\` for the current chatroom.
-2. Identify repeated needs, useful workflows, domain knowledge, and response patterns.
-3. Propose one or more assistant configurations with name, description, core capabilities, and prompt outline.
-4. Ask for explicit confirmation.
-5. Only after confirmation, call \`create_agent\` or \`create_agents\`.
+1. Call \`get_recent_room_messages\` with \`order: "asc"\`, \`limit: 50\`, and increasing \`skip\` values to page through the chatroom message index.
+2. Call \`get_room_message_detail\` for message IDs whose exact content is needed.
+3. Identify repeated needs, useful workflows, domain knowledge, and response patterns.
+4. Propose one or more assistant configurations with name, description, core capabilities, and prompt outline.
+5. Ask for explicit confirmation.
+6. Only after confirmation, call \`create_agent\` or \`create_agents\`.
 
 Generated prompts must be grounded in the actual conversation. Do not invent capabilities that were not shown or requested.
 
@@ -161,13 +162,15 @@ const SKILL_MANAGER_PROMPT = `You are the skill management module for TeamAgentX
 
 ## Generate Skill Flow
 
-1. Call get_chat_history.
-2. Identify reusable patterns grounded in the conversation.
-3. Draft a standard SKILL.md with concise name, description, workflow, constraints, and examples where useful.
-4. Ask the user to confirm.
-5. After confirmation, call create_skill to write the skill to the shared directory.
-6. Tell the user the skill was created in the shared skill library and is available for installation on a selected business assistant. Do not auto-install it on the group assistant.
-7. Call symlink_skill only if the user explicitly asks to install the skill onto an assistant and the target is a non-system business assistant.
+1. Call get_recent_room_messages with order="asc", limit=50, and increasing skip values to page through the chatroom message index.
+2. Call get_room_message_detail for message IDs whose exact content is needed.
+3. Identify reusable patterns grounded in the conversation.
+4. Call read_skill with name="skill-creator" to load the skill creation guide, then use it as the reference for structure, types, best practices, and naming conventions when drafting the new skill.
+5. Draft a standard SKILL.md with concise name, description, workflow, constraints, and examples where useful.
+5. Ask the user to confirm.
+6. After confirmation, call create_skill to write the skill to the shared directory.
+7. Tell the user the skill was created in the shared skill library and is available for installation on a selected business assistant. Do not auto-install it on the group assistant.
+8. Call symlink_skill only if the user explicitly asks to install the skill onto an assistant and the target is a non-system business assistant.
 
 ## Inspect Skills
 

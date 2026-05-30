@@ -9,12 +9,19 @@ export interface AgentAction {
   target?: string;
 }
 
+export type AgentTriggerMode = 'auto' | 'manual' | 'coordinator';
+
 // 历史消息类型
 export interface HistoryMessage {
   content: string;
   senderName: string;
   isHuman: boolean;
-  kind?: 'message' | 'memory_summary';
+  kind?: 'message' | 'memory_summary' | 'message_index';
+  messageId?: string;
+  time?: string;
+  senderType?: 'user' | 'agent';
+  preview?: string;
+  attachments?: Array<{filename?: string | null; type?: string | null}>;
 }
 
 // 消息广播回调类型（异步，确保消息保存完成）

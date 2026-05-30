@@ -9,6 +9,7 @@ import { useAuthStore, useChatRoomStore } from '@/stores'
 import {
   ArrowLeft,
   Bot,
+  Brain,
   Cpu,
   Download,
   Globe,
@@ -32,6 +33,7 @@ import { AssistantConfigTab } from './assistant-config-tab'
 import { AssistantHistoryTab } from './assistant-history-tab'
 import { AssistantSkillsTab } from './assistant-skills-tab'
 import { AssistantVoiceTab } from './assistant-voice-tab'
+import { AssistantMemoryTab } from './assistant-memory-tab'
 import { useAssistantDetail } from './hooks/use-assistant-detail'
 
 // 加载骨架屏
@@ -405,6 +407,10 @@ export function AssistantDetailPage() {
               <History className="size-4" />
               会话记录
             </TabsTrigger>
+            <TabsTrigger value="memory" className="gap-2">
+              <Brain className="size-4" />
+              记忆
+            </TabsTrigger>
           </TabsList>
 
           {/* 分隔线 */}
@@ -432,6 +438,10 @@ export function AssistantDetailPage() {
 
           <TabsContent value="history" className="flex-1 overflow-y-auto p-8 m-0">
             <AssistantHistoryTab agentId={agent.id} />
+          </TabsContent>
+
+          <TabsContent value="memory" className="flex-1 overflow-y-auto p-6 m-0">
+            <AssistantMemoryTab agentId={agent.id} />
           </TabsContent>
         </Tabs>
       </div>

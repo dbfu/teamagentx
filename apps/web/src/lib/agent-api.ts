@@ -458,8 +458,10 @@ async function request<T>(
 ): Promise<ApiResponse<T>> {
   const baseUrl = await getApiBaseUrl()
   const hasBody = options?.body !== undefined
+  const token = localStorage.getItem('auth_token')
   const headers: HeadersInit = {
     ...(hasBody && { 'Content-Type': 'application/json' }),
+    ...(token && { Authorization: `Bearer ${token}` }),
     ...options?.headers,
   }
 
@@ -1218,6 +1220,32 @@ export const agentApi = {
   // 获取 chatRoom 的快速对话会话信息
   async getQuickChatSession(chatRoomId: string): Promise<ApiResponse<QuickChatSession | null>> {
     return request<QuickChatSession | null>(`/chatrooms/${chatRoomId}/quick-chat-session`)
+  },
+
+  // 获取助手全局长期记忆
+  async getMemory(agentId: string): Promise<ApiResponse<{ content: string; filePath: string }>> {
+    return request<{ content: string; filePath: string }>(`/agents/${agentId}/memory`)
+  },
+
+  // 更新助手全局长期记忆
+  async updateMemory(agentId: string, content: string): Promise<ApiResponse<void>> {
+    return request<void>(`/agents/${agentId}/memory`, {
+      method: 'PUT',
+      body: JSON.stringify({ content }),
+    })
+  },
+
+  // 获取助手在某个房间的长期记忆
+  async getRoomMemory(agentId: string, chatRoomId: string): Promise<ApiResponse<{ content: string; filePath: string }>> {
+    return request<{ content: string; filePath: string }>(`/agents/${agentId}/memory/room/${chatRoomId}`)
+  },
+
+  // 更新助手在某个房间的长期记忆
+  async updateRoomMemory(agentId: string, chatRoomId: string, content: string): Promise<ApiResponse<void>> {
+    return request<void>(`/agents/${agentId}/memory/room/${chatRoomId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ content }),
+    })
   },
 }
 

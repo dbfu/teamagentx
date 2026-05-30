@@ -6,7 +6,12 @@ export interface HistoryMessage {
   content: string;
   senderName: string;
   isHuman: boolean;
-  kind?: 'message' | 'memory_summary';
+  kind?: 'message' | 'memory_summary' | 'message_index';
+  messageId?: string;
+  time?: string;
+  senderType?: 'user' | 'agent';
+  preview?: string;
+  attachments?: Array<{filename?: string | null; type?: string | null}>;
 }
 
 // 附件数据（用于传递给 LLM）

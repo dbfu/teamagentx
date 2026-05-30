@@ -219,6 +219,12 @@ export interface TodoData {
   createdAt: string | Date
 }
 
+// 密码变更事件数据类型
+export interface AuthPasswordChangedData {
+  message: string
+  timestamp: number
+}
+
 interface PackageScriptsUpdatedData {
   chatRoomId: string
   data: {
@@ -306,6 +312,9 @@ interface SocketStore {
   completeTodo: (todoId: string) => void
   dismissTodo: (todoId: string) => void
   onTodoUpdated: (callback: (data: { todoId: string; status: string }) => void) => () => void
+
+  // 密码变更相关方法
+  onAuthPasswordChanged: (callback: (data: AuthPasswordChangedData) => void) => () => void
 
 }
 
@@ -629,6 +638,14 @@ export const useSocketStore = create<SocketStore>((set, get) => ({
     if (!socket) return () => {}
     socket.on('todo:updated', callback)
     return () => socket?.off('todo:updated', callback)
+  },
+
+  // 密码变更事件监听
+  onAuthPasswordChanged: (callback) => {
+    const socket = get().socket
+    if (!socket) return () => {}
+    socket.on('auth:password-changed', callback)
+    return () => socket?.off('auth:password-changed', callback)
   },
 
 }))

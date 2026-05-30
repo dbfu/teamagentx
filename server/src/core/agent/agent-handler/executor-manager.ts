@@ -1,7 +1,12 @@
 import { writeFileSync, unlinkSync, existsSync } from 'fs';
 import { chatRoomService } from '../../../modules/chatroom/chatroom.service.js';
 import { llmProviderService } from '../../../modules/llm-provider/llm-provider.service.js';
-import type { IAgentExecutor, AgentDebugInfo, ChatRoomAgentInfo } from '../executor.interface.js';
+import type {
+  AgentDebugInfo,
+  AgentTriggerMode,
+  ChatRoomAgentInfo,
+  IAgentExecutor,
+} from '../executor.interface.js';
 import { createExecutor } from '../executor.factory.js';
 import { resolveAgentImageProvider } from '../image-generation.service.js';
 import { clearAgentLog } from '../agent-log.js';
@@ -16,7 +21,7 @@ import { setBroadcastCronTriggerMessageFn } from '../../cron/cron-scheduler.serv
 import { broadcastCronTriggerMessage } from './message-utils.js';
 import { recoveryService } from '../../../modules/recovery/recovery.service.js';
 import { messageService } from '../../../modules/message/message.service.js';
-import { agentMemoryService } from '../../../modules/agent-memory/agent-memory.service.js';
+import { roomMessageIndexService } from '../../../modules/message/room-message-index.service.js';
 import type { HistoryMessage } from '../../../modules/task-queue/task-queue.service.js';
 import { globalEmit, globalEmitDone } from './status.js';
 import { buildAIMessage } from './message-utils.js';
@@ -70,7 +75,7 @@ export async function getExecutor(
     chatRoomId,
     agent.id,
   );
-  const injectGroupHistory = chatRoomAgent?.injectGroupHistory ?? true;
+  const injectGroupHistory = chatRoomAgent?.injectGroupHistory ?? false;
   const lastInjectedMessageId = chatRoomAgent?.lastInjectedMessageId ?? undefined;  // 上次注入位置
 
   // 获取群聊配置
@@ -142,6 +147,7 @@ export async function getExecutor(
     imageGenerationProvider,
     lastInjectedMessageId,  // 传递上次注入位置
     chatRoomRules,  // 传递群规则
+    agentTriggerMode: (chatRoom?.agentTriggerMode ?? 'coordinator') as AgentTriggerMode,
     stateless: agent.id === GROUP_COORDINATOR_ID,
   });
   executorCache.set(cacheKey, executor);
@@ -186,7 +192,7 @@ export function _testInjectDebugInfo(
     lastHistory: debugInfo.lastHistory ?? null,
     threadId: debugInfo.threadId ?? cacheKey,
     chatRoomId: debugInfo.chatRoomId ?? chatRoomId,
-    injectGroupHistory: debugInfo.injectGroupHistory ?? true,
+    injectGroupHistory: debugInfo.injectGroupHistory ?? false,
     chatRoomAgents: debugInfo.chatRoomAgents ?? [],
     workDir: debugInfo.workDir,
     lastResponse: debugInfo.lastResponse ?? null,
@@ -297,12 +303,16 @@ export async function initAgents() {
         }
       };
 
-      // 获取群历史
+      // 恢复时只构建群消息索引，不触发长期摘要。
       let history: HistoryMessage[] | undefined;
       if (executor.injectGroupHistory) {
         const latestMessages = await messageService.findByChatRoomId(chatRoomId, { take: 1, order: 'desc' });
         history = latestMessages[0]
-          ? await agentMemoryService.buildHistory(chatRoomId, agent.id, latestMessages[0].id)
+          ? await roomMessageIndexService.buildMessageIndex(
+              chatRoomId,
+              latestMessages[0].id,
+              executor.lastInjectedMessageId,
+            )
           : [];
       }
 

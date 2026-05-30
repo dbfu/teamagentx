@@ -1,13 +1,12 @@
 
-import { ChatRoom, chatRoomApi, templatePackageApi } from '@/lib/agent-api'
+import { ChatRoom, chatRoomApi } from '@/lib/agent-api'
 import { AgentAvatarImage } from '@/lib/agent-avatars'
 import { GroupAvatarImage } from '@/lib/group-avatars'
 import { cn, formatDateTime } from '@/lib/utils'
 import { useSocketStore } from '@/stores/socket-store'
-import { Copy, Download, Loader2, MessageSquare, Pin, Plus, RefreshCw, Trash2, Upload } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { Copy, Loader2, MessageSquare, Pin, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { GroupTemplateImportModal } from './group-template-import-modal'
 
 interface ConversationListProps {
   chatRooms: ChatRoom[]
@@ -32,6 +31,11 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
       .map((todo) => todo.chatRoomId),
   ), [todos])
 
+  // 滚动容器 ref
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+  // 群聊项 ref 映射
+  const roomItemRefs = useRef<Map<string, HTMLDivElement>>(new Map())
+
   // 右键菜单状态
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; room: ChatRoom } | null>(null)
   const [pinning, setPinning] = useState(false)
@@ -39,8 +43,31 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
   const [deleting, setDeleting] = useState(false)
   // 删除确认对话框状态
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
-  const [showImportModal, setShowImportModal] = useState(false)
-  const [exportingTemplate, setExportingTemplate] = useState(false)
+
+  // 当选中群聊变化时，自动滚动到该群聊位置
+  useEffect(() => {
+    if (!selectedId || !scrollContainerRef.current) return
+
+    // 尝试滚动到选中的群聊，使用 requestAnimationFrame 确保 DOM 已渲染
+    const scrollToSelected = () => {
+      const roomElement = roomItemRefs.current.get(selectedId)
+      if (roomElement) {
+        roomElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      }
+    }
+
+    // 立即尝试一次
+    scrollToSelected()
+
+    // 如果第一次没找到元素，延迟再试（等待列表刷新和渲染）
+    const timer = requestAnimationFrame(() => {
+      scrollToSelected()
+      // 再延迟一次确保
+      requestAnimationFrame(scrollToSelected)
+    })
+
+    return () => cancelAnimationFrame(timer)
+  }, [selectedId, chatRooms])
 
   // 格式化未读数显示
   const formatUnreadCount = (count: number) => {
@@ -93,7 +120,8 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
       const response = await chatRoomApi.duplicate(room.id)
       if (response.success && response.data) {
         toast.success('群聊已复制')
-        onRefresh?.()
+        // 等待刷新完成后再选中新群聊，确保列表已更新
+        await onRefresh?.()
         onSelect(response.data.id)
       } else {
         toast.error(response.error || '复制失败')
@@ -144,39 +172,6 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
     }
   }
 
-  const handleExportTemplate = async (room: ChatRoom) => {
-    if (exportingTemplate) return
-
-    setExportingTemplate(true)
-    try {
-      const response = await templatePackageApi.export({
-        chatRoomId: room.id,
-        packageTitle: room.name,
-        packageSummary: room.description || undefined,
-      })
-
-      if (!response.success || !response.data) {
-        toast.error(response.error || '导出群组模板失败')
-        return
-      }
-
-      const url = URL.createObjectURL(response.data.blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = response.data.filename
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      setTimeout(() => URL.revokeObjectURL(url), 100)
-      toast.success(`已导出群组模板：${room.name}`)
-    } catch {
-      toast.error('导出群组模板失败')
-    } finally {
-      setExportingTemplate(false)
-      handleCloseContextMenu()
-    }
-  }
-
   return (
     <>
     <div className={cn("flex h-full select-none flex-col bg-background overflow-x-hidden", isMobile ? "w-full border-0" : "w-72 shrink-0 border-r border-border")}>
@@ -191,52 +186,41 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
             <span className="text-xl font-semibold text-foreground">消息</span>
           </div>
           <div className="flex items-center gap-1">
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                setShowImportModal(true)
-              }}
-              className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              title="导入群组模板"
-              style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
-            >
-              <Upload className="size-4" />
-            </button>
-              {onCreateChatRoom && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onCreateChatRoom()
-                  }}
-                  className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  title="创建群聊"
-                  style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
-                >
-                  <Plus className="size-4" />
-                </button>
-              )}
-              {onRefresh && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onRefresh()
-                  }}
-                  className={cn(
-                    "flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  )}
-                  title="刷新"
-                  style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
-                >
-                  <RefreshCw className={cn("size-4", isRefreshing && "animate-spin")} />
-                </button>
-              )}
-            </div>
+            {onCreateChatRoom && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onCreateChatRoom()
+                }}
+                className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                title="创建群聊"
+                style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+              >
+                <Plus className="size-4" />
+              </button>
+            )}
+            {onRefresh && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onRefresh()
+                }}
+                className={cn(
+                  "flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                )}
+                title="刷新"
+                style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+              >
+                <RefreshCw className={cn("size-4", isRefreshing && "animate-spin")} />
+              </button>
+            )}
+          </div>
         </div>
       )}
 
-      {/* 置顶群聊区域 - 卡片形式，不参与滚动 */}
+      {/* 置顶群聊区域 - 卡片形式，不参与滚动，移动端一行5个，桌面端一行4个 */}
       {chatRooms.some(room => room.isPinned) && (
-        <div className="mx-2 flex flex-wrap gap-1.5 px-1 py-1 pb-2">
+        <div className={cn("mx-2 grid gap-1 px-1 py-1 pb-2", isMobile ? "grid-cols-5" : "grid-cols-4")}>
           {chatRooms.filter(room => room.isPinned).sort((a, b) => {
             // 置顶群聊按置顶时间倒序
             const aPinnedAt = a.pinnedAt ? new Date(a.pinnedAt).getTime() : 0
@@ -254,13 +238,13 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
                 onClick={() => onSelect(room.id)}
                 onContextMenu={(e) => handleContextMenu(e, room)}
                 className={cn(
-                  'flex shrink-0 cursor-pointer flex-col items-center gap-1 rounded-lg px-2 py-1 transition-colors',
+                  'flex cursor-pointer flex-col items-center gap-1 rounded-lg px-2 py-1 transition-colors',
                   selectedId === room.id
                     ? 'bg-primary/10 ring-1 ring-primary/20'
                     : 'bg-muted/50 hover:bg-accent'
                 )}
               >
-                <div className="relative shrink-0">
+                <div className={cn("relative shrink-0", isMobile ? "" : "scale-90")}>
                   {/* 快速对话群聊使用助手头像，普通群聊使用群聊头像 */}
                   {room.isQuickChatRoom ? (
                     <AgentAvatarImage avatar={room.avatar ?? null} className="size-10 rounded-full" />
@@ -269,19 +253,20 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
                   )}
                   {/* 未读数红点 */}
                   {unreadDisplay && (
-                    <div className="absolute -right-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-xs font-medium text-white">
+                    <div className={cn("absolute -right-1 -top-1 flex items-center justify-center rounded-full bg-red-500 font-medium text-white", isMobile ? "min-h-5 min-w-5 px-1.5 text-xs" : "min-h-4 min-w-4 px-1 text-[10px]")}>
                       {unreadDisplay}
                     </div>
                   )}
                   {/* 助手执行中标识 */}
                   {isExecuting && (
-                    <div className="absolute -bottom-1 -right-1 flex size-4 items-center justify-center rounded-full bg-primary">
-                      <Loader2 className="size-3 animate-spin text-white" />
+                    <div className={cn("absolute -bottom-1 -right-1 flex items-center justify-center rounded-full bg-primary", isMobile ? "size-4" : "size-3")}>
+                      <Loader2 className={cn("animate-spin text-white", isMobile ? "size-3" : "size-2.5")} />
                     </div>
                   )}
                 </div>
                 <span className={cn(
-                  "max-w-16 truncate text-xs",
+                  "truncate text-xs",
+                  isMobile ? "max-w-16" : "max-w-14",
                   unreadCount > 0 ? "font-medium text-foreground" : "text-muted-foreground"
                 )}>{room.name}</span>
                 {hasOwnerMention && (
@@ -296,7 +281,7 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
       )}
 
       {/* Conversation list - 不支持拖动 */}
-      <div className="scrollbar-hover flex-1 overflow-y-auto pb-3">
+      <div ref={scrollContainerRef} className="scrollbar-hover flex-1 overflow-y-auto pb-3">
         {chatRooms.length === 0 ? (
           <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
             暂无群聊，点击左上角 + 创建
@@ -319,6 +304,13 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
                   return (
                     <div
                       key={room.id}
+                      ref={(el) => {
+                        if (el) {
+                          roomItemRefs.current.set(room.id, el)
+                        } else {
+                          roomItemRefs.current.delete(room.id)
+                        }
+                      }}
                       onClick={() => onSelect(room.id)}
                       onContextMenu={(e) => handleContextMenu(e, room)}
                       className={cn(
@@ -420,14 +412,6 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
               复制群聊
             </button>
             <button
-              onClick={() => handleExportTemplate(contextMenu.room)}
-              disabled={exportingTemplate}
-              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-popover-foreground hover:bg-accent disabled:opacity-50"
-            >
-              {exportingTemplate ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
-              导出群组模板
-            </button>
-            <button
               onClick={handleDeleteClick}
               className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
             >
@@ -466,15 +450,6 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
         </>
       )}
     </div>
-    <GroupTemplateImportModal
-      isOpen={showImportModal}
-      onClose={() => setShowImportModal(false)}
-      onImported={async (chatRoomId) => {
-        setShowImportModal(false)
-        onRefresh?.()
-        onSelect(chatRoomId)
-      }}
-    />
     </>
   )
 }

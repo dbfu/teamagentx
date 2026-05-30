@@ -51,6 +51,7 @@ describe('internal coordinator no-dispatch handling', () => {
   test('prompt forces an exact no-dispatch sentinel', () => {
     const prompt = buildInternalCoordinatorPrompt();
 
+    assert.ok(prompt.length < 2100);
     assert.match(prompt, /最终回复必须只包含这四个字：无需调度/);
     assert.match(prompt, /不要添加原因、标点、换行或任何其他文字/);
     assert.doesNotMatch(prompt, /无需调度：一句话原因/);
@@ -90,6 +91,18 @@ describe('internal coordinator no-dispatch handling', () => {
     assert.match(prompt, /不能在一条消息里同时 @业务助手 和 @群主/);
     assert.match(prompt, /必须先只 @群主 提问/);
     assert.match(prompt, /用户回答或确认后，再调度合适的助手处理/);
+    assert.match(prompt, /回答你刚刚转发给群主的问题/);
+    assert.match(prompt, /调度回原始提问的业务助手/);
+  });
+
+  test('prompt requires preserving forwarded question formatting for the owner', () => {
+    const prompt = buildInternalCoordinatorPrompt();
+
+    assert.match(prompt, /转发助手提出的问题或确认事项给群主/);
+    assert.match(prompt, /Markdown 格式、换行、列表、选项编号和代码块/);
+    assert.match(prompt, /不要压缩成一句话、不要改成纯文本摘要/);
+    assert.match(prompt, /保留被转发内容全文和原始排版/);
+    assert.match(prompt, /不得重写标题、列表、空行或选项文本/);
   });
 
   test('prompt blocks next phase until all parallel tasks finish', () => {

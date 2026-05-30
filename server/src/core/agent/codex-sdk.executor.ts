@@ -9,9 +9,19 @@ import * as os from 'os';
 import * as path from 'path';
 import { config as appConfig } from '../../config/index.js';
 import { agentMemoryService } from '../../modules/agent-memory/agent-memory.service.js';
+import { buildRoomMessageIndexSection } from '../../modules/message/room-message-index.service.js';
 import { skillInstallService } from '../../modules/skill/skill-install.service.js';
 import type { AttachmentData } from '../../modules/task-queue/task-queue.service.js';
-import { buildAgentLongTermMemorySection } from './agent-long-term-memory.js';
+import {
+  buildAgentLongTermMemoryContentSection,
+  buildAgentLongTermMemoryInstructions,
+} from './agent-long-term-memory.js';
+import {
+  buildAgentBaseSystemPrompt,
+  buildGroupChatMemberInfoSection,
+  CODEX_BACKGROUND_COMMANDS_SECTION,
+  RESPONSE_STYLE_INSTRUCTION,
+} from './agent-system-prompt.js';
 import { debugLog } from './agent-handler/debug.js';
 import { getInternalAgentToolToken } from './agent-handler/internal-agent-tool-auth.js';
 import { buildAcpProviderEnv, type AcpProviderInfo } from './acp-provider.adapter.js';
@@ -23,7 +33,6 @@ import {
   buildInstalledSkillsInstructions,
   buildInstalledSkillsSignature,
 } from './skill-instructions.js';
-import { getImageGenerationSkillInstructions } from './image-generation-config.js';
 import {
   DEFAULT_AGENT_THINKING_MODE,
   type AgentThinkingMode,
@@ -31,6 +40,7 @@ import {
 import type {
   AgentDebugInfo,
   AgentExecResult,
+  AgentTriggerMode,
   ChatRoomAgentInfo,
   HistoryMessage,
   IAgentExecutor,
@@ -744,7 +754,7 @@ export class CodexSdkExecutor implements IAgentExecutor {
     systemPrompt: string,
     chatRoomId: string,
     workDir: string | null,
-    injectGroupHistory: boolean = true,
+    injectGroupHistory: boolean = false,
     agentId?: string,
     sessionDir?: string,
     customWorkDir?: string,
@@ -758,6 +768,7 @@ export class CodexSdkExecutor implements IAgentExecutor {
     thinkingMode?: AgentThinkingMode | null,
     chatRoomRules?: string,
     stateless: boolean = false,
+    agentTriggerMode?: AgentTriggerMode,
   ) {
     this.name = name;
     this.chatRoomId = chatRoomId;
@@ -781,35 +792,15 @@ export class CodexSdkExecutor implements IAgentExecutor {
       agentWorkDir: workDir,
     });
 
-    const modelInfo = this.llmProvider
-      ? `
-## Current Model
-You are using the model service provided by ${this.llmProvider.name}.
-- Model name: ${this.llmProvider.model}
-- Provider type: ${this.llmProvider.type}`
-      : '';
-    const chatRoomRulesSection = chatRoomRules?.trim()
-      ? `
-## Group Rules
-The following rules come from the current chatroom and apply to all assistants in this chatroom. You must follow them in replies and collaboration in this chatroom:
-${chatRoomRules.trim()}`
-      : '';
-
-    this.systemPrompt = `${modelInfo}
-${systemPrompt}
-${chatRoomRulesSection}
-
-${getImageGenerationSkillInstructions(this.imageGenerationProvider)}
-
-## Assistant Mentions
-In TeamAgentX, an @assistant mention can trigger another assistant task. A single message may contain at most one triggerable @assistant mention. When handing off or asking another assistant, choose one target assistant and mention only that assistant. If multiple assistants could help, choose the best next assistant or ask the user to choose; refer to any additional assistants by name without @.
-
-## Working Directory
-Your working directory is: ${this.workDir}
-When you perform file operations or run commands, operate in this directory by default. Resolve relative paths from this directory.
-
-## Background Commands
-For long-running services or commands that should keep running after this turn, such as \`pnpm dev\`, \`npm run dev\`, \`vite\`, \`next dev\`, watch modes, servers, listeners, and \`tail -f\`, use the MCP tool \`start_background_command\` instead of running the command directly in the shell. Use \`read_background_command_output\` to inspect logs, \`list_background_commands\` to find existing tasks, and \`stop_background_command\` when the user asks to stop one. Do not block the turn waiting for a dev server to exit.`;
+    this.systemPrompt = buildAgentBaseSystemPrompt({
+      agentPrompt: systemPrompt,
+      llmProvider: this.llmProvider,
+      imageGenerationProvider: this.imageGenerationProvider,
+      chatRoomRules,
+      workDir: this.workDir,
+      agentTriggerMode,
+      commandSection: CODEX_BACKGROUND_COMMANDS_SECTION,
+    });
 
     this.ensureWorkDirectory();
     this.threadId = this.stateless ? null : this.loadThreadId();
@@ -1431,11 +1422,7 @@ process.stdin.on("data", (chunk) => {
   private buildFullMessage(message: string, history?: HistoryMessage[]): string {
     let fullMessage = '';
 
-    if (this.systemPrompt) {
-      fullMessage += `[System Instructions]\n${this.systemPrompt}\n\n`;
-    }
-
-    const longTermMemorySection = buildAgentLongTermMemorySection(this.chatRoomId, this.agentId, this.name);
+    const longTermMemorySection = buildAgentLongTermMemoryContentSection(this.chatRoomId, this.agentId, this.name);
     if (longTermMemorySection) {
       fullMessage += `${longTermMemorySection}\n\n`;
     }
@@ -1445,50 +1432,39 @@ process.stdin.on("data", (chunk) => {
       fullMessage += `${skillsUpdateSection}\n\n`;
     }
 
-    if (this.injectGroupHistory && history && history.length > 0) {
-      const memorySummary = history.find((msg) => msg.kind === 'memory_summary')?.content;
-      const recentHistory = history.filter((msg) => msg.kind !== 'memory_summary');
-
-      if (memorySummary) {
-        fullMessage += `[Group Chat Long-Term Memory Summary]
-${memorySummary}
-
-`;
+    if (this.injectGroupHistory) {
+      const messageIndexSection = buildRoomMessageIndexSection(history);
+      if (messageIndexSection) {
+        fullMessage += `${messageIndexSection}\n\n`;
       }
 
-      if (recentHistory.length > 0) {
-        const historyText = recentHistory
-          .map((msg) => `[${msg.senderName}]: ${msg.content}`)
-          .join('\n');
-
-        fullMessage += `[Recent Group Chat Messages]
-The following are the most recent group-chat messages before the current message (${recentHistory.length} total):
-${historyText}
-
-`;
-      }
-    }
-
-    if (this.chatRoomAgents.length > 0) {
-      const agentsInfo = this.chatRoomAgents.map((agent) => agent.name).join(', ');
-      const otherAgents = this.chatRoomAgents.filter((agent) => agent.name !== this.name);
-      const otherAgentsList = otherAgents.map((agent) => agent.name).join(', ');
-      const othersInfo = otherAgents.length > 0 ? otherAgentsList : 'none';
-      const mentionTip = otherAgents.length > 0
-        ? '\n[Tip]\nWhen you need to message another assistant, write "@assistant_name message content" directly in your final reply. You may also mention an assistant in body text when the @ is preceded by a space. A target assistant is triggered only when @ is at the start of a line or the previous character is a space; @ immediately after punctuation will not trigger. A single message may contain at most one triggerable @assistant mention. If you need to refer to additional assistants, write their names without @. If the user only asks you to send a message to another assistant, output only that @assistant message in the final reply, with no explanation, pleasantries, summary, or expanded collaboration invitation.'
-        : '';
-
-      fullMessage += `[Group Chat Member Info]
-Chatroom working directory: ${this.workDir}
-Assistants in the current chatroom: ${agentsInfo}
-You are: ${this.name}
-Other assistants: ${othersInfo}${mentionTip}
+      fullMessage += `[Group History Access]
+You may access current chatroom history through tools. Use \`get_recent_room_messages\` for message indexes, \`search_room_messages\` to search indexes by keyword, or \`get_room_message_detail\` to inspect exact message content by messageId. These tools automatically use the current chatroom; do not ask for or provide a chatRoomId. Fetch at most 50 message indexes per call; use \`skip\` for pagination and \`order\` as \`asc\` or \`desc\` for chronological direction. Recent/search results are navigation previews, so call \`get_room_message_detail\` before relying on exact prior content.
 
 `;
     }
 
     fullMessage += `[Current Message]\n${message}`;
     return fullMessage;
+  }
+
+  private buildDeveloperInstructions(): string {
+    return [
+      this.systemPrompt,
+      buildAgentLongTermMemoryInstructions(
+        this.chatRoomId,
+        this.agentId,
+        this.name,
+      ),
+      buildGroupChatMemberInfoSection({
+        chatRoomAgents: this.chatRoomAgents,
+        agentName: this.name,
+        workDir: this.workDir,
+      }),
+      RESPONSE_STYLE_INSTRUCTION,
+    ]
+      .filter((section) => section.trim().length > 0)
+      .join('\n\n');
   }
 
   private buildSkillsUpdateSection(): string {
@@ -1544,6 +1520,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       backgroundCommandListEndpoint,
     });
     const config = {
+      developer_instructions: this.buildDeveloperInstructions(),
       hide_agent_reasoning: this.thinkingMode === 'off',
       show_raw_agent_reasoning: this.thinkingMode !== 'off',
       model_reasoning_effort: getCodexReasoningEffort(this.thinkingMode),

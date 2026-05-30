@@ -256,10 +256,31 @@ class ExecutionRecordService {
 
   async findByChatRoom(
     chatRoomId: string,
-    options?: { take?: number }
+    options?: { take?: number; currentOnly?: boolean }
   ): Promise<ExecutionRecordWithParsed[]> {
+    const latestArchive = options?.currentOnly
+      ? await prisma.chatRoomMessageArchive.findFirst({
+          where: { chatRoomId },
+          orderBy: { archivedAt: 'desc' },
+          select: { archivedAt: true },
+        })
+      : null;
+
     const records = await prisma.executionRecord.findMany({
-      where: { chatRoomId },
+      where: {
+        chatRoomId,
+        ...(options?.currentOnly
+          ? {
+              OR: [
+                { outputMessages: { some: { archiveId: null } } },
+                {
+                  outputMessages: { none: {} },
+                  ...(latestArchive ? { createdAt: { gt: latestArchive.archivedAt } } : {}),
+                },
+              ],
+            }
+          : {}),
+      },
       orderBy: { createdAt: 'desc' },
       take: options?.take ?? 50,
     });
