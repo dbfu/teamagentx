@@ -863,20 +863,20 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
         {/* 二维码安全提示弹框 */}
         {showQRConfirmModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-            <div className="w-[360px] rounded-2xl bg-card shadow-xl p-6">
-              <div className="flex items-center justify-center mb-4">
-                <div className="rounded-full bg-orange-100 p-3">
-                  <VolumeX className="size-6 text-orange-600" />
+            <div className="w-[480px] rounded-2xl bg-card shadow-xl p-8">
+              <div className="flex items-center justify-center mb-5">
+                <div className="rounded-full bg-orange-100 p-4">
+                  <VolumeX className="size-7 text-orange-600" />
                 </div>
               </div>
-              <h3 className="text-lg font-semibold text-foreground text-center mb-3">安全提示</h3>
-              <p className="text-sm text-muted-foreground text-center leading-relaxed mb-6">
+              <h3 className="text-xl font-semibold text-foreground text-center mb-3">安全提示</h3>
+              <p className="text-sm text-muted-foreground text-center leading-relaxed mb-8">
                 二维码中包含您的登录凭证，请勿泄露给他人。如被他人获取，他们将能够直接连接您的服务并访问您的数据。
               </p>
               <div className="flex gap-3">
                 <button
                   onClick={() => setShowQRConfirmModal(false)}
-                  className="flex-1 rounded-lg border border-gray-200 text-gray-600 px-4 py-2.5 text-sm hover:bg-gray-50"
+                  className="flex-1 rounded-lg border border-gray-200 text-gray-600 px-4 py-2.5 text-sm hover:bg-gray-50 whitespace-nowrap"
                 >
                   取消
                 </button>
@@ -886,7 +886,7 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
                     setShowQRConfirmModal(false)
                     setShowQRModal(true)
                   }}
-                  className="flex-1 rounded-lg bg-blue-500 px-4 py-2.5 text-sm text-white hover:bg-blue-600"
+                  className="flex-1 rounded-lg bg-blue-500 px-4 py-2.5 text-sm text-white hover:bg-blue-600 whitespace-nowrap"
                 >
                   我已了解，生成二维码
                 </button>
@@ -898,9 +898,9 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
         {/* 二维码弹框 */}
         {showQRModal && generatedQRData && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-            <div className="w-[360px] rounded-2xl bg-card shadow-xl p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-foreground">扫码连接</h3>
+            <div className="w-[480px] rounded-2xl bg-card shadow-xl p-8">
+              <div className="flex items-center justify-between mb-5">
+                <h3 className="text-xl font-semibold text-foreground">扫码连接</h3>
                 <button
                   onClick={() => setShowQRModal(false)}
                   className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -908,7 +908,7 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
                   <X className="size-5" />
                 </button>
               </div>
-              <p className="text-xs text-muted-foreground mb-4">
+              <p className="text-sm text-muted-foreground mb-5">
                 使用手机 TeamAgentX App 或其他扫码应用扫描下方二维码
               </p>
               <QRCodeDisplay data={generatedQRData} />
