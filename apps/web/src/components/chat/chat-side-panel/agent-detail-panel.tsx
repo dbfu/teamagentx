@@ -1,10 +1,10 @@
 import { cn } from '@/lib/utils'
-import { Bot, Eye, History, Loader2, Trash2, ExternalLink, List } from 'lucide-react'
+import { Bot, Eye, History, Loader2, Trash2, ExternalLink, List, Brain, Save, RotateCcw, X } from 'lucide-react'
 import type { AgentStatus } from '@/stores/socket-store'
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useChatStore } from '@/stores/chat-store'
-import { chatRoomApi } from '@/lib/agent-api'
+import { chatRoomApi, agentApi } from '@/lib/agent-api'
 import { toast } from 'sonner'
 import { AgentAvatar } from '../agent-avatar'
 import { isSystemAssistantDetailBlocked } from '@/lib/system-agents'
@@ -65,6 +65,51 @@ export function AgentDetailPanel({
   const [isClearing, setIsClearing] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
   const [isSavingHistoryAccess, setIsSavingHistoryAccess] = useState(false)
+
+  // 群记忆弹窗相关状态
+  const [memoryModalOpen, setMemoryModalOpen] = useState(false)
+  const [memoryContent, setMemoryContent] = useState('')
+  const [memoryOriginal, setMemoryOriginal] = useState('')
+  const [memoryLoading, setMemoryLoading] = useState(false)
+  const [memorySaving, setMemorySaving] = useState(false)
+
+  const loadRoomMemory = useCallback(async () => {
+    if (!selectedRoomAgent?.id) return
+    setMemoryLoading(true)
+    try {
+      const res = await agentApi.getRoomMemory(selectedRoomAgent.id, chatRoomId)
+      if (res.success && res.data) {
+        setMemoryContent(res.data.content)
+        setMemoryOriginal(res.data.content)
+      }
+    } catch {
+      // ignore
+    } finally {
+      setMemoryLoading(false)
+    }
+  }, [selectedRoomAgent?.id, chatRoomId])
+
+  useEffect(() => {
+    if (memoryModalOpen) {
+      loadRoomMemory()
+    }
+  }, [memoryModalOpen, loadRoomMemory])
+
+  const saveRoomMemory = async () => {
+    if (!selectedRoomAgent?.id) return
+    setMemorySaving(true)
+    try {
+      const res = await agentApi.updateRoomMemory(selectedRoomAgent.id, chatRoomId, memoryContent)
+      if (res.success) {
+        setMemoryOriginal(memoryContent)
+        toast.success('群记忆已保存')
+      } else {
+        toast.error(res.error || '保存失败')
+      }
+    } finally {
+      setMemorySaving(false)
+    }
+  }
 
   // 是否是可以清空上下文的助手（原生助手和 ACP 助手都支持）
   const canClearContext = selectedRoomAgent?.agentType === 'builtin' || selectedRoomAgent?.agentType === 'acp'
@@ -224,6 +269,17 @@ export function AgentDetailPanel({
           )}
         </div>
 
+        {/* 群记忆 */}
+        {selectedRoomAgent?.id && (
+          <button
+            className="w-full flex items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 py-2.5 text-sm font-medium text-foreground hover:bg-accent transition-colors"
+            onClick={() => setMemoryModalOpen(true)}
+          >
+            <Brain className="size-4" />
+            群记忆
+          </button>
+        )}
+
         {/* 清空上下文 */}
         {canClearContext && selectedRoomAgent?.chatRoomAgentId && (
           <button
@@ -259,6 +315,69 @@ export function AgentDetailPanel({
                 disabled={isClearing}
               >
                 {isClearing ? '清空中...' : '确认清空'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 群记忆弹窗 */}
+      {memoryModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setMemoryModalOpen(false)} />
+          <div className="relative bg-background rounded-xl shadow-xl flex flex-col w-full max-w-lg mx-4" style={{ maxHeight: '80vh' }}>
+            {/* 弹窗头部 */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+              <div className="flex items-center gap-2">
+                <Brain className="size-4 text-primary" />
+                <span className="font-semibold text-foreground">群记忆</span>
+                <span className="text-xs text-muted-foreground">— {selectedRoomAgent?.name}</span>
+              </div>
+              <button
+                className="text-muted-foreground hover:text-foreground transition-colors"
+                onClick={() => setMemoryModalOpen(false)}
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+
+            {/* 内容区 */}
+            <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-3 min-h-0">
+              <p className="text-xs text-muted-foreground">
+                助手在本群的长期记忆，仅在当前群生效。助手可在对话中自动写入，也可在此手动编辑。
+              </p>
+              {memoryLoading ? (
+                <div className="flex items-center justify-center h-32 gap-2 text-muted-foreground">
+                  <Loader2 className="size-4 animate-spin" />
+                  <span className="text-sm">加载中...</span>
+                </div>
+              ) : (
+                <textarea
+                  value={memoryContent}
+                  onChange={(e) => setMemoryContent(e.target.value)}
+                  placeholder="暂无群记忆，助手可在对话中写入..."
+                  className="w-full flex-1 min-h-[240px] resize-none rounded-lg border border-gray-200 px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none bg-muted/30 placeholder:text-muted-foreground/50"
+                />
+              )}
+            </div>
+
+            {/* 底部操作 */}
+            <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border shrink-0">
+              <button
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent rounded-lg transition-colors border border-gray-200"
+                onClick={() => setMemoryContent(memoryOriginal)}
+                disabled={memoryLoading || memorySaving}
+              >
+                <RotateCcw className="size-3.5" />
+                重置
+              </button>
+              <button
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors disabled:opacity-50"
+                onClick={saveRoomMemory}
+                disabled={memoryLoading || memorySaving}
+              >
+                {memorySaving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
+                保存
               </button>
             </div>
           </div>
