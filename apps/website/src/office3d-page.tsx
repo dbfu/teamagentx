@@ -74,19 +74,16 @@ export function Office3dPage({ siteConfig }: Office3dPageProps) {
             <p>{t('office3d.desc')}</p>
           </section>
 
-          {/* 视频介绍位置 —— 后续把真实视频替换这里的占位框
-              用法示例：
-              <video className="office3d-video-el" src="/office-3d.mp4" poster="/office-3d-poster.jpg" controls /> */}
+          {/* 视频介绍 */}
           <div className="office3d-video reveal">
-            <div className="office3d-video-inner">
-              <span className="office3d-play">
-                <svg width="30" height="30" viewBox="0 0 24 24" fill="none">
-                  <path d="M8 5.5v13l11-6.5L8 5.5Z" fill="currentColor" />
-                </svg>
-              </span>
-              <span className="office3d-video-label">{t('office3d.videoLabel')}</span>
-              <small className="office3d-video-note">{t('office3d.videoNote')}</small>
-            </div>
+            <video
+              className="office3d-video-el"
+              src="/teamagentx-3d.mp4"
+              autoPlay
+              muted
+              loop
+              playsInline
+            />
           </div>
 
           {/* 特性卡片 */}
