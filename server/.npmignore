@@ -1,0 +1,10 @@
+node_modules
+node_modules-prod
+node_modules-prod-test
+dev.db
+*.log
+*.jsonl
+release
+uploads
+src
+*.tsbuildinfo

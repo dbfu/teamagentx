@@ -1,0 +1,11 @@
+node_modules
+# Keep environment variables out of version control
+.env
+
+/src/generated/prisma
+
+# Test and temporary files
+.teamagentx-output/
+migrate-events.mts
+migrate-events.ts
+src/gateway/shell-test.gateway.ts

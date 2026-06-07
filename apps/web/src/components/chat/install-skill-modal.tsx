@@ -1,0 +1,444 @@
+import { useState, useRef, useEffect, useMemo } from 'react'
+import { X, Loader2, Download, MessageSquare, Package, Check, Search } from 'lucide-react'
+import { agentApi } from '@/lib/agent-api'
+import { skillApi, SharedSkill } from '@/lib/skill-api'
+import { toast } from 'sonner'
+import { useAuthStore, useSocketStore, useChatRoomStore } from '@/stores'
+import { useNavigate } from 'react-router-dom'
+import { cn } from '@/lib/utils'
+import { useTranslation } from 'react-i18next'
+
+interface InstallSkillModalProps {
+  isOpen: boolean
+  onClose: () => void
+  onSuccess?: () => void  // 安装成功后的回调
+  agentId: string
+  agentName: string
+}
+
+// 群助手的专用 ID
+const GROUP_ASSISTANT_ID = '4f7c8a91-2d6b-4c8f-9a7e-5b1d2c3e4f60'
+
+// 安装模式
+type InstallMode = 'chat' | 'select'
+
+export function InstallSkillModal({
+  isOpen,
+  onClose,
+  onSuccess,
+  agentId,
+  agentName,
+}: InstallSkillModalProps) {
+  const { t } = useTranslation()
+  const [mode, setMode] = useState<InstallMode>('select')
+  const [query, setQuery] = useState('')
+  const [isCreating, setIsCreating] = useState(false)
+  const isComposingRef = useRef(false)  // 追踪中文输入状态
+  const { user } = useAuthStore()
+  const navigate = useNavigate()
+  const { sendMessage } = useSocketStore()
+  const loadChatRooms = useChatRoomStore((s) => s.loadChatRooms)
+  const selectRoom = useChatRoomStore((s) => s.selectRoom)
+
+  // 选择模式状态
+  const [sharedSkills, setSharedSkills] = useState<SharedSkill[]>([])
+  const [loadingSkills, setLoadingSkills] = useState(false)
+  const [selectedSkills, setSelectedSkills] = useState<Set<string>>(new Set())
+  const [installing, setInstalling] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+
+  // 搜索过滤后的技能列表
+  const filteredSkills = useMemo(() => sharedSkills.filter((skill) => {
+    if (!searchQuery.trim()) return true
+    const q = searchQuery.toLowerCase()
+    return (
+      skill.name.toLowerCase().includes(q) ||
+      skill.description?.toLowerCase().includes(q) ||
+      skill.slug.toLowerCase().includes(q)
+    )
+  }), [searchQuery, sharedSkills])
+  const filteredSkillSlugs = useMemo(
+    () => filteredSkills.map((skill) => skill.slug),
+    [filteredSkills],
+  )
+  const allFilteredSelected = filteredSkillSlugs.length > 0
+    && filteredSkillSlugs.every((slug) => selectedSkills.has(slug))
+
+  // 加载共享技能
+  useEffect(() => {
+    if (isOpen && mode === 'select') {
+      loadSharedSkills()
+    }
+  }, [isOpen, mode])
+
+  const loadSharedSkills = async () => {
+    setLoadingSkills(true)
+    try {
+      const result = await skillApi.getShared()
+      if (result.success && result.data) {
+        // 过滤出未安装到当前助手的技能
+        const availableSkills = result.data.filter(
+          skill => !skill.installedAgents.includes(agentName)
+        )
+        setSharedSkills(availableSkills)
+        setSelectedSkills(prev => {
+          const availableSlugs = new Set(availableSkills.map((skill) => skill.slug))
+          return new Set([...prev].filter((slug) => availableSlugs.has(slug)))
+        })
+      } else {
+        toast.error(t('skill.getSkillListFailed'))
+      }
+    } catch (error) {
+      toast.error(t('skill.getSkillListFailed'))
+    } finally {
+      setLoadingSkills(false)
+    }
+  }
+
+  // 切换技能选中状态
+  const toggleSkill = (slug: string) => {
+    setSelectedSkills(prev => {
+      const next = new Set(prev)
+      if (next.has(slug)) {
+        next.delete(slug)
+      } else {
+        next.add(slug)
+      }
+      return next
+    })
+  }
+
+  const toggleSelectAllFiltered = () => {
+    if (filteredSkillSlugs.length === 0) return
+
+    setSelectedSkills(prev => {
+      const next = new Set(prev)
+      if (filteredSkillSlugs.every((slug) => next.has(slug))) {
+        filteredSkillSlugs.forEach((slug) => next.delete(slug))
+      } else {
+        filteredSkillSlugs.forEach((slug) => next.add(slug))
+      }
+      return next
+    })
+  }
+
+  // 批量安装选中的技能
+  const handleBatchInstall = async () => {
+    if (selectedSkills.size === 0) return
+
+    setInstalling(true)
+    try {
+      let successCount = 0
+      let failCount = 0
+
+      for (const slug of selectedSkills) {
+        const skill = sharedSkills.find(s => s.slug === slug)
+        if (!skill) continue
+
+        const result = await skillApi.symlink(skill.slug, agentId)
+        if (result.success) {
+          successCount++
+        } else {
+          failCount++
+        }
+      }
+
+      if (failCount === 0) {
+        toast.success(t('skill.installSuccessCount', { count: successCount }))
+        onSuccess?.()
+      } else {
+        toast.warning(t('skill.installPartialSuccess', { success: successCount, fail: failCount }))
+        onSuccess?.()  // 即使部分失败，也刷新列表让已安装的显示出来
+      }
+
+      resetAndClose()
+    } catch (error) {
+      toast.error(t('skill.installFailed'))
+    } finally {
+      setInstalling(false)
+    }
+  }
+
+  if (!isOpen) return null
+
+  const handleStartChat = async () => {
+    if (!query.trim() || isCreating) return
+    if (!user?.id) {
+      toast.error(t('auth.pleaseLoginFirst'))
+      return
+    }
+
+    setIsCreating(true)
+    try {
+      // 创建与群助手的快速对话
+      const res = await agentApi.createQuickChat(GROUP_ASSISTANT_ID, user.id)
+      if (res.success && res.data) {
+        // 刷新聊天室列表，确保新会话已加载
+        await loadChatRooms()
+        // 选择新创建的房间
+        selectRoom(res.data.id)
+        // 跳转到消息页面
+        navigate('/')
+        // 发送初始消息（包含目标助手 ID 和名称）
+        sendMessage({ chatRoomId: res.data.id, content: `[目标助手: ${agentName} (ID: ${agentId})] ${query.trim()}` })
+        // 关闭模态框
+        resetAndClose()
+        // 注意：技能还未安装，需要用户在对话中完成安装后返回助手页面刷新
+      } else {
+        toast.error(t('skill.createChatFailed'))
+      }
+    } finally {
+      setIsCreating(false)
+    }
+  }
+
+  const resetAndClose = () => {
+    setQuery('')
+    setMode('select')
+    setSelectedSkills(new Set())
+    setSearchQuery('')
+    onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="w-[520px] rounded-2xl bg-card shadow-xl">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-border px-6 py-4">
+          <div className="flex items-center gap-2">
+            <Download className="size-5 text-primary" />
+            <h2 className="text-lg font-semibold text-foreground">{t('skill.installSkillTitle')}</h2>
+          </div>
+          <button
+            onClick={resetAndClose}
+            disabled={isCreating || installing}
+            className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+          >
+            <X className="size-5" />
+          </button>
+        </div>
+
+        {/* Mode Tabs */}
+        <div className="flex border-b border-border px-6">
+          <button
+            onClick={() => setMode('select')}
+            className={cn(
+              'flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors',
+              mode === 'select'
+                ? 'border-primary text-primary'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            )}
+          >
+            <Package className="size-4" />
+            {t('skill.fromSkillLib')}
+          </button>
+          <button
+            onClick={() => setMode('chat')}
+            className={cn(
+              'flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors',
+              mode === 'chat'
+                ? 'border-primary text-primary'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            )}
+          >
+            <MessageSquare className="size-4" />
+            {t('skill.chatInstall')}
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="p-6">
+          <p className="mb-4 text-sm text-muted-foreground">
+            {t('skill.installSkillFor', { name: agentName })}
+          </p>
+
+          {/* 选择模式 */}
+          {mode === 'select' && (
+            <>
+              {loadingSkills ? (
+                <div className="flex items-center justify-center py-8 text-muted-foreground">
+                  <Loader2 className="size-5 animate-spin mr-2" />
+                  {t('skill.loadingSkillList')}
+                </div>
+              ) : sharedSkills.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                  <Package className="size-12 mb-3 opacity-50" />
+                  <p className="text-sm">{t('skill.noSkillsToInstall')}</p>
+                  <p className="text-xs mt-1">{t('skill.noSkillsToInstallHint')}</p>
+                </div>
+              ) : (
+                <>
+                  {/* 搜索框 */}
+                  <div className="mb-3 flex items-center gap-2">
+                    <div className="relative min-w-0 flex-1">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                      <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder={t('skill.searchSkillPlaceholder')}
+                        className="w-full rounded-lg border border-border bg-background pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={toggleSelectAllFiltered}
+                      disabled={filteredSkills.length === 0 || installing}
+                      className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+                    >
+                      <span className={cn(
+                        'flex size-4 items-center justify-center rounded border transition-colors',
+                        allFilteredSelected
+                          ? 'border-primary bg-primary text-white'
+                          : 'border-border bg-transparent'
+                      )}
+                      >
+                        {allFilteredSelected && <Check className="size-3" />}
+                      </span>
+                      {allFilteredSelected ? t('skill.cancelSelectAll') : t('skill.selectAll')}
+                    </button>
+                  </div>
+                  {filteredSkills.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-6 text-muted-foreground">
+                      <Search className="size-8 mb-2 opacity-50" />
+                      <p className="text-sm">{t('skill.noMatchingSkills')}</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-60 overflow-y-auto">
+                      {filteredSkills.map((skill) => (
+                    <button
+                      key={skill.slug}
+                      onClick={() => toggleSkill(skill.slug)}
+                      className={cn(
+                        'flex w-full items-center gap-3 rounded-lg border px-4 py-3 transition-colors',
+                        selectedSkills.has(skill.slug)
+                          ? 'border-primary bg-primary/5'
+                          : 'border-border hover:bg-accent'
+                      )}
+                    >
+                      <div className={cn(
+                        'flex size-5 items-center justify-center rounded border transition-colors',
+                        selectedSkills.has(skill.slug)
+                          ? 'border-primary bg-primary text-white'
+                          : 'border-border bg-transparent'
+                      )}
+                      >
+                        {selectedSkills.has(skill.slug) && (
+                          <Check className="size-3" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0 text-left">
+                        <div className="font-medium text-foreground truncate">{skill.name}</div>
+                        <div className="text-xs text-muted-foreground truncate">
+                          {skill.description || t('skill.noDescription')}
+                        </div>
+                      </div>
+                      <span className="text-xs text-muted-foreground">
+                        <span className="rounded bg-muted px-2 py-0.5">
+                          {skill.source === 'user-created' ? t('skill.sourceUserCreated') : t('skill.sourceExternal')}
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                  )}
+                </>
+              )}
+
+              {!loadingSkills && sharedSkills.length > 0 && (
+                <p className="text-xs text-muted-foreground mt-3">
+                  {t('skill.selectedSkillsHint', { count: selectedSkills.size })}
+                </p>
+              )}
+            </>
+          )}
+
+          {/* 对话模式 */}
+          {mode === 'chat' && (
+            <>
+              {/* 输入框 */}
+              <div className="mb-4">
+                <label className="mb-1.5 block text-sm font-medium text-foreground">
+                  {t('skill.describeSkillNeeded')}
+                </label>
+                <textarea
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder={t('skill.describeSkillPlaceholder')}
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none resize-none h-24"
+                  autoFocus
+                  onCompositionStart={() => { isComposingRef.current = true }}
+                  onCompositionEnd={() => { isComposingRef.current = false }}
+                  onKeyDown={(e) => {
+                    // 中文输入过程中不响应回车，结束后才触发
+                    if (e.key === 'Enter' && !e.shiftKey && !isComposingRef.current) {
+                      e.preventDefault()
+                      handleStartChat()
+                    }
+                  }}
+                />
+              </div>
+
+              {/* 提示 */}
+              <p className="text-xs text-muted-foreground">
+                {t('skill.chatInstallHint')}
+              </p>
+            </>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="flex justify-between gap-3 border-t border-border px-6 py-4">
+          <button
+            type="button"
+            onClick={resetAndClose}
+            disabled={isCreating || installing}
+            className="rounded-lg border border-border px-4 py-2 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50"
+          >
+            {t('common.cancel')}
+          </button>
+
+          {mode === 'select' ? (
+            <button
+              type="button"
+              onClick={handleBatchInstall}
+              disabled={selectedSkills.size === 0 || installing}
+              className="rounded-lg bg-primary px-4 py-2 text-sm text-white hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
+            >
+              {installing ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  {t('skill.installing')}
+                </>
+              ) : (
+                <>
+                  <Download className="size-4" />
+                  {t('skill.installCount', { count: selectedSkills.size })}
+                </>
+              )}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleStartChat}
+              disabled={!query.trim() || isCreating}
+              className="rounded-lg bg-primary px-4 py-2 text-sm text-white hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
+            >
+              {isCreating ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  {t('skill.creatingChat')}
+                </>
+              ) : (
+                <>
+                  <MessageSquare className="size-4" />
+                  {t('skill.startChatInstall')}
+                </>
+              )}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}

@@ -1,0 +1,21 @@
+{
+  "packageManager": "pnpm@10.24.0",
+  "license": "MIT",
+  "scripts": {
+    "start": "./start.sh",
+    "start:web": "./start.sh web",
+    "start:electron": "./start.sh electron",
+    "build:dmg": "./build-dmg.sh",
+    "build:win": "./build-win.sh",
+    "build:desktop-all": "./build-desktop-all.sh"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/engines",
+      "electron",
+      "electron-winstaller",
+      "esbuild",
+      "prisma"
+    ]
+  }
+}

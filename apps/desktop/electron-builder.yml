@@ -1,0 +1,130 @@
+appId: com.teamagentx.app
+productName: TeamAgentX
+compression: maximum
+electronLanguages:
+  - en-US
+  - zh-CN
+directories:
+  output: release
+
+extraResources:
+  - from: electron/tray-icon.png
+    to: tray-icon.png
+  - from: electron/icon.png
+    to: icon.png
+  - from: ../../server/dist/
+    to: server/dist/
+    filter:
+      - "**/*"
+  - from: ../../server/prisma/
+    to: server/prisma/
+    filter:
+      - "**/*"
+  - from: ../../server/preinstalled-skills/
+    to: server/preinstalled-skills/
+    filter:
+      - "**/*"
+  - from: ../../server/package.json
+    to: server/package.json
+  - from: ../../server/node_modules-prod/node_modules/
+    to: server/node_modules/
+    filter:
+      - "**/*"
+      - "!**/.modules.yaml"
+      - "!**/.bin/**"
+      - "!**/@prisma/engines/prisma-fmt-*"
+      - "!**/*.md"
+      - "!**/README*"
+      - "!**/CHANGELOG*"
+      - "!**/.DS_Store"
+      # 故意不打入任何 claude/codex native 子包，由 server 端的
+      # resolveClaudeCodeExecutable / findLocalCodexBinary 在运行时优先使用
+      # 用户本地的 claude/codex CLI（TOOLS_DIR 或系统 PATH）。这是为了
+      # 控制安装包体积。如果用户机器上没有，setup wizard 会引导安装。
+      - "!**/claude-agent-sdk-darwin-*/**"
+      - "!**/claude-agent-sdk-linux-*/**"
+      - "!**/claude-agent-sdk-win32-*/**"
+      - "!**/@openai+codex@*-darwin-*/**"
+      - "!**/@openai+codex@*-linux-*/**"
+      - "!**/@openai+codex@*-win32-*/**"
+
+# Windows 特殊配置 - server 目录不解压到 asar，保持为普通文件
+asar: true
+
+afterPack: electron/after-pack.cjs
+afterSign: electron/after-sign.cjs
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+  category: public.app-category.developer-tools
+  # 声明 App 支持的本地化语言，macOS 原生对话框（文件选择 / 保存框、
+  # 左侧系统目录名、按钮文案）由 AppKit 根据该列表选择语言。默认 Electron
+  # 只声明英文，导致系统即使首选中文，原生弹框仍显示英文。
+  extendInfo:
+    CFBundleDevelopmentRegion: zh-Hans
+    CFBundleLocalizations:
+      - zh-Hans
+      - en
+  icon: electron/icon.icns
+  darkModeSupport: true
+  # 正式签名身份由环境变量 CSC_NAME 指定（换账号只改环境变量，不改这里）。
+  # 未设置 CSC_NAME 且本机无证书时，electron-builder 跳过正式签名，
+  # 由 after-sign.cjs 回退为 ad-hoc 签名（仅本机可用）。
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: electron/entitlements.mac.plist
+  entitlementsInherit: electron/entitlements.mac.plist
+  # 公证在 after-sign.cjs 中用 notarytool 处理，关闭内置公证避免重复
+  notarize: false
+
+dmg:
+  icon: electron/icon.icns
+  iconSize: 160
+  contents:
+    - x: 180
+      y: 170
+      type: file
+    - x: 480
+      y: 170
+      type: link
+      path: /Applications
+  window:
+    width: 660
+    height: 400
+  backgroundColor: "#ffffff"
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: electron/icon.ico
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  allowElevation: true
+  deleteAppDataOnUninstall: false
+  runAfterFinish: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: TeamAgentX
+  # 安装/升级前先 taskkill 所有 TeamAgentX 进程及其子进程（utilityProcess
+  # 启动的 server 与 claude.exe / codex.exe），否则文件锁会导致覆盖安装失败、
+  # 必须先手动卸载旧版本才能装新版本。
+  include: electron/installer.nsh
+
+linux:
+  target:
+    - AppImage
+  icon: electron/icon.png
+  category: Development
+
+files:
+  - dist/**/*
+  - dist-electron/**/*

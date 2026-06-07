@@ -1,0 +1,682 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum AgentType {
+  builtin
+  acp
+}
+
+enum AgentLevel {
+  normal
+  system
+}
+
+enum ScheduleType {
+  cron // cron 表达式（如 "0 9 * * *" 每天9点）
+  interval // 固定间隔（如每5分钟）
+  once // 一次性执行
+}
+
+enum CronTaskState {
+  pending
+  running
+  completed
+  failed
+  skipped
+}
+
+enum AttachmentType {
+  image
+  audio
+  file // 未来扩展
+}
+
+enum TodoStatus {
+  pending // 待处理
+  completed // 已完成
+  dismissed // 已忽略
+}
+
+enum LlmProviderType {
+  custom // 自定义 API 端点
+}
+
+enum LlmModelType {
+  text
+  image
+  video
+  audio
+}
+
+enum ImageGenApiType {
+  sync
+  async
+  auto
+}
+
+enum AgentCapabilityType {
+  image
+  video
+  audio
+}
+
+// LLM 供应商配置
+model LlmProvider {
+  id                String            @id @default(uuid())
+  name              String            @unique
+  type              LlmProviderType   @default(custom)
+  modelType         LlmModelType      @default(text)
+  apiProtocol       String            @default("anthropic") // 'anthropic' | 'openai'
+  codexWireApi      String            @default("responses") // 'responses' | 'chat'：openai 协议下 codex 走的 wire API，chat 表示仅支持 Chat Completions，需开启路由转换
+  apiUrl            String?
+  apiKey            String // 明文存储（本地应用）
+  model             String
+  sttModel          String? // 语音识别模型（audio 类型专用，留空则与 model 共用）
+  audioUsage        String            @default("both") // audio 类型用途：tts | stt | both
+  imageProvider     String?
+  imageApiType      ImageGenApiType?
+  supportsThinking  Boolean? // 是否支持思考模式（null 表示未检测）
+  isActive          Boolean           @default(true)
+  isDefault         Boolean           @default(false)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  agents            Agent[]
+  agentCapabilities AgentCapability[] @relation("CapabilityProvider")
+
+  @@index([name])
+  @@index([modelType])
+}
+
+// 助手分类
+model AgentCategory {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  agents      Agent[]
+
+  @@index([sortOrder])
+}
+
+model Agent {
+  id                String             @id @default(uuid())
+  name              String             @unique
+  avatar            String?
+  avatarColor       String?
+  description       String?
+  prompt            String
+  type              AgentType          @default(builtin)
+  agentLevel        AgentLevel         @default(normal)
+  acpTool           String? // ACP 工具名称：claude, codex, cursor 等
+  workDir           String? // 工作目录（适用于所有类型）
+  proxyConfig       String? // ACP 工具代理配置（如 Codex 本地模式代理地址或 export 片段）
+  codexModel        String? // Codex 本地配置模式下指定的模型名称
+  codexFastMode     Boolean            @default(false) // Codex Fast service tier
+  claudeModel       String? // Claude 本地配置模式下指定的模型名称
+  thinkingMode      String             @default("high") // 思考模式: off | low | medium | high
+  isActive          Boolean            @default(true)
+  categoryId        String? // 分类 ID
+  category          AgentCategory?     @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  llmProviderId     String? // LLM 供应商 ID
+  llmProvider       LlmProvider?       @relation(fields: [llmProviderId], references: [id], onDelete: SetNull)
+  speechConfig      String? // 助手语音配置（JSON 字符串）
+  sortOrder         Int                @default(0) // 同分类内的排序顺序
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  chatRoomAgents    ChatRoomAgent[]
+  messages          Message[]
+  roomMemories      AgentRoomMemory[]
+  quickChatSessions QuickChatSession[] // 快速对话会话
+  triggeredTodos    Todo[] // 助手 @ 用户触发的待办
+  externalChannels  ExternalChannel[] // 作为默认助手的外部频道
+  platformConfigs   PlatformConfig[] // 作为平台全局默认助手
+  bridgeBots        BridgeBot[] // 外部平台机器人实例
+  capabilities      AgentCapability[]
+
+  @@index([name])
+  @@index([categoryId])
+  @@index([llmProviderId])
+  @@index([agentLevel])
+  @@index([categoryId, sortOrder]) // 分类内排序查询优化
+}
+
+model AgentCapability {
+  id             String              @id @default(uuid())
+  agentId        String
+  capabilityType AgentCapabilityType
+  enabled        Boolean             @default(false)
+  llmProviderId  String?
+  config         Json?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  agent       Agent        @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  llmProvider LlmProvider? @relation("CapabilityProvider", fields: [llmProviderId], references: [id], onDelete: SetNull)
+
+  @@unique([agentId, capabilityType])
+  @@index([agentId])
+  @@index([llmProviderId])
+}
+
+model ChatRoom {
+  id                String                   @id
+  name              String
+  description       String?
+  rules             String? // 群规则/指南，注入到群内所有 Agent 的上下文
+  workDir           String? // 群聊工作目录
+  envVars           String? // 群聊环境变量，JSON 数组：[{ key, value, description }]，注入到助手 shell 命令环境
+  ownerId           String?
+  isQuickChatRoom   Boolean                  @default(false) // 标识为快速对话临时群聊
+  quickChatAgentId  String? // 关联的快速对话助手
+  defaultAgentId    String? // 群主无 @ 发言时默认触发的助手
+  agentTriggerMode  String                   @default("auto") // 助手触发模式：auto(自动) | manual(手动)，手动模式下助手消息的 @ 不触发其他助手
+  isPinned          Boolean                  @default(false) // 是否置顶
+  pinnedAt          DateTime? // 置顶时间
+  isCollapsed       Boolean                  @default(false) // 是否折叠
+  collapsedAt       DateTime? // 折叠时间
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime
+  avatar            String?
+  avatarColor       String?
+  owner             User?                    @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  chatRoomAgents    ChatRoomAgent[]
+  messages          Message[]
+  messageArchives   ChatRoomMessageArchive[]
+  agentMemories     AgentRoomMemory[]
+  quickChatSessions QuickChatSession[] // 快速对话会话
+  cronTasks         CronTask[] // 定时任务
+  todos             Todo[] // 助手 @ 用户触发的待办
+  externalChannels  ExternalChannel[] // 关联的外部平台频道
+  platformConfigs   PlatformConfig[] // 直接绑定到该群聊的平台机器人
+  bridgeBots        BridgeBot[] // 直接绑定到该群聊的机器人实例
+
+  @@index([name])
+  @@index([ownerId])
+  @@index([quickChatAgentId])
+  @@index([defaultAgentId])
+  @@index([isPinned, pinnedAt]) // 置顶群聊查询优化
+  @@index([isCollapsed]) // 折叠群聊查询优化
+}
+
+model ChatRoomAgent {
+  id                    String   @id
+  chatRoomId            String
+  userId                String?
+  agentId               String?
+  role                  String   @default("MEMBER")
+  injectGroupHistory    Boolean  @default(false)
+  customWorkDir         String? // 当前群聊中的自定义工作目录
+  lastInjectedMessageId String? // 上次注入群历史的最后消息 ID（用于增量注入）
+  joinedAt              DateTime @default(now())
+  lastReadAt            DateTime @default(now()) // 用户最后阅读时间，用于计算未读消息数
+  chatRoom              ChatRoom @relation(fields: [chatRoomId], references: [id], onDelete: Cascade)
+  user                  User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agent                 Agent?   @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([chatRoomId, agentId])
+  @@unique([chatRoomId, userId])
+  @@index([chatRoomId])
+}
+
+model Message {
+  id                String                  @id
+  type              String                  @default("MESSAGE")
+  content           String
+  time              DateTime                @default(now())
+  userId            String?
+  agentId           String?
+  chatRoomId        String
+  replyMessageId    String?
+  isHuman           Boolean                 @default(true)
+  executionRecordId String? // 关联的执行记录 ID
+  archiveId         String? // 归档记录 ID；null 表示当前可见消息
+  executionDuration Int? // 执行耗时（毫秒）
+  totalTokens       Int? // 消息消耗的 token 数
+  cacheReadTokens   Int? // 缓存读取 token 数
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime
+  replyTo           Message?                @relation("MessageToMessage", fields: [replyMessageId], references: [id])
+  replies           Message[]               @relation("MessageToMessage")
+  chatRoom          ChatRoom                @relation(fields: [chatRoomId], references: [id], onDelete: Cascade)
+  agent             Agent?                  @relation(fields: [agentId], references: [id])
+  user              User?                   @relation(fields: [userId], references: [id])
+  executionRecord   ExecutionRecord?        @relation(fields: [executionRecordId], references: [id], onDelete: SetNull)
+  archive           ChatRoomMessageArchive? @relation(fields: [archiveId], references: [id], onDelete: SetNull)
+  attachments       Attachment[] // 消息附件（图片等）
+  todo              Todo? // 助手 @ 用户触发的待办
+  coveredMemories   AgentRoomMemory[]       @relation("AgentRoomMemoryCoveredMessage")
+
+  @@index([time])
+  @@index([chatRoomId])
+  @@index([agentId])
+  @@index([userId])
+  @@index([executionRecordId])
+  @@index([archiveId])
+}
+
+model ChatRoomMessageArchive {
+  id           String    @id @default(uuid())
+  chatRoomId   String
+  title        String
+  messageCount Int       @default(0)
+  startedAt    DateTime?
+  endedAt      DateTime?
+  archivedAt   DateTime  @default(now())
+  createdBy    String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  chatRoom ChatRoom  @relation(fields: [chatRoomId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@index([chatRoomId, archivedAt])
+  @@index([createdBy])
+}
+
+// 群聊中某个助手的长期摘要记忆
+model AgentRoomMemory {
+  id                 String    @id @default(uuid())
+  chatRoomId         String
+  agentId            String
+  summary            String    @default("")
+  coveredMessageId   String?
+  coveredMessageTime DateTime?
+  messageCount       Int       @default(0)
+  tokenEstimate      Int       @default(0)
+  version            Int       @default(1)
+  compactStatus      String    @default("idle") // idle | pending | running | failed
+  compactStartedAt   DateTime?
+  compactError       String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  chatRoom       ChatRoom @relation(fields: [chatRoomId], references: [id], onDelete: Cascade)
+  agent          Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  coveredMessage Message? @relation("AgentRoomMemoryCoveredMessage", fields: [coveredMessageId], references: [id], onDelete: SetNull)
+
+  @@unique([chatRoomId, agentId])
+  @@index([chatRoomId])
+  @@index([agentId])
+  @@index([compactStatus])
+}
+
+model TaskQueue {
+  id             String   @id
+  chatRoomId     String
+  agentId        String
+  agentName      String
+  messageId      String
+  messageContent String
+  history        String? // JSON string of history messages at enqueue time
+  sessionDir     String? // 快速对话会话工作目录
+  attachments    String? // JSON string of attachments (images with base64)
+  status         String   @default("pending") // pending | executing | interrupted | cancelled
+  createdAt      DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([chatRoomId, agentId])
+  @@index([status]) // 新增索引，便于查询待恢复任务
+}
+
+// 快速对话会话
+model QuickChatSession {
+  id         String    @id @default(uuid())
+  agentId    String
+  chatRoomId String
+  sessionId  String    @unique // 随机会话 ID（目录名）
+  workDir    String // 完整工作目录路径
+  status     String    @default("active") // active, archived
+  createdAt  DateTime  @default(now())
+  archivedAt DateTime?
+
+  agent    Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  chatRoom ChatRoom @relation(fields: [chatRoomId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+  @@index([createdAt])
+}
+
+// Agent 执行记录
+model ExecutionRecord {
+  id             String  @id
+  chatRoomId     String
+  agentId        String
+  agentName      String
+  triggerMessage String // 触发执行的用户消息
+  triggerUser    String? // 触发执行的用户名
+  events         String  @default("[]") // JSON 字符串，按时间顺序存储执行事件 [{type, timestamp, data}]
+  context        String? // JSON 字符串，存储上下文消息
+  systemPrompt   String // 系统提示词快照
+  status         String  @default("completed") // completed, failed
+  errorMessage   String? // 错误信息
+  duration       Int? // 执行耗时（毫秒）
+
+  // Token 使用统计字段
+  llmProviderId       String? // 关联到 LlmProvider
+  inputTokens         Int? // 输入 token 数
+  outputTokens        Int? // 输出 token 数
+  totalTokens         Int? // 总 token 数
+  cacheReadTokens     Int? // 缓存读取 token 数（Prompt Caching）
+  cacheCreationTokens Int? // 缓存创建 token 数
+
+  createdAt      DateTime  @default(now())
+  outputMessages Message[] // 产生的消息列表
+
+  @@index([chatRoomId, agentId])
+  @@index([agentId])
+  @@index([createdAt])
+  @@index([llmProviderId])
+}
+
+// 定时任务（群聊级别）
+model CronTask {
+  id         String @id @default(uuid())
+  chatRoomId String
+
+  name        String
+  description String?
+
+  // 调度配置
+  scheduleType    ScheduleType @default(cron)
+  cronExpression  String? // cron 类型
+  intervalMinutes Int? // interval 类型
+  scheduledAt     DateTime? // once 类型
+
+  // 执行内容（消息内容）
+  payload String
+
+  // 选中触发的助手（JSON 数组存储 agentId 列表，空数组表示不自动 @，["*"] 表示所有助手）
+  agentIds String? @default("[]")
+
+  // 控制
+  enabled    Boolean @default(true)
+  maxRetries Int     @default(3)
+  retryCount Int     @default(0)
+
+  // 状态跟踪
+  state     CronTaskState @default(pending)
+  lastRunAt DateTime?
+  nextRunAt DateTime?
+  lastError String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String?
+
+  // 关联
+  chatRoom   ChatRoom            @relation(fields: [chatRoomId], references: [id], onDelete: Cascade)
+  executions CronTaskExecution[]
+
+  @@index([enabled, nextRunAt])
+  @@index([chatRoomId])
+}
+
+// 定时任务执行记录
+model CronTaskExecution {
+  id                String        @id @default(uuid())
+  cronTaskId        String
+  triggeredAt       DateTime      @default(now())
+  startedAt         DateTime?
+  completedAt       DateTime?
+  state             CronTaskState @default(pending)
+  executionRecordId String?
+  errorMessage      String?
+  duration          Int?
+  payloadSnapshot   String // 执行时的 payload 快照
+
+  cronTask CronTask @relation(fields: [cronTaskId], references: [id], onDelete: Cascade)
+
+  @@index([cronTaskId, triggeredAt])
+}
+
+model TemplatePackage {
+  id                String   @id @default(uuid())
+  templateId        String
+  version           String
+  title             String
+  summary           String?
+  sourceType        String
+  sourceLabel       String?
+  manifestJson      String
+  compatibilityJson String?
+  createdBy         String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([templateId, version])
+}
+
+// chatRoomId 故意不加外键约束，以便群组删除后保留历史导入记录供审计
+model TemplateImportRecord {
+  id              String   @id @default(uuid())
+  templateId      String
+  version         String
+  chatRoomId      String
+  importedBy      String?
+  importAction    String
+  sourceLabel     String?
+  unresolvedCount Int      @default(0)
+  metadataJson    String?
+  importedAt      DateTime @default(now())
+
+  @@index([templateId, version])
+  @@index([chatRoomId])
+}
+
+// 消息附件（图片等）
+model Attachment {
+  id         String         @id @default(uuid())
+  messageId  String
+  type       AttachmentType @default(image)
+  filename   String // 原始文件名
+  mimeType   String // MIME 类型
+  size       Int // 文件大小（字节）
+  url        String // 访问 URL
+  width      Int? // 图片宽度（像素）
+  height     Int? // 图片高度（像素）
+  durationMs Int? // 音频时长（毫秒）
+  transcript String? // 音频转写文本
+  waveform   String? // 预留波形数据
+  createdAt  DateTime       @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+  @@index([createdAt])
+  @@index([type])
+}
+
+model User {
+  id             String          @id
+  socketId       String?         @unique
+  clientId       String?         @unique
+  username       String          @unique
+  password       String
+  avatar         String?
+  avatarColor    String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime
+  ownedChatRooms ChatRoom[]
+  chatRoomAgents ChatRoomAgent[]
+  messages       Message[]
+  todos          Todo[] // 助手 @ 用户触发的待办
+  bridgeBots     BridgeBot[]
+
+  @@index([username])
+}
+
+// 应用级 KV 设置（首次引导、默认 Agent 等）
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+// 后台任务（长时间运行的 shell 命令）
+model BackgroundTask {
+  id         String @id
+  chatRoomId String
+  agentId    String
+  agentName  String
+
+  command String // 执行的命令
+  workDir String // 工作目录
+  pid     Int? // 进程 ID
+
+  state    String @default("running") // pending, running, backgrounded, completed, killed, error
+  exitCode Int? // 退出码
+
+  stdoutPath String // stdout 输出文件路径
+  stderrPath String // stderr 输出文件路径
+
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  lastOutputAt    DateTime @default(now()) // 最后输出时间（用于阻塞检测）
+  blockedNotified Boolean  @default(false) // 是否已发送阻塞通知
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([chatRoomId, agentId])
+  @@index([state])
+  @@index([startedAt])
+}
+
+// 待办事项数据表。助手 @ 群内用户时自动创建待办提醒。
+model Todo {
+  id             String     @id @default(uuid())
+  chatRoomId     String
+  messageId      String     @unique // 触发消息 ID（一条消息最多关联一个待办）
+  triggerAgentId String
+  ownerUserId    String? // 被 @ 的用户 ID（可为空）
+  contentSummary String // 待办内容摘要
+  status         TodoStatus @default(pending)
+  completedAt    DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  chatRoom     ChatRoom @relation(fields: [chatRoomId], references: [id], onDelete: Cascade)
+  message      Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  triggerAgent Agent    @relation(fields: [triggerAgentId], references: [id], onDelete: Cascade)
+  ownerUser    User?    @relation(fields: [ownerUserId], references: [id], onDelete: SetNull)
+
+  @@index([ownerUserId, status])
+  @@index([chatRoomId])
+  @@index([createdAt])
+}
+
+// 外部平台全局配置（每个平台一条记录，存储全局 Bot Token 和默认助手）
+model PlatformConfig {
+  id             String   @id @default(uuid())
+  platform       String   @unique
+  botToken       String? // 全局 Bot Token（加密存储）
+  config         String? // 平台凭证配置（加密 JSON 存储）
+  defaultAgentId String?
+  chatRoomId     String?  @unique
+  enabled        Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  chatRoom     ChatRoom? @relation(fields: [chatRoomId], references: [id], onDelete: SetNull)
+  defaultAgent Agent?    @relation(fields: [defaultAgentId], references: [id], onDelete: SetNull)
+}
+
+// 外部平台机器人实例（同一平台可配置多个凭证实例）
+model BridgeBot {
+  id             String   @id @default(uuid())
+  platform       String
+  name           String
+  botToken       String?
+  config         String?
+  credentialHash String? // SHA-256(platform + 凭证明文)，用于去重
+  defaultAgentId String?
+  chatRoomId     String?
+  ownerId        String?
+  enabled        Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  chatRoom     ChatRoom? @relation(fields: [chatRoomId], references: [id], onDelete: SetNull)
+  defaultAgent Agent?    @relation(fields: [defaultAgentId], references: [id], onDelete: SetNull)
+  owner        User?     @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+
+  @@unique([platform, credentialHash])
+  @@index([platform, createdAt])
+  @@index([chatRoomId])
+  @@index([ownerId])
+}
+
+// 桥接事件日志
+model BridgeEvent {
+  id             String   @id @default(uuid())
+  platform       String
+  externalId     String
+  direction      String // inbound | outbound
+  status         String // success | failed
+  messageId      String?
+  dedupeKey      String?  @unique
+  contentPreview String?
+  agentName      String?
+  errorMsg       String?
+  createdAt      DateTime @default(now())
+
+  @@index([platform, createdAt])
+  @@index([createdAt])
+}
+
+// 外部聊天平台频道（Telegram / 飞书 / 钉钉 / 企业微信 / QQ）
+model ExternalChannel {
+  id             String   @id @default(uuid())
+  platform       String // telegram | feishu | dingtalk | wecom | qq
+  externalId     String // 平台侧群 ID（chat_id / open_chat_id 等）
+  chatRoomId     String
+  botToken       String? // 平台机器人 Token
+  webhookSecret  String? // Webhook 验签密钥
+  defaultAgentId String? // 该群默认 Agent（为空时使用 ChatRoom 默认 Agent）
+  config         String? // 平台特定配置（JSON 字符串）
+  enabled        Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  chatRoom     ChatRoom @relation(fields: [chatRoomId], references: [id], onDelete: Cascade)
+  defaultAgent Agent?   @relation(fields: [defaultAgentId], references: [id], onDelete: SetNull)
+
+  @@unique([platform, externalId])
+  @@index([chatRoomId])
+}
+
+// LangGraph checkpoint 存储（运行时由 LangGraph checkpointer 管理）
+model Checkpoint {
+  threadId          String  @map("thread_id")
+  checkpointNs      String  @default("") @map("checkpoint_ns")
+  checkpointId      String  @map("checkpoint_id")
+  parentCheckpointId String? @map("parent_checkpoint_id")
+  type              String?
+  checkpoint        Bytes?
+  metadata          Bytes?
+
+  @@id([threadId, checkpointNs, checkpointId])
+  @@map("checkpoints")
+}
+
+model CheckpointWrite {
+  threadId      String  @map("thread_id")
+  checkpointNs  String  @default("") @map("checkpoint_ns")
+  checkpointId  String  @map("checkpoint_id")
+  taskId        String  @map("task_id")
+  idx           Int     @map("idx")
+  channel       String
+  type          String?
+  value         Bytes?
+
+  @@id([threadId, checkpointNs, checkpointId, taskId, idx])
+  @@map("writes")
+}

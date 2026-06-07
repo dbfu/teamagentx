@@ -1,0 +1,87 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Auto-generated JWT secret (per-deployment, never commit)
+.jwt-secret
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Claude Code 本地配置（个人环境，不入库）
+.claude/settings.local.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Database
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Prisma
+server/prisma/*.db
+server/prisma/*.db-journal
+server/prisma/*.db-shm
+server/prisma/*.db-wal
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Vite generated
+apps/web/vite.config.d.ts
+apps/web/vite.config.js
+
+# Debug files
+server/debug-*.jsonl
+
+# Electron build outputs
+apps/web/dist-electron/
+apps/web/release/
+apps/web/~/
+apps/desktop/dist-electron/
+apps/desktop/release/
+apps/desktop/~/
+
+# Production dependencies for Electron
+server/node_modules-prod/
+server/packages/
+
+# Playwright CLI temp files
+.playwright-cli/
+
+# Temp test scripts
+server/test-*.mjs
+
+# Upload files (runtime generated)
+server/uploads/
+
+.acpx-sessions
+
+# Flutter/Mobile build outputs
+apps/mobile/.dart_tool/
+apps/mobile/build/
+apps/mobile/.flutter-plugins
+apps/mobile/.flutter-plugins-dependencies
+apps/mobile/.idea/
+apps/mobile/*.iml
+apps/mobile/release/
+.gitnexus
+.claude/worktrees/

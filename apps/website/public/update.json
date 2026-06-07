@@ -1,0 +1,19 @@
+{
+  "version": "v1.2.0",
+  "url": "",
+  "macUrlArm64": "",
+  "macUrlX64": "",
+  "macUrl": "",
+  "winUrl": "",
+  "iosUrl": "",
+  "androidUrl": "",
+  "downloads": {
+    "macArm64": "",
+    "macX64": "",
+    "mac": "",
+    "win": "",
+    "ios": "",
+    "android": ""
+  },
+  "notes": ""
+}

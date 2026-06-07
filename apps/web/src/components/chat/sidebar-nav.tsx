@@ -1,0 +1,365 @@
+
+import { CreateAssistantModal } from '@/components/chat/create-assistant-modal'
+import { CreateGroupModal } from '@/components/chat/create-group-modal'
+import { UserAvatar } from '@/components/chat/user-avatar'
+import { useTheme } from '@/components/theme-provider'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { agentApi, AgentSpeechConfig, type AgentThinkingMode } from '@/lib/agent-api'
+import { openExternalUrl, TEAMAGENTX_DOCS_URL } from '@/lib/site-links'
+import { updateManager } from '@/lib/update-manager'
+import { cn } from '@/lib/utils'
+import { useAuthStore, useSocketStore } from '@/stores'
+import { useChatStore } from '@/stores/chat-store'
+import { BookOpenText, Bot, Check, CircleArrowUp, Cpu, Globe, MessageSquare, Monitor, Moon, Package, Palette, Plus, Sun, Users } from 'lucide-react'
+import { useState, useSyncExternalStore } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { toast } from 'sonner'
+import { useTranslation } from 'react-i18next'
+
+interface SidebarNavProps {
+  messageBadge?: number
+  onRefreshChatRooms?: () => void
+}
+
+export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps) {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false)
+  const [isCreateAssistantOpen, setIsCreateAssistantOpen] = useState(false)
+  const { user } = useAuthStore()
+  const { user: socketUser } = useSocketStore()
+  const { theme, setTheme, brandTheme, setBrandTheme } = useTheme()
+  const setSidePanelMode = useChatStore((s) => s.setSidePanelMode)
+  const updateState = useSyncExternalStore(
+    updateManager.subscribe,
+    updateManager.getSnapshot,
+    updateManager.getSnapshot,
+  )
+
+  const activeTab = location.pathname.startsWith('/settings')
+    ? null
+    : location.pathname.startsWith('/assistant')
+      ? 'assistant'
+      : location.pathname.startsWith('/skill')
+        ? 'skill'
+        : location.pathname.startsWith('/model')
+          ? 'model'
+          : location.pathname.startsWith('/integration')
+            ? 'integration'
+            : 'message'
+  const currentUser = user || socketUser
+
+  // 检测是否在 Electron 环境中
+  const isElectron = window.electronAPI?.isElectron ?? false
+  const isMac = isElectron && /mac/i.test(navigator.platform)
+  const modeOptions = [
+    { value: 'light', label: t('nav.light'), icon: Sun },
+    { value: 'dark', label: t('nav.dark'), icon: Moon },
+    { value: 'system', label: t('nav.system'), icon: Monitor },
+  ] as const
+  const brandOptions = [
+    { value: 'enterprise', label: t('nav.enterpriseBlue'), color: 'oklch(0.55 0.22 250)' },
+    { value: 'graphite', label: t('nav.graphiteGray'), color: 'oklch(0.36 0.018 260)' },
+    { value: 'violet', label: t('nav.inspirationPurple'), color: 'oklch(0.54 0.28 293)' },
+    { value: 'emerald', label: t('nav.emeraldGreen'), color: 'oklch(0.55 0.16 158)' },
+    { value: 'ruby', label: t('nav.rubyRed'), color: 'oklch(0.55 0.2 18)' },
+  ] as const
+
+  const handleTabChange = (tab: 'message' | 'assistant' | 'skill' | 'model' | 'integration') => {
+    // 切换 Tab 时关闭侧拉框
+    setSidePanelMode(null)
+    if (tab === 'message') {
+      navigate('/')
+    } else {
+      navigate(`/${tab}`)
+    }
+  }
+
+  const handleCreateAssistant = async (data: {
+    name: string
+    avatar: string
+    description: string
+    prompt: string
+    type: 'builtin' | 'acp'
+    acpTool: string
+    proxyConfig?: string | null
+    codexModel?: string | null
+    codexFastMode?: boolean
+    claudeModel?: string | null
+    thinkingMode?: AgentThinkingMode | null
+    categoryId: string | null
+    llmProviderId: string | null
+    speechConfig: AgentSpeechConfig | null
+    imageGeneration?: { enabled: boolean; llmProviderId: string | null }
+  }): Promise<boolean> => {
+    const response = await agentApi.create({
+      name: data.name,
+      avatar: data.avatar,
+      description: data.description,
+      prompt: data.prompt,
+      type: data.type,
+      acpTool: data.acpTool || undefined,
+      proxyConfig: data.proxyConfig || null,
+      codexModel: data.codexModel || null,
+      codexFastMode: Boolean(data.codexFastMode),
+      claudeModel: data.claudeModel || null,
+      thinkingMode: data.thinkingMode || 'high',
+      categoryId: data.categoryId || undefined,
+      llmProviderId: data.llmProviderId || undefined,
+      speechConfig: data.speechConfig,
+      imageGeneration: data.imageGeneration,
+    })
+    if (response.success) {
+      setIsCreateAssistantOpen(false)
+      return true
+    } else {
+      toast.error(t('assistant.createFailed'))
+      return false
+    }
+  }
+
+  const handleOpenDocs = async () => {
+    const result = await openExternalUrl(TEAMAGENTX_DOCS_URL)
+    if (!result.success) {
+      toast.error(t('settings.openDocsFailed'))
+    }
+  }
+
+  return (
+    <>
+    <div
+      className="flex h-full w-20 shrink-0 flex-col items-center border-r border-sidebar-border bg-sidebar/95 shadow-[var(--control-shadow)] backdrop-blur"
+      style={isElectron ? { WebkitAppRegion: 'drag' } as React.CSSProperties : {}}
+    >
+      {/* Logo area - 拖拽区域 */}
+      <div className={cn(
+        "mb-4 flex size-10 items-center justify-center overflow-hidden rounded-xl border border-sidebar-border bg-[var(--surface-raised)] shadow-[var(--control-shadow)]",
+        isMac ? "mt-10" : "mt-4"
+      )}>
+        <img src={`${import.meta.env.BASE_URL}app-logo.png`} alt="TeamAgentX" className="size-full object-cover" />
+      </div>
+
+      {/* Nav items */}
+      <div className="flex w-full flex-1 flex-col items-center gap-1 px-2 pb-4 select-none">
+        {/* 加号按钮 */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              className="flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg py-2 text-muted-foreground hover:bg-sidebar-accent transition-colors focus:outline-none"
+              style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+            >
+              <div className="flex size-8 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-[var(--control-shadow)]">
+                <Plus className="size-4" />
+              </div>
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            side="right"
+            align="start"
+            style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+          >
+            <DropdownMenuItem onClick={() => setIsCreateGroupOpen(true)}>
+              <Users className="size-4" />
+              {t('nav.createGroup')}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => setIsCreateAssistantOpen(true)}>
+              <Bot className="size-4" />
+              {t('nav.createAssistant')}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => handleTabChange('model')}>
+              <Cpu className="size-4" />
+              {t('nav.modelManagement')}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        {/* 消息 Tab */}
+        <button
+          onClick={() => handleTabChange('message')}
+          className={cn(
+            'relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
+            activeTab === 'message'
+              ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
+              : 'text-muted-foreground hover:bg-sidebar-accent'
+          )}
+          style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+        >
+          <MessageSquare className="size-5" />
+          <span className="text-xs">{t('nav.messages')}</span>
+          {!!messageBadge && messageBadge > 0 && (
+            <span className="absolute right-3 top-0.5 flex size-4 items-center justify-center rounded-full bg-red-500 text-[10px] text-white">
+              {messageBadge > 99 ? '99' : messageBadge}
+            </span>
+          )}
+        </button>
+
+        {/* 助手 Tab */}
+        <button
+          onClick={() => handleTabChange('assistant')}
+          className={cn(
+            'relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
+            activeTab === 'assistant'
+              ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
+              : 'text-muted-foreground hover:bg-sidebar-accent'
+          )}
+          style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+        >
+          <Bot className="size-5" />
+          <span className="text-xs">{t('nav.assistants')}</span>
+        </button>
+
+        {/* 技能 Tab */}
+        <button
+          onClick={() => handleTabChange('skill')}
+          className={cn(
+            'relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
+            activeTab === 'skill'
+              ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
+              : 'text-muted-foreground hover:bg-sidebar-accent'
+          )}
+          style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+        >
+          <Package className="size-5" />
+          <span className="text-xs">{t('nav.skills')}</span>
+        </button>
+
+        {/* 模型 Tab */}
+        <button
+          onClick={() => handleTabChange('model')}
+          className={cn(
+            'relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
+            activeTab === 'model'
+              ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
+              : 'text-muted-foreground hover:bg-sidebar-accent'
+          )}
+          style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+        >
+          <Cpu className="size-5" />
+          <span className="text-xs">{t('nav.models')}</span>
+        </button>
+
+        {/* 频道 Tab */}
+        <button
+          onClick={() => handleTabChange('integration')}
+          className={cn(
+            'relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
+            activeTab === 'integration'
+              ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
+              : 'text-muted-foreground hover:bg-sidebar-accent'
+          )}
+          style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+        >
+          <Globe className="size-5" />
+          <span className="text-xs">{t('nav.integrations')}</span>
+        </button>
+
+        {/* 中间空白区域 - 可拖拽 */}
+      </div>
+
+      {/* Bottom buttons */}
+      <div className="flex flex-col items-center gap-1 pb-4">
+        {isElectron && updateState.update && (
+          <button
+            className="relative flex size-9 cursor-pointer items-center justify-center rounded-lg text-emerald-600 hover:bg-emerald-500/10 hover:text-emerald-700"
+            onClick={() => updateManager.openNotification()}
+            title={t('settings.updateAvailable') + ' ' + updateState.update.version}
+            style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+          >
+            <CircleArrowUp className="size-5" />
+            <span className="absolute right-1 top-1 size-2 rounded-full bg-emerald-500 shadow-[0_0_0_2px_var(--sidebar)]" />
+          </button>
+        )}
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              className="flex size-9 cursor-pointer items-center justify-center rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+              title={t('nav.theme')}
+              style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+            >
+              <Palette className="size-4" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            side="right"
+            align="end"
+            className="w-48"
+            style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+          >
+            {modeOptions.map((option) => {
+              const Icon = option.icon
+              return (
+                <DropdownMenuItem key={option.value} onClick={() => setTheme(option.value)}>
+                  <Icon className="size-4" />
+                  <span>{option.label}</span>
+                  {theme === option.value && <Check className="ml-auto size-4 text-primary" />}
+                </DropdownMenuItem>
+              )
+            })}
+            <DropdownMenuSeparator />
+            {brandOptions.map((option) => (
+              <DropdownMenuItem key={option.value} onClick={() => setBrandTheme(option.value)}>
+                <span className="size-2.5 rounded-full" style={{ background: option.color }} />
+                <span>{option.label}</span>
+                {brandTheme === option.value && <Check className="ml-auto size-4 text-primary" />}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <button
+          className="flex size-9 cursor-pointer items-center justify-center rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+          title={t('nav.docs')}
+          onClick={handleOpenDocs}
+          style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+        >
+          <BookOpenText className="size-4" />
+        </button>
+
+        {/* User avatar - 跳转到设置 */}
+        <button
+          className="flex size-9 cursor-pointer items-center justify-center rounded-lg text-muted-foreground hover:bg-sidebar-accent"
+          onClick={() => navigate('/settings')}
+          title={t('nav.settings')}
+          style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+        >
+          {currentUser ? (
+            <UserAvatar avatar={currentUser.avatar} size="sm" />
+          ) : (
+            <div className="flex size-7 items-center justify-center rounded-full bg-linear-to-br from-green-400 to-green-600 text-xs text-white">
+              U
+            </div>
+          )}
+        </button>
+      </div>
+    </div>
+
+    {/* Modals rendered outside backdrop-blur container to avoid clipping */}
+    <CreateGroupModal
+      isOpen={isCreateGroupOpen}
+      onClose={() => setIsCreateGroupOpen(false)}
+      onSuccess={(chatRoomId) => {
+        onRefreshChatRooms?.()
+        navigate(`/?room=${chatRoomId}`)
+      }}
+      ownerId={currentUser?.id}
+    />
+
+    <CreateAssistantModal
+      isOpen={isCreateAssistantOpen}
+      onClose={() => setIsCreateAssistantOpen(false)}
+      onSubmit={handleCreateAssistant}
+    />
+
+    </>
+  )
+}

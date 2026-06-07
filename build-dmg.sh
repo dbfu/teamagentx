@@ -1,0 +1,131 @@
+#!/bin/bash
+
+# 获取脚本所在目录
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# 颜色输出
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
+log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+
+# 计时开始
+START_TIME=$(date +%s)
+
+# 清理函数
+cleanup() {
+  local exit_code=$?
+  END_TIME=$(date +%s)
+  ELAPSED=$((END_TIME - START_TIME))
+  echo ""
+  if [ $exit_code -eq 0 ]; then
+    log_info "Build completed in ${ELAPSED}s"
+  else
+    log_error "Build failed (exit code $exit_code) after ${ELAPSED}s"
+  fi
+  exit $exit_code
+}
+
+trap cleanup EXIT
+
+# 检查依赖
+if ! command -v npx &> /dev/null; then
+  log_error "npx is not installed. Please install Node.js/npm first."
+  exit 1
+fi
+
+PNPM_CMD=(npx pnpm@10.24.0)
+
+echo "======================================="
+echo "  TeamAgentX Desktop Build (macOS DMG)"
+echo "======================================="
+echo ""
+
+# Step 0: 清理临时文件
+log_info "Step 0/4: Cleaning temporary files..."
+rm -rf "$SCRIPT_DIR/apps/desktop/release" 2>/dev/null
+rm -rf "$SCRIPT_DIR/apps/desktop/dist" 2>/dev/null
+rm -rf "$SCRIPT_DIR/server/dist" 2>/dev/null
+rm -rf "$SCRIPT_DIR/server/node_modules-prod" 2>/dev/null
+log_info "Temporary files cleaned"
+echo ""
+
+# Step 1: 编译后端
+log_info "Step 1/4: Building server..."
+cd "$SCRIPT_DIR/server"
+"${PNPM_CMD[@]}" db:generate && "${PNPM_CMD[@]}" build && ALLOW_STALE_MIGRATION=1 "${PNPM_CMD[@]}" prebuild:electron
+if [ $? -ne 0 ]; then
+  log_error "Server build failed"
+  exit 1
+fi
+log_info "Server build done"
+echo ""
+
+# Step 2: 部署生产依赖
+log_info "Step 2/4: Deploying production dependencies..."
+cd "$SCRIPT_DIR"
+"${PNPM_CMD[@]}" --filter=server deploy server/node_modules-prod --prod --frozen-lockfile --force
+if [ $? -ne 0 ]; then
+  log_error "Production dependency deployment failed"
+  exit 1
+fi
+cd "$SCRIPT_DIR/server"
+"${PNPM_CMD[@]}" verify:electron-deps && "${PNPM_CMD[@]}" sync:prisma:prod
+if [ $? -ne 0 ]; then
+  log_error "Electron dependency verification failed"
+  exit 1
+fi
+log_info "Production dependencies deployed"
+echo ""
+
+# Step 3: 编译前端
+log_info "Step 3/4: Building renderer..."
+cd "$SCRIPT_DIR/apps/desktop"
+"${PNPM_CMD[@]}" typecheck
+if [ $? -ne 0 ]; then
+  log_error "TypeScript type check failed"
+  exit 1
+fi
+"${PNPM_CMD[@]}" exec tsc -p ../web/tsconfig.json
+if [ $? -ne 0 ]; then
+  log_error "Frontend TypeScript compilation failed"
+  exit 1
+fi
+cd ../web && "${PNPM_CMD[@]}" exec vite --config ../desktop/vite.config.ts --mode electron build
+if [ $? -ne 0 ]; then
+  log_error "Vite build failed"
+  exit 1
+fi
+log_info "Renderer build done"
+echo ""
+
+# Step 4: 打包 DMG
+log_info "Step 4/4: Packaging macOS DMG..."
+cd "$SCRIPT_DIR/apps/desktop"
+"${PNPM_CMD[@]}" exec electron-builder --mac dmg
+if [ $? -ne 0 ]; then
+  log_error "DMG packaging failed"
+  exit 1
+fi
+echo ""
+
+# 输出产物
+echo "======================================="
+log_info "Build successful!"
+echo ""
+
+RELEASE_DIR="$SCRIPT_DIR/apps/desktop/release"
+if [ -d "$RELEASE_DIR" ]; then
+  log_info "Output files:"
+  ls -lh "$RELEASE_DIR"/*.dmg 2>/dev/null | while read line; do
+    echo "  $line"
+  done
+  echo ""
+  log_info "Release directory: $RELEASE_DIR"
+fi
+
+echo "======================================="

@@ -1,0 +1,1 @@
+ALTER TABLE "Agent" ADD COLUMN "thinkingMode" TEXT NOT NULL DEFAULT 'high';

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
+    <title>TeamAgentX - AI Agent 协作平台</title>
+    <meta name="description" content="TeamAgentX - AI 驱动的多 Agent 协作聊天平台" />
+    <link rel="icon" type="image/png" href="/icon.png" />
+    <link rel="apple-touch-icon" href="/apple-icon.png" />
+    <!-- Google Fonts: Geist / Geist Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=Geist+Mono:wght@100..900&display=swap" rel="stylesheet" />
+    <style>
+      /* 消息定位高亮动画 */
+      .message-highlight {
+        animation: message-pulse 3s ease-in-out;
+      }
+      @keyframes message-pulse {
+        0%, 100% {
+          background-color: transparent;
+        }
+        10%, 30% {
+          background-color: rgba(255, 200, 0, 0.15);
+        }
+      }
+    </style>
+  </head>
+  <body class="font-sans antialiased">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

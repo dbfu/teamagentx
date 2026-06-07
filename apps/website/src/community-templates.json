@@ -1,0 +1,882 @@
+[
+  {
+    "id": "ai-autonomy",
+    "name": "AI自主性探索",
+    "description": "研究如何让 AI 拥有自主性——能自动思考、自主规划、持续探索。",
+    "scenario": "AI研究",
+    "level": "入门",
+    "agents": [
+      "怀疑论者",
+      "研究调度员",
+      "建造者",
+      "探索者"
+    ],
+    "highlights": [
+      "自动思考规划",
+      "持续探索",
+      "怀疑与验证"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/iRG0U3r2cenc",
+    "size": "10 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "purple"
+  },
+  {
+    "id": "a-share-research",
+    "name": "A股研究团队",
+    "description": "8位研究专家支持6个预设工作流编排，覆盖宏观策略、盘面解读、个股深度、估值定价、产业链映射、资金追踪、风险诊断",
+    "scenario": "投研分析",
+    "level": "进阶",
+    "agents": [
+      "连拓远",
+      "洪远见",
+      "方有安",
+      "颜一深",
+      "古见远",
+      "潘明哲",
+      "金向北",
+      "贾不贵"
+    ],
+    "highlights": [
+      "6大预设工作流",
+      "宏观到个股全覆盖",
+      "资金与风险诊断"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/iicEY3r2cela",
+    "size": "22 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "green"
+  },
+  {
+    "id": "git-report",
+    "name": "Git周月报",
+    "description": "基于 Git 提交记录自动生成工作周月报，只取真实 commit，按功能/修复/重构分类统计，转化为面向管理层的业务语言。",
+    "scenario": "研发报告",
+    "level": "入门",
+    "agents": [
+      "报告撰写员",
+      "Git分析师"
+    ],
+    "highlights": [
+      "基于真实提交",
+      "按类型统计",
+      "管理层视角"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/i6wab3r2cepe",
+    "size": "3 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "blue"
+  },
+  {
+    "id": "hr-operations",
+    "name": "HR 运营团队",
+    "description": "人力资源管理流程化，招聘筛选、薪酬体系设计、组织发展与HR运营流程化管理，助力企业人才战略落地",
+    "scenario": "人力资源",
+    "level": "进阶",
+    "agents": [
+      "猎达",
+      "拓远程",
+      "迎新来",
+      "薪析",
+      "任贤达"
+    ],
+    "highlights": [
+      "招聘筛选方案",
+      "薪酬体系设计",
+      "组织与流程管理"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/iq7wN3r2ce4d",
+    "size": "10 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "blue"
+  },
+  {
+    "id": "ppt-delivery",
+    "name": "PPT大纲、生成、视频、演示与交付专家团",
+    "description": "把原始资料梳理成人感PPT大纲，调度HTML生成、演讲模式、视频动效与交付质检，形成可演示成果。",
+    "scenario": "演示交付",
+    "level": "进阶",
+    "agents": [
+      "风格探索生成师",
+      "视频动效师",
+      "主理人·2",
+      "归藏生成师",
+      "质检官",
+      "演讲增强师",
+      "大纲导演"
+    ],
+    "highlights": [
+      "人感PPT大纲",
+      "HTML生成+演讲模式",
+      "视频动效与质检"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/ikgcs3r2cerg",
+    "size": "9 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "purple"
+  },
+  {
+    "id": "seo-content",
+    "name": "SEO 内容营销团队",
+    "description": "7位专业角色分5阶段协作：关键词研究、SEO长文创作、技术优化、内容编辑、链接策略、转化率分析，全流程自动化产出高质量SEO内容",
+    "scenario": "内容营销",
+    "level": "进阶",
+    "agents": [
+      "欧化成",
+      "搜尔文",
+      "关宇霖",
+      "文笔舒",
+      "连乐桥",
+      "率可成",
+      "艾笔润"
+    ],
+    "highlights": [
+      "关键词与竞品研究",
+      "SEO长文创作",
+      "排名与转化优化"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/iqz5x3r2cesh",
+    "size": "21 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "amber"
+  },
+  {
+    "id": "pro-docs",
+    "name": "专业文档生成团队",
+    "description": "企业级长文档生成，4角色协作完成深度调研、大纲规划、内容撰写与合规审核全流程",
+    "scenario": "文档生成",
+    "level": "入门",
+    "agents": [
+      "严审之",
+      "苏寻源",
+      "支笔生",
+      "章成文"
+    ],
+    "highlights": [
+      "深度调研",
+      "大纲规划与撰写",
+      "合规审核"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/i9Oah3r2cekj",
+    "size": "16 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "blue"
+  },
+  {
+    "id": "legal-consult-cn",
+    "name": "中文法律咨询团",
+    "description": "案情采集、法条研究、判例分析、建议撰写，为民事、婚姻、合同、劳动等高频场景出具专业法律咨询报告。",
+    "scenario": "法律咨询",
+    "level": "进阶",
+    "agents": [
+      "方助理",
+      "周法官",
+      "林律师",
+      "苏文书",
+      "沈判官",
+      "钱顾问"
+    ],
+    "highlights": [
+      "案情采集与法条研究",
+      "判例分析",
+      "专业咨询报告"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/iHeBI3r2cdng",
+    "size": "12 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "purple"
+  },
+  {
+    "id": "trading-analysis",
+    "name": "交易分析团队",
+    "description": "13位专业角色分5阶段协作完成投资分析：技术面、基本面、新闻面、情绪面数据采集 → 多空辩论 → 交易决策 → 三方风险评估 → 最终报告，输出 BUY/SELL/HOLD 建议及完整操作方案",
+    "scenario": "投研分析",
+    "level": "高级",
+    "agents": [
+      "甘为先",
+      "熊正寒",
+      "沈行远",
+      "程交远",
+      "严控风",
+      "钟允平",
+      "季本实",
+      "蔡定锋",
+      "何执舟",
+      "牛正阳",
+      "涂一线",
+      "闻一新",
+      "莫慌言"
+    ],
+    "highlights": [
+      "四面数据采集",
+      "多空辩论决策",
+      "三方风险评估"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/iVCxS3r2cdtc",
+    "size": "19 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "green"
+  },
+  {
+    "id": "product-strategy",
+    "name": "产品战略团队",
+    "description": "由产品总监领导的 5 人产品专家团队：需求分析师（PRD/功能规格书）、用户研究员（调研综合分析）、竞品分析师（竞争情报）、数据分析师（指标追踪）和路线图规划师（路线图管理/迭代规划）。覆盖从构思到上线的完整产品生命周期。",
+    "scenario": "产品战略",
+    "level": "进阶",
+    "agents": [
+      "路径",
+      "方向明",
+      "竞析",
+      "析客",
+      "瑞思",
+      "数析"
+    ],
+    "highlights": [
+      "PRD与功能规格",
+      "竞品与用户研究",
+      "路线图与迭代规划"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/i8K3O3r2cdle",
+    "size": "9 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "blue"
+  },
+  {
+    "id": "enterprise-legal",
+    "name": "企业法务专家团",
+    "description": "面向企业法务的多角色专家团，覆盖合同、交易、隐私、产品、监管、AI 治理、雇佣与知识产权分诊。",
+    "scenario": "企业法务",
+    "level": "高级",
+    "agents": [
+      "尹数安",
+      "顾劳清",
+      "桂循章",
+      "艾治明",
+      "何同慎",
+      "陈品安",
+      "伍权衡",
+      "梅谨成",
+      "法衡中"
+    ],
+    "highlights": [
+      "跨职能法律分诊",
+      "合同与隐私审查",
+      "AI治理与知产"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/iNO1S3r2ce1a",
+    "size": "10 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "purple"
+  },
+  {
+    "id": "omni-distribution",
+    "name": "全域内容分发专家团",
+    "description": "一站式多平台内容分发方案，覆盖13+全球社交媒体平台（含微信视频号），提供发布规则适配、排期管理、批量发布编排、跨平台数据分析和小红书自动化发布能力",
+    "scenario": "内容分发",
+    "level": "进阶",
+    "agents": [
+      "安拓",
+      "格罗",
+      "晓红",
+      "凯历",
+      "达维"
+    ],
+    "highlights": [
+      "13+平台适配",
+      "排期与批量发布",
+      "跨平台数据分析"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/iMBzc3r2ce2b",
+    "size": "17 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "amber"
+  },
+  {
+    "id": "content-creation",
+    "name": "内容创作专家团",
+    "description": "AI驱动的多模态内容生产团队，覆盖文案创作、视频生成、图片设计、智能剪辑和跨语言改编，提供从文字到视频的端到端创意解决方案。",
+    "scenario": "内容创作",
+    "level": "进阶",
+    "agents": [
+      "艾达",
+      "柯立",
+      "司远",
+      "维欧",
+      "珀西",
+      "笔澜"
+    ],
+    "highlights": [
+      "多模态内容生产",
+      "文案到视频",
+      "图文与剪辑"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/iIWT73r2cdwf",
+    "size": "23 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "amber"
+  },
+  {
+    "id": "content-monetization",
+    "name": "内容变现商业化专家团",
+    "description": "5人专家团覆盖CPS带货分佣、CPE/CPM效果广告、创作者-品牌交易撮合与收益分析，助力内容创作者和品牌方实现商业化闭环",
+    "scenario": "内容变现",
+    "level": "进阶",
+    "agents": [
+      "麦奇",
+      "芬利",
+      "赛勒",
+      "普罗",
+      "艾菲"
+    ],
+    "highlights": [
+      "CPS/CPE/CPM分析",
+      "品牌交易撮合",
+      "收益评估"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/i1TdW3r2cdyh",
+    "size": "15 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "amber"
+  },
+  {
+    "id": "duo-comedy",
+    "name": "双人转小剧场",
+    "description": "纯双人对打的东北逗哏小剧场。",
+    "scenario": "趣味互动",
+    "level": "入门",
+    "agents": [
+      "铁柱",
+      "翠花"
+    ],
+    "highlights": [
+      "东北逗哏对打",
+      "纯双人剧场",
+      "即兴段子"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/i4lXS3r2ceba",
+    "size": "3 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "blue"
+  },
+  {
+    "id": "small-business",
+    "name": "小企业经营团队",
+    "description": "经营总管调度四位领域专家，覆盖财务、营收、客户合规和运营，小企业管理一站搞定",
+    "scenario": "企业经营",
+    "level": "进阶",
+    "agents": [
+      "严守约",
+      "全管事",
+      "甄客来",
+      "毕运营",
+      "钱守通"
+    ],
+    "highlights": [
+      "财务与营收管理",
+      "客户合规",
+      "经营复盘"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/icRwx3r2cegf",
+    "size": "2 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "green"
+  },
+  {
+    "id": "novel-writing",
+    "name": "小说写作",
+    "description": "只做小说写作的新群。题材、设定、大纲、正文、签约优化和审稿都拆给独立助手。",
+    "scenario": "创意写作",
+    "level": "高级",
+    "agents": [
+      "题材策划",
+      "章节写手",
+      "小说总编",
+      "大纲师",
+      "设定师",
+      "签约优化师",
+      "审稿官",
+      "连载管家"
+    ],
+    "highlights": [
+      "题材设定大纲",
+      "正文与审稿拆分",
+      "签约优化"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/iQqBH3r2cefe",
+    "size": "21 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "purple"
+  },
+  {
+    "id": "engineering-ops",
+    "name": "工程保障团队",
+    "description": "由工程总监领导的 5 人工程专家团队：代码审查师（安全/性能/正确性）、架构师（系统设计/ADR）、SRE 工程师（事故响应/部署）、测试专家（测试策略/覆盖率）和技术文档师（文档/Runbook）。处理从代码审查到事故响应的复杂工程工作流。",
+    "scenario": "工程保障",
+    "level": "进阶",
+    "agents": [
+      "甄宇航",
+      "泰莎",
+      "科迪",
+      "雷克斯",
+      "多库",
+      "阿奇"
+    ],
+    "highlights": [
+      "代码审查",
+      "事故响应",
+      "测试与文档"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/ip7Tk3r2cdoh",
+    "size": "10 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "blue"
+  },
+  {
+    "id": "recording-publish",
+    "name": "录频发布工作台",
+    "description": "群聊录屏与多平台发布全流程",
+    "scenario": "录屏发布",
+    "level": "入门",
+    "agents": [
+      "小红书助手",
+      "B站助手",
+      "抖音助手",
+      "录制助手"
+    ],
+    "highlights": [
+      "群聊录屏",
+      "多平台分发",
+      "抖音/B站/小红书"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/ivQYl3r2cdud",
+    "size": "3 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "blue"
+  },
+  {
+    "id": "investment-masters",
+    "name": "投资大师专家团",
+    "description": "13位传奇投资哲学家 + 6位专业分析师并行分析，风险管理师评估约束，投资组合经理信号聚合投票，多角度投资分析参考",
+    "scenario": "投研分析",
+    "level": "高级",
+    "agents": [
+      "本杰明·格雷厄姆",
+      "莫慌言·2",
+      "闻风声",
+      "黑天鹅之父",
+      "成长青",
+      "谷衡值",
+      "大空头",
+      "严控风·2",
+      "贺知衡",
+      "华尔街斗牛士",
+      "木头姐",
+      "裴持衡",
+      "菲利普·费雪",
+      "Dhandho掌门",
+      "麦哲伦舵手",
+      "奥马哈先知",
+      "拉凯什·金君瓦拉",
+      "涂一线·2",
+      "葛衡量",
+      "查理·芒格",
+      "宏观之王",
+      "季本实·2"
+    ],
+    "highlights": [
+      "13位投资哲学家",
+      "6位分析师并行",
+      "组合经理聚合投票"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/iHdb73r2cecb",
+    "size": "22 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "green"
+  },
+  {
+    "id": "smart-data-analysis",
+    "name": "智数分析专家团",
+    "description": "6人AI数据分析团队，擅长自然语言转SQL、Python建模、RAG知识问答、仪表盘可视化与报告生成",
+    "scenario": "数据分析",
+    "level": "进阶",
+    "agents": [
+      "赛奇",
+      "诺亚",
+      "达仕",
+      "瑞卡",
+      "秦逸",
+      "若溪"
+    ],
+    "highlights": [
+      "自然语言转SQL",
+      "Python建模",
+      "仪表盘与报告"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/iSpBB3r2ceji",
+    "size": "15 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "blue"
+  },
+  {
+    "id": "daily-debate",
+    "name": "每日大赛",
+    "description": "",
+    "scenario": "趣味互动",
+    "level": "进阶",
+    "agents": [
+      "反方三辩",
+      "正方一辩",
+      "反方一辩",
+      "反方二辩",
+      "正方三辩",
+      "反方四辩",
+      "主持人",
+      "正方二辩",
+      "正方四辩"
+    ],
+    "highlights": [
+      "正反多轮辩论",
+      "主持人控场",
+      "每日话题"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/i4S2v3r2cdve",
+    "size": "5 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "amber"
+  },
+  {
+    "id": "deep-research",
+    "name": "深度研究团队",
+    "description": "深度研究报告输出，7角色5阶段聚合多源信息，经审稿修订循环输出带引用的专业报告",
+    "scenario": "研究写作",
+    "level": "进阶",
+    "agents": [
+      "顾全之",
+      "程文成",
+      "季要纲",
+      "傅梓铭",
+      "明鉴秋",
+      "任润泽",
+      "谭溯源"
+    ],
+    "highlights": [
+      "多源信息聚合",
+      "审稿修订循环",
+      "带引用报告"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/iftES3r2ce7g",
+    "size": "26 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "purple"
+  },
+  {
+    "id": "social-growth",
+    "name": "社媒互动增长专家团",
+    "description": "通过智能化互动自动化、AI评论运营、高转化信号挖掘和品牌舆情监控，安全高效提升社交媒体互动效果，覆盖14+全球主流平台",
+    "scenario": "社媒增长",
+    "level": "进阶",
+    "agents": [
+      "麦恩",
+      "瑞普",
+      "沃奇",
+      "格罗斯",
+      "柏特"
+    ],
+    "highlights": [
+      "互动自动化",
+      "高转化信号挖掘",
+      "品牌舆情监控"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/iL2eo3r2ce6f",
+    "size": "16 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "amber"
+  },
+  {
+    "id": "fu-partner",
+    "name": "福帮手",
+    "description": "面向90后00后的 AI 合伙人来了。帮您把智能转型、创业IP、家族发展需求，整理成可带走的七日行动卡，让故事和认知，变成可分发、可共创、可进化的智能资产。",
+    "scenario": "创业增长",
+    "level": "进阶",
+    "agents": [
+      "传播官",
+      "故事矿工",
+      "品牌架构师",
+      "库长",
+      "IP战略师",
+      "变现设计师"
+    ],
+    "highlights": [
+      "七日行动卡",
+      "IP与故事沉淀",
+      "可分发智能资产"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/iAPaF3r2ceqf",
+    "size": "29 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "green"
+  },
+  {
+    "id": "competitor-intel",
+    "name": "竞品情报站",
+    "description": "每周自动运行的竞品情报追踪群，围绕多 Agent 协作平台的竞争格局，分维度收录有来源的情报并输出影响分析简报。",
+    "scenario": "竞品情报",
+    "level": "入门",
+    "agents": [
+      "情报采集员"
+    ],
+    "highlights": [
+      "每周自动追踪",
+      "多维度收录",
+      "影响分析简报"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/iCjaM3r2cdsb",
+    "size": "6 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "amber"
+  },
+  {
+    "id": "morning-stock-report",
+    "name": "股市早报",
+    "description": "每日 07:30 自动运行的股市早报播报群，数据→新闻→日历→板块→复盘→风险→播报全流水线，数字均来自脚本输出，仅供信息参考。",
+    "scenario": "定时播报",
+    "level": "进阶",
+    "agents": [
+      "板块分析师",
+      "新闻员",
+      "风险官",
+      "Codex",
+      "数据员",
+      "播报员",
+      "复盘官",
+      "日历员"
+    ],
+    "highlights": [
+      "每日定时播报",
+      "七环节流水线",
+      "数据脚本驱动"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/ie6853r2cdqj",
+    "size": "10 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "green"
+  },
+  {
+    "id": "standup-comedy",
+    "name": "脱口秀俱乐部",
+    "description": "五位风格各异的脱口秀演员围绕同一话题轮番开麦，MC 控场选题、观众打分点评的无害吐槽小剧场。",
+    "scenario": "趣味互动",
+    "level": "入门",
+    "agents": [
+      "躺平侠",
+      "自嘲侠",
+      "阴阳鱼",
+      "观众",
+      "冷面君",
+      "段子王",
+      "脱口秀MC"
+    ],
+    "highlights": [
+      "五位演员开麦",
+      "同题轮番表演",
+      "观众打分点评"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/i2NUl3r2cedc",
+    "size": "5 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "amber"
+  },
+  {
+    "id": "marketing-campaign",
+    "name": "营销战役团队",
+    "description": "由营销总监领导的 4 人营销专家团队：内容创作者（博客/邮件/社媒/品牌声音）、活动策划师（战役策略/受众/渠道/预算）、SEO 专家（技术审计/内容优化/效果分析）和品牌分析师（竞品定位/品牌审核）。覆盖完整营销生命周期。",
+    "scenario": "内容营销",
+    "level": "进阶",
+    "agents": [
+      "营销总监",
+      "品析",
+      "笔达",
+      "优搜",
+      "牟全胜"
+    ],
+    "highlights": [
+      "战役策略与预算",
+      "内容与SEO",
+      "品牌竞品分析"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/iqPQK3r2cehg",
+    "size": "15 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "amber"
+  },
+  {
+    "id": "promo-video",
+    "name": "袋鼠帝宣传片创作团队",
+    "description": "6位专业角色分6阶段协作完成产品宣传片全流程制作：创意简报、逐镜头分镜、素材生产、HyperFrames剪辑合成、BGM设计与交付，从产品URL到可发布的60-90秒宣传片MP4",
+    "scenario": "视频创作",
+    "level": "进阶",
+    "agents": [
+      "Melody",
+      "Max",
+      "Bella",
+      "Ethan",
+      "Sean",
+      "Ada"
+    ],
+    "highlights": [
+      "逐镜头分镜",
+      "HyperFrames剪辑",
+      "BGM与交付"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/iJjDk3r2ce0j",
+    "size": "14 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "purple"
+  },
+  {
+    "id": "design-prototype",
+    "name": "设计原型专家团",
+    "description": "6 角色 AI 设计团队，覆盖从需求发现到品牌级原型交付的完整工作流，内置 71 套设计系统",
+    "scenario": "设计原型",
+    "level": "进阶",
+    "agents": [
+      "筑原型",
+      "交付达",
+      "画统筹",
+      "彩格调",
+      "严过审",
+      "许明需"
+    ],
+    "highlights": [
+      "需求到原型交付",
+      "71套设计系统",
+      "品牌级还原"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/iZ8vx3r2cdjc",
+    "size": "13 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "purple"
+  },
+  {
+    "id": "poetry-arena",
+    "name": "诗词擂台",
+    "description": "诗词比赛活动群，多轮对战，主持人控场，裁判计分，讲解员科普",
+    "scenario": "趣味互动",
+    "level": "高级",
+    "agents": [
+      "谢桥",
+      "陆离",
+      "诗词裁判",
+      "诗词比赛主持人",
+      "苏棠",
+      "程墨",
+      "闻笙",
+      "许观",
+      "沈砚",
+      "诗词讲解员"
+    ],
+    "highlights": [
+      "多轮对战",
+      "裁判计分",
+      "讲解科普"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/iyhXF3r2ce8h",
+    "size": "11 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "amber"
+  },
+  {
+    "id": "finance-tax-compliance",
+    "name": "财税合规专家团",
+    "description": "覆盖票据处理、记账核算、报表编制、税务申报、合规审计五大环节的企业财税合规全链路管理专家团",
+    "scenario": "财税合规",
+    "level": "进阶",
+    "agents": [
+      "钱合规",
+      "王报表",
+      "孙申报",
+      "张记账",
+      "赵审计",
+      "李票务"
+    ],
+    "highlights": [
+      "票据与记账核算",
+      "报表与税务申报",
+      "合规审计"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/iYDKz3r2cdib",
+    "size": "18 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "green"
+  },
+  {
+    "id": "software-studio",
+    "name": "软件工坊",
+    "description": "6位工程专业角色：产品评审、代码审查、安全审计、QA测试、设计系统、调试运维，覆盖从想法到生产的完整软件生命周期",
+    "scenario": "软件研发",
+    "level": "进阶",
+    "agents": [
+      "船长",
+      "设计师",
+      "产品官",
+      "排障手",
+      "质量门神",
+      "安全卫士"
+    ],
+    "highlights": [
+      "产品评审到运维",
+      "安全审计",
+      "QA与设计系统"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/iaUaR3r2cdmf",
+    "size": "28 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "blue"
+  },
+  {
+    "id": "software-dev",
+    "name": "软件开发团队",
+    "description": "高效软件研发团队，产品经理定需求、架构师设计+拆任务、工程师批量实现代码、QA验证质量，小需求支持快速模式",
+    "scenario": "软件研发",
+    "level": "进阶",
+    "agents": [
+      "高见远",
+      "许清楚",
+      "严过关",
+      "寇豆码",
+      "齐活林"
+    ],
+    "highlights": [
+      "产品定需求",
+      "架构拆任务",
+      "批量实现+QA"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/ijQjC3r2ce3c",
+    "size": "15 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "blue"
+  },
+  {
+    "id": "sales-ops",
+    "name": "销售作战团队",
+    "description": "销售攻坚体系，客户研究锁定目标、外联策略提升触达、竞品情报预警风险、销售预测优化资源分配",
+    "scenario": "销售增长",
+    "level": "进阶",
+    "agents": [
+      "预析",
+      "探客",
+      "销售总监",
+      "联达",
+      "竞情"
+    ],
+    "highlights": [
+      "客户研究锁定",
+      "外联策略",
+      "竞品预警与预测"
+    ],
+    "downloadUrl": "https://wwbjc.lanzouu.com/i8irS3r2ceed",
+    "size": "8 KB",
+    "updatedAt": "2026-06-03",
+    "accent": "green"
+  }
+]

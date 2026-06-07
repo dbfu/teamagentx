@@ -1,0 +1,146 @@
+import 'react'
+
+declare global {
+  interface ElectronAPI {
+    isElectron: boolean;
+    platform: 'darwin' | 'win32' | 'linux';
+    getPathForFile: (file: File) => string;
+    getServerUrl: () => Promise<string | null>;
+    getMobileWebUrl: () => Promise<string | null>;
+    getAppVersion: () => Promise<string>;
+    getOpenAtLoginSettings: () => Promise<{
+      success: boolean;
+      data?: OpenAtLoginSettings;
+      error?: string;
+    }>;
+    setOpenAtLogin: (enabled: boolean) => Promise<{
+      success: boolean;
+      data?: OpenAtLoginSettings;
+      error?: string;
+    }>;
+    getNotificationOnboardingState: () => Promise<{
+      success: boolean;
+      data?: { welcomeNotificationSentAt: number | null };
+      error?: string;
+    }>;
+    setNotificationOnboardingState: (input: { welcomeNotificationSentAt: number | null }) => Promise<{
+      success: boolean;
+      error?: string;
+    }>;
+    setActiveTaskState?: (state: { hasActiveTasks: boolean; executingRoomCount: number }) => void;
+    checkForUpdates: () => Promise<{
+      success: boolean;
+      data?: { hasUpdate: boolean; currentVersion: string; update: UpdateInfo | null; noUrlConfigured?: boolean };
+      error?: string;
+    }>;
+    downloadUpdate: (update: UpdateInfo) => Promise<{ success: boolean; filePath?: string; error?: string }>;
+    installUpdate: (filePath?: string) => Promise<{ success: boolean; error?: string }>;
+    showUpdateInFolder: (filePath: string) => Promise<void>;
+    onUpdateDownloadProgress: (callback: (progress: UpdateDownloadProgress) => void) => () => void;
+    getOpenTargetIcons: () => Promise<Partial<Record<'vscode' | 'cursor' | 'trae' | 'trae-cn', string | null>>>;
+    openFolder: (
+      path: string,
+      target?: 'system' | 'terminal' | 'vscode' | 'cursor' | 'trae' | 'trae-cn',
+      terminalTarget?: 'terminal-app' | 'iterm2' | 'alacritty' | 'kitty' | 'ghostty' | 'wezterm' | 'kaku'
+    ) => Promise<{ success: boolean; error?: string }>;
+    runCommandInTerminal?: (
+      path: string,
+      command: string,
+      terminalTarget?: 'terminal-app' | 'iterm2' | 'alacritty' | 'kitty' | 'ghostty' | 'wezterm' | 'kaku'
+    ) => Promise<{ success: boolean; error?: string }>;
+    selectFolder: () => Promise<{ success: boolean; path: string | null }>;
+    exportPdf?: (payload: {
+      html: string;
+      filename: string;
+    }) => Promise<{ success: boolean; filePath?: string; canceled?: boolean; error?: string }>;
+    openExternal: (url: string) => Promise<{ success: boolean; error?: string }>;
+    setBadgeCount: (count: number) => Promise<{ success: boolean; error?: string }>;
+  showNotification: (payload: { title: string; body: string; chatRoomId?: string }) => Promise<{ success: boolean; error?: string }>;
+  onNotificationOpen: (callback: (chatRoomId: string) => void) => () => void;
+    windowMinimize: () => Promise<void>;
+    windowMaximize: () => Promise<void>;
+    windowClose: () => Promise<void>;
+    windowIsMaximized: () => Promise<boolean>;
+    onServerReady: (callback: (port: number) => void) => () => void;
+    onServerError: (callback: (error: string) => void) => () => void;
+    getServerStatus: () => Promise<{
+      ready: boolean;
+      port: number | null;
+      error: string | null;
+      logPath?: string;
+      runtime?: {
+        phase: 'idle' | 'preparing' | 'ready' | 'failed';
+        progress: RuntimePrepareProgress | null;
+      };
+    }>;
+    // 获取用户配置文件路径（用于登录界面提示）
+    getUserConfigPath?: () => Promise<string>;
+    // 获取本地用户账号密码（用于自动填充登录表单，仅 Electron 环境）
+    getLocalUserCredentials?: () => Promise<{
+      success: boolean;
+      data?: {
+        username: string;
+        password: string;
+      };
+      error?: string;
+    }>;
+    appendDebugLog?: (message: string, payload?: unknown) => Promise<{ success: boolean; error?: string }>;
+    openLogFolder?: () => Promise<{ success: boolean; error?: string }>;
+    onRuntimePrepareStart?: (callback: () => void) => () => void;
+    onRuntimePrepareProgress?: (callback: (progress: RuntimePrepareProgress) => void) => () => void;
+    onRuntimePrepareDone?: (callback: () => void) => () => void;
+    onRuntimePrepareError?: (callback: (error: string) => void) => () => void;
+  }
+
+  interface RuntimePrepareProgress {
+    phase: 'extract' | 'copy';
+    percent: number | null;
+    files: number;
+    bytes: number;
+    totalBytes: number | null;
+    message: string;
+  }
+
+  interface OpenAtLoginSettings {
+    supported: boolean;
+    openAtLogin: boolean;
+    wasOpenedAtLogin: boolean;
+    wasOpenedAsHidden: boolean;
+    executableWillLaunchAtLogin?: boolean;
+    status?: 'not-registered' | 'enabled' | 'requires-approval' | 'not-found';
+  }
+
+  interface UpdateInfo {
+    version: string;
+    url: string;
+    macUrlArm64?: string;
+    macUrlX64?: string;
+    winUrl?: string;
+    downloads?: { macArm64?: string; macX64?: string; win?: string };
+    notes?: string;
+    publishedAt?: string;
+  }
+
+  interface UpdateDownloadProgress {
+    percent: number;
+    transferred: number;
+    total: number | null;
+  }
+
+  interface FlutterChannel {
+    postMessage: (message: string) => void;
+  }
+
+  interface Window {
+    electronAPI?: ElectronAPI;
+    FlutterChannel?: FlutterChannel;
+  }
+}
+
+declare module 'react' {
+  interface CSSProperties {
+    WebkitAppRegion?: 'drag' | 'no-drag';
+  }
+}
+
+export {}

@@ -1,0 +1,14 @@
+{
+  "name": "@teamagentx/website-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Tiny download URL resolver for TeamAgentX website",
+  "scripts": {
+    "dev": "node --watch src/index.mjs",
+    "start": "node src/index.mjs"
+  },
+  "dependencies": {
+    "dotenv": "^16.5.0"
+  }
+}
