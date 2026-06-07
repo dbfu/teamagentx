@@ -884,6 +884,9 @@ export function ChatMessagesList({
       return
     }
 
+    // 有待定位的消息时，不要把列表锁定到底部，让消息定位逻辑独占滚动
+    if (scrollToMessageId) return
+
     if (
       wasSidePanelOpen
       || !wasPinnedToBottom
@@ -898,11 +901,12 @@ export function ChatMessagesList({
     scrollToBottom({ save: true, frames: SIDE_PANEL_BOTTOM_LOCK_FRAMES })
     setShowNewMessageHint(false)
     setShowScrollToBottomHint(false)
-  }, [checkIsNearBottom, isSidePanelOpen, messagesBelongToCurrentRoom, scrollToBottom])
+  }, [checkIsNearBottom, isSidePanelOpen, messagesBelongToCurrentRoom, scrollToBottom, scrollToMessageId])
 
   useLayoutEffect(() => {
     if (
       !isSidePanelOpen
+      || scrollToMessageId
       || Date.now() > sidePanelBottomLockUntilRef.current
       || !messagesBelongToCurrentRoom
       || !hasRestoredPositionRef.current
@@ -913,7 +917,7 @@ export function ChatMessagesList({
     scrollToBottom({ save: true, frames: SIDE_PANEL_BOTTOM_LOCK_FRAMES })
     setShowNewMessageHint(false)
     setShowScrollToBottomHint(false)
-  }, [isSidePanelOpen, messagesBelongToCurrentRoom, scrollToBottom, virtualTotalSize])
+  }, [isSidePanelOpen, messagesBelongToCurrentRoom, scrollToBottom, scrollToMessageId, virtualTotalSize])
 
   useEffect(() => {
     if (!isSidePanelOpen || typeof ResizeObserver === 'undefined') return
@@ -974,18 +978,30 @@ export function ChatMessagesList({
     if (messageIndex === undefined) return
 
     pendingHighlightMessageIdRef.current = scrollToMessageId
-    rowVirtualizer.scrollToIndex(messageIndex, { align: 'center', behavior: 'smooth' })
 
+    // 容器有 py-4 的 padding，需要额外偏移让消息头部完全显示
+    const paddingTopOffset = 16
+
+    // 列表可能刚挂载（如从任务看板切到详情面板），行高尚未测量完，
+    // 要等待渲染完成后再定位，使用延时确保虚拟列表测量完成
     let frame = 0
     const tick = () => {
+      const offsetInfo = rowVirtualizer.getOffsetForIndex(messageIndex, 'start')
+      if (offsetInfo) {
+        suppressProgrammaticScrollSave()
+        // 减去 padding-top，让消息头部完全显示
+        rowVirtualizer.scrollToOffset(Math.max(0, offsetInfo[0] - paddingTopOffset), { behavior: 'auto' })
+      }
       if (highlightMessage(scrollToMessageId)) return
       frame += 1
-      if (frame < 6) {
-        requestAnimationFrame(tick)
+      if (frame < 24) {
+        // 延时等待渲染，每隔 50ms 检查一次
+        setTimeout(tick, 50)
       }
     }
-    requestAnimationFrame(tick)
-  }, [highlightMessage, messageIndexById, rowVirtualizer, scrollToMessageId])
+    // 初始延时 100ms，等待列表渲染
+    setTimeout(tick, 100)
+  }, [highlightMessage, messageIndexById, rowVirtualizer, scrollToMessageId, suppressProgrammaticScrollSave])
 
   useEffect(() => {
     const pendingId = pendingHighlightMessageIdRef.current
@@ -1127,6 +1143,8 @@ export function ChatMessagesList({
   useEffect(() => {
     if (!loading && messages.length > 0 && messagesBelongToCurrentRoom && containerRef.current && !hasRestoredPositionRef.current) {
       hasRestoredPositionRef.current = true
+      // 有待定位的消息时，交给消息定位逻辑滚动，不恢复上次位置（避免抢滚动）
+      if (scrollToMessageId) return
       const savedAnchor = getScrollAnchor(chatRoomId)
       if (savedAnchor) {
         const anchorIndex = messageIndexById.get(savedAnchor.messageId)
@@ -1192,7 +1210,7 @@ export function ChatMessagesList({
         scrollToBottom()
       }
     }
-  }, [chatRoomId, getScrollAnchor, getScrollPosition, loading, messageIndexById, messages.length, messagesBelongToCurrentRoom, rowVirtualizer, scrollToBottom, suppressProgrammaticScrollSave])
+  }, [chatRoomId, getScrollAnchor, getScrollPosition, loading, messageIndexById, messages.length, messagesBelongToCurrentRoom, rowVirtualizer, scrollToBottom, scrollToMessageId, suppressProgrammaticScrollSave])
 
   // 捕获进入房间时的初始消息 ID，这些消息不走自动播放
   useEffect(() => {
