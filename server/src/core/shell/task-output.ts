@@ -1,5 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
+
+// 全局输出目录，放在用户 home 目录下，避免污染项目目录
+const GLOBAL_OUTPUT_DIR = path.join(os.homedir(), '.teamagentx-output');
 
 /**
  * TaskOutput - 管理命令输出文件
@@ -8,6 +12,7 @@ import * as path from 'path';
  * - stdout/stderr 直接写入文件 fd（不经过 JS 层）
  * - 支持尾部读取（polling）获取进度
  * - 跟踪文件大小用于阻塞检测
+ * - 输出文件放在全局目录，不污染项目工作目录
  */
 export class TaskOutput {
   readonly taskId: string;
@@ -21,11 +26,11 @@ export class TaskOutput {
   private stderrSize: number = 0;
   private cleanedUp = false;
 
-  constructor(taskId: string, workDir: string) {
+  constructor(taskId: string, _workDir: string) {
     this.taskId = taskId;
 
-    // 创建输出目录
-    this.outputDir = path.join(workDir, '.teamagentx-output');
+    // 使用全局输出目录，不再在工作目录下创建
+    this.outputDir = GLOBAL_OUTPUT_DIR;
     if (!fs.existsSync(this.outputDir)) {
       fs.mkdirSync(this.outputDir, { recursive: true });
     }

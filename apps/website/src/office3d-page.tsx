@@ -78,7 +78,7 @@ export function Office3dPage({ siteConfig }: Office3dPageProps) {
           <div className="office3d-video reveal">
             <video
               className="office3d-video-el"
-              src="/teamagentx-3d.mp4"
+              src="https://teamagentx.oss-cn-shanghai.aliyuncs.com/teamagentx%203D%E6%BC%94%E7%A4%BA.mp4"
               autoPlay
               muted
               loop

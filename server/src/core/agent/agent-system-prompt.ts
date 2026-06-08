@@ -5,6 +5,7 @@ import type {
 } from './executor.interface.js';
 import { getImageGenerationSkillInstructions } from './image-generation-config.js';
 import type { RoomEnvVar } from './room-env-vars.js';
+import { GROUP_ASSISTANT_ID } from './system-assistant.constants.js';
 
 export const RESPONSE_STYLE_INSTRUCTION =
   'Write the final answer in human-readable Markdown. Do not explain the internal steps, context assembly, or tools used unless the user explicitly asks for that.';
@@ -145,9 +146,19 @@ export function buildGroupChatMemberInfoSection({
     ? `\n[Tip]\nWhen you need to message another assistant, write "@assistant_name message content" directly in your final reply. You may also mention an assistant in body text when the @ is preceded by a space. A target assistant is triggered only when @ is at the start of a line or the previous character is a space; @ immediately after punctuation will not trigger. A single message may contain at most one triggerable @assistant mention. If you need to refer to additional assistants, write their names without @. If the user only asks you to send a message to another assistant, output only that @assistant message in the final reply, with no explanation, pleasantries, summary, or expanded collaboration invitation.${triggerNecessityReminder}`
     : '';
 
+  const groupAssistant = chatRoomAgents.find((a) => a.agentId === GROUP_ASSISTANT_ID);
+  const groupAssistantHint = groupAssistant
+    ? `\n[群助手（${groupAssistant.name}）可以做的事]
+如果你需要以下任一操作，不要自行尝试，直接 @${groupAssistant.name} 来完成：
+- 创建/编辑/列出助手，推荐或安装技能，配置文本/图片/语音/视频模型
+- 创建/启用/禁用/删除定时任务
+- 创建/删除群聊，添加/移除助手成员，修改群规则
+- 接入外部平台（Telegram、飞书、钉钉、企业微信等）`
+    : '';
+
   return `[Group Chat Member Info]
 Chatroom working directory: ${workDir}
 Assistants in the current chatroom: ${agentsInfo}
 You are: ${agentName}
-Other assistants: ${othersInfo}${mentionTip}`;
+Other assistants: ${othersInfo}${mentionTip}${groupAssistantHint}`;
 }

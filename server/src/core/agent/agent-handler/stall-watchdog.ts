@@ -28,12 +28,41 @@ import type { Message } from '../../../types/message.js';
 const watchdogTimers = new Map<string, NodeJS.Timeout>();
 // 两次人类发言之间，watchdog 连续自动唤醒调度助手的次数，超过上限即停止。
 const consecutiveDispatches = new Map<string, number>();
+// 记录刚刚被用户中断的房间，这些房间不应该触发 watchdog（用户主动介入）
+const interruptedRooms = new Set<string>();
 
 /**
  * 人类发言时清零连续救援计数：用户重新介入即视为一个新的协作回合。
  */
 export function resetStallWatchdog(chatRoomId: string): void {
   consecutiveDispatches.delete(chatRoomId);
+  // 用户重新介入，清除中断标志，避免残留标志在新一轮对话中误跳 watchdog
+  interruptedRooms.delete(chatRoomId);
+}
+
+/**
+ * 用户手动停止任务时调用：取消房间防抖定时器，防止群调度助手介入。
+ * 用户主动停止意味着用户已介入，不需要自动唤醒群调度。
+ */
+export function cancelStallWatchdog(chatRoomId: string): void {
+  const timer = watchdogTimers.get(chatRoomId);
+  if (timer) {
+    clearTimeout(timer);
+    watchdogTimers.delete(chatRoomId);
+    console.log(`[stall-watchdog] ${chatRoomId} 用户手动停止，取消防抖定时器`);
+  }
+  // 同时清零连续救援计数
+  consecutiveDispatches.delete(chatRoomId);
+  // 标记房间被用户中断，防止后续的中断消息重新触发 watchdog
+  interruptedRooms.add(chatRoomId);
+}
+
+/**
+ * 检查房间是否刚刚被用户中断，如果是则清除标记并返回 true。
+ * 用于在 handler 中判断是否应该跳过 scheduleStallWatchdog。
+ */
+export function checkAndClearInterrupted(chatRoomId: string): boolean {
+  return interruptedRooms.delete(chatRoomId);
 }
 
 /**

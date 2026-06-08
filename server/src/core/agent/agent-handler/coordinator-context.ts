@@ -49,11 +49,12 @@ ${lines.join('\n')}`;
 }
 
 /**
- * 把「仅供裁决参考」的上下文块拼到触发消息正文之前；真正待裁决的消息放在
- * [待裁决消息] 标记之后，便于调度助手区分上下文与需转发的原文。
+ * 把「待裁决消息」放在最前面，让模型首先识别要裁决的内容；
+ * 「仅供裁决参考」的上下文块放在后面作为辅助信息。
  * 上下文为空时原样返回，不做任何包装。
  */
 export function withCoordinatorContext(content: string, contextBlock: string): string {
   if (!contextBlock) return content;
-  return `${contextBlock}\n\n[待裁决消息]\n${content}`;
+  // 调整顺序：待裁决消息先出现，上下文区块后出现作为参考
+  return `[待裁决消息]\n${content}\n\n${contextBlock}`;
 }

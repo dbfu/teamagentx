@@ -17,6 +17,11 @@ import {
   buildCoordinatorRecentContext,
   withCoordinatorContext,
 } from './coordinator-context.js';
+import { checkAndClearInterrupted } from './stall-watchdog.js';
+import {
+  startParallelBatch,
+  markBatchAgentComplete,
+} from './parallel-batch-tracker.js';
 
 // 消息接收事件接口
 interface ReceivedMessageEvent {
@@ -30,10 +35,13 @@ export function shouldTriggerCoordinatorAgent(params: {
   hasMentions: boolean;
   messageIsHuman?: boolean | undefined;
   sourceAgentId?: string | null;
+  hasUserMentions?: boolean;
 }) {
   if (params.agentTriggerMode !== 'coordinator') return false;
   if (params.isQuickChatRoom) return false;
   if (params.sourceAgentId === GROUP_COORDINATOR_ID) return false;
+  // 助手直接 @用户时不触发群调度，让用户直接看到助手的消息
+  if (params.hasUserMentions) return false;
 
   return !params.hasMentions || !params.messageIsHuman;
 }
@@ -144,6 +152,7 @@ export function setupAIHandlers(
 
       // 卡住检测兜底（仅自由协作 auto 模式）：人类发言清零连续救援计数；
       // 业务助手发完消息后重置房间防抖定时器，超时且房间空闲时唤醒群调度助手裁决。
+      // 但如果房间刚刚被用户中断（手动停止任务），不触发 watchdog，防止群调度介入。
       if (message.isHuman) {
         resetStallWatchdog(chatRoomId);
       } else if (
@@ -152,7 +161,12 @@ export function setupAIHandlers(
         !chatRoom.isQuickChatRoom &&
         message.agentId !== GROUP_COORDINATOR_ID
       ) {
-        scheduleStallWatchdog(chatRoomId);
+        // 检查房间是否刚刚被用户中断，如果是则跳过 watchdog
+        if (checkAndClearInterrupted(chatRoomId)) {
+          console.log(`[handler] ${chatRoomId} 房间刚被用户中断，跳过 watchdog`);
+        } else {
+          scheduleStallWatchdog(chatRoomId);
+        }
       }
 
       // 手动模式下，助手消息中的 @ 只作为公开展示。
@@ -182,6 +196,18 @@ export function setupAIHandlers(
         mentionNames,
       });
       const hasMentions = triggerMentionNames.length > 0;
+
+      // 助手 @用户时不触发群调度：解析消息中是否有 @人类成员
+      // 如果助手直接 @用户（如群主），说明需要用户确认，不应触发群调度自动介入
+      let hasUserMentions = false;
+      if (!message.isHuman && chatRoom) {
+        // 获取群聊中的所有用户成员
+        const userMembers = await chatRoomService.getUserMembers(chatRoomId);
+        const usernames = userMembers.map((m) => m.user?.username).filter(Boolean) as string[];
+        // 检查消息中是否有 @这些用户
+        const userMentions = parseKnownMentions(message.content, usernames, { allowInline: true });
+        hasUserMentions = userMentions.length > 0;
+      }
 
       // 快速对话群聊：如果没有 @其他助手，则触发快速对话助手
       if (message.isHuman && chatRoom?.isQuickChatRoom && chatRoom.quickChatAgentId && !hasMentions) {
@@ -228,6 +254,7 @@ export function setupAIHandlers(
       }
 
       // 协调模式：用户显式 @ 仍直接触发；助手消息即使 @ 其他助手，也先交给内置群调度助手裁决。
+      // 但如果助手直接 @用户，不触发群调度，让用户直接看到助手的消息。
       if (
         chatRoom &&
         shouldTriggerCoordinatorAgent({
@@ -236,8 +263,23 @@ export function setupAIHandlers(
           hasMentions,
           messageIsHuman: message.isHuman,
           sourceAgentId: message.agentId,
+          hasUserMentions,
         })
       ) {
+        // 并行批次检查：协调者同时派发多个助手时，等所有助手都完成后再触发协调者一次，
+        // 避免每个助手完成时都白白调用一次 LLM（中途必然输出"无需调度"）。
+        if (!message.isHuman && message.agentId) {
+          const batchResult = markBatchAgentComplete(chatRoomId, message.agentId);
+          if (batchResult === 'pending') {
+            debugLog('parallelBatchWaiting', {
+              chatRoomId,
+              agentId: message.agentId,
+              reason: 'waitingForOtherParallelAgents',
+            });
+            return;
+          }
+          // 'last'：最后一个并行任务完成，放行；'none'：不在批次里，正常流程
+        }
         const coordinatorAgent = await agentService.findById(GROUP_COORDINATOR_ID);
 
         if (coordinatorAgent && coordinatorAgent.isActive) {
@@ -370,6 +412,7 @@ export function setupAIHandlers(
         : null;
 
       // 协调模式下只有内置群调度助手可在单条消息中同时触发多个助手；其他来源只处理第一个有效助手。
+      const dispatchedAgentIds: string[] = [];
       for (const agentName of triggerMentionNames) {
         // Find agent by name
         const agent = activeAgentByName.get(agentName);
@@ -401,6 +444,12 @@ export function setupAIHandlers(
         }
 
         await enqueueAgentTask(chatRoomId, message, agent, quickChatTargetAgent);
+        dispatchedAgentIds.push(agent.id);
+      }
+
+      // 协调者并行派发了多个助手时，启动批次追踪，等全部完成后再触发协调者
+      if (dispatchedAgentIds.length > 1) {
+        startParallelBatch(chatRoomId, dispatchedAgentIds);
       }
     },
   );

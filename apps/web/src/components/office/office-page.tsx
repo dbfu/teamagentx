@@ -1214,8 +1214,8 @@ export function OfficePage() {
 
   return (
     <div
-      className="relative h-full w-full"
-      style={{ background: 'linear-gradient(175deg, #e4dccb 0%, #efe8da 45%, #fbf8f2 100%)' }}
+      className="light relative h-full w-full"
+      style={{ background: isNight ? 'linear-gradient(175deg, #040812 0%, #070b1a 45%, #0d1224 100%)' : 'linear-gradient(175deg, #e4dccb 0%, #efe8da 45%, #fbf8f2 100%)' }}
     >
       {/* 顶部（桌面端可拖拽窗口，按钮 no-drag；左侧给 macOS 交通灯留位） */}
       <div

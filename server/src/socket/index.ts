@@ -10,6 +10,7 @@ import {
   processQueue,
   broadcastAgentStatus,
   setGlobalBroadcastMessage,
+  cancelStallWatchdog,
   type AgentStatus,
 } from '../core/agent/agent-handler/index.js';
 import type { ToolCall } from '../core/agent/executor.interface.js';
@@ -595,6 +596,20 @@ export function setupSocket(io: Server) {
 
           if (matchedTask) {
             agentId = matchedTask.agentId;
+
+            // pending 任务尚未执行，不能通过 AbortController 取消（否则会误停正在执行的任务）。
+            // 直接在 DB 标记为 cancelled 并走 agent:task-cancelled 通道。
+            if (matchedTask.status === 'pending') {
+              await taskQueueService.updateStatus(matchedTask.id, 'cancelled');
+              io.to(chatRoomId).emit('agent:task-cancelled', {
+                chatRoomId,
+                agentId: matchedTask.agentId,
+                taskId: matchedTask.id,
+                messageId: matchedTask.messageId,
+              });
+              broadcastAgentStatus(chatRoomId);
+              return;
+            }
           }
         }
 
@@ -612,6 +627,11 @@ export function setupSocket(io: Server) {
         const stopped = stopAgentExecution(chatRoomId, agentId, lang);
 
         if (stopped) {
+          // 用户主动停止时无条件取消 watchdog 并标记中断，防止群调度介入。
+          // 不能用 getActiveTasks 判断：被停止的任务在 executor 确认前仍处于
+          // executing 状态，会导致竞态漏判。其他仍在运行的任务完成后会自行
+          // 重新调度 watchdog，此处无条件取消不影响它们的正常流程。
+          cancelStallWatchdog(chatRoomId);
           // 通知前端已停止
           socket.emit('agent:stopped', { chatRoomId, agentId, messageId });
           // 广播给群聊里的所有人

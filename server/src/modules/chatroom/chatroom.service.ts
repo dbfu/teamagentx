@@ -609,6 +609,16 @@ export const chatRoomService = {
     return createVirtualSystemAgentMember(chatRoomId, agentId);
   },
 
+  /**
+   * 获取群聊中的所有用户成员
+   */
+  async getUserMembers(chatRoomId: string) {
+    return prisma.chatRoomAgent.findMany({
+      where: { chatRoomId, userId: { not: null } },
+      include: { user: { select: { username: true } } },
+    });
+  },
+
   async delete(id: string) {
     return prisma.chatRoom.delete({
       where: { id },

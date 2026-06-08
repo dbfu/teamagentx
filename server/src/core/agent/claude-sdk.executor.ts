@@ -1841,6 +1841,7 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
                 'TaskOutput',
                 'ScheduleWakeup',
                 'AskUserQuestion',
+                'CronCreate',
               ],
             }
           : {}),

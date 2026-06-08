@@ -185,7 +185,7 @@ export function OfficeDemoPage() {
 
   return (
     <div
-      className="relative h-full w-full"
+      className="light relative h-full w-full"
       style={{ background: 'linear-gradient(180deg, #c79a6b 0%, #e0b98c 40%, #f3e3cf 100%)' }}
     >
       {/* 顶部 */}

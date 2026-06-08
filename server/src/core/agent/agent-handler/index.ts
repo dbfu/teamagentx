@@ -62,6 +62,17 @@ export {
   debugLog,
 } from './debug.js';
 
+// 从 stall-watchdog 导出
+export {
+  cancelStallWatchdog,
+  checkAndClearInterrupted,
+} from './stall-watchdog.js';
+
+// 从 parallel-batch-tracker 导出
+export {
+  clearParallelBatch,
+} from './parallel-batch-tracker.js';
+
 // 从 claude-sdk.executor 导出
 export { clearClaudeSdkFileSystemContext } from '../claude-sdk.executor.js';
 
