@@ -17,8 +17,9 @@ import { updateManager } from '@/lib/update-manager'
 import { cn } from '@/lib/utils'
 import { useAuthStore, useChatRoomStore, useSocketStore } from '@/stores'
 import { useChatStore } from '@/stores/chat-store'
-import { BookOpenText, Bot, Check, CircleArrowUp, Cpu, Globe, MessageSquare, Monitor, Moon, Package, Palette, Plus, Search, Sun, Users } from 'lucide-react'
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { BookOpenText, Bot, Check, CircleArrowUp, Cpu, Globe, MessageSquare, Monitor, Moon, MoreHorizontal, Package, Palette, Plus, Search, Sun, Users } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
@@ -27,6 +28,25 @@ interface SidebarNavProps {
   messageBadge?: number
   onRefreshChatRooms?: () => void
 }
+
+type MainNavTab = 'message' | 'assistant' | 'skill' | 'model' | 'integration'
+type OptionalNavTab = Exclude<MainNavTab, 'message'>
+
+const NAV_HIDE_CANDIDATES: OptionalNavTab[][] = [
+  [],
+  ['integration'],
+  ['model', 'integration'],
+  ['skill', 'model', 'integration'],
+  ['assistant', 'skill', 'model', 'integration'],
+]
+
+const isOptionalNavTab = (tab: MainNavTab | null): tab is OptionalNavTab => (
+  tab === 'assistant' || tab === 'skill' || tab === 'model' || tab === 'integration'
+)
+
+const areSameTabs = (a: OptionalNavTab[], b: OptionalNavTab[]) => (
+  a.length === b.length && a.every((tab, index) => tab === b[index])
+)
 
 export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps) {
   const { t } = useTranslation()
@@ -46,7 +66,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
     updateManager.getSnapshot,
   )
 
-  const activeTab = location.pathname.startsWith('/settings')
+  const activeTab: MainNavTab | null = location.pathname.startsWith('/settings')
     ? null
     : location.pathname.startsWith('/assistant')
       ? 'assistant'
@@ -58,6 +78,11 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
             ? 'integration'
             : 'message'
   const currentUser = user || socketUser
+  const [hiddenNavTabs, setHiddenNavTabs] = useState<OptionalNavTab[]>([])
+  const navItemsRef = useRef<HTMLDivElement>(null)
+  const navMeasureRefs = useRef<Array<HTMLDivElement | null>>([])
+  const hiddenNavTabSet = new Set(hiddenNavTabs)
+  const isMoreTabActive = isOptionalNavTab(activeTab) && hiddenNavTabSet.has(activeTab)
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -89,7 +114,15 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
     { value: 'ruby', label: t('nav.rubyRed'), color: 'oklch(0.55 0.2 18)' },
   ] as const
 
-  const handleTabChange = (tab: 'message' | 'assistant' | 'skill' | 'model' | 'integration') => {
+  const navTabs: Array<{ id: OptionalNavTab; icon: LucideIcon; label: string; menuLabel: string }> = [
+    { id: 'assistant', icon: Bot, label: t('nav.assistants'), menuLabel: t('nav.assistants') },
+    { id: 'skill', icon: Package, label: t('nav.skills'), menuLabel: t('nav.skills') },
+    { id: 'model', icon: Cpu, label: t('nav.models'), menuLabel: t('nav.modelManagement') },
+    { id: 'integration', icon: Globe, label: t('nav.integrations'), menuLabel: t('nav.integrations') },
+  ]
+  const hiddenMenuTabs = navTabs.filter((tab) => hiddenNavTabSet.has(tab.id))
+
+  const handleTabChange = (tab: MainNavTab) => {
     // 切换 Tab 时关闭侧拉框
     setSidePanelMode(null)
     if (tab === 'message') {
@@ -156,22 +189,93 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
     }
   }
 
+  useEffect(() => {
+    const navItems = navItemsRef.current
+    const measureRefs = navMeasureRefs.current
+    if (!navItems || NAV_HIDE_CANDIDATES.some((_, index) => !measureRefs[index])) return
+
+    let frameId = 0
+    const updateHiddenNavTabs = () => {
+      if (frameId) cancelAnimationFrame(frameId)
+      frameId = requestAnimationFrame(() => {
+        const availableHeight = Math.floor(navItems.clientHeight)
+        const nextHiddenTabs = NAV_HIDE_CANDIDATES.find((_, index) => {
+          const measure = measureRefs[index]
+          return measure ? Math.ceil(measure.scrollHeight) <= availableHeight : false
+        }) ?? NAV_HIDE_CANDIDATES[NAV_HIDE_CANDIDATES.length - 1]
+
+        setHiddenNavTabs((current) => areSameTabs(current, nextHiddenTabs) ? current : nextHiddenTabs)
+      })
+    }
+
+    updateHiddenNavTabs()
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateHiddenNavTabs)
+      return () => {
+        if (frameId) cancelAnimationFrame(frameId)
+        window.removeEventListener('resize', updateHiddenNavTabs)
+      }
+    }
+
+    const observer = new ResizeObserver(updateHiddenNavTabs)
+    observer.observe(navItems)
+    measureRefs.forEach((measure) => {
+      if (measure) observer.observe(measure)
+    })
+    window.addEventListener('resize', updateHiddenNavTabs)
+
+    return () => {
+      if (frameId) cancelAnimationFrame(frameId)
+      observer.disconnect()
+      window.removeEventListener('resize', updateHiddenNavTabs)
+    }
+  }, [])
+
+  const measuredNavButtonClass = 'relative flex w-full flex-col items-center gap-1 rounded-lg border border-transparent py-2'
+  const renderMeasuredNavTab = (key: string, Icon: LucideIcon, label: string) => (
+    <button key={key} tabIndex={-1} className={measuredNavButtonClass}>
+      <Icon className="size-5" />
+      <span className="text-xs">{label}</span>
+    </button>
+  )
+  const renderMeasuredNavGroup = (hiddenTabs: OptionalNavTab[]) => {
+    const hiddenTabsSet = new Set(hiddenTabs)
+    return (
+    <div className="flex w-full flex-col items-center gap-1 px-2 pb-4 select-none">
+      <button tabIndex={-1} className="group flex w-full items-center justify-center rounded-lg py-2 text-muted-foreground">
+        <span className="flex size-8 items-center justify-center rounded-full">
+          <Search className="size-4" />
+        </span>
+      </button>
+      <button tabIndex={-1} className="flex w-full flex-col items-center gap-1 rounded-lg py-2">
+        <div className="flex size-8 items-center justify-center rounded-full">
+          <Plus className="size-4" />
+        </div>
+      </button>
+      {renderMeasuredNavTab('message', MessageSquare, t('nav.messages'))}
+      {navTabs.map((tab) => !hiddenTabsSet.has(tab.id) && renderMeasuredNavTab(tab.id, tab.icon, tab.label))}
+      {hiddenTabs.length > 0 && renderMeasuredNavTab('more', MoreHorizontal, t('common.more'))}
+    </div>
+    )
+  }
+
   return (
     <>
     <div
-      className="flex h-full w-20 shrink-0 flex-col items-center border-r border-sidebar-border bg-sidebar/95 shadow-[var(--control-shadow)] backdrop-blur"
+      className="relative flex h-full w-20 shrink-0 flex-col items-center border-r border-sidebar-border bg-sidebar/95 shadow-[var(--control-shadow)] backdrop-blur"
       style={isElectron ? { WebkitAppRegion: 'drag' } as React.CSSProperties : {}}
     >
       {/* Logo area - 拖拽区域 */}
       <div className={cn(
-        "mb-4 flex size-10 items-center justify-center overflow-hidden rounded-xl border border-sidebar-border bg-[var(--surface-raised)] shadow-[var(--control-shadow)]",
+        "mb-4 flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-sidebar-border bg-[var(--surface-raised)] shadow-[var(--control-shadow)]",
         isMac ? "mt-10" : "mt-4"
       )}>
         <img src={`${import.meta.env.BASE_URL}app-logo.png`} alt="TeamAgentX" className="size-full object-cover" />
       </div>
 
       {/* Nav items */}
-      <div className="flex w-full flex-1 flex-col items-center gap-1 px-2 pb-4 select-none">
+      <div ref={navItemsRef} className="flex min-h-0 w-full flex-1 flex-col items-center gap-1 px-2 pb-4 select-none">
         <button
           onClick={() => setIsSearchOpen(true)}
           className="group flex w-full cursor-pointer items-center justify-center rounded-lg py-2 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
@@ -238,70 +342,132 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
         </button>
 
         {/* 助手 Tab */}
-        <button
-          onClick={() => handleTabChange('assistant')}
-          className={cn(
-            'relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
-            activeTab === 'assistant'
-              ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
-              : 'text-muted-foreground hover:bg-sidebar-accent'
-          )}
-          style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
-        >
-          <Bot className="size-5" />
-          <span className="text-xs">{t('nav.assistants')}</span>
-        </button>
+        {!hiddenNavTabSet.has('assistant') && (
+          <button
+            onClick={() => handleTabChange('assistant')}
+            className={cn(
+              'relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
+              activeTab === 'assistant'
+                ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
+                : 'text-muted-foreground hover:bg-sidebar-accent'
+            )}
+            style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+          >
+            <Bot className="size-5" />
+            <span className="text-xs">{t('nav.assistants')}</span>
+          </button>
+        )}
 
         {/* 技能 Tab */}
-        <button
-          onClick={() => handleTabChange('skill')}
-          className={cn(
-            'relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
-            activeTab === 'skill'
-              ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
-              : 'text-muted-foreground hover:bg-sidebar-accent'
-          )}
-          style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
-        >
-          <Package className="size-5" />
-          <span className="text-xs">{t('nav.skills')}</span>
-        </button>
+        {!hiddenNavTabSet.has('skill') && (
+          <button
+            onClick={() => handleTabChange('skill')}
+            className={cn(
+              'relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
+              activeTab === 'skill'
+                ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
+                : 'text-muted-foreground hover:bg-sidebar-accent'
+            )}
+            style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+          >
+            <Package className="size-5" />
+            <span className="text-xs">{t('nav.skills')}</span>
+          </button>
+        )}
 
         {/* 模型 Tab */}
-        <button
-          onClick={() => handleTabChange('model')}
-          className={cn(
-            'relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
-            activeTab === 'model'
-              ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
-              : 'text-muted-foreground hover:bg-sidebar-accent'
-          )}
-          style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
-        >
-          <Cpu className="size-5" />
-          <span className="text-xs">{t('nav.models')}</span>
-        </button>
+        {!hiddenNavTabSet.has('model') && (
+          <button
+            onClick={() => handleTabChange('model')}
+            className={cn(
+              'relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
+              activeTab === 'model'
+                ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
+                : 'text-muted-foreground hover:bg-sidebar-accent'
+            )}
+            style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+          >
+            <Cpu className="size-5" />
+            <span className="text-xs">{t('nav.models')}</span>
+          </button>
+        )}
 
         {/* 频道 Tab */}
-        <button
-          onClick={() => handleTabChange('integration')}
-          className={cn(
-            'relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
-            activeTab === 'integration'
-              ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
-              : 'text-muted-foreground hover:bg-sidebar-accent'
-          )}
-          style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
-        >
-          <Globe className="size-5" />
-          <span className="text-xs">{t('nav.integrations')}</span>
-        </button>
+        {!hiddenNavTabSet.has('integration') && (
+          <button
+            onClick={() => handleTabChange('integration')}
+            className={cn(
+              'relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
+              activeTab === 'integration'
+                ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
+                : 'text-muted-foreground hover:bg-sidebar-accent'
+            )}
+            style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+          >
+            <Globe className="size-5" />
+            <span className="text-xs">{t('nav.integrations')}</span>
+          </button>
+        )}
+
+        {hiddenMenuTabs.length > 0 && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className={cn(
+                  'relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
+                  isMoreTabActive
+                    ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
+                    : 'text-muted-foreground hover:bg-sidebar-accent'
+                )}
+                title={t('common.more')}
+                style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+              >
+                <MoreHorizontal className="size-5" />
+                <span className="text-xs">{t('common.more')}</span>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              side="right"
+              align="start"
+              style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+            >
+              {hiddenMenuTabs.map((tab) => {
+                const Icon = tab.icon
+                return (
+                  <DropdownMenuItem key={tab.id} onClick={() => handleTabChange(tab.id)}>
+                    <Icon className="size-4" />
+                    {tab.menuLabel}
+                    {activeTab === tab.id && <Check className="ml-auto size-4 text-primary" />}
+                  </DropdownMenuItem>
+                )
+              })}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
 
         {/* 中间空白区域 - 可拖拽 */}
       </div>
 
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute left-0 top-0 w-full opacity-0"
+        style={{ visibility: 'hidden' }}
+      >
+        {NAV_HIDE_CANDIDATES.map((hiddenTabs, index) => (
+          <div
+            key={hiddenTabs.join('-') || 'all'}
+            ref={(element) => {
+              navMeasureRefs.current[index] = element
+            }}
+            className="absolute left-0 top-0 w-full"
+          >
+            {renderMeasuredNavGroup(hiddenTabs)}
+          </div>
+        ))}
+      </div>
+
       {/* Bottom buttons */}
-      <div className="flex flex-col items-center gap-1 pb-4">
+      <div className="flex shrink-0 flex-col items-center gap-1 pb-4">
         {isElectron && updateState.update && (
           <button
             className="relative flex size-9 cursor-pointer items-center justify-center rounded-lg text-emerald-600 hover:bg-emerald-500/10 hover:text-emerald-700"
