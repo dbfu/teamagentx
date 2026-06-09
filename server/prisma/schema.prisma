@@ -196,6 +196,7 @@ model ChatRoom {
   externalChannels  ExternalChannel[] // 关联的外部平台频道
   platformConfigs   PlatformConfig[] // 直接绑定到该群聊的平台机器人
   bridgeBots        BridgeBot[] // 直接绑定到该群聊的机器人实例
+  workbenchTasks    WorkbenchTask[] // 工作台派发任务
 
   @@index([name])
   @@index([ownerId])
@@ -508,8 +509,37 @@ model User {
   messages       Message[]
   todos          Todo[] // 助手 @ 用户触发的待办
   bridgeBots     BridgeBot[]
+  workbenchTasks WorkbenchTask[]
 
   @@index([username])
+}
+
+// 工作台今日任务。由用户在工作台创建，派发到已有群聊后由群调度助手组织执行。
+model WorkbenchTask {
+  id                String    @id @default(uuid())
+  title             String
+  description       String?
+  chatRoomId        String
+  status            String    @default("draft") // draft | dispatched | in_progress | waiting_review | needs_input | completed | blocked
+  priority          String    @default("medium") // low | medium | high
+  dueText           String?
+  expectedOutput    String?
+  note              String?
+  dispatchMessageId String?
+  createdBy         String?
+  dispatchedAt      DateTime?
+  completedAt       DateTime?
+  lastActivityAt    DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  chatRoom ChatRoom @relation(fields: [chatRoomId], references: [id], onDelete: Cascade)
+  creator  User?    @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@index([createdBy, createdAt])
+  @@index([chatRoomId])
+  @@index([status])
+  @@index([dispatchMessageId])
 }
 
 // 应用级 KV 设置（首次引导、默认 Agent 等）

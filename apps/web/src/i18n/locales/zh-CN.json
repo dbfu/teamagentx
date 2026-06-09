@@ -109,6 +109,7 @@
   },
   "nav": {
     "messages": "消息",
+    "workbench": "工作台",
     "assistants": "助手",
     "skills": "技能",
     "models": "模型",

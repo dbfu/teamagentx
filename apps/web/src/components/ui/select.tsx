@@ -52,9 +52,12 @@ function SelectTrigger({
 function SelectContent({
   className,
   children,
+  hideScrollButtons = false,
   position = 'popper',
   ...props
-}: React.ComponentProps<typeof SelectPrimitive.Content>) {
+}: React.ComponentProps<typeof SelectPrimitive.Content> & {
+  hideScrollButtons?: boolean
+}) {
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
@@ -68,7 +71,7 @@ function SelectContent({
         position={position}
         {...props}
       >
-        <SelectScrollUpButton />
+        {!hideScrollButtons && <SelectScrollUpButton />}
         <SelectPrimitive.Viewport
           className={cn(
             'p-1',
@@ -78,7 +81,7 @@ function SelectContent({
         >
           {children}
         </SelectPrimitive.Viewport>
-        <SelectScrollDownButton />
+        {!hideScrollButtons && <SelectScrollDownButton />}
       </SelectPrimitive.Content>
     </SelectPrimitive.Portal>
   )

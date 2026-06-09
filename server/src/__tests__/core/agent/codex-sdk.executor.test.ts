@@ -315,10 +315,13 @@ describe('Codex SDK Executor builtin MCP servers', () => {
           { agentId: 'agent-2', name: 'Claude' },
         ],
         generateImageEndpoint: 'http://127.0.0.1:3001/internal/agent-tools/generate-image',
+        systemToolsListEndpoint: 'http://127.0.0.1:3001/internal/agent-tools/system-tools/list',
+        systemToolsCallEndpoint: 'http://127.0.0.1:3001/internal/agent-tools/system-tools/call',
         backgroundCommandStartEndpoint: 'http://127.0.0.1:3001/internal/agent-tools/background-command/start',
         backgroundCommandReadEndpoint: 'http://127.0.0.1:3001/internal/agent-tools/background-command/read',
         backgroundCommandStopEndpoint: 'http://127.0.0.1:3001/internal/agent-tools/background-command/stop',
         backgroundCommandListEndpoint: 'http://127.0.0.1:3001/internal/agent-tools/background-command/list',
+        roomHistoryToolsEnabled: true,
       }) as Record<string, any>;
 
       assert.strictEqual(mcpServers.gitnexus.command, gitnexusPath);
@@ -335,6 +338,15 @@ describe('Codex SDK Executor builtin MCP servers', () => {
         mcpServers.tax.env.TEAMAGENTX_BACKGROUND_COMMAND_START_ENDPOINT,
         'http://127.0.0.1:3001/internal/agent-tools/background-command/start',
       );
+      assert.strictEqual(
+        mcpServers.tax.env.TEAMAGENTX_SYSTEM_TOOLS_LIST_ENDPOINT,
+        'http://127.0.0.1:3001/internal/agent-tools/system-tools/list',
+      );
+      assert.strictEqual(
+        mcpServers.tax.env.TEAMAGENTX_SYSTEM_TOOLS_CALL_ENDPOINT,
+        'http://127.0.0.1:3001/internal/agent-tools/system-tools/call',
+      );
+      assert.strictEqual(mcpServers.tax.env.TEAMAGENTX_ROOM_HISTORY_TOOLS_ENABLED, '1');
       assert.ok(mcpServers.tax.env.TEAMAGENTX_INTERNAL_TOOL_TOKEN);
     } finally {
       if (originalPath === undefined) {
@@ -343,6 +355,35 @@ describe('Codex SDK Executor builtin MCP servers', () => {
         process.env.PATH = originalPath;
       }
       fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test('生成的 tax MCP server 显式声明 Codex 群历史工具', () => {
+    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-codex-room-history-tools-'));
+    const executor = new CodexSdkExecutor(
+      'CodexAgent',
+      'test prompt',
+      'room-history-tool-test',
+      workDir,
+      true,
+      'agent-room-history-tool-test',
+    );
+
+    try {
+      const serverPath = (executor as any).ensureTeamAgentXMcpServerFile();
+      const script = fs.readFileSync(serverPath, 'utf-8');
+
+      assert.match(script, /TEAMAGENTX_ROOM_HISTORY_TOOLS_ENABLED/);
+      assert.match(script, /get_recent_room_messages/);
+      assert.match(script, /search_room_messages/);
+      assert.match(script, /get_room_message_detail/);
+      assert.match(script, /buildRoomHistoryTools/);
+    } finally {
+      fs.rmSync(workDir, { recursive: true, force: true });
+      fs.rmSync(
+        path.join(os.homedir(), '.teamagentx', 'acp-config', 'agent-room-history-tool-test'),
+        { recursive: true, force: true },
+      );
     }
   });
 

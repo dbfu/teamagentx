@@ -17,7 +17,7 @@ import { updateManager } from '@/lib/update-manager'
 import { cn } from '@/lib/utils'
 import { useAuthStore, useChatRoomStore, useSocketStore } from '@/stores'
 import { useChatStore } from '@/stores/chat-store'
-import { BookOpenText, Bot, Check, CircleArrowUp, Cpu, Globe, MessageSquare, Monitor, Moon, MoreHorizontal, Package, Palette, Plus, Search, Sun, Users } from 'lucide-react'
+import { BookOpenText, Bot, Check, CircleArrowUp, Cpu, Globe, LayoutDashboard, MessageSquare, Monitor, Moon, MoreHorizontal, Package, Palette, Plus, Search, Sun, Users } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
@@ -29,7 +29,7 @@ interface SidebarNavProps {
   onRefreshChatRooms?: () => void
 }
 
-type MainNavTab = 'message' | 'assistant' | 'skill' | 'model' | 'integration'
+type MainNavTab = 'message' | 'workbench' | 'assistant' | 'skill' | 'model' | 'integration'
 type OptionalNavTab = Exclude<MainNavTab, 'message'>
 
 const NAV_HIDE_CANDIDATES: OptionalNavTab[][] = [
@@ -38,10 +38,11 @@ const NAV_HIDE_CANDIDATES: OptionalNavTab[][] = [
   ['model', 'integration'],
   ['skill', 'model', 'integration'],
   ['assistant', 'skill', 'model', 'integration'],
+  ['workbench', 'assistant', 'skill', 'model', 'integration'],
 ]
 
 const isOptionalNavTab = (tab: MainNavTab | null): tab is OptionalNavTab => (
-  tab === 'assistant' || tab === 'skill' || tab === 'model' || tab === 'integration'
+  tab === 'workbench' || tab === 'assistant' || tab === 'skill' || tab === 'model' || tab === 'integration'
 )
 
 const areSameTabs = (a: OptionalNavTab[], b: OptionalNavTab[]) => (
@@ -68,15 +69,17 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
 
   const activeTab: MainNavTab | null = location.pathname.startsWith('/settings')
     ? null
-    : location.pathname.startsWith('/assistant')
-      ? 'assistant'
-      : location.pathname.startsWith('/skill')
-        ? 'skill'
-        : location.pathname.startsWith('/model')
-          ? 'model'
-          : location.pathname.startsWith('/integration')
-            ? 'integration'
-            : 'message'
+    : location.pathname.startsWith('/workbench')
+      ? 'workbench'
+      : location.pathname.startsWith('/assistant')
+        ? 'assistant'
+        : location.pathname.startsWith('/skill')
+          ? 'skill'
+          : location.pathname.startsWith('/model')
+            ? 'model'
+            : location.pathname.startsWith('/integration')
+              ? 'integration'
+              : 'message'
   const currentUser = user || socketUser
   const [hiddenNavTabs, setHiddenNavTabs] = useState<OptionalNavTab[]>([])
   const navItemsRef = useRef<HTMLDivElement>(null)
@@ -115,6 +118,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
   ] as const
 
   const navTabs: Array<{ id: OptionalNavTab; icon: LucideIcon; label: string; menuLabel: string }> = [
+    { id: 'workbench', icon: LayoutDashboard, label: t('nav.workbench'), menuLabel: t('nav.workbench') },
     { id: 'assistant', icon: Bot, label: t('nav.assistants'), menuLabel: t('nav.assistants') },
     { id: 'skill', icon: Package, label: t('nav.skills'), menuLabel: t('nav.skills') },
     { id: 'model', icon: Cpu, label: t('nav.models'), menuLabel: t('nav.modelManagement') },
@@ -340,6 +344,23 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
             </span>
           )}
         </button>
+
+        {/* 工作台 Tab */}
+        {!hiddenNavTabSet.has('workbench') && (
+          <button
+            onClick={() => handleTabChange('workbench')}
+            className={cn(
+              'relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
+              activeTab === 'workbench'
+                ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
+                : 'text-muted-foreground hover:bg-sidebar-accent'
+            )}
+            style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+          >
+            <LayoutDashboard className="size-5" />
+            <span className="text-xs">{t('nav.workbench')}</span>
+          </button>
+        )}
 
         {/* 助手 Tab */}
         {!hiddenNavTabSet.has('assistant') && (

@@ -17,6 +17,7 @@ import { SkillPage } from './components/chat/skill-page'
 import { SidebarNav } from './components/chat/sidebar-nav'
 import { SettingsPage } from './components/chat/settings-page'
 import { StopAllTasksDialog } from './components/chat/dialogs/stop-all-tasks-dialog'
+import { WorkbenchPage } from './components/workbench/workbench-page'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -859,6 +860,7 @@ function AppContent() {
         } />
         <Route path="/assistant" element={<AssistantPage onNavigateToChatRoom={handleNavigateToChatRoom} isMobile={isMobile} />} />
         <Route path="/assistant/:id" element={<AssistantDetailPage />} />
+        <Route path="/workbench" element={<WorkbenchPage />} />
         <Route path="/skill" element={<SkillPage />} />
         <Route path="/model" element={<ModelPage />} />
         <Route path="/integration" element={<IntegrationPage />} />

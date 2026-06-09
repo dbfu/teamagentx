@@ -109,6 +109,7 @@
   },
   "nav": {
     "messages": "Messages",
+    "workbench": "Workbench",
     "assistants": "Assistants",
     "skills": "Skills",
     "models": "Models",

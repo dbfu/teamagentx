@@ -147,6 +147,7 @@ interface CodexBuiltinMcpServerContext {
   backgroundCommandReadEndpoint?: string;
   backgroundCommandStopEndpoint?: string;
   backgroundCommandListEndpoint?: string;
+  roomHistoryToolsEnabled?: boolean;
 }
 
 interface CodexBuiltinMcpServerDefinition {
@@ -328,8 +329,10 @@ const BUILTIN_CODEX_MCP_SERVERS: CodexBuiltinMcpServerDefinition[] = [
       backgroundCommandReadEndpoint,
       backgroundCommandStopEndpoint,
       backgroundCommandListEndpoint,
+      roomHistoryToolsEnabled,
     }) => {
-      if (!generateImageEndpoint && !systemToolsListEndpoint && !backgroundCommandStartEndpoint) return undefined;
+      const hasRoomHistoryTools = roomHistoryToolsEnabled && systemToolsCallEndpoint;
+      if (!generateImageEndpoint && !systemToolsListEndpoint && !backgroundCommandStartEndpoint && !hasRoomHistoryTools) return undefined;
 
       return {
         command: process.execPath,
@@ -345,6 +348,7 @@ const BUILTIN_CODEX_MCP_SERVERS: CodexBuiltinMcpServerDefinition[] = [
           TEAMAGENTX_BACKGROUND_COMMAND_READ_ENDPOINT: backgroundCommandReadEndpoint,
           TEAMAGENTX_BACKGROUND_COMMAND_STOP_ENDPOINT: backgroundCommandStopEndpoint,
           TEAMAGENTX_BACKGROUND_COMMAND_LIST_ENDPOINT: backgroundCommandListEndpoint,
+          TEAMAGENTX_ROOM_HISTORY_TOOLS_ENABLED: roomHistoryToolsEnabled ? '1' : '',
           TEAMAGENTX_INTERNAL_TOOL_TOKEN: getInternalAgentToolToken(),
         },
       };
@@ -1088,6 +1092,7 @@ const token = process.env.TEAMAGENTX_INTERNAL_TOOL_TOKEN;
 const sourceAgentId = process.env.TEAMAGENTX_SOURCE_AGENT_ID;
 const chatRoomId = process.env.TEAMAGENTX_CHAT_ROOM_ID;
 const workDir = process.env.TEAMAGENTX_WORK_DIR;
+const roomHistoryToolsEnabled = process.env.TEAMAGENTX_ROOM_HISTORY_TOOLS_ENABLED === "1";
 
 function write(message) {
   process.stdout.write(JSON.stringify(message) + "\\n");
@@ -1198,6 +1203,65 @@ async function callSystemTool(name, args) {
   }
 }
 
+function buildRoomHistoryTools() {
+  if (!roomHistoryToolsEnabled || !systemToolsCallEndpoint) return [];
+
+  return [
+    {
+      name: "get_room_message_detail",
+      description: "Get detailed content for one message in the current chatroom. Provide messageId when known, or provide keyword plus offset to open the Nth recent matching message. Use contentOffset/contentLimit to page through long message content. The chatroom is fixed to the current execution context; do not provide a chatRoomId.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          messageId: { type: "string", description: "Message ID to inspect. The ID must belong to the current chatroom." },
+          keyword: { type: "string", minLength: 1, maxLength: 120, description: "Keyword used to find a message when messageId is not provided, and to return matching snippets inside the message. Literal substring search; regex is not supported." },
+          offset: { type: "number", minimum: 0, maximum: 500, description: "When using keyword without messageId, skip this many recent matching messages. Default 0 returns the most recent matching message." },
+          contentOffset: { type: "number", minimum: 0, description: "Character offset into the selected message content. Default 0." },
+          contentLimit: { type: "number", minimum: 1, maximum: 12000, description: "Maximum characters of message content to return. Default 4000, maximum 12000." },
+          contextMessages: { type: "number", minimum: 0, maximum: 3, description: "Number of neighboring chat messages before and after the selected message. Default 0, maximum 3." },
+        },
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "get_recent_room_messages",
+      description: "Get message indexes in the current chatroom. The chatroom is fixed to the current execution context; do not provide a chatRoomId. Return at most 50 message indexes per call with short previews only; use skip for offset pagination and order asc/desc for chronological direction. Use get_room_message_detail with messageId to inspect full content. Prefer search_room_messages when you know a keyword.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          limit: { type: "number", minimum: 1, maximum: 50, description: "Maximum recent message indexes to return. Default 5, maximum 50." },
+          skip: { type: "number", minimum: 0, maximum: 1000, description: "Number of matching message indexes to skip before returning results. Default 0, maximum 1000." },
+          order: { type: "string", enum: ["asc", "desc"], description: "Sort order by message time and id. Use asc for oldest first, desc for newest first. Default desc." },
+          beforeMessageId: { type: "string", description: "Only return messages before this message ID. The ID must belong to the current chatroom." },
+          afterMessageId: { type: "string", description: "Only return messages after this message ID. The ID must belong to the current chatroom." },
+          senderType: { type: "string", enum: ["user", "agent"], description: "Optional sender type filter." },
+          senderName: { type: "string", maxLength: 80, description: "Optional partial sender name filter, such as a human username or assistant name." },
+        },
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "search_room_messages",
+      description: "Search message indexes in the current chatroom by keyword. The chatroom is fixed to the current execution context; do not provide a chatRoomId. Return at most 50 matching message indexes per call. It behaves like grep -n -C: returns matching message snippets, line numbers, and optional nearby message indexes instead of dumping full history. Use get_room_message_detail with messageId to inspect full content.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", minLength: 1, maxLength: 120, description: "Keyword to search for in the current chatroom. Literal substring search; regex is not supported." },
+          limit: { type: "number", minimum: 1, maximum: 50, description: "Maximum matching message indexes to return. Default 5, maximum 50." },
+          beforeMessageId: { type: "string", description: "Only search messages before this message ID. The ID must belong to the current chatroom." },
+          afterMessageId: { type: "string", description: "Only search messages after this message ID. The ID must belong to the current chatroom." },
+          senderType: { type: "string", enum: ["user", "agent"], description: "Optional sender type filter." },
+          senderName: { type: "string", maxLength: 80, description: "Optional partial sender name filter, such as a human username or assistant name." },
+          contextMessages: { type: "number", minimum: 0, maximum: 3, description: "Number of neighboring chat messages before and after each match. Default 0, maximum 3." },
+          contextLines: { type: "number", minimum: 0, maximum: 5, description: "Number of lines before and after a matching line inside a long message. Default 2, maximum 5." },
+        },
+        required: ["query"],
+        additionalProperties: false,
+      },
+    },
+  ];
+}
+
 async function callBackgroundCommand(endpoint, args) {
   if (!endpoint || !token || !sourceAgentId || !chatRoomId) {
     return toolResult("Background command tools are not available.", {}, true);
@@ -1250,7 +1314,7 @@ async function handle(request) {
   }
 
   if (method === "tools/list") {
-    const tools = [];
+    const tools = buildRoomHistoryTools();
     if (generateImageEndpoint) {
       tools.push({
         name: "generate_image",
@@ -1770,6 +1834,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       backgroundCommandReadEndpoint,
       backgroundCommandStopEndpoint,
       backgroundCommandListEndpoint,
+      roomHistoryToolsEnabled: this.injectGroupHistory,
     });
     const config = {
       developer_instructions: this.buildDeveloperInstructions(),
