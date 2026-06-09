@@ -1256,8 +1256,8 @@ export const agentApi = {
   },
 
   // 获取助手全局长期记忆
-  async getMemory(agentId: string): Promise<ApiResponse<{ content: string; filePath: string }>> {
-    return request<{ content: string; filePath: string }>(`/agents/${agentId}/memory`)
+  async getMemory(agentId: string): Promise<ApiResponse<{ content: string }>> {
+    return request<{ content: string }>(`/agents/${agentId}/memory`)
   },
 
   // 更新助手全局长期记忆

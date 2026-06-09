@@ -621,7 +621,7 @@ export function ModelPage() {
       >
         <div className="flex items-center gap-2">
           <Cpu className="size-4 text-primary" />
-          <span className="text-sm font-bold text-foreground">{t('nav.modelManagement')}</span>
+          <span className="text-base font-semibold text-foreground">{t('nav.modelManagement')}</span>
           {!isLoading && (
             <span className="text-xs text-muted-foreground">{filteredProviders.length}/{providers.length}</span>
           )}

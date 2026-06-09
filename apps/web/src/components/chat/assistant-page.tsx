@@ -300,8 +300,13 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     })
   )
 
-  const fetchData = useCallback(async () => {
-    setLoading(true)
+  const fetchData = useCallback(async (options: { showLoading?: boolean; resetExpanded?: boolean } = {}) => {
+    const showLoading = options.showLoading ?? true
+    const resetExpanded = options.resetExpanded ?? true
+
+    if (showLoading) {
+      setLoading(true)
+    }
     // Fetch grouped agents
     const groupedResponse = await agentApi.getGrouped()
     if (groupedResponse.success && groupedResponse.data) {
@@ -312,16 +317,20 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
         ...groupedResponse.data.uncategorized
       ]
       setAssistants(allAgents)
-      // 默认展开所有分类（包括未分类）
-      const allCategoryIds = [...groupedResponse.data.categories.map(cg => cg.category.id), '__uncategorized__']
-      setExpandedCategories(new Set(allCategoryIds))
+      if (resetExpanded) {
+        // 默认展开所有分类（包括未分类）
+        const allCategoryIds = [...groupedResponse.data.categories.map(cg => cg.category.id), '__uncategorized__']
+        setExpandedCategories(new Set(allCategoryIds))
+      }
     }
     // Fetch categories for management
     const categoriesResponse = await categoryApi.getAll()
     if (categoriesResponse.success && categoriesResponse.data) {
       setCategories(categoriesResponse.data)
     }
-    setLoading(false)
+    if (showLoading) {
+      setLoading(false)
+    }
   }, [currentUser?.id])
 
   useEffect(() => {
@@ -421,7 +430,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
       imageGeneration: data.imageGeneration,
     })
     if (response.success) {
-      await fetchData()
+      await fetchData({ showLoading: false, resetExpanded: false })
       await loadChatRooms()
       setIsEditModalOpen(false)
       setEditingAssistant(null)
@@ -644,7 +653,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     if (response.success) {
       toast.success(t('assistant.assistantUpdated', { name: systemModelAgent.name }))
       // fetchData 会获取最新数据并更新状态，不需要再用旧数据覆盖
-      await fetchData()
+      await fetchData({ showLoading: false, resetExpanded: false })
       await loadChatRooms()
       setSystemModelAgent(null)
       return true
@@ -961,7 +970,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
         >
           <div className="flex items-center gap-2">
             <Bot className="size-4 text-primary" />
-            <span className="text-sm font-bold text-foreground">{t('nav.assistants')}</span>
+            <span className="text-base font-semibold text-foreground">{t('nav.assistants')}</span>
           </div>
           <div
             className="ml-auto flex items-center gap-1.5"
@@ -1037,6 +1046,52 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
                 onDragCancel={handleDragCancel}
               >
                 <>
+                {/* Render system category - 显示在最上面，不支持拖拽 */}
+                {filteredGroupedData.systemCategory && (
+                  <DroppableCategoryArea
+                    categoryId={filteredGroupedData.systemCategory.category.id}
+                    isSystemCategory={true}
+                  >
+                    <div className="mb-6">
+                      <CategoryToggleButton
+                        expanded={expandedCategories.has(filteredGroupedData.systemCategory.category.id)}
+                        label={filteredGroupedData.systemCategory.category.name}
+                        count={filteredGroupedData.systemCategory.agents.length}
+                        onClick={() => toggleCategoryExpansion(filteredGroupedData.systemCategory!.category.id)}
+                        className="mb-3"
+                      />
+                      {expandedCategories.has(filteredGroupedData.systemCategory.category.id) && filteredGroupedData.systemCategory.agents.length > 0 && (
+                        <div className={cn("gap-3", isMobile ? "grid grid-cols-3" : "grid grid-cols-6")}>
+                          {filteredGroupedData.systemCategory.agents.map((assistant) => (
+                            <SortableAgentCard
+                              key={assistant.id}
+                              agent={assistant}
+                              openMenuId={openMenuId}
+                              contextMenuPosition={contextMenuPosition}
+                              onContextMenu={handleContextMenu}
+                              onToggleMenu={(id, pos) => {
+                                if (openMenuId === id) {
+                                  closeMenu()
+                                } else {
+                                  setOpenMenuId(id)
+                                  setContextMenuPosition(pos ? null : null)
+                                }
+                              }}
+                              onEdit={openEditModal}
+                              onCopy={openCopyModal}
+                              onToggleStatus={handleToggleStatus}
+                              onDelete={openDeleteDialog}
+                              onStartQuickChat={openQuickChatDialog}
+                              onInstallSkill={openInstallSkillModal}
+                              onClick={handleAgentClick}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </DroppableCategoryArea>
+                )}
+
                 {/* Render categorized groups */}
                 {filteredGroupedData.categories.map((categoryGroup) => (
                   <DroppableCategoryArea
@@ -1230,51 +1285,6 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
                   </DroppableCategoryArea>
                 )}
 
-                {/* Render system category - 始终显示在最后，不支持拖拽 */}
-                {filteredGroupedData.systemCategory && (
-                  <DroppableCategoryArea
-                    categoryId={filteredGroupedData.systemCategory.category.id}
-                    isSystemCategory={true}
-                  >
-                    <div className="mb-6">
-                      <CategoryToggleButton
-                        expanded={expandedCategories.has(filteredGroupedData.systemCategory.category.id)}
-                        label={filteredGroupedData.systemCategory.category.name}
-                        count={filteredGroupedData.systemCategory.agents.length}
-                        onClick={() => toggleCategoryExpansion(filteredGroupedData.systemCategory!.category.id)}
-                        className="mb-3"
-                      />
-                      {expandedCategories.has(filteredGroupedData.systemCategory.category.id) && filteredGroupedData.systemCategory.agents.length > 0 && (
-                        <div className={cn("gap-3", isMobile ? "grid grid-cols-3" : "grid grid-cols-6")}>
-                          {filteredGroupedData.systemCategory.agents.map((assistant) => (
-                            <SortableAgentCard
-                              key={assistant.id}
-                              agent={assistant}
-                              openMenuId={openMenuId}
-                              contextMenuPosition={contextMenuPosition}
-                              onContextMenu={handleContextMenu}
-                              onToggleMenu={(id, pos) => {
-                                if (openMenuId === id) {
-                                  closeMenu()
-                                } else {
-                                  setOpenMenuId(id)
-                                  setContextMenuPosition(pos ? null : null)
-                                }
-                              }}
-                              onEdit={openEditModal}
-                              onCopy={openCopyModal}
-                              onToggleStatus={handleToggleStatus}
-                              onDelete={openDeleteDialog}
-                              onStartQuickChat={openQuickChatDialog}
-                              onInstallSkill={openInstallSkillModal}
-                              onClick={handleAgentClick}
-                            />
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </DroppableCategoryArea>
-                )}
                 </>
 
                 {/* Drag Overlay - 拖拽时显示的预览 */}

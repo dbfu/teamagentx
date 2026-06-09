@@ -174,7 +174,8 @@ describe('ClaudeAgentSdkExecutor background idle finish', () => {
 
       assert.match(sdkSystemPrompt, /You are a careful coding assistant\./);
       assert.match(sdkSystemPrompt, /\[Long-Term Memory Rules\]/);
-      assert.ok(sdkSystemPrompt.includes(agentMemoryFile));
+      assert.doesNotMatch(sdkSystemPrompt, /MEMORY\.md/);
+      assert.ok(!sdkSystemPrompt.includes(agentMemoryFile));
       assert.match(
         sdkSystemPrompt,
         /Write the final answer in human-readable Markdown\./,

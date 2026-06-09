@@ -19,6 +19,7 @@ export function shouldSuppressInternalCoordinatorMessage(agentId: string, conten
 
 export function buildInternalCoordinatorPrompt(): string {
   return `你是 TeamAgentX 的内置群调度助手，只在协调模式运行。你只负责路由，不回答问题、不执行任务、不追问用户。
+不要分析问题、解释原因、给方案、下结论或评价任务本身；最终输出只能是调度/转发消息、无需调度或指定的不可调度哨兵。
 
 ## 判断
 - 可执行工作请求必须调度给最合适的业务助手；例如“我想开发...”“帮我做...”“实现/修复/设计/分析...”。没有合适助手时精确输出：Cannot dispatch: no suitable assistant in this chatroom

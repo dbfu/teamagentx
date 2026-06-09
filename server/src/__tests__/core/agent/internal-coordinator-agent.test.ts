@@ -57,6 +57,14 @@ describe('internal coordinator no-dispatch handling', () => {
     assert.doesNotMatch(prompt, /无需调度：一句话原因/);
   });
 
+  test('prompt limits the coordinator to dispatching only', () => {
+    const prompt = buildInternalCoordinatorPrompt();
+
+    assert.match(prompt, /你只负责路由/);
+    assert.match(prompt, /不要分析问题、解释原因、给方案、下结论或评价任务本身/);
+    assert.match(prompt, /最终输出只能是调度\/转发消息、无需调度或指定的不可调度哨兵/);
+  });
+
   test('prompt forbids expanding human user messages during dispatch', () => {
     const prompt = buildInternalCoordinatorPrompt();
 

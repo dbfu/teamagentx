@@ -3,12 +3,13 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/h
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Agent, agentApi } from '@/lib/agent-api';
 import { AgentAvatarImage } from '@/lib/agent-avatars';
-import { ExternalSkill, SharedSkill, skillApi, SkillDetail, SkillFile } from '@/lib/skill-api';
+import { ExternalSkill, SharedSkill, skillApi } from '@/lib/skill-api';
 import { cn } from '@/lib/utils';
-import { Check, ChevronDown, ChevronRight, Code, Copy, Download, File, FileText, Folder, FolderOpen, Import, Package, RefreshCw, Search, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Copy, Download, FileText, FolderOpen, Import, Package, RefreshCw, Search, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
+import { SkillDetailModal } from './skill-detail-modal';
 
 // 自定义 Tabs 组件
 function SimpleTabs({
@@ -69,146 +70,6 @@ function SimpleTabs({
   );
 }
 
-// 文件树节点
-interface FileTreeNode {
-  name: string;
-  path: string;
-  type: 'file' | 'directory';
-  size?: number;
-  content?: string;
-  children?: FileTreeNode[];
-}
-
-// 将扁平文件列表转换为树形结构
-function buildFileTree(files: SkillFile[]): FileTreeNode[] {
-  const root: FileTreeNode[] = [];
-  const nodeMap = new Map<string, FileTreeNode>();
-
-  // 先创建所有节点
-  for (const file of files) {
-    nodeMap.set(file.path, {
-      name: file.name,
-      path: file.path,
-      type: file.type,
-      size: file.size,
-      content: file.content,
-      children: file.type === 'directory' ? [] : undefined,
-    });
-  }
-
-  // 构建树形结构
-  for (const file of files) {
-    const node = nodeMap.get(file.path)!;
-    const parentPath = file.path.split('/').slice(0, -1).join('/');
-
-    if (parentPath === '') {
-      // 根节点
-      root.push(node);
-    } else {
-      // 找到父节点
-      const parent = nodeMap.get(parentPath);
-      if (parent && parent.children) {
-        parent.children.push(node);
-      }
-    }
-  }
-
-  // 排序：目录在前，文件在后，按名称排序
-  const sortNodes = (nodes: FileTreeNode[]) => {
-    nodes.sort((a, b) => {
-      if (a.type !== b.type) {
-        return a.type === 'directory' ? -1 : 1;
-      }
-      return a.name.localeCompare(b.name);
-    });
-    for (const node of nodes) {
-      if (node.children) {
-        sortNodes(node.children);
-      }
-    }
-  };
-
-  sortNodes(root);
-  return root;
-}
-
-// 文件树组件
-function FileTree({
-  nodes,
-  selectedFile,
-  onSelectFile,
-  expandedDirs,
-  onToggleDir,
-  level = 0,
-}: {
-  nodes: FileTreeNode[];
-  selectedFile: SkillFile | null;
-  onSelectFile: (file: SkillFile) => void;
-  expandedDirs: Set<string>;
-  onToggleDir: (path: string) => void;
-  level?: number;
-}) {
-  const getFileIcon = (node: FileTreeNode) => {
-    if (node.type === 'directory') {
-      return expandedDirs.has(node.path) ? (
-        <FolderOpen className="size-4 text-amber-500" />
-      ) : (
-        <Folder className="size-4 text-amber-500" />
-      );
-    }
-    const ext = node.name.split('.').pop()?.toLowerCase();
-    if (['ts', 'tsx', 'js', 'jsx', 'py', 'go', 'rs', 'java'].includes(ext || '')) {
-      return <Code className="size-4 text-blue-500" />;
-    }
-    if (ext === 'md') return <FileText className="size-4 text-muted-foreground" />;
-    return <File className="size-4 text-muted-foreground" />;
-  };
-
-  return (
-    <>
-      {nodes.map((node) => (
-        <div key={node.path}>
-          <button
-            onClick={() => {
-              if (node.type === 'directory') {
-                onToggleDir(node.path);
-              } else {
-                onSelectFile(node);
-              }
-            }}
-            className={cn(
-              'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm',
-              node.type === 'file' && selectedFile?.path === node.path
-                ? 'bg-primary/10 text-primary'
-                : 'text-muted-foreground hover:bg-accent',
-            )}
-            style={{ paddingLeft: `${level * 12 + 8}px` }}
-          >
-            {node.type === 'directory' && (
-              expandedDirs.has(node.path)
-                ? <ChevronDown className="size-4 text-muted-foreground" />
-                : <ChevronRight className="size-4 text-muted-foreground" />
-            )}
-            {node.type === 'file' && <span className="w-3" />}
-            {getFileIcon(node)}
-            <span className="truncate">{node.name}</span>
-          </button>
-          {node.type === 'directory' && node.children && expandedDirs.has(node.path) && (
-            <FileTree
-              nodes={node.children}
-              selectedFile={selectedFile}
-              onSelectFile={onSelectFile}
-              expandedDirs={expandedDirs}
-              onToggleDir={onToggleDir}
-              level={level + 1}
-            />
-          )}
-        </div>
-      ))}
-    </>
-  );
-}
-
 export function SkillPage() {
   const { t } = useTranslation();
   const [sharedSkills, setSharedSkills] = useState<SharedSkill[]>([]);
@@ -217,11 +78,8 @@ export function SkillPage() {
   const [loading, setLoading] = useState(true);
   const [loadingExternal, setLoadingExternal] = useState(false);
   const [expandedSkills, setExpandedSkills] = useState<Set<string>>(new Set());
-  const [viewingSkill, setViewingSkill] = useState<SkillDetail | null>(null);
-  const [loadingDetail, setLoadingDetail] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<SkillFile | null>(null);
+  const [viewingSkillSlug, setViewingSkillSlug] = useState<string | null>(null);
   // 文件树展开状态
-  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   // 选择助手弹框状态
   const [selectAgentsOpen, setSelectAgentsOpen] = useState(false);
   const [currentSkill, setCurrentSkill] = useState<SharedSkill | null>(null);
@@ -428,32 +286,8 @@ export function SkillPage() {
     loadExternalSkills();
   }, []);
 
-  const handleViewSkill = async (slug: string) => {
-    setLoadingDetail(true);
-    setSelectedFile(null);
-    setExpandedDirs(new Set()); // 重置展开状态
-    try {
-      const result = await skillApi.getDetail(slug);
-      if (result.success && result.data) {
-        setViewingSkill(result.data);
-        // 默认选中 SKILL.md 或第一个有内容的文件
-        const skillMd = result.data.files.find(f => f.name === 'SKILL.md');
-        if (skillMd) {
-          setSelectedFile(skillMd);
-        } else if (result.data.files.length > 0) {
-          const firstFileWithContent = result.data.files.find(f => f.type === 'file' && f.content);
-          if (firstFileWithContent) {
-            setSelectedFile(firstFileWithContent);
-          }
-        }
-      } else {
-        toast.error(t('skill.getSkillContentFailed'));
-      }
-    } catch (error) {
-      toast.error(t('skill.getSkillContentFailed'));
-    } finally {
-      setLoadingDetail(false);
-    }
+  const handleViewSkill = (slug: string) => {
+    setViewingSkillSlug(slug);
   };
 
   // 打开选择助手弹框
@@ -550,7 +384,7 @@ export function SkillPage() {
         >
           <div className="flex items-center gap-2">
             <Package className="size-4 text-primary" />
-            <span className="text-sm font-bold text-foreground">{t('nav.skills')}</span>
+            <span className="text-base font-semibold text-foreground">{t('nav.skills')}</span>
           </div>
           <div
             className="ml-auto flex items-center gap-1.5"
@@ -713,7 +547,6 @@ export function SkillPage() {
                           {/* 查看内容按钮 */}
                           <button
                             onClick={() => handleViewSkill(skill.slug)}
-                            disabled={loadingDetail}
                             className="ta-button-secondary h-7 px-2.5 text-xs"
                           >
                             <FileText className="size-3" />
@@ -816,101 +649,10 @@ export function SkillPage() {
         icon={X}
       />
 
-      {/* 技能内容查看模态框 */}
-      {viewingSkill && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          {/* Backdrop */}
-          <div
-            className="absolute inset-0 bg-black/50"
-            onClick={() => setViewingSkill(null)}
-          />
-          {/* Modal */}
-          <div className="relative z-10 flex max-h-[85vh] w-225 flex-col rounded-[var(--radius-panel)] bg-card shadow-xl">
-            {/* Header */}
-            <div className="flex items-center justify-between border-b px-6 py-4">
-              <div>
-                <h3 className="text-lg font-semibold text-foreground">{viewingSkill.name}</h3>
-                <p className="text-sm text-muted-foreground">{viewingSkill.description}</p>
-              </div>
-              <button
-                onClick={() => setViewingSkill(null)}
-                className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-              >
-                <X className="size-5" />
-              </button>
-            </div>
-            {/* Content */}
-            <div className="flex flex-1 overflow-hidden">
-              {/* 文件列表 */}
-              <div className="w-56 shrink-0 border-r bg-muted/30 overflow-y-auto">
-                <div className="p-2">
-                  <div className="text-xs font-medium text-muted-foreground px-2 py-1">{t('skill.fileList')}</div>
-                  <FileTree
-                    nodes={buildFileTree(viewingSkill.files)}
-                    selectedFile={selectedFile}
-                    onSelectFile={setSelectedFile}
-                    expandedDirs={expandedDirs}
-                    onToggleDir={(path) => {
-                      setExpandedDirs(prev => {
-                        const next = new Set(prev);
-                        if (next.has(path)) {
-                          next.delete(path);
-                        } else {
-                          next.add(path);
-                        }
-                        return next;
-                      });
-                    }}
-                  />
-                </div>
-              </div>
-              {/* 文件内容 */}
-              <div className="flex-1 overflow-y-auto p-4">
-                {selectedFile ? (
-                  selectedFile.content ? (
-                    <div>
-                      <div className="mb-2 text-xs text-muted-foreground">
-                        {selectedFile.path}
-                        {selectedFile.size && ` (${(selectedFile.size / 1024).toFixed(1)} KB)`}
-                      </div>
-                      <pre className="whitespace-pre-wrap rounded-lg bg-muted p-4 text-sm text-foreground font-mono overflow-x-auto border max-h-[60vh] overflow-y-auto">
-                        <code>{selectedFile.content}</code>
-                      </pre>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-                      <File className="size-12 mb-2 opacity-50" />
-                      <p>{t('skill.cannotPreviewFile')}</p>
-                      {selectedFile.size && (
-                        <p className="text-xs mt-1">{t('skill.fileSize', { size: (selectedFile.size / 1024).toFixed(1) })}</p>
-                      )}
-                    </div>
-                  )
-                ) : (
-                  <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-                    <FileText className="size-12 mb-2 opacity-50" />
-                    <p>{t('skill.selectFileToView')}</p>
-                  </div>
-                )}
-              </div>
-            </div>
-            {/* Footer */}
-            <div className="flex items-center justify-between border-t px-6 py-3">
-              <div className="text-xs text-muted-foreground">
-                {t('skill.sourceLabel')}: {viewingSkill.source === 'user-created' ? t('skill.sourceUserCreated') : t('skill.sourceExternal')}
-                {' · '}
-                {t('skill.fileCount', { count: viewingSkill.files.length })}
-              </div>
-              <button
-                onClick={() => setViewingSkill(null)}
-                className="ta-button-secondary"
-              >
-                {t('common.close')}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <SkillDetailModal
+        slug={viewingSkillSlug}
+        onClose={() => setViewingSkillSlug(null)}
+      />
 
       {/* 导入外部技能弹框 */}
       {importModalOpen && (

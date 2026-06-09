@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { BookOpen, Loader2, Sparkles } from 'lucide-react'
+import { BookOpen, Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { agentApi, settingsApi, type Agent } from '@/lib/agent-api'
-import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { AgentAvatar } from '../agent-avatar'
@@ -32,7 +31,6 @@ export function AssistantDiaryTab({ agent }: AssistantDiaryTabProps) {
   const [content, setContent] = useState('')
   const [loading, setLoading] = useState(true)
   const [loadingContent, setLoadingContent] = useState(false)
-  const [generating, setGenerating] = useState(false)
 
   const loadDates = useCallback(async () => {
     const res = await agentApi.getDiaryDates(agent.id)
@@ -88,32 +86,6 @@ export function AssistantDiaryTab({ agent }: AssistantDiaryTabProps) {
     loadContent(date)
   }
 
-  const handleGenerate = async () => {
-    setGenerating(true)
-    try {
-      const res = await agentApi.generateDiary(agent.id)
-      if (!res.success) {
-        toast.error(t('assistant.diaryGenerateFailed'))
-        return
-      }
-      if (!res.data) {
-        // 全局关闭或当天无聊天记录
-        toast.info(t('assistant.diaryGenerateEmpty'))
-        return
-      }
-      toast.success(res.data.memoryAppended ? t('assistant.diaryMemoryAppended') : t('common.saveSuccess'))
-      const list = await loadDates()
-      const newDate = res.data.date
-      setSelectedDate(newDate)
-      setContent(res.data.content)
-      if (!list.includes(newDate)) setDates([newDate, ...list])
-    } catch {
-      toast.error(t('assistant.diaryGenerateFailed'))
-    } finally {
-      setGenerating(false)
-    }
-  }
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-48 text-muted-foreground gap-2">
@@ -138,31 +110,18 @@ export function AssistantDiaryTab({ agent }: AssistantDiaryTabProps) {
   const { mood, body } = parseMood(content)
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-sm text-muted-foreground">{t('assistant.diaryDesc')}</div>
-        <Button
-          size="sm"
-          onClick={handleGenerate}
-          disabled={generating}
-          className="gap-1.5 bg-blue-500 hover:bg-blue-600 shrink-0"
-        >
-          {generating ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
-          {generating ? t('assistant.generating') : t('assistant.generateNow')}
-        </Button>
-      </div>
-
+    <div className="flex h-full min-h-0 w-full flex-1 flex-col gap-4">
       {dates.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
+        <div className="flex h-full min-h-0 flex-col items-center justify-center text-center">
           <div className="size-16 rounded-full bg-muted flex items-center justify-center mb-4">
             <BookOpen className="size-8 text-muted-foreground" />
           </div>
           <p className="text-sm text-muted-foreground">{t('assistant.diaryEmpty')}</p>
         </div>
       ) : (
-        <div className="flex gap-4">
+        <div className="flex min-h-0 flex-1 gap-4">
           {/* 日期列表 */}
-          <div className="w-32 shrink-0 flex flex-col gap-1">
+          <div className="flex min-h-0 w-32 shrink-0 flex-col gap-1 overflow-y-auto pr-1">
             {dates.map((date) => (
               <button
                 key={date}
@@ -180,8 +139,8 @@ export function AssistantDiaryTab({ agent }: AssistantDiaryTabProps) {
           </div>
 
           {/* 日记卡片 */}
-          <div className="flex-1 min-w-0 rounded-xl border border-border bg-card p-5">
-            <div className="flex items-center gap-3 mb-4 pb-4 border-b border-border">
+          <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-border bg-card p-5">
+            <div className="mb-4 flex shrink-0 items-center gap-3 border-b border-border pb-4">
               <AgentAvatar
                 avatar={agent.avatar}
                 avatarColor={agent.avatarColor}
@@ -202,12 +161,12 @@ export function AssistantDiaryTab({ agent }: AssistantDiaryTabProps) {
             </div>
 
             {loadingContent ? (
-              <div className="flex items-center justify-center h-32 text-muted-foreground gap-2">
+              <div className="flex min-h-0 flex-1 items-center justify-center gap-2 text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" />
                 <span className="text-sm">{t('common.loading')}</span>
               </div>
             ) : (
-              <div className="text-sm leading-relaxed">
+              <div className="min-h-0 flex-1 overflow-y-auto pr-1 text-sm leading-relaxed">
                 <MarkdownContent content={body} />
               </div>
             )}

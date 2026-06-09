@@ -1449,7 +1449,7 @@ export async function agentGateway(app: FastifyInstance) {
             type: 'object',
             properties: {
               success: { type: 'boolean' },
-              data: { type: 'object', properties: { content: { type: 'string' }, filePath: { type: 'string' } } },
+              data: { type: 'object', properties: { content: { type: 'string' } } },
             },
           },
         },
@@ -1461,7 +1461,7 @@ export async function agentGateway(app: FastifyInstance) {
       if (!agent) return reply.code(404).send({ success: false, error: '助手不存在' });
       const filePath = ensureAgentLongTermMemoryFile(agentId, agent.name);
       const content = fs.readFileSync(filePath, 'utf-8');
-      return reply.send({ success: true, data: { content, filePath } });
+      return reply.send({ success: true, data: { content } });
     },
   );
 

@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { Download, Package, Trash2 } from 'lucide-react'
+import { Download, Eye, Package, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { InstalledSkill } from '@/lib/skill-api'
 import { InstallSkillModal } from '../install-skill-modal'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { SkillDetailModal } from '../skill-detail-modal'
 
 interface AssistantSkillsTabProps {
   agentId: string
@@ -24,6 +25,7 @@ export function AssistantSkillsTab({
   const { t } = useTranslation()
   const [isInstallModalOpen, setIsInstallModalOpen] = useState(false)
   const [uninstallingSlug, setUninstallingSlug] = useState<string | null>(null)
+  const [viewingSkillSlug, setViewingSkillSlug] = useState<string | null>(null)
 
   const handleUninstall = async (slug: string) => {
     setUninstallingSlug(slug)
@@ -72,7 +74,17 @@ export function AssistantSkillsTab({
           {skills.map((skill) => (
             <div
               key={skill.slug}
-              className="group relative bg-card rounded-xl border border-border p-5 hover:border-primary/20 hover:shadow-lg transition-all duration-200 flex items-center justify-between"
+              role="button"
+              tabIndex={0}
+              onClick={() => setViewingSkillSlug(skill.slug)}
+              onKeyDown={(event) => {
+                if (event.target !== event.currentTarget) return
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  setViewingSkillSlug(skill.slug)
+                }
+              }}
+              className="group relative flex cursor-pointer items-center justify-between rounded-xl border border-border bg-card p-5 transition-all duration-200 hover:border-primary/20 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-primary/30"
             >
               {/* Skill 信息 */}
               <div className="flex items-center gap-3">
@@ -90,19 +102,37 @@ export function AssistantSkillsTab({
               </div>
 
               {/* 操作按钮 */}
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => handleUninstall(skill.slug)}
-                disabled={uninstallingSlug === skill.slug}
-                className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity"
-              >
-                {uninstallingSlug === skill.slug ? (
-                  <div className="size-4 animate-spin rounded-full border-2 border-muted border-t-destructive" />
-                ) : (
-                  <Trash2 className="size-4" />
-                )}
-              </Button>
+              <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    setViewingSkillSlug(skill.slug)
+                  }}
+                  className="text-muted-foreground hover:bg-primary/10 hover:text-primary"
+                  title={t('common.view')}
+                >
+                  <Eye className="size-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    handleUninstall(skill.slug)
+                  }}
+                  disabled={uninstallingSlug === skill.slug}
+                  className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                  title={t('common.delete')}
+                >
+                  {uninstallingSlug === skill.slug ? (
+                    <div className="size-4 animate-spin rounded-full border-2 border-muted border-t-destructive" />
+                  ) : (
+                    <Trash2 className="size-4" />
+                  )}
+                </Button>
+              </div>
             </div>
           ))}
         </div>
@@ -121,6 +151,11 @@ export function AssistantSkillsTab({
           agentName={agentName}
         />
       )}
+
+      <SkillDetailModal
+        slug={viewingSkillSlug}
+        onClose={() => setViewingSkillSlug(null)}
+      />
     </div>
   )
 }

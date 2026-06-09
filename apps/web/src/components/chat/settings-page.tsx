@@ -1,5 +1,6 @@
 import { UserAvatar, UserAvatarSelector } from '@/components/chat/user-avatar';
 import { useTheme } from '@/components/theme-provider';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { acpToolsApi, settingsApi, type AcpToolInfo } from '@/lib/agent-api';
@@ -153,6 +154,7 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
   const [openingNotificationSettings, setOpeningNotificationSettings] = useState(false)
   const [diaryEnabled, setDiaryEnabled] = useState(false)
   const [savingDiary, setSavingDiary] = useState(false)
+  const [showDiaryEnableConfirm, setShowDiaryEnableConfirm] = useState(false)
 
   // 读取助手日记全局开关
   useEffect(() => {
@@ -161,8 +163,7 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
     }).catch(() => {})
   }, [])
 
-  // 切换助手日记全局开关
-  const handleToggleDiary = async (next: boolean) => {
+  const saveDiaryEnabled = async (next: boolean) => {
     setSavingDiary(true)
     const prev = diaryEnabled
     setDiaryEnabled(next)
@@ -180,6 +181,16 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
     } finally {
       setSavingDiary(false)
     }
+  }
+
+  // 切换助手日记全局开关
+  const handleToggleDiary = async (next: boolean) => {
+    if (next && !diaryEnabled) {
+      setShowDiaryEnableConfirm(true)
+      return
+    }
+
+    await saveDiaryEnabled(next)
   }
 
   // 语言选项
@@ -1193,6 +1204,19 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
           </div>
         )}
       </div>
+      <ConfirmDialog
+        open={showDiaryEnableConfirm}
+        onOpenChange={setShowDiaryEnableConfirm}
+        title={t('settings.diaryEnableConfirmTitle')}
+        description={t('settings.diaryEnableConfirmDesc')}
+        confirmText={t('common.enable')}
+        loading={savingDiary}
+        icon={BookOpenText}
+        iconColor="text-blue-500"
+        iconBgColor="bg-blue-500/10"
+        confirmButtonClass="bg-blue-500 hover:bg-blue-600"
+        onConfirm={() => saveDiaryEnabled(true)}
+      />
     </div>
   )
 }

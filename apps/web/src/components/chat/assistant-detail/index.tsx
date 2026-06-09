@@ -101,11 +101,11 @@ function AssistantHeader({
   const isSystemAgent = agent.agentLevel === 'system'
 
   return (
-    <div className="px-8 py-6">
+    <div className="px-8 py-4">
       {/* 返回按钮 */}
       <button
         onClick={() => window.history.back()}
-        className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-6 transition-colors"
+        className="mb-4 flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
       >
         <ArrowLeft className="size-4" />
         {t('assistant.backToList')}
@@ -389,35 +389,35 @@ export function AssistantDetailPage() {
       {/* Tab 内容区域 */}
       <div className="flex-1 overflow-hidden border-t border-border bg-card">
         <Tabs defaultValue="config" className="flex flex-1 flex-col h-full mt-2">
-          <TabsList className="h-auto items-center px-8 pt-6 pb-4 justify-start gap-2">
-            <TabsTrigger value="config" className="gap-2">
+          <TabsList className="h-auto items-center px-8 pt-4 pb-4 justify-start gap-2">
+            <TabsTrigger value="config" className="h-9 gap-2 leading-none">
               <Settings className="size-4" />
               {t('assistant.configInfo')}
             </TabsTrigger>
             {showVoiceSettings && (
-              <TabsTrigger value="voice" className="gap-2">
+              <TabsTrigger value="voice" className="h-9 gap-2 leading-none">
                 <Volume2 className="size-4" />
                 {t('assistant.voiceConfig')}
               </TabsTrigger>
             )}
-            <TabsTrigger value="skills" className="gap-2">
+            <TabsTrigger value="skills" className="h-9 gap-2 leading-none">
               <Bot className="size-4" />
               Skills
               {skills.length > 0 && (
-                <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded-full">
+                <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-xs leading-none text-primary">
                   {skills.length}
                 </span>
               )}
             </TabsTrigger>
-            <TabsTrigger value="history" className="gap-2">
+            <TabsTrigger value="history" className="h-9 gap-2 leading-none">
               <History className="size-4" />
               {t('assistant.sessionHistory')}
             </TabsTrigger>
-            <TabsTrigger value="memory" className="gap-2">
+            <TabsTrigger value="memory" className="h-9 gap-2 leading-none">
               <Brain className="size-4" />
               {t('assistant.memory')}
             </TabsTrigger>
-            <TabsTrigger value="diary" className="gap-2">
+            <TabsTrigger value="diary" className="h-9 gap-2 leading-none">
               <BookOpen className="size-4" />
               {t('assistant.diary')}
             </TabsTrigger>
@@ -450,11 +450,11 @@ export function AssistantDetailPage() {
             <AssistantHistoryTab agentId={agent.id} />
           </TabsContent>
 
-          <TabsContent value="memory" className="flex-1 overflow-y-auto p-6 m-0">
+          <TabsContent value="memory" className="m-0 flex flex-1 overflow-hidden p-6">
             <AssistantMemoryTab agentId={agent.id} />
           </TabsContent>
 
-          <TabsContent value="diary" className="flex-1 overflow-y-auto p-6 m-0">
+          <TabsContent value="diary" className="m-0 flex flex-1 overflow-hidden p-6">
             <AssistantDiaryTab agent={agent} />
           </TabsContent>
         </Tabs>

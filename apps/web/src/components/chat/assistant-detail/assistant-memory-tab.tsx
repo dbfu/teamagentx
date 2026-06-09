@@ -10,7 +10,6 @@ interface MemoryEditorProps {
   description: string
   icon: React.ReactNode
   content: string
-  filePath: string
   loading: boolean
   saving: boolean
   onChange: (value: string) => void
@@ -23,7 +22,6 @@ function MemoryEditor({
   description,
   icon,
   content,
-  filePath,
   loading,
   saving,
   onChange,
@@ -33,8 +31,8 @@ function MemoryEditor({
   const { t } = useTranslation()
 
   return (
-    <div className="rounded-xl border border-border bg-card p-5 flex flex-col gap-3">
-      <div className="flex items-start justify-between gap-2">
+    <div className="flex min-h-0 w-full flex-1 flex-col gap-3 rounded-xl border border-border bg-card p-5">
+      <div className="flex shrink-0 items-start justify-between gap-2">
         <div className="flex items-center gap-2">
           <div className="size-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
             {icon}
@@ -68,7 +66,7 @@ function MemoryEditor({
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center h-32 text-muted-foreground gap-2">
+        <div className="flex min-h-0 flex-1 items-center justify-center gap-2 text-muted-foreground">
           <Loader2 className="size-4 animate-spin" />
           <span className="text-sm">{t('common.loading')}</span>
         </div>
@@ -77,15 +75,10 @@ function MemoryEditor({
           value={content}
           onChange={(e) => onChange(e.target.value)}
           placeholder={t('assistant.memoryPlaceholder')}
-          className="w-full min-h-[200px] resize-y rounded-lg border border-gray-200 px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none bg-muted/30 placeholder:text-muted-foreground/50"
+          className="min-h-0 w-full flex-1 resize-none rounded-lg border border-gray-200 bg-muted/30 px-3 py-2 font-mono text-sm placeholder:text-muted-foreground/50 focus:border-blue-500 focus:outline-none"
         />
       )}
 
-      {filePath && (
-        <div className="text-xs text-muted-foreground truncate" title={filePath}>
-          {t('assistant.memoryFile')}：{filePath}
-        </div>
-      )}
     </div>
   )
 }
@@ -97,7 +90,6 @@ interface AssistantMemoryTabProps {
 export function AssistantMemoryTab({ agentId }: AssistantMemoryTabProps) {
   const { t } = useTranslation()
   const [globalContent, setGlobalContent] = useState('')
-  const [globalFilePath, setGlobalFilePath] = useState('')
   const [globalOriginal, setGlobalOriginal] = useState('')
   const [globalLoading, setGlobalLoading] = useState(true)
   const [globalSaving, setGlobalSaving] = useState(false)
@@ -109,7 +101,6 @@ export function AssistantMemoryTab({ agentId }: AssistantMemoryTabProps) {
       if (res.success && res.data) {
         setGlobalContent(res.data.content)
         setGlobalOriginal(res.data.content)
-        setGlobalFilePath(res.data.filePath)
       }
     } catch {
       toast.error(t('assistant.globalMemoryLoadFailed'))
@@ -138,8 +129,8 @@ export function AssistantMemoryTab({ agentId }: AssistantMemoryTabProps) {
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="text-sm text-muted-foreground">
+    <div className="flex h-full min-h-0 w-full flex-1 flex-col gap-4">
+      <div className="shrink-0 text-sm text-muted-foreground">
         {t('assistant.memoryDesc')}
       </div>
 
@@ -148,7 +139,6 @@ export function AssistantMemoryTab({ agentId }: AssistantMemoryTabProps) {
         description={t('assistant.globalMemoryDesc')}
         icon={<Brain className="size-4" />}
         content={globalContent}
-        filePath={globalFilePath}
         loading={globalLoading}
         saving={globalSaving}
         onChange={setGlobalContent}

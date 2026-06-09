@@ -361,11 +361,11 @@ export function IntegrationPage() {
   return (
     <div className="flex flex-1 flex-col overflow-hidden bg-background">
       <div
-        className="flex h-14 shrink-0 items-center border-b border-border px-6"
+        className="flex h-[52px] shrink-0 items-center border-b border-border bg-[var(--surface-raised)] px-4"
         style={ELECTRON_DRAG_STYLE}
       >
         <div className="flex items-center gap-2">
-          <Globe className="size-5 text-primary" />
+          <Globe className="size-4 text-primary" />
           <h1 className="text-base font-semibold">{t('integration.pageTitleAlt')}</h1>
         </div>
       </div>
