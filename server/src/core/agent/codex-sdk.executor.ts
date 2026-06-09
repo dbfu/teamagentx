@@ -237,16 +237,22 @@ function findBundledCodexBinary(): string {
 
   try {
     const codexPackageJsonPath = moduleRequire.resolve(`${CODEX_NPM_NAME}/package.json`);
-    const codexRequire = createRequire(codexPackageJsonPath);
-    const platformPackageJsonPath = codexRequire.resolve(`${platformPackage}/package.json`);
-    const vendorRoot = path.join(path.dirname(platformPackageJsonPath), 'vendor');
-    const codexBinaryName = process.platform === 'win32' ? 'codex.exe' : 'codex';
-    return path.join(vendorRoot, targetTriple, 'codex', codexBinaryName);
+    const binaryPath = getCodexBinaryFromCodexPackageJson(codexPackageJsonPath);
+    if (binaryPath) return binaryPath;
   } catch {
-    throw new Error(
-      `Unable to locate Codex CLI binaries. Ensure ${CODEX_NPM_NAME} is installed with optional dependencies.`,
-    );
+    // Fall through to the actionable error below.
   }
+
+  try {
+    const localBinary = findLocalCodexBinary();
+    if (localBinary) return localBinary;
+  } catch {
+    // Fall through to the actionable error below.
+  }
+
+  throw new Error(
+    `Unable to locate Codex CLI binaries. Reinstall ${CODEX_NPM_NAME} with optional dependencies so ${platformPackage} is installed.`,
+  );
 }
 
 function findExecutableOnPath(commandName: string): string | undefined {

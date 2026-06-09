@@ -2,6 +2,7 @@ import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { createRequire } from 'module';
 
 // Local agent tool definitions. Only Claude and Codex are currently supported.
 export const ACP_TOOLS = [
@@ -22,6 +23,15 @@ export const ACP_TOOLS = [
 const TOOL_PACKAGES: Record<string, string> = {
   claude: '@anthropic-ai/claude-code',
   codex: '@openai/codex',
+};
+
+const CODEX_PLATFORM_PACKAGE_BY_TARGET: Record<string, string> = {
+  'x86_64-unknown-linux-musl': '@openai/codex-linux-x64',
+  'aarch64-unknown-linux-musl': '@openai/codex-linux-arm64',
+  'x86_64-apple-darwin': '@openai/codex-darwin-x64',
+  'aarch64-apple-darwin': '@openai/codex-darwin-arm64',
+  'x86_64-pc-windows-msvc': '@openai/codex-win32-x64',
+  'aarch64-pc-windows-msvc': '@openai/codex-win32-arm64',
 };
 
 export interface LocalModelConfig {
@@ -234,6 +244,48 @@ function readPackageVersion(packageDir: string): string | undefined {
   }
 }
 
+function getCodexTargetTriple(): string | undefined {
+  if (process.platform === 'linux' || process.platform === 'android') {
+    if (process.arch === 'x64') return 'x86_64-unknown-linux-musl';
+    if (process.arch === 'arm64') return 'aarch64-unknown-linux-musl';
+  }
+  if (process.platform === 'darwin') {
+    if (process.arch === 'x64') return 'x86_64-apple-darwin';
+    if (process.arch === 'arm64') return 'aarch64-apple-darwin';
+  }
+  if (process.platform === 'win32') {
+    if (process.arch === 'x64') return 'x86_64-pc-windows-msvc';
+    if (process.arch === 'arm64') return 'aarch64-pc-windows-msvc';
+  }
+  return undefined;
+}
+
+function getCodexBinaryFromPlatformPackageJson(platformPackageJsonPath: string): string | undefined {
+  const targetTriple = getCodexTargetTriple();
+  if (!targetTriple) return undefined;
+
+  const codexBinaryName = process.platform === 'win32' ? 'codex.exe' : 'codex';
+  const binaryPath = path.join(path.dirname(platformPackageJsonPath), 'vendor', targetTriple, 'codex', codexBinaryName);
+  return fs.existsSync(binaryPath) ? binaryPath : undefined;
+}
+
+function hasCodexPlatformBinary(codexPackageDir: string): boolean {
+  const targetTriple = getCodexTargetTriple();
+  const platformPackage = targetTriple ? CODEX_PLATFORM_PACKAGE_BY_TARGET[targetTriple] : undefined;
+  if (!platformPackage) return false;
+
+  const codexPackageJsonPath = path.join(codexPackageDir, 'package.json');
+  if (!fs.existsSync(codexPackageJsonPath)) return false;
+
+  try {
+    const codexRequire = createRequire(codexPackageJsonPath);
+    const platformPackageJsonPath = codexRequire.resolve(`${platformPackage}/package.json`);
+    return Boolean(getCodexBinaryFromPlatformPackageJson(platformPackageJsonPath));
+  } catch {
+    return Boolean(getCodexBinaryFromPlatformPackageJson(codexPackageJsonPath));
+  }
+}
+
 /**
  * 检测 TeamAgentX 应用本地安装目录中的 SDK/工具包。
  */
@@ -244,6 +296,9 @@ function checkAppLocalSdkInstalled(toolId: string): { installed: boolean; versio
 
   const packageDir = path.join(toolsDir, 'node_modules', ...packageName.split('/'));
   if (!fs.existsSync(packageDir)) return { installed: false };
+  if (toolId === 'codex' && !hasCodexPlatformBinary(packageDir)) {
+    return { installed: false, version: readPackageVersion(packageDir) };
+  }
 
   return {
     installed: true,

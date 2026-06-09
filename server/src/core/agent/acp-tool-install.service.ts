@@ -155,7 +155,7 @@ function runAttempt(index) {
 
   const child = spawn(
     bundledNpmCli ? process.execPath : npmCmd,
-    [...(bundledNpmCli ? [bundledNpmCli] : []), 'install', '--prefix', toolsDir, packageName, '--force', '--registry', registry],
+    [...(bundledNpmCli ? [bundledNpmCli] : []), 'install', '--prefix', toolsDir, packageName, '--force', '--include=optional', '--registry', registry],
     {
       env: childEnv,
       stdio: ['ignore', 'pipe', 'pipe'],
