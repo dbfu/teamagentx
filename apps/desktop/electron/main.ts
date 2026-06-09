@@ -405,6 +405,12 @@ type DownloadProgress = {
   total: number | null;
 };
 
+type DownloadFileResult = {
+  filePath: string;
+  transferred: number;
+  total: number | null;
+};
+
 type LoginItemStatus = {
   supported: boolean;
   openAtLogin: boolean;
@@ -1090,11 +1096,11 @@ function sendUpdateProgress(progress: DownloadProgress): void {
   mainWindow?.webContents.send('update:download-progress', progress);
 }
 
-function downloadFile(downloadUrl: string, destination: string, redirectCount = 0): Promise<string> {
+function downloadFile(downloadUrl: string, destination: string, redirectCount = 0): Promise<DownloadFileResult> {
   return new Promise((resolve, reject) => {
     // settled 守卫：防止多个错误路径同时触发导致二次 reject 变成未处理 rejection
     let settled = false;
-    const safeResolve = (value: string) => { if (!settled) { settled = true; resolve(value); } };
+    const safeResolve = (value: DownloadFileResult) => { if (!settled) { settled = true; resolve(value); } };
     const safeReject = (error: Error) => { if (!settled) { settled = true; reject(error); } };
 
     const client = downloadUrl.startsWith('https:') ? https : http;
@@ -1120,6 +1126,7 @@ function downloadFile(downloadUrl: string, destination: string, redirectCount = 
 
       fs.mkdirSync(path.dirname(destination), { recursive: true });
       const total = Number.parseInt(String(response.headers['content-length'] || ''), 10);
+      const totalBytes = Number.isFinite(total) && total > 0 ? total : null;
       let transferred = 0;
       const file = fs.createWriteStream(destination);
 
@@ -1135,16 +1142,29 @@ function downloadFile(downloadUrl: string, destination: string, redirectCount = 
       response.on('data', (chunk: Buffer) => {
         transferred += chunk.length;
         sendUpdateProgress({
-          percent: Number.isFinite(total) && total > 0 ? Math.round((transferred / total) * 100) : 0,
+          percent: totalBytes ? Math.min(100, Math.round((transferred / totalBytes) * 100)) : 0,
           transferred,
-          total: Number.isFinite(total) && total > 0 ? total : null,
+          total: totalBytes,
         });
       });
 
       response.pipe(file);
 
       file.on('finish', () => {
-        file.close(() => safeResolve(destination));
+        file.close(() => {
+          const finalTransferred = fs.statSync(destination).size;
+          const finalTotal = totalBytes ?? (finalTransferred > 0 ? finalTransferred : null);
+          sendUpdateProgress({
+            percent: 100,
+            transferred: finalTransferred,
+            total: finalTotal,
+          });
+          safeResolve({
+            filePath: destination,
+            transferred: finalTransferred,
+            total: finalTotal,
+          });
+        });
       });
       file.on('error', cleanup);
     });
@@ -1172,8 +1192,8 @@ async function downloadUpdate(update: UpdateInfo): Promise<{ success: true; file
         writeLog(`[Update] 已解析蓝奏分享链接为真实下载地址（第 ${attempt} 次）：${downloadUrl}`);
       }
       const filePath = path.join(app.getPath('userData'), UPDATE_DOWNLOAD_DIR, getDownloadFileName(downloadUrl));
-      downloadedUpdatePath = await downloadFile(downloadUrl, filePath);
-      sendUpdateProgress({ percent: 100, transferred: 1, total: 1 });
+      const result = await downloadFile(downloadUrl, filePath);
+      downloadedUpdatePath = result.filePath;
       return { success: true, filePath: downloadedUpdatePath };
     } catch (error) {
       lastError = error;

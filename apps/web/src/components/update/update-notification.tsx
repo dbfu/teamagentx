@@ -87,6 +87,7 @@ export function UpdateNotification() {
 
   if (!visible || !update) return null
 
+  const hasKnownProgressTotal = progress.total !== null && progress.total > 0
   const progressLabel = progress.total
     ? `${formatBytes(progress.transferred)} / ${formatBytes(progress.total)}`
     : formatBytes(progress.transferred)
@@ -117,10 +118,14 @@ export function UpdateNotification() {
         <div className="mt-4">
           <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
             <span>{t('settings.downloadingPackage')}</span>
-            <span>{progress.percent}%</span>
+            <span>{hasKnownProgressTotal ? `${progress.percent}%` : formatBytes(progress.transferred)}</span>
           </div>
           <div className="h-2 overflow-hidden rounded-full bg-muted">
-            <div className="h-full rounded-full bg-blue-500 transition-all" style={{ width: `${progress.percent}%` }} />
+            {hasKnownProgressTotal ? (
+              <div className="h-full rounded-full bg-blue-500 transition-all" style={{ width: `${progress.percent}%` }} />
+            ) : (
+              <div className="h-full w-full animate-pulse rounded-full bg-blue-500/60" />
+            )}
           </div>
           <div className="mt-2 text-xs text-muted-foreground">{progressLabel}</div>
         </div>

@@ -43,6 +43,36 @@ const initialState: UpdateManagerState = {
   lastCheckedAt: null,
 }
 
+function normalizeDownloadProgress(
+  progress: UpdateDownloadProgress,
+  previous: UpdateDownloadProgress,
+): UpdateDownloadProgress {
+  if (
+    progress.percent === 100 &&
+    progress.transferred === 1 &&
+    progress.total === 1 &&
+    previous.transferred > 1
+  ) {
+    return { ...previous, percent: 100 }
+  }
+
+  const transferred = Number.isFinite(progress.transferred)
+    ? Math.max(0, Math.floor(progress.transferred))
+    : 0
+  const parsedTotal = progress.total !== null && Number.isFinite(progress.total)
+    ? Math.max(0, Math.floor(progress.total))
+    : null
+  const total = parsedTotal && parsedTotal > 0 ? Math.max(parsedTotal, transferred) : null
+  const rawPercent = Number.isFinite(progress.percent)
+    ? progress.percent
+    : total
+      ? (transferred / total) * 100
+      : 0
+  const percent = Math.min(100, Math.max(0, Math.round(rawPercent)))
+
+  return { percent, transferred, total }
+}
+
 export function createUpdateManager(options: CreateUpdateManagerOptions = {}) {
   const getElectronAPI = options.getElectronAPI ?? (() => window.electronAPI)
   const now = options.now ?? (() => Date.now())
@@ -158,7 +188,7 @@ export function createUpdateManager(options: CreateUpdateManagerOptions = {}) {
       setState({ visible: false })
     },
     setDownloadProgress(progress: UpdateDownloadProgress) {
-      setState({ progress })
+      setState({ progress: normalizeDownloadProgress(progress, state.progress) })
     },
     setStatus(status: UpdateStatus) {
       setState({ status })

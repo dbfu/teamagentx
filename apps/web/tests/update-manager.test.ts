@@ -69,4 +69,29 @@ describe('update manager', () => {
     await manager.checkForUpdates({ force: true, silent: true, reason: 'manual' })
     assert.equal(calls, 3)
   })
+
+  test('normalizes download progress and preserves real bytes after legacy completion event', () => {
+    const manager = createUpdateManager()
+
+    manager.setDownloadProgress({ percent: 120.4, transferred: 1200.8, total: 1000 })
+    assert.deepEqual(manager.getSnapshot().progress, {
+      percent: 100,
+      transferred: 1200,
+      total: 1200,
+    })
+
+    manager.setDownloadProgress({ percent: 100, transferred: 1, total: 1 })
+    assert.deepEqual(manager.getSnapshot().progress, {
+      percent: 100,
+      transferred: 1200,
+      total: 1200,
+    })
+
+    manager.setDownloadProgress({ percent: Number.NaN, transferred: 2048, total: null })
+    assert.deepEqual(manager.getSnapshot().progress, {
+      percent: 0,
+      transferred: 2048,
+      total: null,
+    })
+  })
 })
