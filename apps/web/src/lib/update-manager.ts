@@ -63,10 +63,10 @@ function normalizeDownloadProgress(
     ? Math.max(0, Math.floor(progress.total))
     : null
   const total = parsedTotal && parsedTotal > 0 ? Math.max(parsedTotal, transferred) : null
-  const rawPercent = Number.isFinite(progress.percent)
-    ? progress.percent
-    : total
-      ? (transferred / total) * 100
+  const rawPercent = total
+    ? (transferred / total) * 100
+    : Number.isFinite(progress.percent)
+      ? progress.percent
       : 0
   const percent = Math.min(100, Math.max(0, Math.round(rawPercent)))
 

@@ -80,11 +80,18 @@ describe('update manager', () => {
       total: 1200,
     })
 
+    manager.setDownloadProgress({ percent: 1, transferred: 500, total: 1000 })
+    assert.deepEqual(manager.getSnapshot().progress, {
+      percent: 50,
+      transferred: 500,
+      total: 1000,
+    })
+
     manager.setDownloadProgress({ percent: 100, transferred: 1, total: 1 })
     assert.deepEqual(manager.getSnapshot().progress, {
       percent: 100,
-      transferred: 1200,
-      total: 1200,
+      transferred: 500,
+      total: 1000,
     })
 
     manager.setDownloadProgress({ percent: Number.NaN, transferred: 2048, total: null })
