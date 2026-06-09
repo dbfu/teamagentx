@@ -9,6 +9,7 @@ import {
   buildCodexRouterBaseUrl,
   CodexSdkExecutor,
   extractCodexSessionTranscript,
+  isCodexTransientStreamDisconnectError,
   isInputLengthExceededError,
 } from '../../../core/agent/codex-sdk.executor.js';
 import {
@@ -106,6 +107,38 @@ describe('Codex SDK Executor input length detection', () => {
     assert.strictEqual(isInputLengthExceededError(new Error('Codex Exec exited with code 1: ECONNRESET')), false);
     assert.strictEqual(isInputLengthExceededError('Range of input length'), false);
     assert.strictEqual(isInputLengthExceededError(null), false);
+  });
+});
+
+describe('Codex SDK Executor transient stream disconnect detection', () => {
+  test('识别 Codex 重连期间的临时流断开错误', () => {
+    assert.strictEqual(
+      isCodexTransientStreamDisconnectError(
+        'Reconnecting..1/5 (stream disconnected before completion: stream closed beforeresponse.completed)',
+      ),
+      true,
+    );
+    assert.strictEqual(
+      isCodexTransientStreamDisconnectError(
+        'stream disconnected before completion: stream closed before response.completed',
+      ),
+      true,
+    );
+    assert.strictEqual(
+      isCodexTransientStreamDisconnectError('stream closed beforeresponse.completed'),
+      true,
+    );
+  });
+
+  test('不会把普通 Codex 错误误判为重连临时错误', () => {
+    assert.strictEqual(
+      isCodexTransientStreamDisconnectError('invalid_api_key'),
+      false,
+    );
+    assert.strictEqual(
+      isCodexTransientStreamDisconnectError('context_length_exceeded'),
+      false,
+    );
   });
 });
 

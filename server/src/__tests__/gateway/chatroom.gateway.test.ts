@@ -13,6 +13,7 @@ import { GROUP_ASSISTANT_ID, GROUP_COORDINATOR_ID } from '../../core/agent/syste
 import { chatRoomGateway } from '../../gateway/chatroom.gateway.js';
 import { internalAgentToolsGateway } from '../../gateway/internal-agent-tools.gateway.js';
 import prisma from '../../lib/prisma.js';
+import { chatRoomService } from '../../modules/chatroom/chatroom.service.js';
 import { getGroupAssistantDefinition, getGroupCoordinatorDefinition } from '../../scripts/system-agent-definitions.js';
 import { syncSystemAgent, syncSystemAgents } from '../../scripts/system-agent-sync.js';
 
@@ -223,6 +224,58 @@ describe('ChatRoom Gateway API', () => {
           vendorOptions: null,
         },
       });
+    });
+
+    test('快速对话添加新助手会升级为普通群聊且保留群名和头像', async () => {
+      const suffix = Date.now().toString();
+      const user = await prisma.user.create({
+        data: {
+          id: randomUUID(),
+          username: `quick-upgrade-user-${suffix}`,
+          password: 'test-password',
+          updatedAt: new Date(),
+        },
+      });
+      const quickAgent = await agentService.create({
+        name: `Quick Target ${suffix}`,
+        avatar: 'quick-agent-avatar',
+        avatarColor: 'blue',
+        description: 'Quick target',
+        prompt: 'Handle quick chat',
+      });
+      const addedAgent = await agentService.create({
+        name: `Added Agent ${suffix}`,
+        description: 'Added agent',
+        prompt: 'Join upgraded room',
+      });
+      const quickRoom = await chatRoomService.createQuickChatRoom(
+        quickAgent.id,
+        user.id,
+        path.join(workDirRoot, 'quick-upgrade-room'),
+      );
+      if (!quickRoom) {
+        throw new Error('快速对话群聊创建失败');
+      }
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/chatrooms/${quickRoom.id}/agents`,
+        payload: {
+          agentId: addedAgent.id,
+        },
+      });
+      assert.strictEqual(response.statusCode, 201);
+
+      const room = await chatRoomService.findById(quickRoom.id);
+      assert.ok(room);
+      assert.strictEqual(room.isQuickChatRoom, false);
+      assert.strictEqual(room.quickChatAgentId, null);
+      assert.strictEqual(room.agentTriggerMode, 'coordinator');
+      assert.strictEqual(room.name, quickRoom.name);
+      assert.strictEqual(room.avatar, quickRoom.avatar);
+      assert.strictEqual(room.avatarColor, quickRoom.avatarColor);
+      assert.ok(room.chatRoomAgents.some((item) => item.agentId === quickAgent.id));
+      assert.ok(room.chatRoomAgents.some((item) => item.agentId === addedAgent.id));
     });
 
     test('应该返回可见群助手但不返回内置协调助手', async () => {

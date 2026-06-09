@@ -394,7 +394,7 @@ function AppContent() {
   const updateUnreadCount = useChatStore((s) => s.updateUnreadCount)
   const executingChatRooms = useChatStore((s) => s.executingChatRooms)
   const setScrollToMessageId = useChatStore((s) => s.setScrollToMessageId)
-  const { isConnected, onUnreadUpdate, requestUnreadCounts, markChatRoomRead, onMessage, onChatRoomCreated, onAgentsUpdated, onAgentStatus, requestTodos, onTodoList, onTodoCreated, onTodoUpdated, completeTodo, user: socketUser } = useSocketStore()
+  const { isConnected, onUnreadUpdate, requestUnreadCounts, markChatRoomRead, onMessage, onChatRoomCreated, onChatRoomUpdated, onAgentsUpdated, onAgentStatus, requestTodos, onTodoList, onTodoCreated, onTodoUpdated, completeTodo, user: socketUser } = useSocketStore()
   const { user } = useAuthStore()
   const visibleChatRoomId = useMemo(() => {
     return getVisibleChatRoomId(location.pathname, isMobile ? null : selectedRoomId)
@@ -590,6 +590,16 @@ function AppContent() {
     })
     return unsubscribe
   }, [isConnected, onAgentsUpdated, loadChatRooms])
+
+  // 监听群聊配置更新事件（其他端修改名称、规则、默认助手、触发模式等）
+  useEffect(() => {
+    if (!isConnected) return
+
+    const unsubscribe = onChatRoomUpdated(() => {
+      loadChatRooms()
+    })
+    return unsubscribe
+  }, [isConnected, onChatRoomUpdated, loadChatRooms])
 
   // 全局维护群聊执行中状态。聊天区未挂载时也要能停止群头像 loading。
   useEffect(() => {

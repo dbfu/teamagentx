@@ -148,6 +148,37 @@ export const messageService = {
     });
   },
 
+  async search(query: string, options?: { take?: number }) {
+    const normalizedQuery = query.trim();
+    if (!normalizedQuery) return [];
+
+    return prisma.message.findMany({
+      where: {
+        archiveId: null,
+        content: {
+          contains: normalizedQuery,
+        },
+      },
+      include: {
+        user: true,
+        agent: true,
+        attachments: true,
+        chatRoom: {
+          select: {
+            id: true,
+            name: true,
+            avatar: true,
+            avatarColor: true,
+            isQuickChatRoom: true,
+            quickChatAgentId: true,
+          },
+        },
+      },
+      orderBy: [{ time: 'desc' }, { id: 'desc' }],
+      take: options?.take ?? 20,
+    });
+  },
+
   /**
    * 获取指定消息之后的新消息（用于增量注入）
    */

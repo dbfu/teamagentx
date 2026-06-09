@@ -5,17 +5,42 @@ import {
   shouldTriggerCoordinatorAgent,
 } from '../../../../core/agent/agent-handler/handler.js';
 import {
+  cancelStallWatchdog,
+  checkAndClearInterrupted,
+  scheduleStallWatchdog,
+} from '../../../../core/agent/agent-handler/stall-watchdog.js';
+import {
   COORDINATOR_RECENT_HISTORY_LIMIT,
   buildCoordinatorRecentContext,
   withCoordinatorContext,
 } from '../../../../core/agent/agent-handler/coordinator-context.js';
 import { GROUP_COORDINATOR_ID } from '../../../../core/agent/system-assistant.constants.js';
+import { config } from '../../../../config/index.js';
+import { chatRoomService } from '../../../../modules/chatroom/chatroom.service.js';
+import { messageService } from '../../../../modules/message/message.service.js';
 import { roomMessageIndexService } from '../../../../modules/message/room-message-index.service.js';
+import { taskQueueService } from '../../../../modules/task-queue/task-queue.service.js';
+import { agentService } from '../../../../core/agent/agent.service.js';
 
 const originalBuildMessageIndex = roomMessageIndexService.buildMessageIndex;
+const originalStallWatchdogDelayMs = config.agent.stallWatchdogDelayMs;
+const originalFindChatRoomById = chatRoomService.findById;
+const originalGetUserMembers = chatRoomService.getUserMembers;
+const originalFindMessagesByChatRoomId = messageService.findByChatRoomId;
+const originalGetActiveTasks = taskQueueService.getActiveTasks;
+const originalFindAgentById = agentService.findById;
+const WATCHDOG_USER_MENTION_ROOM_ID = 'room-watchdog-user-mention';
 
 test.afterEach(() => {
   roomMessageIndexService.buildMessageIndex = originalBuildMessageIndex;
+  config.agent.stallWatchdogDelayMs = originalStallWatchdogDelayMs;
+  chatRoomService.findById = originalFindChatRoomById;
+  chatRoomService.getUserMembers = originalGetUserMembers;
+  messageService.findByChatRoomId = originalFindMessagesByChatRoomId;
+  taskQueueService.getActiveTasks = originalGetActiveTasks;
+  agentService.findById = originalFindAgentById;
+  cancelStallWatchdog(WATCHDOG_USER_MENTION_ROOM_ID);
+  checkAndClearInterrupted(WATCHDOG_USER_MENTION_ROOM_ID);
 });
 
 test('coordinator mode lets explicit user mentions trigger the target assistant directly', () => {
@@ -106,10 +131,11 @@ test('coordinator context block includes only the latest message previews and is
     },
   ]);
 
-  // withCoordinatorContext 把上下文拼到 [待裁决消息] 之前；空上下文时原样返回
+  // withCoordinatorContext 把上下文拼到 [待裁决消息] 之后；空上下文时原样返回
   const merged = withCoordinatorContext('请继续', context);
   assert.ok(merged.includes('[待裁决消息]'));
-  assert.ok(merged.endsWith('请继续'));
+  assert.ok(merged.startsWith('[待裁决消息]\n请继续'));
+  assert.ok(merged.includes(context));
   assert.equal(withCoordinatorContext('原文', ''), '原文');
 });
 
@@ -153,4 +179,45 @@ test('coordinator mode lets only the internal coordinator trigger multiple menti
     }),
     ['工程师'],
   );
+});
+
+test('auto stall watchdog skips when the latest assistant message mentions a room user', async () => {
+  let coordinatorLookups = 0;
+
+  config.agent.stallWatchdogDelayMs = 1;
+  chatRoomService.findById = (async () => ({
+    id: WATCHDOG_USER_MENTION_ROOM_ID,
+    agentTriggerMode: 'auto',
+    isQuickChatRoom: false,
+  })) as unknown as typeof chatRoomService.findById;
+  taskQueueService.getActiveTasks = (async () => []) as typeof taskQueueService.getActiveTasks;
+  messageService.findByChatRoomId = (async () => [
+    {
+      id: 'last-message',
+      type: 'REPLY',
+      content: '这里需要 @admin 确认后再继续。',
+      time: new Date('2026-06-09T10:00:00.000Z'),
+      agentId: 'assistant-1',
+      agent: {
+        name: '工程师',
+        avatar: null,
+        avatarColor: null,
+      },
+      chatRoomId: WATCHDOG_USER_MENTION_ROOM_ID,
+      replyMessageId: null,
+      isHuman: false,
+    },
+  ]) as unknown as typeof messageService.findByChatRoomId;
+  chatRoomService.getUserMembers = (async () => [
+    { user: { username: 'admin' } },
+  ]) as unknown as typeof chatRoomService.getUserMembers;
+  agentService.findById = (async () => {
+    coordinatorLookups += 1;
+    return null;
+  }) as typeof agentService.findById;
+
+  scheduleStallWatchdog(WATCHDOG_USER_MENTION_ROOM_ID);
+  await new Promise((resolve) => setTimeout(resolve, 25));
+
+  assert.equal(coordinatorLookups, 0);
 });

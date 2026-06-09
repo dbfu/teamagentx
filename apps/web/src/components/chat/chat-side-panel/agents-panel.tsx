@@ -15,7 +15,7 @@ interface AgentsPanelProps {
   chatRoom: ChatRoom
   agentStatuses?: Map<string, AgentStatus>
   onSelectAgent: (agent: { id: string; name: string; avatar?: string | null; avatarColor?: string | null; description?: string | null; chatRoomAgentId?: string; agentType?: string; agentLevel?: string; chatRoomId?: string; injectGroupHistory?: boolean }) => void
-  onAgentSettingsChange?: () => void
+  onAgentSettingsChange?: () => void | Promise<void>
   onInsertMention?: (agentId: string, agentName: string) => void
 }
 
@@ -290,7 +290,7 @@ export function AgentsPanel({ chatRoom, agentStatuses, onSelectAgent, onAgentSet
       }
 
       toast.success(agentIds.length > 1 ? t('chat.agentsPanel.addedMultiple', { count: agentIds.length }) : t('chat.agentsPanel.addedSingle'))
-      onAgentSettingsChange?.()
+      await Promise.resolve(onAgentSettingsChange?.())
       setAddDialogOpen(false)
     } finally {
       setAddingAgentIds(new Set())
@@ -344,18 +344,15 @@ export function AgentsPanel({ chatRoom, agentStatuses, onSelectAgent, onAgentSet
         <div className="text-sm text-muted-foreground text-center py-4">{t('chat.agentsPanel.noMembers')}</div>
       )}
 
-      {/* Add agent button - 快速对话群聊不允许添加新助手 */}
-      {!chatRoom.isQuickChatRoom && (
-        <div className="mt-4">
-          <button
-            onClick={handleOpenAddDialog}
-            className="group flex w-full items-center justify-center gap-2 rounded-lg bg-blue-500 px-3 py-2.5 text-sm font-medium text-white shadow-sm shadow-blue-500/20 transition-all duration-200 hover:-translate-y-0.5 hover:bg-blue-600 hover:shadow-md hover:shadow-blue-500/25 active:translate-y-0 active:scale-[0.98] outline-none"
-          >
-            <Plus className="size-4 transition-transform duration-200 group-hover:rotate-90" />
-            <span>{t('chat.agentsPanel.addAssistant')}</span>
-          </button>
-        </div>
-      )}
+      <div className="mt-4">
+        <button
+          onClick={handleOpenAddDialog}
+          className="group flex w-full items-center justify-center gap-2 rounded-lg bg-blue-500 px-3 py-2.5 text-sm font-medium text-white shadow-sm shadow-blue-500/20 transition-all duration-200 hover:-translate-y-0.5 hover:bg-blue-600 hover:shadow-md hover:shadow-blue-500/25 active:translate-y-0 active:scale-[0.98] outline-none"
+        >
+          <Plus className="size-4 transition-transform duration-200 group-hover:rotate-90" />
+          <span>{t('chat.agentsPanel.addAssistant')}</span>
+        </button>
+      </div>
 
       {/* Remove Confirm Dialog */}
       <ConfirmDialog

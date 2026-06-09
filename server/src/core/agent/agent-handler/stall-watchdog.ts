@@ -11,6 +11,7 @@ import {
   withCoordinatorContext,
 } from './coordinator-context.js';
 import { debugLog } from './debug.js';
+import { messageMentionsRoomUser } from './user-mention-utils.js';
 import type { Message } from '../../../types/message.js';
 
 /**
@@ -112,6 +113,10 @@ async function runStallWatchdog(chatRoomId: string): Promise<void> {
   }
   if (last.agentId === GROUP_COORDINATOR_ID) {
     debugLog('stallWatchdogSkipped', { chatRoomId, reason: 'lastIsCoordinator' });
+    return;
+  }
+  if (await messageMentionsRoomUser(chatRoomId, last.content)) {
+    debugLog('stallWatchdogSkipped', { chatRoomId, reason: 'lastMentionsUser' });
     return;
   }
 

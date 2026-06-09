@@ -455,6 +455,14 @@ interface MessageArchiveMessagesResponse extends ApiResponse<Message[]> {
   pagination?: MessagePagination
 }
 
+export interface GlobalSearchMessage extends Message {
+  chatRoom: Pick<ChatRoom, 'id' | 'name' | 'avatar' | 'avatarColor' | 'isQuickChatRoom' | 'quickChatAgentId'>
+}
+
+export interface GlobalSearchResult {
+  messages: GlobalSearchMessage[]
+}
+
 // 返回带 token 的请求头（用于 FormData 上传，不能手动设置 Content-Type）
 function authHeaders(): Record<string, string> {
   const token = localStorage.getItem('auth_token')
@@ -532,7 +540,22 @@ export const acpToolsApi = {
     const baseUrl = await getApiBaseUrl()
     const res = await fetch(`${baseUrl}/acp-tools/${toolId}/install`, {
       method: 'POST',
+      headers: authHeaders(),
+      cache: 'no-store',
     })
+
+    if (!res.ok) {
+      const text = await res.text()
+      try {
+        const data = JSON.parse(text) as { error?: string }
+        throw new Error(data.error || text || '安装失败')
+      } catch (error) {
+        if (error instanceof Error && error.message !== 'Unexpected end of JSON input') {
+          throw error
+        }
+        throw new Error(text || '安装失败')
+      }
+    }
 
     const reader = res.body?.getReader()
     if (!reader) throw new Error('无法读取安装输出')
@@ -1067,6 +1090,14 @@ export const messageApi = {
   // 获取单条消息
   async getById(id: string): Promise<ApiResponse<Message>> {
     return request<Message>(`/messages/${id}`)
+  },
+
+  async search(query: string, take = 20): Promise<ApiResponse<GlobalSearchResult>> {
+    const params = new URLSearchParams({
+      query,
+      take: String(take),
+    })
+    return request<GlobalSearchResult>(`/messages/search?${params.toString()}`)
   },
 
   // 删除单条消息

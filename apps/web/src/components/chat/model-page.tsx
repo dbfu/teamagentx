@@ -7,6 +7,7 @@ import { Activity, BadgeCheck, Copy, Cpu, Download, Eye, EyeOff, Image, Mic, Pen
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 
 const IMAGE_PROVIDER_BASE_URLS: Record<string, string> = {
   openai: 'https://api.openai.com/v1',
@@ -183,6 +184,7 @@ function parseImportPayload(rawText: string, t: (key: string) => string): Export
 
 export function ModelPage() {
   const { t } = useTranslation()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [providers, setProviders] = useState<LlmProvider[]>([])
   const [tokenUsage, setTokenUsage] = useState<TokenUsageByProvider[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -223,6 +225,16 @@ export function ModelPage() {
   // 搜索与筛选
   const [searchQuery, setSearchQuery] = useState('')
   const [filterType, setFilterType] = useState<'all' | 'text' | 'image' | 'video' | 'audio'>('all')
+
+  useEffect(() => {
+    const search = searchParams.get('search')?.trim()
+    if (search) {
+      setSearchQuery(search)
+      const nextParams = new URLSearchParams(searchParams)
+      nextParams.delete('search')
+      setSearchParams(nextParams, { replace: true })
+    }
+  }, [searchParams, setSearchParams])
 
   // 导出选择
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())

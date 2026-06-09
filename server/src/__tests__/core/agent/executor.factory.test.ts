@@ -41,8 +41,8 @@ describe('createExecutor', () => {
       assert.match(debugInfo.systemPrompt, /所有回复必须使用中文。/);
       assert.match(debugInfo.systemPrompt, /## Assistant Mentions/);
       assert.match(debugInfo.systemPrompt, /at most one triggerable @assistant mention/);
-      assert.match(debugInfo.systemPrompt, /Before final output, run a collaboration trigger check/);
-      assert.match(debugInfo.systemPrompt, /explicitly mention exactly one target assistant/);
+      assert.match(debugInfo.systemPrompt, /End-of-Turn Handoff Protocol \(MANDATORY\)/);
+      assert.match(debugInfo.systemPrompt, /Every reply MUST end in exactly ONE of these two ways/);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -72,8 +72,8 @@ describe('createExecutor', () => {
       assert.match(debugInfo.systemPrompt, /输出前先检查群规则。/);
       assert.match(debugInfo.systemPrompt, /## Assistant Mentions/);
       assert.match(debugInfo.systemPrompt, /at most one triggerable @assistant mention/);
-      assert.match(debugInfo.systemPrompt, /Before final output, run a collaboration trigger check/);
-      assert.match(debugInfo.systemPrompt, /explicitly mention exactly one target assistant/);
+      assert.match(debugInfo.systemPrompt, /End-of-Turn Handoff Protocol \(MANDATORY\)/);
+      assert.match(debugInfo.systemPrompt, /Every reply MUST end in exactly ONE of these two ways/);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -108,11 +108,11 @@ describe('createExecutor', () => {
 
       assert.doesNotMatch(
         coordinatorExecutor.getDebugInfo().systemPrompt,
-        /Before final output, run a collaboration trigger check/,
+        /End-of-Turn Handoff Protocol \(MANDATORY\)/,
       );
       assert.doesNotMatch(
         manualExecutor.getDebugInfo().systemPrompt,
-        /Before final output, run a collaboration trigger check/,
+        /End-of-Turn Handoff Protocol \(MANDATORY\)/,
       );
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -138,7 +138,7 @@ describe('createExecutor', () => {
 
       assert.doesNotMatch(
         executor.getDebugInfo().systemPrompt,
-        /Before final output, run a collaboration trigger check/,
+        /End-of-Turn Handoff Protocol \(MANDATORY\)/,
       );
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });

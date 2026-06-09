@@ -91,6 +91,15 @@ function replaceUrlHostname(url: string, hostname: string) {
   return parsedUrl.toString().replace(/\/+$/, '')
 }
 
+function getUrlHostname(url: string | null | undefined) {
+  if (!url) return null
+  try {
+    return new URL(normalizeServerUrl(url)).hostname
+  } catch {
+    return null
+  }
+}
+
 async function getLocalNetworkIp() {
   try {
     const apiUrl = getBrowserApiServerUrl(window.location.origin)
@@ -285,12 +294,11 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
         setMobileWebUrl(url)
         // 默认使用局域网地址
         setCustomServerUrl(url || '')
+        refreshLocalIps(url)
       })
       window.electronAPI.getAppVersion().then((version) => {
         setAppVersion(version)
       })
-      // Electron 也通过后端 API 获取局域网 IP 列表
-      refreshLocalIps()
     } else if (window.location.protocol.startsWith('http')) {
       if (isLoopbackHost(window.location.hostname)) {
         refreshLocalIps()
@@ -300,23 +308,27 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
     }
   }, [])
 
-  const refreshLocalIps = async () => {
+  const refreshLocalIps = async (mobileUrlOverride?: string | null) => {
     setRefreshingIps(true)
     try {
       if (window.electronAPI?.isElectron) {
         // Electron 通过内嵌后端 API 获取
-        const apiUrl = mobileWebUrl || `http://localhost:11053`
+        const effectiveMobileWebUrl = mobileUrlOverride ?? mobileWebUrl
+        const apiUrl = effectiveMobileWebUrl || `http://localhost:11053`
         const apiServerUrl = getBrowserApiServerUrl(apiUrl)
         const response = await fetch(`${apiServerUrl}/network-info`)
         const data = await response.json() as { localIp?: string | null; localIps?: string[] }
         const localIps = data.localIps || (data.localIp ? [data.localIp] : [])
         setLocalNetworkIps(localIps)
         if (localIps.length > 0 && !selectedLocalIp) {
-          const defaultIp = data.localIp || localIps[0]
+          const mobileUrlHost = getUrlHostname(effectiveMobileWebUrl)
+          const defaultIp = mobileUrlHost && localIps.includes(mobileUrlHost)
+            ? mobileUrlHost
+            : data.localIp || localIps[0]
           setSelectedLocalIp(defaultIp)
           // 更新 customServerUrl 使用局域网 IP
-          if (mobileWebUrl) {
-            const parsed = new URL(mobileWebUrl)
+          if (effectiveMobileWebUrl) {
+            const parsed = new URL(effectiveMobileWebUrl)
             parsed.hostname = defaultIp
             setCustomServerUrl(parsed.toString().replace(/\/+$/, ''))
           }
@@ -989,7 +1001,7 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="text-sm font-medium">{t('settings.localNetworkIp')}</label>
                     <button
-                      onClick={refreshLocalIps}
+                      onClick={() => refreshLocalIps()}
                       disabled={refreshingIps}
                       className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
                     >

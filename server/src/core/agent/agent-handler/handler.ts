@@ -17,6 +17,7 @@ import {
   buildCoordinatorRecentContext,
   withCoordinatorContext,
 } from './coordinator-context.js';
+import { messageMentionsRoomUser } from './user-mention-utils.js';
 import { checkAndClearInterrupted } from './stall-watchdog.js';
 import {
   startParallelBatch,
@@ -149,6 +150,11 @@ export function setupAIHandlers(
       const chatRoom = await chatRoomService.findById(chatRoomId);
 
       const agentTriggerMode = chatRoom?.agentTriggerMode ?? 'coordinator';
+      // 助手 @用户时不触发群调度或 auto 模式卡住检测：说明需要用户确认。
+      let hasUserMentions = false;
+      if (!message.isHuman && chatRoom) {
+        hasUserMentions = await messageMentionsRoomUser(chatRoomId, message.content);
+      }
 
       // 卡住检测兜底（仅自由协作 auto 模式）：人类发言清零连续救援计数；
       // 业务助手发完消息后重置房间防抖定时器，超时且房间空闲时唤醒群调度助手裁决。
@@ -161,8 +167,10 @@ export function setupAIHandlers(
         !chatRoom.isQuickChatRoom &&
         message.agentId !== GROUP_COORDINATOR_ID
       ) {
-        // 检查房间是否刚刚被用户中断，如果是则跳过 watchdog
-        if (checkAndClearInterrupted(chatRoomId)) {
+        if (hasUserMentions) {
+          debugLog('stallWatchdogSkipped', { chatRoomId, reason: 'messageMentionsUser' });
+        } else if (checkAndClearInterrupted(chatRoomId)) {
+          // 检查房间是否刚刚被用户中断，如果是则跳过 watchdog
           console.log(`[handler] ${chatRoomId} 房间刚被用户中断，跳过 watchdog`);
         } else {
           scheduleStallWatchdog(chatRoomId);
@@ -196,18 +204,6 @@ export function setupAIHandlers(
         mentionNames,
       });
       const hasMentions = triggerMentionNames.length > 0;
-
-      // 助手 @用户时不触发群调度：解析消息中是否有 @人类成员
-      // 如果助手直接 @用户（如群主），说明需要用户确认，不应触发群调度自动介入
-      let hasUserMentions = false;
-      if (!message.isHuman && chatRoom) {
-        // 获取群聊中的所有用户成员
-        const userMembers = await chatRoomService.getUserMembers(chatRoomId);
-        const usernames = userMembers.map((m) => m.user?.username).filter(Boolean) as string[];
-        // 检查消息中是否有 @这些用户
-        const userMentions = parseKnownMentions(message.content, usernames, { allowInline: true });
-        hasUserMentions = userMentions.length > 0;
-      }
 
       // 快速对话群聊：如果没有 @其他助手，则触发快速对话助手
       if (message.isHuman && chatRoom?.isQuickChatRoom && chatRoom.quickChatAgentId && !hasMentions) {

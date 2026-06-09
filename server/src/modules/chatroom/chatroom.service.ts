@@ -534,26 +534,55 @@ export const chatRoomService = {
       throw new Error('必须提供 userId 或 agentId 中的一个（不能同时或都不提供）');
     }
 
-    // 检查是否是快速对话群聊，快速对话群聊不允许添加新助手
     const chatRoom = await prisma.chatRoom.findUnique({
       where: { id: chatRoomId },
-      select: { isQuickChatRoom: true },
+      select: { isQuickChatRoom: true, quickChatAgentId: true },
     });
 
-    if (chatRoom?.isQuickChatRoom && agentId) {
-      throw new Error('快速对话群聊不允许添加新助手');
+    const shouldUpgradeQuickChatRoom = Boolean(
+      chatRoom?.isQuickChatRoom &&
+      agentId &&
+      agentId !== chatRoom.quickChatAgentId
+    );
+
+    if (!shouldUpgradeQuickChatRoom) {
+      return prisma.chatRoomAgent.create({
+        data: {
+          id: randomUUID(),
+          chatRoomId,
+          userId,
+          agentId,
+          role,
+          injectGroupHistory,
+        },
+        include: agentInclude,
+      });
     }
 
-    return prisma.chatRoomAgent.create({
-      data: {
-        id: randomUUID(),
-        chatRoomId,
-        userId,
-        agentId,
-        role,
-        injectGroupHistory,
-      },
-      include: agentInclude,
+    return prisma.$transaction(async (tx) => {
+      const chatRoomAgent = await tx.chatRoomAgent.create({
+        data: {
+          id: randomUUID(),
+          chatRoomId,
+          userId,
+          agentId,
+          role,
+          injectGroupHistory,
+        },
+        include: agentInclude,
+      });
+
+      await tx.chatRoom.update({
+        where: { id: chatRoomId },
+        data: {
+          isQuickChatRoom: false,
+          quickChatAgentId: null,
+          agentTriggerMode: 'coordinator',
+          updatedAt: new Date(),
+        },
+      });
+
+      return chatRoomAgent;
     });
   },
 

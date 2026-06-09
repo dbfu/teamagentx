@@ -9,6 +9,7 @@ import { Check, ChevronDown, ChevronRight, Copy, Download, FileText, FolderOpen,
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 import { SkillDetailModal } from './skill-detail-modal';
 
 // 自定义 Tabs 组件
@@ -72,6 +73,7 @@ function SimpleTabs({
 
 export function SkillPage() {
   const { t } = useTranslation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [sharedSkills, setSharedSkills] = useState<SharedSkill[]>([]);
   const [externalSkills, setExternalSkills] = useState<ExternalSkill[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -100,6 +102,16 @@ export function SkillPage() {
   const [importingLocalFolder, setImportingLocalFolder] = useState(false);
   // 已安装技能搜索
   const [skillSearchQuery, setSkillSearchQuery] = useState('');
+
+  useEffect(() => {
+    const search = searchParams.get('search')?.trim();
+    if (search) {
+      setSkillSearchQuery(search);
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete('search');
+      setSearchParams(nextParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const skillsPath = '~/.teamagentx/skills';
 

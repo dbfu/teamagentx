@@ -2226,8 +2226,8 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
           agentId,
         })
       }
-      onChatRoomChange?.()
-      loadMessages(chatRoom.id)
+      await Promise.resolve(onChatRoomChange?.())
+      await loadMessages(chatRoom.id)
     } catch (error) {
       console.error('Failed to add agents:', error)
     } finally {

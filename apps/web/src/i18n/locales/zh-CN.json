@@ -130,6 +130,21 @@
     "rubyRed": "曜石红",
     "me": "我"
   },
+  "globalSearch": {
+    "title": "全局搜索",
+    "placeholder": "搜索群聊、助手、技能、模型",
+    "chatRooms": "群聊",
+    "agents": "助手",
+    "skills": "技能",
+    "models": "模型",
+    "history": "搜索历史",
+    "noChatRoomResults": "未找到匹配群聊",
+    "noAgentResults": "未找到匹配助手",
+    "noSkillResults": "未找到匹配技能",
+    "noModelResults": "未找到匹配模型",
+    "searchFailed": "搜索失败",
+    "shortcutExit": "esc 退出搜索"
+  },
   "auth": {
     "login": "登录",
     "logout": "退出登录",

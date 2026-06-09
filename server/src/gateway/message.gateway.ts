@@ -85,10 +85,17 @@ interface MessageQuery {
 type MessageListItem = Awaited<ReturnType<typeof messageService.findMany>>[number];
 const DEFAULT_MESSAGE_PAGE_SIZE = 100;
 const MAX_MESSAGE_PAGE_SIZE = 100;
+const DEFAULT_SEARCH_LIMIT = 20;
+const MAX_SEARCH_LIMIT = 50;
 
 function normalizeMessagePageSize(value?: number) {
   if (!value || !Number.isFinite(value)) return DEFAULT_MESSAGE_PAGE_SIZE;
   return Math.min(Math.max(Math.floor(value), 1), MAX_MESSAGE_PAGE_SIZE);
+}
+
+function normalizeSearchLimit(value?: number) {
+  if (!value || !Number.isFinite(value)) return DEFAULT_SEARCH_LIMIT;
+  return Math.min(Math.max(Math.floor(value), 1), MAX_SEARCH_LIMIT);
 }
 
 async function applyBridgeMessageSenders<T extends MessageListItem>(messages: T[]): Promise<T[]> {
@@ -189,6 +196,77 @@ export async function messageGateway(app: FastifyInstance) {
 
     const messages = await messageService.findMany({ take });
     return reply.send({ success: true, data: await applyBridgeMessageSenders(messages) });
+  });
+
+  app.get<{ Querystring: { query?: string; take?: number } }>('/messages/search', {
+    schema: {
+      description: '搜索当前消息记录',
+      tags: ['Messages'],
+      querystring: {
+        type: 'object',
+        required: ['query'],
+        properties: {
+          query: { type: 'string', minLength: 1, maxLength: 120, description: '搜索关键词' },
+          take: { type: 'integer', minimum: 1, maximum: MAX_SEARCH_LIMIT, description: '结果数量' },
+        },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: {
+              type: 'object',
+              properties: {
+                messages: {
+                  type: 'array',
+                  items: {
+                    ...messageSchema,
+                    properties: {
+                      ...messageSchema.properties,
+                      chatRoom: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'string' },
+                          name: { type: 'string' },
+                          avatar: { type: 'string', nullable: true },
+                          avatarColor: { type: 'string', nullable: true },
+                          isQuickChatRoom: { type: 'boolean' },
+                          quickChatAgentId: { type: 'string', nullable: true },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        400: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const query = request.query.query?.trim() ?? '';
+    if (!query) {
+      return reply.code(400).send({ success: false, error: '搜索关键词不能为空' });
+    }
+
+    const messages = await messageService.search(query, {
+      take: normalizeSearchLimit(request.query.take),
+    });
+
+    return reply.send({
+      success: true,
+      data: {
+        messages: await applyBridgeMessageSenders(messages),
+      },
+    });
   });
 
   app.get<{ Params: { chatRoomId: string } }>('/chatrooms/:chatRoomId/message-archives', {

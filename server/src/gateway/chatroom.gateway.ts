@@ -1559,6 +1559,11 @@ export async function chatRoomGateway(app: FastifyInstance) {
       ) {
         await broadcastChatRoomRulesUpdatedMessage(id, chatRoom.rules);
       }
+      const io = (app as any).io as Server | undefined;
+      io?.emit('chatroom:updated', {
+        chatRoomId: id,
+        chatRoom: serializeChatRoomForResponse(chatRoom),
+      });
       return reply.send({ success: true, data: chatRoom, skippedReservedKeys });
     } catch (error: any) {
       if (error.code === 'P2025') {

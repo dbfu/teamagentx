@@ -598,6 +598,15 @@ function isMissingCodexThreadRolloutError(error: unknown): boolean {
   return /thread\/resume/i.test(error.message) && /no rollout found/i.test(error.message);
 }
 
+export function isCodexTransientStreamDisconnectError(message: unknown): boolean {
+  if (typeof message !== 'string') return false;
+  return (
+    /reconnecting\.{0,3}\s*\d+\s*\/\s*\d+/i.test(message) ||
+    /stream\s+disconnected\s+before\s+completion/i.test(message) ||
+    /stream\s+closed\s+before\s*response\.completed/i.test(message)
+  );
+}
+
 /**
  * 判断错误是否为「输入内容超出模型最大长度」。
  * 典型来源：路由模式下上游返回 `Range of input length should be [1, 202752]`，
@@ -1952,8 +1961,24 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       case 'turn.completed':
         return normalizeUsage(event.usage);
       case 'turn.failed':
+        if (isCodexTransientStreamDisconnectError(event.error.message)) {
+          debugLog('codexSdkTransientStreamDisconnect', {
+            agentName: this.name,
+            eventType: event.type,
+            message: event.error.message,
+          });
+          return undefined;
+        }
         throw new Error(event.error.message);
       case 'error':
+        if (isCodexTransientStreamDisconnectError(event.message)) {
+          debugLog('codexSdkTransientStreamDisconnect', {
+            agentName: this.name,
+            eventType: event.type,
+            message: event.message,
+          });
+          return undefined;
+        }
         throw new Error(event.message);
       default:
         return undefined;

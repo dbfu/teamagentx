@@ -298,6 +298,7 @@ interface SocketStore {
   requestInactiveTasks: (chatRoomId: string) => void
   onInactiveTasks: (callback: (data: InactiveTasksData) => void) => () => void
   onChatRoomCreated: (callback: (data: ChatRoomCreatedData) => void) => () => void
+  onChatRoomUpdated: (callback: (data: { chatRoomId: string }) => void) => () => void
   onAgentsUpdated: (callback: (data: { chatRoomId: string }) => void) => () => void
   onPackageScriptsUpdated: (callback: (data: PackageScriptsUpdatedData) => void) => () => void
 
@@ -565,6 +566,13 @@ export const useSocketStore = create<SocketStore>((set, get) => ({
     if (!socket) return () => {}
     socket.on('chatroom:created', callback)
     return () => socket?.off('chatroom:created', callback)
+  },
+
+  onChatRoomUpdated: (callback) => {
+    const socket = get().socket
+    if (!socket) return () => {}
+    socket.on('chatroom:updated', callback)
+    return () => socket?.off('chatroom:updated', callback)
   },
 
   onAgentsUpdated: (callback) => {

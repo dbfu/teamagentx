@@ -130,6 +130,21 @@
     "rubyRed": "Ruby Red",
     "me": "Me"
   },
+  "globalSearch": {
+    "title": "Global Search",
+    "placeholder": "Search chat rooms, assistants, skills, models",
+    "chatRooms": "Chat Rooms",
+    "agents": "Assistants",
+    "skills": "Skills",
+    "models": "Models",
+    "history": "Search history",
+    "noChatRoomResults": "No matching chat rooms",
+    "noAgentResults": "No matching assistants",
+    "noSkillResults": "No matching skills",
+    "noModelResults": "No matching models",
+    "searchFailed": "Search failed",
+    "shortcutExit": "esc Exit search"
+  },
   "auth": {
     "login": "Login",
     "logout": "Logout",

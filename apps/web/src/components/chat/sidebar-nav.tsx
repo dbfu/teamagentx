@@ -1,6 +1,7 @@
 
 import { CreateAssistantModal } from '@/components/chat/create-assistant-modal'
 import { CreateGroupModal } from '@/components/chat/create-group-modal'
+import { GlobalSearchModal } from '@/components/chat/global-search-modal'
 import { UserAvatar } from '@/components/chat/user-avatar'
 import { useTheme } from '@/components/theme-provider'
 import {
@@ -14,10 +15,10 @@ import { agentApi, AgentSpeechConfig, type AgentThinkingMode } from '@/lib/agent
 import { openExternalUrl, TEAMAGENTX_DOCS_URL, TEAMAGENTX_GITHUB_URL } from '@/lib/site-links'
 import { updateManager } from '@/lib/update-manager'
 import { cn } from '@/lib/utils'
-import { useAuthStore, useSocketStore } from '@/stores'
+import { useAuthStore, useChatRoomStore, useSocketStore } from '@/stores'
 import { useChatStore } from '@/stores/chat-store'
-import { BookOpenText, Bot, Check, CircleArrowUp, Cpu, Globe, MessageSquare, Monitor, Moon, Package, Palette, Plus, Sun, Users } from 'lucide-react'
-import { useState, useSyncExternalStore } from 'react'
+import { BookOpenText, Bot, Check, CircleArrowUp, Cpu, Globe, MessageSquare, Monitor, Moon, Package, Palette, Plus, Search, Sun, Users } from 'lucide-react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
@@ -33,6 +34,8 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
   const location = useLocation()
   const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false)
   const [isCreateAssistantOpen, setIsCreateAssistantOpen] = useState(false)
+  const [isSearchOpen, setIsSearchOpen] = useState(false)
+  const chatRooms = useChatRoomStore((s) => s.chatRooms)
   const { user } = useAuthStore()
   const { user: socketUser } = useSocketStore()
   const { theme, setTheme, brandTheme, setBrandTheme } = useTheme()
@@ -55,6 +58,20 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
             ? 'integration'
             : 'message'
   const currentUser = user || socketUser
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      const isTyping = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k' && !isTyping) {
+        event.preventDefault()
+        setIsSearchOpen(true)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   // 检测是否在 Electron 环境中
   const isElectron = window.electronAPI?.isElectron ?? false
@@ -155,6 +172,17 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
 
       {/* Nav items */}
       <div className="flex w-full flex-1 flex-col items-center gap-1 px-2 pb-4 select-none">
+        <button
+          onClick={() => setIsSearchOpen(true)}
+          className="group flex w-full cursor-pointer items-center justify-center rounded-lg py-2 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+          title={t('globalSearch.title')}
+          style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+        >
+          <span className="flex size-8 items-center justify-center rounded-full bg-sidebar-accent text-muted-foreground transition-colors group-hover:text-foreground">
+            <Search className="size-4" />
+          </span>
+        </button>
+
         {/* 加号按钮 */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -385,6 +413,12 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
       isOpen={isCreateAssistantOpen}
       onClose={() => setIsCreateAssistantOpen(false)}
       onSubmit={handleCreateAssistant}
+    />
+
+    <GlobalSearchModal
+      open={isSearchOpen}
+      onClose={() => setIsSearchOpen(false)}
+      chatRooms={chatRooms}
     />
 
     </>
