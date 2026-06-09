@@ -11,6 +11,7 @@ import {
   extractCodexSessionTranscript,
   isCodexTransientStreamDisconnectError,
   isInputLengthExceededError,
+  resolveCodexSpawnCandidate,
 } from '../../../core/agent/codex-sdk.executor.js';
 import {
   ensureAgentLongTermMemoryFile,
@@ -33,6 +34,54 @@ function provider(overrides: Record<string, unknown> = {}) {
     agents: [],
     ...overrides,
   } as any;
+}
+
+const CODEX_PLATFORM_PACKAGE_BY_TARGET: Record<string, string> = {
+  'x86_64-unknown-linux-musl': '@openai/codex-linux-x64',
+  'aarch64-unknown-linux-musl': '@openai/codex-linux-arm64',
+  'x86_64-apple-darwin': '@openai/codex-darwin-x64',
+  'aarch64-apple-darwin': '@openai/codex-darwin-arm64',
+  'x86_64-pc-windows-msvc': '@openai/codex-win32-x64',
+  'aarch64-pc-windows-msvc': '@openai/codex-win32-arm64',
+};
+
+function getTestCodexTargetTriple(): string {
+  if (process.platform === 'linux' || process.platform === 'android') {
+    if (process.arch === 'x64') return 'x86_64-unknown-linux-musl';
+    if (process.arch === 'arm64') return 'aarch64-unknown-linux-musl';
+  }
+  if (process.platform === 'darwin') {
+    if (process.arch === 'x64') return 'x86_64-apple-darwin';
+    if (process.arch === 'arm64') return 'aarch64-apple-darwin';
+  }
+  if (process.platform === 'win32') {
+    if (process.arch === 'x64') return 'x86_64-pc-windows-msvc';
+    if (process.arch === 'arm64') return 'aarch64-pc-windows-msvc';
+  }
+  throw new Error(`Unsupported test platform: ${process.platform} (${process.arch})`);
+}
+
+function writePackageJson(packageDir: string, name: string, version = '0.0.0') {
+  fs.mkdirSync(packageDir, { recursive: true });
+  fs.writeFileSync(path.join(packageDir, 'package.json'), JSON.stringify({ name, version }), 'utf-8');
+}
+
+function writeCodexPlatformBinary(codexPackageDir: string) {
+  const targetTriple = getTestCodexTargetTriple();
+  const platformPackage = CODEX_PLATFORM_PACKAGE_BY_TARGET[targetTriple];
+  const platformPackageDir = path.join(codexPackageDir, 'node_modules', ...platformPackage.split('/'));
+  writePackageJson(platformPackageDir, platformPackage);
+
+  const binaryPath = path.join(
+    platformPackageDir,
+    'vendor',
+    targetTriple,
+    'codex',
+    process.platform === 'win32' ? 'codex.exe' : 'codex',
+  );
+  fs.mkdirSync(path.dirname(binaryPath), { recursive: true });
+  fs.writeFileSync(binaryPath, '');
+  return binaryPath;
 }
 
 describe('Codex SDK Executor provider config', () => {
@@ -81,6 +130,39 @@ describe('Codex SDK Executor provider config', () => {
     );
     const providers = config.model_providers as Record<string, any>;
     assert.strictEqual(providers.teamagentx_openai.base_url, 'https://dm-fox.rjj.cc/codex/v1');
+  });
+});
+
+describe('Codex SDK Executor binary resolution', () => {
+  test('Windows npm extensionless shim resolves to the platform binary', () => {
+    const npmDir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-codex-global-npm-'));
+    const codexPackageDir = path.join(npmDir, 'node_modules', '@openai', 'codex');
+    writePackageJson(codexPackageDir, '@openai/codex');
+    const platformBinary = writeCodexPlatformBinary(codexPackageDir);
+    const shimPath = path.join(npmDir, 'codex');
+    fs.writeFileSync(shimPath, '#!/bin/sh\nexec node "$basedir/node_modules/@openai/codex/bin/codex.js" "$@"\n');
+
+    try {
+      const resolved = resolveCodexSpawnCandidate(shimPath, true);
+      assert.ok(resolved);
+      assert.strictEqual(fs.realpathSync(resolved), fs.realpathSync(platformBinary));
+    } finally {
+      fs.rmSync(npmDir, { recursive: true, force: true });
+    }
+  });
+
+  test('Windows npm extensionless shim is not returned when the platform binary is missing', () => {
+    const npmDir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-codex-global-npm-missing-'));
+    const codexPackageDir = path.join(npmDir, 'node_modules', '@openai', 'codex');
+    writePackageJson(codexPackageDir, '@openai/codex');
+    const shimPath = path.join(npmDir, 'codex');
+    fs.writeFileSync(shimPath, '#!/bin/sh\nexec node "$basedir/node_modules/@openai/codex/bin/codex.js" "$@"\n');
+
+    try {
+      assert.strictEqual(resolveCodexSpawnCandidate(shimPath, true), undefined);
+    } finally {
+      fs.rmSync(npmDir, { recursive: true, force: true });
+    }
   });
 });
 

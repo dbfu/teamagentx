@@ -3,7 +3,7 @@ import type { ThreadEvent, ThreadItem, Usage } from '@openai/codex-sdk';
 import { createInterface } from 'readline';
 import { createRequire } from 'module';
 import { createHash, randomUUID } from 'crypto';
-import { execFileSync, execSync, spawn } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -404,6 +404,10 @@ function getCodexBinaryFromBinShim(binPath: string): string | undefined {
     if (fromPackageDir) return fromPackageDir;
   }
 
+  const globalPackageDir = path.join(path.dirname(binPath), 'node_modules', '@openai', 'codex');
+  const fromGlobalPackageDir = getCodexBinaryFromCodexPackageDir(globalPackageDir);
+  if (fromGlobalPackageDir) return fromGlobalPackageDir;
+
   try {
     const text = fs.readFileSync(binPath, 'utf-8');
     const match = text.match(/(?:^|["\s])([^"\r\n]+node_modules[\\/]@openai[\\/]codex[\\/]bin[\\/]codex\.js)/i);
@@ -415,6 +419,16 @@ function getCodexBinaryFromBinShim(binPath: string): string | undefined {
     // Ignore unreadable shims and keep looking.
   }
 
+  return undefined;
+}
+
+export function resolveCodexSpawnCandidate(candidate: string | undefined, isWindows = process.platform === 'win32'): string | undefined {
+  if (!candidate || !fs.existsSync(candidate)) return undefined;
+  if (!isWindows) return candidate;
+  if (/\.exe$/i.test(candidate)) return candidate;
+  if (/(^|[\\/])codex(?:\.(?:cmd|ps1))?$/i.test(candidate)) {
+    return getCodexBinaryFromBinShim(candidate);
+  }
   return undefined;
 }
 
@@ -477,16 +491,29 @@ function findLocalCodexBinary(): string | undefined {
   if (toolsDir) {
     const extension = process.platform === 'win32' ? '.exe' : '';
     const localBin = path.join(toolsDir, 'node_modules', '.bin', 'codex' + extension);
-    if (fs.existsSync(localBin)) return localBin;
+    const resolvedLocalBin = resolveCodexSpawnCandidate(localBin);
+    if (resolvedLocalBin) return resolvedLocalBin;
+    if (process.platform === 'win32') {
+      const fromCmdShim =
+        resolveCodexSpawnCandidate(path.join(toolsDir, 'node_modules', '.bin', 'codex.cmd')) ||
+        resolveCodexSpawnCandidate(path.join(toolsDir, 'node_modules', '.bin', 'codex.CMD'));
+      if (fromCmdShim) return fromCmdShim;
+    }
   }
 
   // 2. 系统 PATH
   try {
     const which = process.platform === 'win32' ? 'where' : 'which';
-    const result = execSync(`${which} codex 2>/dev/null`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
-    if (result) {
-      const binPath = result.split('\n')[0].trim();
-      if (binPath && fs.existsSync(binPath)) return binPath;
+    const result = execFileSync(which, ['codex'], {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 3000,
+      windowsHide: true,
+    }).trim();
+    const candidates = result.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    for (const candidate of candidates) {
+      const resolved = resolveCodexSpawnCandidate(candidate);
+      if (resolved) return resolved;
     }
   } catch {}
 
@@ -496,10 +523,7 @@ function findLocalCodexBinary(): string | undefined {
 function findSpawnableCodexBinary(): string | undefined {
   const isWindows = process.platform === 'win32';
   const extension = isWindows ? '.exe' : '';
-  const tryPath = (candidate: string | undefined): string | undefined => {
-    if (!candidate || !fs.existsSync(candidate)) return undefined;
-    return candidate;
-  };
+  const tryPath = (candidate: string | undefined): string | undefined => resolveCodexSpawnCandidate(candidate, isWindows);
 
   const toolsDir = process.env.TOOLS_DIR;
   if (toolsDir) {
@@ -535,12 +559,7 @@ function findSpawnableCodexBinary(): string | undefined {
     }).trim();
     const candidates = result.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
     for (const candidate of candidates) {
-      if (isWindows && /\.cmd$/i.test(candidate)) {
-        const fromShim = getCodexBinaryFromBinShim(candidate);
-        if (fromShim) return fromShim;
-        continue;
-      }
-      const found = tryPath(candidate);
+      const found = resolveCodexSpawnCandidate(candidate, isWindows);
       if (found) return found;
     }
   } catch {
