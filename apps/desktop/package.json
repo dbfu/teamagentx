@@ -1,6 +1,6 @@
 {
   "name": "@teamagentx/desktop",
-  "version": "1.0.11",
+  "version": "1.0.14",
   "private": true,
   "type": "module",
   "description": "TeamAgentX",
@@ -14,7 +14,7 @@
     "build:server": "cd ../../server && pnpm db:generate && pnpm build && pnpm prebuild:electron",
     "build:server:prod-deps": "cd ../.. && npx pnpm@10.24.0 --filter=server deploy server/node_modules-prod --prod --frozen-lockfile --force && cd server && pnpm verify:electron-deps && pnpm sync:prisma:prod",
     "build:package": "npx pnpm@10.24.0 exec electron-builder",
-    "build:package:win": "npx pnpm@10.24.0 exec electron-builder --win",
+    "build:package:win": "npx pnpm@10.24.0 exec electron-builder --win nsis --x64",
     "build": "pnpm build:server && pnpm build:server:prod-deps && pnpm build:renderer && pnpm build:package",
     "build:win": "pnpm build:server && pnpm build:server:prod-deps && pnpm build:renderer && set \"ELECTRON_CACHE=%TEMP%\\\\teamagentx-electron-cache\" && pnpm build:package:win",
     "electron:dev": "pnpm dev",

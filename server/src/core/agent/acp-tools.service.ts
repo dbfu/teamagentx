@@ -265,7 +265,7 @@ function getCodexBinaryFromPlatformPackageJson(platformPackageJsonPath: string):
   if (!targetTriple) return undefined;
 
   const codexBinaryName = process.platform === 'win32' ? 'codex.exe' : 'codex';
-  const binaryPath = path.join(path.dirname(platformPackageJsonPath), 'vendor', targetTriple, 'codex', codexBinaryName);
+  const binaryPath = path.join(path.dirname(platformPackageJsonPath), 'vendor', targetTriple, 'bin', codexBinaryName);
   return fs.existsSync(binaryPath) ? binaryPath : undefined;
 }
 

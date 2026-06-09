@@ -45,7 +45,7 @@ function writeCodexPlatformBinary(toolsDir: string) {
     platformPackageDir,
     'vendor',
     targetTriple,
-    'codex',
+    'bin',
     process.platform === 'win32' ? 'codex.exe' : 'codex',
   );
   fs.mkdirSync(path.dirname(binaryPath), { recursive: true });

@@ -368,7 +368,7 @@ export function buildBuiltinCodexMcpServerConfigs(
 function getCodexBinaryFromPlatformPackageJson(platformPackageJsonPath: string): string | undefined {
   const targetTriple = getCodexTargetTriple();
   const codexBinaryName = process.platform === 'win32' ? 'codex.exe' : 'codex';
-  const binaryPath = path.join(path.dirname(platformPackageJsonPath), 'vendor', targetTriple, 'codex', codexBinaryName);
+  const binaryPath = path.join(path.dirname(platformPackageJsonPath), 'vendor', targetTriple, 'bin', codexBinaryName);
   return fs.existsSync(binaryPath) ? binaryPath : undefined;
 }
 
