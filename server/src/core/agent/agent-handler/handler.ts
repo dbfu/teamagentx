@@ -11,12 +11,8 @@ import { parseKnownMentions } from './message-utils.js';
 import { debugLog } from './debug.js';
 import { enqueueAgentTask } from './agent-dispatch.service.js';
 import { GROUP_COORDINATOR_ID } from '../system-assistant.constants.js';
-import { createInternalCoordinatorAgent } from '../internal-coordinator-agent.js';
 import { scheduleStallWatchdog, resetStallWatchdog } from './stall-watchdog.js';
-import {
-  buildCoordinatorRecentContext,
-  withCoordinatorContext,
-} from './coordinator-context.js';
+import { runCoordinatorDispatch } from '../coordinator-dispatch.js';
 import { messageMentionsRoomUser } from './user-mention-utils.js';
 import { checkAndClearInterrupted } from './stall-watchdog.js';
 import {
@@ -289,21 +285,7 @@ export function setupAIHandlers(
             hasMentions,
           });
 
-          // 调度助手非群成员，消息索引段与回查工具都被门控；把最近群消息作为
-          // 「仅供裁决参考」上下文拼进触发消息正文，让它能基于最近上下文路由。
-          const contextBlock = await buildCoordinatorRecentContext(
-            chatRoomId,
-            message.id,
-          );
-          const coordinatorMessage = contextBlock
-            ? { ...message, content: withCoordinatorContext(message.content, contextBlock) }
-            : message;
-
-          await enqueueAgentTask(
-            chatRoomId,
-            coordinatorMessage,
-            createInternalCoordinatorAgent(coordinatorAgent),
-          );
+            await runCoordinatorDispatch(chatRoomId, message, coordinatorAgent);
         } else {
           console.warn(`[coordinatorAgentTrigger] 内置协调助手不存在或未启用: ${GROUP_COORDINATOR_ID}`);
         }

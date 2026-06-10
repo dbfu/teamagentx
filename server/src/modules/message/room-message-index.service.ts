@@ -22,6 +22,8 @@ export type RoomMessageIndexHistoryMessage = {
   time: string;
   senderType: 'user' | 'agent';
   preview: string;
+  // Raw (non-truncated) normalized content — only populated when includeRawContent option is set.
+  rawContent?: string;
   attachments: Array<{filename?: string | null; type?: string | null}>;
 };
 
@@ -42,7 +44,10 @@ function getSenderName(message: MessageIndexRecord): string {
   return message.user?.username || message.agent?.name || 'unknown';
 }
 
-function toIndexMessage(message: MessageIndexRecord): RoomMessageIndexHistoryMessage {
+function toIndexMessage(
+  message: MessageIndexRecord,
+  options?: { includeRawContent?: boolean },
+): RoomMessageIndexHistoryMessage {
   const previewChars = getPositiveIntegerEnv(
     'AGENT_ROOM_MESSAGE_INDEX_PREVIEW_CHARS',
     DEFAULT_PREVIEW_CHARS,
@@ -59,6 +64,7 @@ function toIndexMessage(message: MessageIndexRecord): RoomMessageIndexHistoryMes
     isHuman: senderType === 'user',
     preview,
     content: preview,
+    rawContent: options?.includeRawContent ? message.content.trim() : undefined,
     attachments: (message.attachments || []).map((attachment) => ({
       filename: attachment.filename,
       type: attachment.type,
@@ -81,12 +87,13 @@ export const roomMessageIndexService = {
     chatRoomId: string,
     currentMessageId: string,
     afterMessageId?: string,
+    options?: { includeRawContent?: boolean; limit?: number },
   ): Promise<RoomMessageIndexHistoryMessage[]> {
     const currentMessage = await findMessageAnchor(chatRoomId, currentMessageId);
     if (!currentMessage) return [];
 
     const afterMessage = await findMessageAnchor(chatRoomId, afterMessageId);
-    const limit = getPositiveIntegerEnv(
+    const limit = options?.limit ?? getPositiveIntegerEnv(
       'AGENT_ROOM_MESSAGE_INDEX_LIMIT',
       Math.max(1, config.agent.memoryRecentMessages),
     );
@@ -120,7 +127,7 @@ export const roomMessageIndexService = {
       take: limit,
     }) as MessageIndexRecord[];
 
-    return messages.reverse().map(toIndexMessage);
+    return messages.reverse().map((m) => toIndexMessage(m, options));
   },
 };
 

@@ -4,12 +4,7 @@ import { messageService } from '../../../modules/message/message.service.js';
 import { taskQueueService } from '../../../modules/task-queue/task-queue.service.js';
 import { agentService } from '../agent.service.js';
 import { GROUP_COORDINATOR_ID } from '../system-assistant.constants.js';
-import { createInternalCoordinatorAgent } from '../internal-coordinator-agent.js';
-import { enqueueAgentTask } from './agent-dispatch.service.js';
-import {
-  buildCoordinatorRecentContext,
-  withCoordinatorContext,
-} from './coordinator-context.js';
+import { runCoordinatorDispatch } from '../coordinator-dispatch.js';
 import { debugLog } from './debug.js';
 import { messageMentionsRoomUser } from './user-mention-utils.js';
 import type { Message } from '../../../types/message.js';
@@ -134,28 +129,18 @@ async function runStallWatchdog(chatRoomId: string): Promise<void> {
     return;
   }
 
-  // 与协调模式共用同一套上下文注入：把最近群消息作为「仅供裁决参考」上下文拼进
-  // 触发消息正文，绕开调度助手被门控的消息索引/回查工具，让裁判能基于最近上下文判断
-  // 「任务是否真的结束 / 下一步该谁」。
-  const contextBlock = await buildCoordinatorRecentContext(chatRoomId, last.id);
-  const triggerMessage = mapRowToMessage(last);
-  triggerMessage.content = withCoordinatorContext(triggerMessage.content, contextBlock);
-
   consecutiveDispatches.set(chatRoomId, count + 1);
+
+  const triggerMessage = mapRowToMessage(last);
 
   debugLog('stallWatchdogTrigger', {
     chatRoomId,
     triggerMessageId: last.id,
     triggerAgentId: last.agentId,
     consecutive: count + 1,
-    hasContext: Boolean(contextBlock),
   });
 
-  await enqueueAgentTask(
-    chatRoomId,
-    triggerMessage,
-    createInternalCoordinatorAgent(coordinatorAgent),
-  );
+  await runCoordinatorDispatch(chatRoomId, triggerMessage, coordinatorAgent);
 }
 
 type ChatRoomMessageRow = Awaited<ReturnType<typeof messageService.findByChatRoomId>>[number];

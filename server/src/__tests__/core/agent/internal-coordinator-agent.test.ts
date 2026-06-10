@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   INTERNAL_COORDINATOR_AGENT_NAME,
   INTERNAL_COORDINATOR_NO_DISPATCH_RESPONSE,
+  INTERNAL_COORDINATOR_NO_SUITABLE_ASSISTANT,
+  INTERNAL_COORDINATOR_SYSTEM_MANAGEMENT,
   buildInternalCoordinatorPrompt,
   shouldSuppressInternalCoordinatorMessage,
 } from '../../../core/agent/internal-coordinator-agent.js';
@@ -48,13 +50,17 @@ afterEach(() => {
 });
 
 describe('internal coordinator no-dispatch handling', () => {
-  test('prompt forces an exact no-dispatch sentinel', () => {
+  test('prompt uses dispatch_decision tool for all decisions', () => {
     const prompt = buildInternalCoordinatorPrompt();
 
     assert.ok(prompt.length < 2100);
-    assert.match(prompt, /最终回复必须只包含这四个字：无需调度/);
-    assert.match(prompt, /不要添加原因、标点、换行或任何其他文字/);
+    assert.match(prompt, /dispatch_decision 工具/);
+    assert.match(prompt, /禁止输出纯文本/);
     assert.doesNotMatch(prompt, /无需调度：一句话原因/);
+    // All four decision types are present
+    assert.match(prompt, /no_dispatch/);
+    assert.match(prompt, /ask_owner/);
+    assert.match(prompt, /cannot_dispatch/);
   });
 
   test('prompt limits the coordinator to dispatching only', () => {
@@ -62,48 +68,39 @@ describe('internal coordinator no-dispatch handling', () => {
 
     assert.match(prompt, /你只负责路由/);
     assert.match(prompt, /不要分析问题、解释原因、给方案、下结论或评价任务本身/);
-    assert.match(prompt, /最终输出只能是调度\/转发消息、无需调度或指定的不可调度哨兵/);
+    assert.match(prompt, /dispatch_decision 工具/);
   });
 
-  test('prompt forbids expanding human user messages during dispatch', () => {
+  test('prompt uses forwardVerbatim instead of text copy constraints', () => {
     const prompt = buildInternalCoordinatorPrompt();
 
-    assert.match(prompt, /用户原始消息全文/);
-    assert.match(prompt, /不要扩写、总结、解释、拆解、补充验收标准/);
-    assert.match(prompt, /添加分支\/提交\/PR\/发布等操作/);
-    assert.match(prompt, /用户没有明确说出的内容，不能出现在你的调度消息里/);
-    assert.match(prompt, /不得添加、删除、改写任何内容/);
+    assert.match(prompt, /forwardVerbatim/);
+    assert.match(prompt, /原文发送给目标助手/);
+    assert.match(prompt, /不要添加与原始目标无关的新需求/);
   });
 
-  test('prompt allows only the coordinator to dispatch multiple assistants in coordinator mode', () => {
+  test('prompt supports multiple parallel targetAgentIds', () => {
     const prompt = buildInternalCoordinatorPrompt();
 
-    assert.match(prompt, /只有你（群调度助手）支持在一条调度消息中 @多个助手/);
-    assert.match(prompt, /多个助手同时执行任务/);
-    assert.match(prompt, /多个可并行推进的任务/);
-    assert.match(prompt, /同时 @多个助手 分配任务/);
+    assert.match(prompt, /targetAgentIds/);
+    assert.match(prompt, /可多个（并行）/);
     assert.match(prompt, /必须等所有被并行调度的助手都明确完成各自任务后/);
     assert.match(prompt, /才能调度下一个阶段任务/);
-    assert.match(prompt, /其他业务助手在协调模式下不能直接 @助手 触发任务/);
-    assert.match(prompt, /不会直接触发目标助手/);
-    assert.match(prompt, /@assistant_name @assistant_name original_content/);
   });
 
-  test('prompt requires mentioning the chatroom owner for human answers', () => {
+  test('prompt requires ask_owner for human confirmation', () => {
     const prompt = buildInternalCoordinatorPrompt();
 
     assert.match(prompt, /需要人类用户回答问题或确认事项/);
-    assert.match(prompt, /最终回复必须提及群主/);
+    assert.match(prompt, /ask_owner/);
     assert.match(prompt, /涉及群主\/admin 的选择、确认、授权、验收或偏好/);
     assert.match(prompt, /不要替群主做决定/);
-    assert.match(prompt, /必须 @群主，让用户回答/);
+    assert.match(prompt, /必须 ask_owner，让用户回答/);
     assert.match(prompt, /不要为了提问或确认而 @其他人类成员/);
-    assert.match(prompt, /不要把需要用户回答或确认的问题输出为“无需调度”/);
-    assert.match(prompt, /不能在一条消息里同时 @业务助手 和 @群主/);
-    assert.match(prompt, /必须先只 @群主 提问/);
-    assert.match(prompt, /用户回答或确认后，再调度合适的助手处理/);
-    assert.match(prompt, /回答你刚刚转发给群主的问题/);
-    assert.match(prompt, /调度回原始提问的业务助手/);
+    assert.match(prompt, /不要把需要用户回答或确认的问题设为 no_dispatch/);
+    assert.match(prompt, /必须先 ask_owner 提问/);
+    assert.match(prompt, /用户回答或确认后，再 dispatch 合适的助手处理/);
+    assert.match(prompt, /回答你刚刚转发给群主的问题时，调度回原始提问的业务助手/);
   });
 
   test('prompt requires preserving forwarded question formatting for the owner', () => {
@@ -112,18 +109,13 @@ describe('internal coordinator no-dispatch handling', () => {
     assert.match(prompt, /转发助手提出的问题或确认事项给群主/);
     assert.match(prompt, /Markdown 格式、换行、列表、选项编号和代码块/);
     assert.match(prompt, /不要压缩成一句话、不要改成纯文本摘要/);
-    assert.match(prompt, /保留被转发内容全文和原始排版/);
-    assert.match(prompt, /不得重写标题、列表、空行或选项文本/);
   });
 
-  test('prompt blocks next phase until all parallel tasks finish', () => {
+  test('prompt uses no_dispatch to block next phase until all parallel tasks finish', () => {
     const prompt = buildInternalCoordinatorPrompt();
 
-    assert.match(prompt, /上一阶段是并行任务/);
-    assert.match(prompt, /任意一个并行助手尚未明确完成/);
-    assert.match(prompt, /无法确认所有并行任务都已完成/);
-    assert.match(prompt, /必须输出“无需调度”/);
-    assert.match(prompt, /不能进入下一个阶段任务/);
+    assert.match(prompt, /上一阶段并行任务中有任一助手尚未完成/);
+    assert.match(prompt, /不能 dispatch 下一阶段/);
   });
 
   test('suppresses only exact internal coordinator no-dispatch output', () => {
@@ -141,6 +133,21 @@ describe('internal coordinator no-dispatch handling', () => {
     assert.equal(
       shouldSuppressInternalCoordinatorMessage('normal-agent', INTERNAL_COORDINATOR_NO_DISPATCH_RESPONSE),
       false,
+    );
+    // English sentinels (with trailing punctuation/whitespace) are also suppressed.
+    assert.equal(
+      shouldSuppressInternalCoordinatorMessage(
+        GROUP_COORDINATOR_ID,
+        `${INTERNAL_COORDINATOR_NO_SUITABLE_ASSISTANT}\n`,
+      ),
+      true,
+    );
+    assert.equal(
+      shouldSuppressInternalCoordinatorMessage(
+        GROUP_COORDINATOR_ID,
+        `${INTERNAL_COORDINATOR_SYSTEM_MANAGEMENT}.`,
+      ),
+      true,
     );
   });
 

@@ -99,7 +99,7 @@ export const config = {
     memoryCandidateTtlDays: parseInt(process.env.AGENT_MEMORY_CANDIDATE_TTL_DAYS || '14', 10),
     // 自由协作（auto）模式下的「卡住检测」兜底：助手发完消息、房间内无在跑/排队任务且
     // 超过该延迟无新活动时，唤醒群调度助手裁决任务是否真的结束。
-    stallWatchdogDelayMs: parseInt(process.env.AGENT_STALL_WATCHDOG_DELAY_MS || '60000', 10),
+    stallWatchdogDelayMs: parseInt(process.env.AGENT_STALL_WATCHDOG_DELAY_MS || '5000', 10),
     // 连续救援上限：两次人类发言之间，watchdog 最多自动唤醒调度助手的次数，防止死循环。
     stallWatchdogMaxConsecutive: parseInt(process.env.AGENT_STALL_WATCHDOG_MAX_CONSECUTIVE || '5', 10),
   },

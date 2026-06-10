@@ -136,7 +136,7 @@ test('coordinator context block includes only the latest message previews and is
   assert.ok(merged.includes('[待裁决消息]'));
   assert.ok(merged.startsWith('[待裁决消息]\n请继续'));
   assert.ok(merged.includes(context));
-  assert.equal(withCoordinatorContext('原文', ''), '原文');
+  assert.equal(withCoordinatorContext('原文', ''), '[待裁决消息]\n原文');
 });
 
 test('coordinator messages do not recursively trigger the coordinator', () => {
