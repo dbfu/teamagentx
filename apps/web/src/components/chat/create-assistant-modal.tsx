@@ -448,7 +448,7 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
                     onClick={() => setCodexFastMode(v => !v)}
                     className={cn(
                       'relative h-5 w-10 rounded-full transition-colors',
-                      codexFastMode ? 'bg-primary' : 'bg-muted'
+                      codexFastMode ? 'bg-blue-500' : 'bg-gray-200'
                     )}
                     aria-pressed={codexFastMode}
                   >
@@ -537,7 +537,7 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
                   onClick={() => setImageGenerationEnabled(v => !v)}
                   className={cn(
                     'relative h-5 w-10 rounded-full transition-colors',
-                    imageGenerationEnabled ? 'bg-primary' : 'bg-muted'
+                    imageGenerationEnabled ? 'bg-blue-500' : 'bg-gray-200'
                   )}
                   aria-pressed={imageGenerationEnabled}
                 >

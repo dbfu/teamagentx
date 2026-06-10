@@ -63,14 +63,13 @@ export async function notifySourceAgentOnFailure(params: {
     return;
   }
 
-  // 6. 检查群聊触发模式（手动模式下助手不能自动触发其他助手，失败通知也跳过）
+  // 6. 检查群聊触发模式：手动 / 协调模式下，只有内置群调度助手分配者才发自动通知
   const chatRoom = await chatRoomService.findById(chatRoomId);
-  if (chatRoom?.agentTriggerMode === 'manual') {
-    console.warn('[notifySourceAgentOnFailure] 群聊为手动模式，跳过自动通知');
-    return;
-  }
-  if (chatRoom?.agentTriggerMode === 'coordinator' && sourceAgent.id !== GROUP_COORDINATOR_ID) {
-    console.warn('[notifySourceAgentOnFailure] 群聊为协调模式，非内置协调助手分配者跳过自动通知');
+  if (
+    (chatRoom?.agentTriggerMode === 'manual' || chatRoom?.agentTriggerMode === 'coordinator') &&
+    sourceAgent.id !== GROUP_COORDINATOR_ID
+  ) {
+    console.warn('[notifySourceAgentOnFailure] 群聊为手动/协调模式，非内置群调度助手分配者跳过自动通知');
     return;
   }
 

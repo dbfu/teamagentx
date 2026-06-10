@@ -19,8 +19,19 @@ const FEISHU_DOWNLOAD_FIELD_PAGE = process.env.FEISHU_DOWNLOAD_FIELD_PAGE || '�
 const FEISHU_DOWNLOAD_FIELD_USER_AGENT = process.env.FEISHU_DOWNLOAD_FIELD_USER_AGENT || 'User Agent';
 const FEISHU_DOWNLOAD_FIELD_IP = process.env.FEISHU_DOWNLOAD_FIELD_IP || 'IP';
 const FEISHU_DOWNLOAD_FIELD_VERSION = process.env.FEISHU_DOWNLOAD_FIELD_VERSION || '客户端版本';
+const FEISHU_DOWNLOAD_FIELD_TYPE = process.env.FEISHU_DOWNLOAD_FIELD_TYPE || '下载类型';
 
 const TRACKED_PLATFORMS = new Set(['macos-arm64', 'macos-x64', 'windows', 'android']);
+
+// 下载类型：官网下载默认「下载」，客户端内更新上报「更新」
+const DOWNLOAD_TYPE_DOWNLOAD = '下载';
+const DOWNLOAD_TYPE_UPDATE = '更新';
+const TRACKED_DOWNLOAD_TYPES = new Set([DOWNLOAD_TYPE_DOWNLOAD, DOWNLOAD_TYPE_UPDATE]);
+
+// 把外部传入的 type 归一化为受支持的下载类型，未知值回落到「下载」
+function normalizeDownloadType(value) {
+  return TRACKED_DOWNLOAD_TYPES.has(value) ? value : DOWNLOAD_TYPE_DOWNLOAD;
+}
 
 let feishuTokenCache = {
   token: '',
@@ -136,7 +147,7 @@ async function writeDownloadEventToFeishu(fields) {
   }
 }
 
-async function recordDownloadEvent(req, originalUrl, platform, version) {
+async function recordDownloadEvent(req, originalUrl, platform, version, downloadType) {
   if (!TRACKED_PLATFORMS.has(platform) || !isFeishuDownloadTrackingEnabled()) {
     return;
   }
@@ -147,6 +158,7 @@ async function recordDownloadEvent(req, originalUrl, platform, version) {
   const fields = {
     [FEISHU_DOWNLOAD_FIELD_TIME]: Date.now(),
     [FEISHU_DOWNLOAD_FIELD_PLATFORM]: platform,
+    [FEISHU_DOWNLOAD_FIELD_TYPE]: normalizeDownloadType(downloadType),
     [FEISHU_DOWNLOAD_FIELD_URL]: toFeishuUrlField(originalUrl),
     [FEISHU_DOWNLOAD_FIELD_USER_AGENT]: req.headers['user-agent'] || '',
     [FEISHU_DOWNLOAD_FIELD_IP]: getClientIp(req),
@@ -214,6 +226,7 @@ const server = http.createServer(async (req, res) => {
     const originalUrl = url.searchParams.get('url') || '';
     const platform = url.searchParams.get('platform') || '';
     const version = url.searchParams.get('version') || '';
+    const downloadType = url.searchParams.get('type') || '';
     if (!originalUrl) {
       sendJson(res, 400, { success: false, error: 'Missing "url" query parameter' });
       return;
@@ -224,7 +237,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    recordDownloadEvent(req, originalUrl, platform, version).catch((error) => {
+    recordDownloadEvent(req, originalUrl, platform, version, downloadType).catch((error) => {
       console.error('[website-server] failed to record download event:', error);
     });
 

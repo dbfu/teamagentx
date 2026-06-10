@@ -1,5 +1,6 @@
 import { FastifyInstance, FastifyRequest } from 'fastify';
 import { workbenchTaskService, type WorkbenchTaskPriority, type WorkbenchTaskStatus } from '../modules/workbench/workbench.service.js';
+import { coordinatorLogService } from '../modules/coordinator-log/coordinator-log.service.js';
 
 const workbenchTaskSchema = {
   type: 'object',
@@ -194,7 +195,7 @@ export async function workbenchGateway(app: FastifyInstance) {
           title: { type: 'string' },
           description: { type: 'string', nullable: true },
           chatRoomId: { type: 'string' },
-          status: { type: 'string', enum: ['draft', 'dispatched', 'in_progress', 'waiting_review', 'needs_input', 'completed', 'blocked'] },
+          status: { type: 'string', enum: ['draft', 'dispatched', 'in_progress', 'waiting_review', 'needs_input', 'completed'] },
           priority: { type: 'string', enum: ['low', 'medium', 'high'] },
           dueText: { type: 'string', nullable: true },
           expectedOutput: { type: 'string', nullable: true },
@@ -305,6 +306,149 @@ export async function workbenchGateway(app: FastifyInstance) {
       return reply.send({ success: true, data: tasks });
     } catch (error) {
       return reply.code(400).send({ success: false, error: error instanceof Error ? error.message : '批量派发任务失败' });
+    }
+  });
+
+  // 获取群调度助手日志（按群聊分组）
+  app.get('/coordinator-logs', {
+    schema: {
+      description: '获取群调度助手决策日志，按群聊分组',
+      tags: ['Coordinator'],
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: {
+              type: 'object',
+              additionalProperties: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string' },
+                    chatRoomId: { type: 'string' },
+                    triggerMessageId: { type: 'string' },
+                    decision: { type: 'string' },
+                    targetAgentIds: { type: 'array', items: { type: 'string' }, nullable: true },
+                    content: { type: 'string', nullable: true },
+                    forwardVerbatim: { type: 'boolean' },
+                    reason: { type: 'string', nullable: true },
+                    sourceAgentId: { type: 'string', nullable: true },
+                    sourceIsHuman: { type: 'boolean' },
+                    sourceContent: { type: 'string', nullable: true },
+                    success: { type: 'boolean' },
+                    errorMessage: { type: 'string', nullable: true },
+                    createdAt: { type: 'string' },
+                    chatRoom: {
+                      type: 'object',
+                      properties: {
+                        id: { type: 'string' },
+                        name: { type: 'string' },
+                        avatar: { type: 'string', nullable: true },
+                      },
+                    },
+                    sourceAgent: {
+                      type: 'object',
+                      nullable: true,
+                      properties: {
+                        id: { type: 'string' },
+                        name: { type: 'string' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    try {
+      const groupedLogs = await coordinatorLogService.findByChatRoomGrouped();
+      // 将 Map 转换为普通对象，并将 targetAgentIds 解析为数组
+      const result: Record<string, any[]> = {};
+      for (const [chatRoomId, logs] of groupedLogs) {
+        result[chatRoomId] = logs.map(log => ({
+          ...log,
+          targetAgentIds: log.targetAgentIds ? JSON.parse(log.targetAgentIds) : null,
+          createdAt: log.createdAt.toISOString(),
+        }));
+      }
+      return reply.send({ success: true, data: result });
+    } catch (error) {
+      return (reply as any).code(400).send({ success: false, error: error instanceof Error ? error.message : '获取调度日志失败' });
+    }
+  });
+
+  // 获取单个群聊的调度日志
+  app.get<{ Params: { chatRoomId: string } }>('/coordinator-logs/:chatRoomId', {
+    schema: {
+      description: '获取指定群聊的群调度助手决策日志',
+      tags: ['Coordinator'],
+      params: {
+        type: 'object',
+        properties: { chatRoomId: { type: 'string' } },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string' },
+                  chatRoomId: { type: 'string' },
+                  triggerMessageId: { type: 'string' },
+                  decision: { type: 'string' },
+                  targetAgentIds: { type: 'array', items: { type: 'string' }, nullable: true },
+                  content: { type: 'string', nullable: true },
+                  forwardVerbatim: { type: 'boolean' },
+                  reason: { type: 'string', nullable: true },
+                  sourceAgentId: { type: 'string', nullable: true },
+                  sourceIsHuman: { type: 'boolean' },
+                  sourceContent: { type: 'string', nullable: true },
+                  success: { type: 'boolean' },
+                  errorMessage: { type: 'string', nullable: true },
+                  createdAt: { type: 'string' },
+                  chatRoom: {
+                    type: 'object',
+                    properties: {
+                      id: { type: 'string' },
+                      name: { type: 'string' },
+                      avatar: { type: 'string', nullable: true },
+                    },
+                  },
+                  sourceAgent: {
+                    type: 'object',
+                    nullable: true,
+                    properties: {
+                      id: { type: 'string' },
+                      name: { type: 'string' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    try {
+      const logs = await coordinatorLogService.findByChatRoom(request.params.chatRoomId);
+      const data = logs.map(log => ({
+        ...log,
+        targetAgentIds: log.targetAgentIds ? JSON.parse(log.targetAgentIds) : null,
+        createdAt: log.createdAt.toISOString(),
+      }));
+      return reply.send({ success: true, data });
+    } catch (error) {
+      return (reply as any).code(400).send({ success: false, error: error instanceof Error ? error.message : '获取调度日志失败' });
     }
   });
 }

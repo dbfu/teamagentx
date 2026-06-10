@@ -20,6 +20,12 @@ interface MentionInputProps {
   agents: Agent[]
   className?: string
   onMentionClick?: (agentId: string, agentName: string) => void
+  customCommands?: CustomCommand[]
+}
+
+interface CustomCommand {
+  name: string
+  content: string
 }
 
 interface MentionData {
@@ -34,6 +40,8 @@ interface SlashCommand {
   command: string
   title: string
   description: string
+  // 选中后插入到输入框的文本，默认等于 command；自定义指令为其内容
+  insertText?: string
 }
 
 // 撤销历史栈
@@ -106,6 +114,7 @@ export const MentionInput = forwardRef<MentionInputRef, MentionInputProps>(funct
   agents,
   className,
   onMentionClick,
+  customCommands,
 }, ref) {
   const { t } = useTranslation()
   const [showMentions, setShowMentions] = useState(false)
@@ -377,7 +386,18 @@ export const MentionInput = forwardRef<MentionInputRef, MentionInputProps>(funct
   const filteredAgents = agents
     .filter(a => !mentionQuery || a.name.toLowerCase().includes(mentionQuery.toLowerCase()))
 
-  const filteredCommands = SLASH_COMMANDS(t).filter((item) => {
+  // 自定义指令排在内置指令之前，选中后填充指令内容
+  const allCommands = useMemo<SlashCommand[]>(() => {
+    const customs: SlashCommand[] = (customCommands ?? []).map((cmd) => ({
+      command: `/${cmd.name}`,
+      title: cmd.name,
+      description: cmd.content,
+      insertText: cmd.content,
+    }))
+    return [...customs, ...SLASH_COMMANDS(t)]
+  }, [customCommands, t])
+
+  const filteredCommands = allCommands.filter((item) => {
     const query = slashQuery.toLowerCase()
     return (
       !query ||
@@ -545,7 +565,8 @@ export const MentionInput = forwardRef<MentionInputRef, MentionInputProps>(funct
     const before = slashPos >= 0 ? plainText.slice(0, slashPos) : ''
     const after = slashPos >= 0 ? plainText.slice(slashPos + 1 + slashQuery.length) : ''
     const needsTrailingSpace = after.length > 0 && !after.startsWith(' ')
-    const inserted = `${item.command}${after.length === 0 || needsTrailingSpace ? ' ' : ''}`
+    const insertValue = item.insertText ?? item.command
+    const inserted = `${insertValue}${after.length === 0 || needsTrailingSpace ? ' ' : ''}`
     const newText = before + inserted + after
     const newCursorPos = before.length + inserted.length
 
@@ -904,7 +925,7 @@ export const MentionInput = forwardRef<MentionInputRef, MentionInputProps>(funct
         >
           {filteredCommands.map((item, index) => (
             <div
-              key={item.command}
+              key={`${item.command}-${index}`}
               ref={index === selectedCommandIndex ? selectedCommandRef : null}
               className={cn(
                 'flex cursor-pointer items-center gap-3 px-3 py-2.5 first:rounded-t-lg last:rounded-b-lg hover:bg-blue-500/5',

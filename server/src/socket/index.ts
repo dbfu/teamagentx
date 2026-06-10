@@ -10,6 +10,7 @@ import {
   processQueue,
   broadcastAgentStatus,
   setGlobalBroadcastMessage,
+  setGlobalEmitWorkbenchTaskUpdated,
   cancelStallWatchdog,
   type AgentStatus,
 } from '../core/agent/agent-handler/index.js';
@@ -78,6 +79,11 @@ export function setupSocket(io: Server) {
   };
   setBridgeInboundMessageBroadcaster(emitMessageToChatRoomMembers);
   setGlobalBroadcastMessage(emitMessageToChatRoomMembers);
+
+  // 工作台任务状态更新：推送给任务创建者，实现前端实时刷新
+  setGlobalEmitWorkbenchTaskUpdated((task: any, userId: string) => {
+    io.to(`user:${userId}`).emit('workbench:task-updated', task);
+  });
 
   // Emit function for AI responses - broadcasts to specific chatRoom room
   // 同时给群聊里所有用户发送未读更新通知
@@ -506,9 +512,12 @@ export function setupSocket(io: Server) {
           };
 
           await emitMessageToChatRoomMembers(msgWithUser, chatRoomId);
-          await bridgeService.syncRoomMessage(chatRoomId, user.username, message.content, message.id);
+          // Bridge 发送失败不应阻塞助手任务触发
+          bridgeService.syncRoomMessage(chatRoomId, user.username, message.content, message.id).catch((error) => {
+            console.error('[Bridge] syncRoomMessage 失败:', error);
+          });
 
-          // Trigger AI handlers
+          // Trigger AI handlers（无论 bridge 是否成功都触发）
           messageEventEmitter.emit('receivedMessage', {
             message: msgWithUser,
             chatRoomId,

@@ -528,16 +528,19 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
           const elapsedText = !isPending && agent.startedAt
             ? formatDuration(durationNow - agent.startedAt)
             : null
+          // 群调度助手等无详情系统助手：typing 标签仅展示，不可点击（点击无对应执行详情）。
+          const detailBlocked = isSystemAssistantDetailBlocked({ id: agent.agentId, name: agent.agentName })
           return (
             <div
               key={agent.agentId}
               className={cn(
-                "inline-flex cursor-pointer items-center gap-1 rounded-full px-2 py-0.5 text-xs leading-none",
+                "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs leading-none",
+                detailBlocked ? "cursor-default" : "cursor-pointer",
                 isPending
-                  ? "bg-muted text-muted-foreground hover:bg-accent"
-                  : "bg-primary/5 text-primary hover:bg-primary/10"
+                  ? detailBlocked ? "bg-muted text-muted-foreground" : "bg-muted text-muted-foreground hover:bg-accent"
+                  : detailBlocked ? "bg-primary/5 text-primary" : "bg-primary/5 text-primary hover:bg-primary/10"
               )}
-              onClick={() => onTypingAgentClick?.(message.id, agent.agentId, agent.agentName)}
+              onClick={detailBlocked ? undefined : () => onTypingAgentClick?.(message.id, agent.agentId, agent.agentName)}
             >
               {isPending && <Clock className="size-3" />}
               {!isPending && (

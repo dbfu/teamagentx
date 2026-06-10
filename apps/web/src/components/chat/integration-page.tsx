@@ -475,9 +475,9 @@ export function IntegrationPage() {
             onDeleteBot={(bot) => setPendingDeleteBot(bot)}
           />
 
-          <div className="space-y-4 self-start">
+          <div className="space-y-4 min-h-0 flex-1 flex flex-col">
             {/* Linked rooms overview */}
-            <div className="rounded-xl border border-border bg-card p-4">
+            <div className="rounded-xl border border-border bg-card p-4 shrink-0 overflow-hidden">
               <div className="mb-4">
                 <div className="text-sm font-semibold">{t('integration.linkedRoomsTitle')}</div>
                 <div className="mt-1 text-xs text-muted-foreground">{t('integration.linkedRoomsHint')}</div>
@@ -523,21 +523,21 @@ export function IntegrationPage() {
             </div>
 
             {/* Recent events */}
-            <div className="rounded-xl border border-border bg-card p-4">
-              <div className="mb-4">
+            <div className="rounded-xl border border-border bg-card p-4 min-h-0 flex-1 flex flex-col overflow-hidden">
+              <div className="mb-4 shrink-0">
                 <div className="text-sm font-semibold">{t('integration.recentEventsTitle')}</div>
                 <div className="mt-1 text-xs text-muted-foreground">{t('integration.recentEventsHint')}</div>
               </div>
-              <div className="max-h-[360px] space-y-2 overflow-y-auto pr-1">
+              <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overflow-x-hidden pr-1">
                 {events.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-border px-3 py-4 text-xs text-muted-foreground">
                     {t('integration.noEvents')}
                   </div>
                 ) : (
                   events.map((event: BridgeEvent) => (
-                    <div key={event.id} className="rounded-xl border border-border bg-white px-3 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0 flex-1">
+                    <div key={event.id} className="rounded-xl border border-border bg-white px-3 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)] overflow-hidden">
+                      <div className="flex items-start gap-3">
+                        <div className="min-w-0 flex-1 shrink">
                           <div className="flex flex-wrap items-center gap-1.5">
                             <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700">
                               {platformLabel(platforms, event.platform)}
@@ -548,8 +548,19 @@ export function IntegrationPage() {
                                 : <ArrowUpRight className="size-3.5 text-blue-600" />}
                               {event.direction === 'inbound' ? t('integration.inbound') : t('integration.outbound')}
                             </span>
+                            <span className={cn(
+                              'shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium',
+                              event.status === 'success' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500',
+                            )}>
+                              {event.status === 'success' ? (
+                                <span className="inline-flex items-center gap-1">
+                                  <Check className="size-3.5" />
+                                  {t('integration.success')}
+                                </span>
+                              ) : t('integration.failed')}
+                            </span>
                           </div>
-                          <div className="mt-2 line-clamp-3 text-[12px] leading-5 text-foreground">
+                          <div className="mt-2 line-clamp-3 text-[12px] leading-5 text-foreground break-words">
                             {event.contentPreview || t('integration.noContentPreview')}
                           </div>
                           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
@@ -559,23 +570,12 @@ export function IntegrationPage() {
                             </span>
                             {event.agentName && <span>{t('integration.agentLabel', { name: event.agentName })}</span>}
                             {event.errorMsg ? (
-                              <span className="text-red-500">{event.errorMsg}</span>
+                              <span className="block w-full text-red-500 break-words ml-1">{event.errorMsg}</span>
                             ) : (
                               <span className="truncate max-w-[160px]">{t('integration.sessionLabel', { id: event.externalId })}</span>
                             )}
                           </div>
                         </div>
-                        <span className={cn(
-                          'shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium',
-                          event.status === 'success' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500',
-                        )}>
-                          {event.status === 'success' ? (
-                            <span className="inline-flex items-center gap-1">
-                              <Check className="size-3.5" />
-                              {t('integration.success')}
-                            </span>
-                          ) : t('integration.failed')}
-                        </span>
                       </div>
                     </div>
                   ))

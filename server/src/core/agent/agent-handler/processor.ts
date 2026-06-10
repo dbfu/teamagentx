@@ -9,6 +9,7 @@ import { roomMessageIndexService } from '../../../modules/message/room-message-i
 import { todoService } from '../../../modules/todo/todo.service.js';
 import { agentService } from '../agent.service.js';
 import { chatRoomService } from '../../../modules/chatroom/chatroom.service.js';
+import { workbenchTaskService } from '../../../modules/workbench/workbench.service.js';
 import {
   processingMap,
   abortControllers,
@@ -17,6 +18,7 @@ import {
   taskExecutionStartedAt,
   streamEventsCache,
   injectedRoomRulesCache,
+  bridgeInfoCache,
 } from './cache.js';
 import { getSystemMessage } from './system-messages.js';
 import {
@@ -64,6 +66,16 @@ export async function processQueue(chatRoomId: string, agentId: string) {
       await taskQueueService.updateStatus(task.id, 'executing');
       const startedAt = Date.now();
       taskExecutionStartedAt.set(task.id, startedAt);
+
+      // 群内有 agent 任务真正开始执行 → 该群「已派发」的工作台任务流转为「执行中」。
+      // 这是所有调度路径（协调器结构化派发、手动/自由模式、用户直接 @、外部平台触发）
+      // 的必经之处，把流转挂在这里可以不依赖协调器决策时序，保证只要助手开始干活，
+      // 工作台任务就一定能进入 in_progress。函数幂等：已是 in_progress 的任务不会重复更新。
+      try {
+        await workbenchTaskService.syncRoomDispatchTaskStatus(chatRoomId, false);
+      } catch (error) {
+        console.error('[workbench] 同步派发任务状态失败:', error);
+      }
 
       // 发送 typing 事件（让前端初始化流式面板）
       if (globalEmitTyping) {
@@ -409,6 +421,12 @@ export async function processQueue(chatRoomId: string, agentId: string) {
           // 解析 attachments
           const attachments = taskQueueService.parseAttachments(task);
 
+          // 获取 Bridge 信息，构建提示词注入
+          const bridgeInfo = bridgeInfoCache.get(task.id);
+          const bridgeContextSection = bridgeInfo?.platform === 'feishu' && bridgeInfo.externalId
+            ? `\n\n当前飞书群聊Id: ${bridgeInfo.externalId}\n注意：用户消息来自飞书群聊，"当前群聊"指的是飞书群聊。你可以使用 lark-cli (飞书 CLI) 来完成用户在飞书群聊中的任务，如发送消息、搜索聊天记录、管理群成员等。`
+            : '';
+
           // 执行任务，消息在 tool 调用时实时广播
           const startTime = Date.now();
           let execResult;
@@ -417,7 +435,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
 
           try {
             execResult = await executor.exec(
-              task.messageContent + ruleReminder,
+              task.messageContent + ruleReminder + bridgeContextSection,
               emitCallback,
               task.messageId,
               history,
@@ -454,6 +472,9 @@ export async function processQueue(chatRoomId: string, agentId: string) {
           // 清除流式事件缓存（任务已完成，按 messageId_agentId 存储）
           const streamCacheKey = `${chatRoomId}_${task.messageId}_${task.agentId}`;
           streamEventsCache.delete(streamCacheKey);
+
+          // 清除 Bridge 信息缓存
+          bridgeInfoCache.delete(task.id);
 
           if (discardExecutionResultKeys.delete(key)) {
             console.log(`[processor] 已丢弃清理期间结束的执行结果: ${key}`);
@@ -617,6 +638,19 @@ export async function processQueue(chatRoomId: string, agentId: string) {
 
         // 任务完成后立即广播状态更新（队列长度变化，可能从 busy 变成 executing）
         broadcastAgentStatus(chatRoomId);
+
+        // 工作台任务自动状态流转：
+        // - 协调模式：等待群调度助手确认后再更新（在 coordinator-dispatch.ts 中处理）
+        // - 非协调模式：任务完成后直接判断群内空闲并更新
+        try {
+          const chatRoom = await chatRoomService.findById(chatRoomId);
+          if (chatRoom && chatRoom.agentTriggerMode !== 'coordinator') {
+            const roomActiveTasks = await taskQueueService.getActiveTasks(chatRoomId);
+            await workbenchTaskService.syncRoomDispatchTaskStatus(chatRoomId, roomActiveTasks.length === 0);
+          }
+        } catch (error) {
+          console.error('[workbench] 同步派发任务状态失败:', error);
+        }
       }
     }
   } finally {

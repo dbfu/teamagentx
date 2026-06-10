@@ -434,7 +434,15 @@ export const bridgeService = {
         console.error('[Bridge] 广播入站消息到群聊失败:', error);
       });
     }
-    messageEventEmitter.emit('receivedMessage', { message: msgWithUser, chatRoomId });
+    messageEventEmitter.emit('receivedMessage', {
+      message: msgWithUser,
+      chatRoomId,
+      bridgeInfo: {
+        platform: params.platform,
+        externalId: params.externalId,
+        sourceMessageId: params.sourceMessageId,
+      },
+    });
 
     await createBridgeEvent({
       platform: params.platform,

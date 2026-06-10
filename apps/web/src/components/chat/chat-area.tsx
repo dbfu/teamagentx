@@ -11,6 +11,7 @@ import { RoomEnvVarsDialog } from './dialogs/room-env-vars-dialog'
 import { StopAllTasksDialog } from './dialogs/stop-all-tasks-dialog'
 import { ScreenshotModal } from './screenshot-modal'
 import { MessageArchivesModal } from './message-archives-modal'
+import { CustomCommandModal } from './dialogs/custom-command-modal'
 import { useSocketStore, useChatRoomStore } from '@/stores'
 import { useChatStore } from '@/stores/chat-store'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -34,6 +35,7 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
   const [showRoomRules, setShowRoomRules] = useState(false)
   const [showEnvVars, setShowEnvVars] = useState(false)
   const [showScreenshot, setShowScreenshot] = useState(false)
+  const [showCustomCommands, setShowCustomCommands] = useState(false)
   const [showMessageArchives, setShowMessageArchives] = useState(false)
   const [showStopAllConfirm, setShowStopAllConfirm] = useState(false)
   const [stopAllTargetAgentIds, setStopAllTargetAgentIds] = useState<string[]>([])
@@ -339,6 +341,7 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
           onStopAllTasks={handleStopAllTasks}
           onOpenRoomRules={() => setShowRoomRules(true)}
           onOpenEnvVars={() => setShowEnvVars(true)}
+          onOpenCustomCommands={() => setShowCustomCommands(true)}
           onScreenshot={() => setShowScreenshot(true)}
         />
       )}
@@ -489,6 +492,13 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
         onClose={() => setShowEnvVars(false)}
         chatRoom={chatRoom}
         onChatRoomChange={onChatRoomChange || (() => {})}
+      />
+
+      {/* Custom Commands Modal */}
+      <CustomCommandModal
+        isOpen={showCustomCommands}
+        onClose={() => setShowCustomCommands(false)}
+        chatRoomId={chatRoom.id}
       />
 
       {/* Screenshot Modal */}

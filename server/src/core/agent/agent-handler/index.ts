@@ -25,6 +25,7 @@ export {
   broadcastChatRoomCreated,
   broadcastAgentsUpdated,
   setGlobalBroadcastMessage,
+  setGlobalEmitWorkbenchTaskUpdated,
 } from './status.js';
 
 // 从 executor-manager 导出

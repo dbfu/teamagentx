@@ -28,6 +28,14 @@ export interface LlmProvider {
   _count?: {
     agents: number
   }
+  agents?: Array<{
+    id: string
+    name: string
+    isActive: boolean
+    agentLevel: string
+    avatar: string | null
+    avatarColor: string | null
+  }>
 }
 
 // 创建 LLM 供应商请求

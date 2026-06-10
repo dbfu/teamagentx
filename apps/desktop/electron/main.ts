@@ -1008,6 +1008,53 @@ function getPlatformDownloadUrl(update: UpdateInfo): string {
   return update.url;
 }
 
+// 把当前桌面端平台映射为 website-server 追踪用的平台标识
+function getTrackPlatform(): string | null {
+  if (process.platform === 'darwin') {
+    return process.arch === 'arm64' ? 'macos-arm64' : 'macos-x64';
+  }
+  if (process.platform === 'win32') {
+    return 'windows';
+  }
+  return null;
+}
+
+// 客户端内更新下载成功后，向官网下载追踪接口上报一条「更新」记录。
+// 接口地址从 UPDATE_CHECK_URL（.../update.json）推导出同源的 /website-server/download。
+// 仅用于统计，失败不影响更新流程。
+function reportUpdateDownloadEvent(originalDownloadUrl: string, version: string): void {
+  if (!UPDATE_CHECK_URL || !originalDownloadUrl) return;
+  const platform = getTrackPlatform();
+  if (!platform) return;
+
+  let endpoint: URL;
+  try {
+    endpoint = new URL('/website-server/download', UPDATE_CHECK_URL);
+  } catch {
+    return;
+  }
+  endpoint.searchParams.set('url', originalDownloadUrl);
+  endpoint.searchParams.set('platform', platform);
+  endpoint.searchParams.set('type', '更新');
+  if (version) {
+    endpoint.searchParams.set('version', version);
+  }
+
+  const target = endpoint.toString();
+  const client = target.startsWith('https:') ? https : http;
+  try {
+    const request = client.get(target, { headers: { 'User-Agent': `TeamAgentX/${app.getVersion()}` } }, (response) => {
+      response.resume(); // 丢弃响应体（接口会 302 到真实下载地址，这里不跟随）
+    });
+    request.on('error', (error) => {
+      writeLog(`[Update] 上报更新下载事件失败：${error instanceof Error ? error.message : String(error)}`);
+    });
+    request.setTimeout(10000, () => request.destroy());
+  } catch (error) {
+    writeLog(`[Update] 上报更新下载事件异常：${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 function requestJson(url: string, redirectCount = 0): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const client = url.startsWith('https:') ? https : http;
@@ -1194,6 +1241,8 @@ async function downloadUpdate(update: UpdateInfo): Promise<{ success: true; file
       const filePath = path.join(app.getPath('userData'), UPDATE_DOWNLOAD_DIR, getDownloadFileName(downloadUrl));
       const result = await downloadFile(downloadUrl, filePath);
       downloadedUpdatePath = result.filePath;
+      // 更新包下载成功后异步上报「更新」类型事件，失败不影响更新
+      reportUpdateDownloadEvent(originalDownloadUrl, update.version);
       return { success: true, filePath: downloadedUpdatePath };
     } catch (error) {
       lastError = error;

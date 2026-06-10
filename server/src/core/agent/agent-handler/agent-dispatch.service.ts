@@ -12,6 +12,7 @@ import { getExecutor } from './executor-manager.js';
 import { processQueue } from './processor.js';
 import { broadcastAgentStatus, globalEmit, globalEmitTyping } from './status.js';
 import { debugLog } from './debug.js';
+import { bridgeInfoCache, type BridgeInfo } from './cache.js';
 
 export async function enqueueAgentTask(
   chatRoomId: string,
@@ -23,6 +24,7 @@ export async function enqueueAgentTask(
     sessionDir?: string;
     attachments?: AttachmentData[];
     skipHistory?: boolean;
+    bridgeInfo?: BridgeInfo;
   },
 ) {
   if (globalEmitTyping) {
@@ -84,6 +86,16 @@ export async function enqueueAgentTask(
     attachments: attachmentsData,
   });
 
+  // 存储 Bridge 信息到缓存，用于执行时注入到提示词
+  if (options?.bridgeInfo) {
+    bridgeInfoCache.set(task.id, options.bridgeInfo);
+    debugLog('bridgeInfoCached', {
+      taskId: task.id,
+      platform: options.bridgeInfo.platform,
+      externalId: options.bridgeInfo.externalId,
+    });
+  }
+
   if (!options?.skipHistory && injectGroupHistory && executor && agent.agentLevel !== 'system') {
     const latestMessages = await messageService.findByChatRoomId(
       chatRoomId,
@@ -121,16 +133,20 @@ export async function sendMessageToAgent(params: {
   if (!chatRoom) {
     throw new Error('群聊不存在');
   }
-  if (chatRoom.agentTriggerMode === 'manual') {
-    throw new Error('当前群聊为手动模式，助手不能自动触发其他助手');
-  }
-
   const sourceAgent = await agentService.findById(params.sourceAgentId);
   if (!sourceAgent || !sourceAgent.isActive) {
     throw new Error('来源助手不存在或未启用');
   }
-  if (chatRoom.agentTriggerMode === 'coordinator' && sourceAgent.id !== GROUP_COORDINATOR_ID) {
-    throw new Error('当前群聊为协调模式，只有内置协调助手可以派发其他助手');
+  // 手动 / 协调模式下，只有内置群调度助手可以派发其他助手（普通助手不能自动触发其他助手）
+  if (
+    (chatRoom.agentTriggerMode === 'manual' || chatRoom.agentTriggerMode === 'coordinator') &&
+    sourceAgent.id !== GROUP_COORDINATOR_ID
+  ) {
+    throw new Error(
+      chatRoom.agentTriggerMode === 'manual'
+        ? '当前群聊为手动模式，只有群调度助手可以派发其他助手'
+        : '当前群聊为协调模式，只有内置协调助手可以派发其他助手',
+    );
   }
   if (sourceAgent.agentLevel !== 'system') {
     const isSourceMember = await chatRoomService.isAgentMember(params.chatRoomId, sourceAgent.id);

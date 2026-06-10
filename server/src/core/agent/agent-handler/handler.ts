@@ -4,6 +4,7 @@ import { messageService } from '../../../modules/message/message.service.js';
 import { agentService } from '../agent.service.js';
 import { recoveryService } from '../../../modules/recovery/recovery.service.js';
 import type { Message } from '../../../types/message.js';
+import type { Platform } from '../../../modules/bridge/bridge.service.js';
 import { setGlobalCallbacks, setGlobalEmitReceivedMessage } from './status.js';
 import type { AgentStatus } from './status.js';
 import type { ToolCall } from '../executor.interface.js';
@@ -11,12 +12,9 @@ import { parseKnownMentions } from './message-utils.js';
 import { debugLog } from './debug.js';
 import { enqueueAgentTask } from './agent-dispatch.service.js';
 import { GROUP_COORDINATOR_ID } from '../system-assistant.constants.js';
-import { createInternalCoordinatorAgent } from '../internal-coordinator-agent.js';
+import { workbenchTaskService } from '../../../modules/workbench/workbench.service.js';
 import { scheduleStallWatchdog, resetStallWatchdog } from './stall-watchdog.js';
-import {
-  buildCoordinatorRecentContext,
-  withCoordinatorContext,
-} from './coordinator-context.js';
+import { runCoordinatorDispatch } from '../coordinator-dispatch.js';
 import { messageMentionsRoomUser } from './user-mention-utils.js';
 import { checkAndClearInterrupted } from './stall-watchdog.js';
 import {
@@ -28,6 +26,11 @@ import {
 interface ReceivedMessageEvent {
   message: Message;
   chatRoomId: string;
+  bridgeInfo?: {
+    platform: Platform;
+    externalId: string;
+    sourceMessageId?: string;
+  };
 }
 
 export function shouldTriggerCoordinatorAgent(params: {
@@ -131,7 +134,7 @@ export function setupAIHandlers(
   messageEventEmitter.on(
     'receivedMessage',
     async (data: ReceivedMessageEvent) => {
-      const {message, chatRoomId} = data;
+      const {message, chatRoomId, bridgeInfo} = data;
 
       // 更新恢复服务的群状态
       const agentName = message.isHuman ? undefined : message.agentName;
@@ -154,6 +157,13 @@ export function setupAIHandlers(
       let hasUserMentions = false;
       if (!message.isHuman && chatRoom) {
         hasUserMentions = await messageMentionsRoomUser(chatRoomId, message.content);
+        if (hasUserMentions) {
+          try {
+            await workbenchTaskService.syncNeedsInputOnUserMention(chatRoomId);
+          } catch (error) {
+            console.error('[workbench] 同步需补充状态失败:', error);
+          }
+        }
       }
 
       // 卡住检测兜底（仅自由协作 auto 模式）：人类发言清零连续救援计数；
@@ -243,6 +253,7 @@ export function setupAIHandlers(
             skipHistory: true,
             sessionDir, // 仅在快速对话显式指定工作目录时传递
             attachments: attachmentsData,  // 传递图片附件
+            bridgeInfo,  // 传递 Bridge 信息
           });
         }
         // 快速对话助手已触发，直接返回（不处理 @mentions）
@@ -289,21 +300,7 @@ export function setupAIHandlers(
             hasMentions,
           });
 
-          // 调度助手非群成员，消息索引段与回查工具都被门控；把最近群消息作为
-          // 「仅供裁决参考」上下文拼进触发消息正文，让它能基于最近上下文路由。
-          const contextBlock = await buildCoordinatorRecentContext(
-            chatRoomId,
-            message.id,
-          );
-          const coordinatorMessage = contextBlock
-            ? { ...message, content: withCoordinatorContext(message.content, contextBlock) }
-            : message;
-
-          await enqueueAgentTask(
-            chatRoomId,
-            coordinatorMessage,
-            createInternalCoordinatorAgent(coordinatorAgent),
-          );
+            await runCoordinatorDispatch(chatRoomId, message, coordinatorAgent);
         } else {
           console.warn(`[coordinatorAgentTrigger] 内置协调助手不存在或未启用: ${GROUP_COORDINATOR_ID}`);
         }
@@ -352,7 +349,7 @@ export function setupAIHandlers(
                 replyMessageId: message.replyMessageId,
               });
 
-              await enqueueAgentTask(chatRoomId, message, agent);
+              await enqueueAgentTask(chatRoomId, message, agent, null, { bridgeInfo });
             }
           }
           return;
@@ -389,7 +386,7 @@ export function setupAIHandlers(
               triggerMessageId: message.id,
             });
 
-            await enqueueAgentTask(chatRoomId, message, agent);
+            await enqueueAgentTask(chatRoomId, message, agent, null, { bridgeInfo });
           }
         }
         return;
@@ -439,7 +436,7 @@ export function setupAIHandlers(
           }
         }
 
-        await enqueueAgentTask(chatRoomId, message, agent, quickChatTargetAgent);
+        await enqueueAgentTask(chatRoomId, message, agent, quickChatTargetAgent, { bridgeInfo });
         dispatchedAgentIds.push(agent.id);
       }
 

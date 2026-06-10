@@ -1,4 +1,5 @@
 import type { IAgentExecutor, ToolCall } from '../executor.interface.js';
+import type { Platform } from '../../../modules/bridge/bridge.service.js';
 
 // Agent executor cache - keyed by chatRoomId_agentName for memory isolation
 export const executorCache = new Map<string, IAgentExecutor>();
@@ -35,6 +36,14 @@ export const streamEventsCache = new Map<string, CachedStreamEvent[]>();
 // 记录每个 chatRoom-agent 上次已注入的群规则全文（按 chatRoomId_agentName 存储），
 // 用于「仅在群规则变化时注入全文，其余棒只追加短提醒」以节省 token。
 export const injectedRoomRulesCache = new Map<string, string>();
+
+// Bridge 信息缓存 - 按 taskId 存储，用于在执行时注入到提示词
+export interface BridgeInfo {
+  platform: Platform;
+  externalId: string;
+  sourceMessageId?: string;
+}
+export const bridgeInfoCache = new Map<string, BridgeInfo>();
 
 export function clearExecutorCacheEntries(agentName?: string, chatRoomId?: string): number {
   if (!agentName && chatRoomId) {
@@ -112,6 +121,7 @@ export function clearAllExecutionState(): void {
   taskExecutionStartedAt.clear();
   streamEventsCache.clear();
   injectedRoomRulesCache.clear();
+  bridgeInfoCache.clear();
 
   console.log('[AgentHandler] 已清理所有执行状态');
 }

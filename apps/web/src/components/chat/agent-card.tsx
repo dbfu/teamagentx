@@ -1,4 +1,4 @@
-import { MoreHorizontal, Pencil, Trash2, Power, PowerOff, Copy, Zap, Download, Settings } from 'lucide-react'
+import { MoreHorizontal, Pencil, Trash2, Power, PowerOff, Copy, Zap, Download, Settings, History } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Agent } from '@/lib/agent-api'
 import { AgentAvatar } from './agent-avatar'
@@ -18,6 +18,7 @@ interface AgentCardProps {
   onDelete: (assistant: Agent) => void
   onStartQuickChat?: (agent: Agent) => void
   onInstallSkill?: (agent: Agent) => void
+  onCoordinatorLogs?: (agent: Agent) => void
   onClick?: (assistant: Agent) => void // 点击跳转详情页
   isDragging?: boolean // 是否正在被拖拽
 }
@@ -31,6 +32,7 @@ function MenuContent({
   onDelete,
   onStartQuickChat,
   onInstallSkill,
+  onCoordinatorLogs,
 }: {
   assistant: Agent
   onEdit: (assistant: Agent) => void
@@ -39,6 +41,7 @@ function MenuContent({
   onDelete: (assistant: Agent) => void
   onStartQuickChat?: (agent: Agent) => void
   onInstallSkill?: (agent: Agent) => void
+  onCoordinatorLogs?: (agent: Agent) => void
 }) {
   const { t } = useTranslation()
   const isSystemAgent = assistant.agentLevel === 'system'
@@ -46,7 +49,7 @@ function MenuContent({
   const isGroupCoordinator = assistant.id === GROUP_COORDINATOR_ID || assistant.name === '群调度助手'
   const canConfigureSystemModel = isSystemAgent && (isGroupAssistant || isGroupCoordinator)
   const canStartQuickChat = assistant.isActive && onStartQuickChat && (!isSystemAgent || isGroupAssistant)
-  const hasTopActions = canStartQuickChat || (!isSystemAgent && onInstallSkill)
+  const hasTopActions = canStartQuickChat || (!isSystemAgent && onInstallSkill) || (isGroupCoordinator && onCoordinatorLogs)
   const hasEditActions = !isSystemAgent || canConfigureSystemModel
 
   return (
@@ -70,6 +73,17 @@ function MenuContent({
         >
           <Download className="size-3.5" />
           {t('assistant.installSkill')}
+        </button>
+      )}
+
+      {/* 调度日志 - 仅对群调度助手显示 */}
+      {isGroupCoordinator && onCoordinatorLogs && (
+        <button
+          onClick={() => onCoordinatorLogs(assistant)}
+          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/50"
+        >
+          <History className="size-3.5" />
+          {t('workbench.coordinatorLogs')}
         </button>
       )}
 
@@ -149,6 +163,7 @@ export function AgentCard({
   onDelete,
   onStartQuickChat,
   onInstallSkill,
+  onCoordinatorLogs,
   onClick,
   isDragging,
 }: AgentCardProps) {
@@ -214,6 +229,7 @@ export function AgentCard({
             onDelete={onDelete}
             onStartQuickChat={onStartQuickChat}
             onInstallSkill={onInstallSkill}
+            onCoordinatorLogs={onCoordinatorLogs}
           />
         </FloatingMenu>
       )}
@@ -229,6 +245,7 @@ export function AgentCard({
             onDelete={onDelete}
             onStartQuickChat={onStartQuickChat}
             onInstallSkill={onInstallSkill}
+            onCoordinatorLogs={onCoordinatorLogs}
           />
         </div>
       )}
