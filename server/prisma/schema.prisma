@@ -139,6 +139,7 @@ model Agent {
   platformConfigs   PlatformConfig[] // 作为平台全局默认助手
   bridgeBots        BridgeBot[] // 外部平台机器人实例
   capabilities      AgentCapability[]
+  coordinatorLogs   CoordinatorLog[] // 作为来源助手的调度日志
 
   @@index([name])
   @@index([categoryId])
@@ -197,6 +198,8 @@ model ChatRoom {
   platformConfigs   PlatformConfig[] // 直接绑定到该群聊的平台机器人
   bridgeBots        BridgeBot[] // 直接绑定到该群聊的机器人实例
   workbenchTasks    WorkbenchTask[] // 工作台派发任务
+  coordinatorLogs   CoordinatorLog[] // 群调度助手决策日志
+  customCommands    ChatRoomCommand[] // 群聊自定义指令
 
   @@index([name])
   @@index([ownerId])
@@ -253,6 +256,7 @@ model Message {
   attachments       Attachment[] // 消息附件（图片等）
   todo              Todo? // 助手 @ 用户触发的待办
   coveredMemories   AgentRoomMemory[]       @relation("AgentRoomMemoryCoveredMessage")
+  coordinatorLog    CoordinatorLog? // 群调度助手决策日志
 
   @@index([time])
   @@index([chatRoomId])
@@ -416,6 +420,26 @@ model CronTask {
   executions CronTaskExecution[]
 
   @@index([enabled, nextRunAt])
+  @@index([chatRoomId])
+}
+
+// 群聊自定义指令：用户在群内定义的 /指令，选中后将内容填充到输入框
+model ChatRoomCommand {
+  id         String @id @default(uuid())
+  chatRoomId String
+
+  name    String // 指令名称（不含 "/"），如 "部署"
+  content String // 指令内容，选中后填充到输入框
+
+  sortOrder Int @default(0) // 排序
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String?
+
+  chatRoom ChatRoom @relation(fields: [chatRoomId], references: [id], onDelete: Cascade)
+
+  @@unique([chatRoomId, name])
   @@index([chatRoomId])
 }
 
@@ -709,4 +733,37 @@ model CheckpointWrite {
 
   @@id([threadId, checkpointNs, checkpointId, taskId, idx])
   @@map("writes")
+}
+
+// 群调度助手决策日志
+model CoordinatorLog {
+  id             String   @id @default(uuid())
+  chatRoomId     String
+  triggerMessageId String  @unique // 触发消息 ID
+
+  // 决策信息
+  decision       String   // dispatch/no_dispatch/ask_owner/cannot_dispatch
+  targetAgentIds String?  // JSON 数组，目标助手 ID 列表
+  content        String?  // 调度内容（dispatch/ask_owner 时）
+  forwardVerbatim Boolean @default(false) // 是否原文转发
+  reason         String?  // cannot_dispatch 时的原因
+
+  // 来源信息
+  sourceAgentId  String?  // 来源助手 ID（如果是助手消息触发）
+  sourceIsHuman  Boolean  @default(true) // 是否是人类用户消息触发
+  sourceContent  String?  // 触发消息内容摘要
+
+  // 执行结果
+  success        Boolean  @default(true) // 决策是否成功执行
+  errorMessage   String?  // 执行错误信息
+
+  createdAt      DateTime @default(now())
+
+  chatRoom       ChatRoom @relation(fields: [chatRoomId], references: [id], onDelete: Cascade)
+  triggerMessage Message  @relation(fields: [triggerMessageId], references: [id], onDelete: Cascade)
+  sourceAgent    Agent?   @relation(fields: [sourceAgentId], references: [id], onDelete: SetNull)
+
+  @@index([chatRoomId])
+  @@index([createdAt])
+  @@map("coordinator_logs")
 }
