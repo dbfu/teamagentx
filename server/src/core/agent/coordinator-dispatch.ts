@@ -21,7 +21,12 @@ import {
 } from './agent-handler/coordinator-context.js';
 import { enqueueAgentTask } from './agent-handler/agent-dispatch.service.js';
 import { startParallelBatch } from './agent-handler/parallel-batch-tracker.js';
-import { globalEmit, globalEmitTyping, globalEmitDone } from './agent-handler/status.js';
+import {
+  globalEmit,
+  globalBroadcastMessage,
+  globalEmitTyping,
+  globalEmitDone,
+} from './agent-handler/status.js';
 import { buildAIMessage } from './agent-handler/message-utils.js';
 import type { Message } from '../../types/message.js';
 import { debugLog } from './agent-handler/debug.js';
@@ -400,7 +405,10 @@ async function executeDecision(
         replyMessageId: triggerMessage.id,
         isHuman: false,
       });
-      if (globalEmit) await globalEmit(dispatchMsg, chatRoomId);
+      // 关键：调度广播必须用「仅 UI 同步」的 globalBroadcastMessage，而非会触发 receivedMessage
+      // 的 globalEmit。否则这条 "@运维 ..." 广播会重新进入 handler，命中 @提及分派把目标助手
+      // 再入队一次；与下面 executeDecision 直接 enqueue 叠加，导致同一助手被调度两次。
+      if (globalBroadcastMessage) await globalBroadcastMessage(dispatchMsg, chatRoomId);
 
       // 用已保存的调度消息作为触发源，让目标助手的回复能正确指向它
       const dispatchedIds: string[] = [];
