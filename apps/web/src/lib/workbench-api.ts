@@ -13,7 +13,6 @@ export type WorkbenchTaskStatus =
   | 'waiting_review'
   | 'needs_input'
   | 'completed'
-  | 'blocked'
 
 export type WorkbenchTaskPriority = 'low' | 'medium' | 'high'
 

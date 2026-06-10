@@ -5,7 +5,8 @@ import { ChatRoom } from '@/lib/agent-api'
 import { GroupAvatarImage } from '@/lib/group-avatars'
 import { workbenchApi, type WorkbenchTask, type WorkbenchTaskStatus } from '@/lib/workbench-api'
 import { cn } from '@/lib/utils'
-import { useChatRoomStore } from '@/stores'
+import { useChatRoomStore, useSocketStore } from '@/stores'
+import { statusMeta, TaskStatusSelect } from './task-status-select'
 import {
   AlertCircle,
   ArrowRight,
@@ -14,6 +15,7 @@ import {
   CheckCircle2,
   ChevronDown,
   Clock3,
+  LayoutDashboard,
   ListTodo,
   Loader2,
   MessageSquare,
@@ -23,42 +25,15 @@ import {
   Sparkles,
   Trash2,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
+import { useTranslation } from 'react-i18next'
 
-const statusMeta: Record<WorkbenchTaskStatus, { label: string; tone: string; column: string }> = {
-  draft: { label: '待派发', tone: 'bg-slate-100 text-slate-700', column: '待派发' },
-  dispatched: { label: '已派发', tone: 'bg-blue-100 text-blue-700', column: '执行中' },
-  in_progress: { label: '执行中', tone: 'bg-cyan-100 text-cyan-700', column: '执行中' },
-  waiting_review: { label: '待确认', tone: 'bg-amber-100 text-amber-700', column: '待确认' },
-  needs_input: { label: '需补充', tone: 'bg-orange-100 text-orange-700', column: '卡住' },
-  completed: { label: '已完成', tone: 'bg-emerald-100 text-emerald-700', column: '已完成' },
-  blocked: { label: '卡住', tone: 'bg-red-100 text-red-700', column: '卡住' },
-}
+const columnKeys = ['columnDraft', 'columnInProgress', 'columnWaitingReview', 'columnCompleted', 'columnNeedsInput'] as const
 
-const statusOptions: WorkbenchTaskStatus[] = [
-  'draft',
-  'dispatched',
-  'in_progress',
-  'waiting_review',
-  'needs_input',
-  'completed',
-  'blocked',
-]
-
-const columns = ['待派发', '执行中', '待确认', '已完成', '卡住']
-
-function todayLabel() {
-  return new Intl.DateTimeFormat('zh-CN', {
-    month: 'long',
-    day: 'numeric',
-    weekday: 'long',
-  }).format(new Date())
-}
-
-function formatTime(value: string | null | undefined) {
-  if (!value) return '暂无动态'
+function formatTime(value: string | null | undefined, noActivityText: string) {
+  if (!value) return noActivityText
   return new Intl.DateTimeFormat('zh-CN', {
     hour: '2-digit',
     minute: '2-digit',
@@ -78,40 +53,15 @@ function RoomSelectDisplay({ room }: { room: Pick<ChatRoom, 'avatar' | 'name'> }
   )
 }
 
-function TaskStatusBadge({ status }: { status: WorkbenchTaskStatus }) {
+function TaskStatusBadge({ status, t }: { status: WorkbenchTaskStatus; t: (key: string) => string }) {
   const meta = statusMeta[status]
   return (
     <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium', meta.tone)}>
-      {meta.label}
+      {t(`workbench.${meta.labelKey}`)}
     </span>
   )
 }
 
-function StatTile({
-  label,
-  value,
-  icon: Icon,
-  tone,
-}: {
-  label: string
-  value: number
-  icon: typeof ListTodo
-  tone: string
-}) {
-  return (
-    <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <div className="text-xs text-gray-500">{label}</div>
-          <div className="mt-1 text-2xl font-semibold text-gray-900">{value}</div>
-        </div>
-        <div className={cn('flex size-9 items-center justify-center rounded-lg', tone)}>
-          <Icon className="size-4" />
-        </div>
-      </div>
-    </div>
-  )
-}
 
 function TaskRow({
   task,
@@ -121,6 +71,7 @@ function TaskRow({
   onStatusChange,
   onOpenRoom,
   busy,
+  t,
 }: {
   task: WorkbenchTask
   rooms: ChatRoom[]
@@ -129,39 +80,35 @@ function TaskRow({
   onStatusChange: (task: WorkbenchTask, status: WorkbenchTaskStatus) => void
   onOpenRoom: (task: WorkbenchTask) => void
   busy: boolean
+  t: (key: string) => string
 }) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+    <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="break-words text-sm font-semibold text-gray-900">{task.title}</h3>
-            <TaskStatusBadge status={task.status} />
+            <h3 className="break-words text-sm font-semibold text-foreground">{task.title}</h3>
+            <TaskStatusBadge status={task.status} t={t} />
           </div>
-          <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-gray-500">
+          <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1">
               <MessageSquare className="size-3.5" />
-              {task.chatRoom?.name ?? rooms.find((room) => room.id === task.chatRoomId)?.name ?? '未知群聊'}
+              {task.chatRoom?.name ?? rooms.find((room) => room.id === task.chatRoomId)?.name ?? t('workbench.noMatchingGroup')}
             </span>
-            <span>最新：{formatTime(task.lastActivityAt || task.updatedAt)}</span>
+            <span>{t('workbench.latestTime')}{formatTime(task.lastActivityAt || task.updatedAt, t('workbench.noActivity'))}</span>
           </div>
           {(task.expectedOutput || task.description) && (
-            <p className="mt-2 line-clamp-2 text-sm text-gray-600">
-              {task.expectedOutput ? `产出：${task.expectedOutput}` : task.description}
+            <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">
+              {task.expectedOutput ? `${t('workbench.outputLabel')}${task.expectedOutput}` : task.description}
             </p>
           )}
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <select
+          <TaskStatusSelect
             value={task.status}
-            onChange={(event) => onStatusChange(task, event.target.value as WorkbenchTaskStatus)}
-            className="h-9 rounded-lg border border-gray-200 bg-white px-2 text-sm text-gray-700 focus:border-blue-500 focus:outline-none"
-          >
-            {statusOptions.map((status) => (
-              <option key={status} value={status}>{statusMeta[status].label}</option>
-            ))}
-          </select>
+            onChange={(status) => onStatusChange(task, status)}
+          />
           <Button
             type="button"
             variant="outline"
@@ -170,7 +117,7 @@ function TaskRow({
             onClick={() => onOpenRoom(task)}
           >
             <ArrowRight className="size-4" />
-            进入群聊
+            {t('workbench.enterGroup')}
           </Button>
           <Button
             type="button"
@@ -180,13 +127,13 @@ function TaskRow({
             onClick={() => onDispatch(task)}
           >
             {busy ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
-            派发
+            {t('workbench.dispatch')}
           </Button>
           <Button
             type="button"
             variant="ghost"
             size="icon"
-            className="size-9 text-gray-500 hover:bg-red-50 hover:text-red-600"
+            className="size-9 text-muted-foreground hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950 dark:hover:text-red-400"
             onClick={() => onDelete(task)}
           >
             <Trash2 className="size-4" />
@@ -198,6 +145,8 @@ function TaskRow({
 }
 
 export function WorkbenchPage() {
+  const { t } = useTranslation()
+  const isElectron = window.electronAPI?.isElectron ?? false
   const navigate = useNavigate()
   const chatRooms = useChatRoomStore((s) => s.chatRooms)
   const loadChatRooms = useChatRoomStore((s) => s.loadChatRooms)
@@ -217,6 +166,8 @@ export function WorkbenchPage() {
     note: '',
   })
 
+  const columns = useMemo(() => columnKeys.map((key) => t(`workbench.${key}`)), [t])
+
   const refreshTasks = async () => {
     setLoading(true)
     try {
@@ -224,7 +175,7 @@ export function WorkbenchPage() {
       if (response.success && response.data) {
         setTasks(response.data)
       } else {
-        toast.error(response.error || '加载工作台任务失败')
+        toast.error(response.error || t('workbench.loadTasksFailed'))
       }
     } finally {
       setLoading(false)
@@ -236,50 +187,51 @@ export function WorkbenchPage() {
     refreshTasks()
   }, [loadChatRooms])
 
+  // 订阅工作台任务状态实时更新（agent 执行进度自动推进派发任务状态）
+  const socket = useSocketStore((s) => s.socket)
+  useEffect(() => {
+    if (!socket) return
+    const handleTaskUpdated = (task: WorkbenchTask) => {
+      setTasks((current) =>
+        current.some((item) => item.id === task.id)
+          ? current.map((item) => (item.id === task.id ? task : item))
+          : current,
+      )
+    }
+    socket.on('workbench:task-updated', handleTaskUpdated)
+    return () => {
+      socket.off('workbench:task-updated', handleTaskUpdated)
+    }
+  }, [socket])
+
   const selectedRoom = roomOptions.find((room) => room.id === form.chatRoomId) ?? null
 
   const stats = useMemo(() => {
     const total = tasks.length
     const completed = tasks.filter((task) => task.status === 'completed').length
-    const waiting = tasks.filter((task) => task.status === 'waiting_review' || task.status === 'needs_input').length
-    const blocked = tasks.filter((task) => task.status === 'blocked' || task.status === 'needs_input').length
-    const running = tasks.filter((task) => ['dispatched', 'in_progress'].includes(task.status)).length
+    const waiting = tasks.filter((task) => task.status === 'waiting_review').length
+    const blocked = tasks.filter((task) => task.status === 'needs_input').length
+    const running = tasks.filter((task) => task.status === 'dispatched' || task.status === 'in_progress').length
     return { total, completed, running, waiting, blocked }
   }, [tasks])
 
   const tasksByColumn = useMemo(() => {
     return columns.reduce<Record<string, WorkbenchTask[]>>((acc, column) => {
-      acc[column] = tasks.filter((task) => statusMeta[task.status].column === column)
+      acc[column] = tasks.filter((task) => t(`workbench.${statusMeta[task.status].columnKey}`) === column)
       return acc
     }, {})
-  }, [tasks])
-
-  const roomStats = useMemo(() => {
-    return roomOptions
-      .map((room) => {
-        const roomTasks = tasks.filter((task) => task.chatRoomId === room.id)
-        return {
-          room,
-          total: roomTasks.length,
-          completed: roomTasks.filter((task) => task.status === 'completed').length,
-          running: roomTasks.filter((task) => ['dispatched', 'in_progress'].includes(task.status)).length,
-          blocked: roomTasks.filter((task) => task.status === 'blocked' || task.status === 'needs_input').length,
-        }
-      })
-      .filter((item) => item.total > 0)
-      .sort((a, b) => b.total - a.total)
-  }, [roomOptions, tasks])
+  }, [tasks, t, columns])
 
   const draftTasks = tasks.filter((task) => task.status === 'draft')
 
   const handleRecommendRoom = async () => {
     if (roomOptions.length === 0) {
-      toast.error('暂无可推荐的群聊')
+      toast.error(t('workbench.noGroupsToRecommend'))
       return
     }
 
     if (![form.title, form.expectedOutput, form.description, form.note].some((value) => value.trim())) {
-      toast.error('请先填写任务内容或补充说明')
+      toast.error(t('workbench.fillTaskFirst'))
       return
     }
 
@@ -293,18 +245,18 @@ export function WorkbenchPage() {
       })
 
       if (!response.success || !response.data) {
-        toast.error(response.error || '推荐目标群聊失败')
+        toast.error(response.error || t('workbench.recommendGroupFailed'))
         return
       }
 
       if (!response.data.chatRoomId) {
-        toast.error(response.data.reason || '没有找到匹配的群聊')
+        toast.error(response.data.reason || t('workbench.noMatchingGroup'))
         return
       }
 
       const recommendedRoom = roomOptions.find((room) => room.id === response.data?.chatRoomId)
       setForm((current) => ({ ...current, chatRoomId: response.data!.chatRoomId! }))
-      toast.success(`已推荐「${recommendedRoom?.name ?? '目标群聊'}」`, {
+      toast.success(t('workbench.groupRecommended', { name: recommendedRoom?.name ?? t('workbench.targetGroup') }), {
         description: response.data.reason,
       })
     } finally {
@@ -314,11 +266,11 @@ export function WorkbenchPage() {
 
   const handleCreateTask = async () => {
     if (!form.title.trim()) {
-      toast.error('请输入任务内容')
+      toast.error(t('workbench.taskContentRequired'))
       return
     }
     if (!form.chatRoomId) {
-      toast.error('请选择目标群聊')
+      toast.error(t('workbench.selectTargetGroup'))
       return
     }
 
@@ -342,7 +294,7 @@ export function WorkbenchPage() {
           note: '',
         }))
       } else {
-        toast.error(response.error || '创建任务失败')
+        toast.error(response.error || t('workbench.createTaskFailed'))
       }
     } finally {
       setSaving(false)
@@ -359,9 +311,9 @@ export function WorkbenchPage() {
       const response = await workbenchApi.dispatch(task.id)
       if (response.success && response.data) {
         replaceTask(response.data)
-        toast.success(`已派发到「${response.data.chatRoom.name}」`)
+        toast.success(t('workbench.dispatchSuccess', { name: response.data.chatRoom.name }))
       } else {
-        toast.error(response.error || '派发失败')
+        toast.error(response.error || t('workbench.dispatchFailed'))
       }
     } finally {
       setDispatchingIds((current) => {
@@ -383,9 +335,9 @@ export function WorkbenchPage() {
           const byId = new Map(response.data!.map((task) => [task.id, task]))
           return current.map((task) => byId.get(task.id) ?? task)
         })
-        toast.success(`已派发 ${response.data.length} 个任务`)
+        toast.success(t('workbench.dispatchCountSuccess', { count: response.data.length }))
       } else {
-        toast.error(response.error || '批量派发失败')
+        toast.error(response.error || t('workbench.batchDispatchFailed'))
       }
     } finally {
       setDispatchingIds(new Set())
@@ -397,7 +349,7 @@ export function WorkbenchPage() {
     if (response.success) {
       setTasks((current) => current.filter((item) => item.id !== task.id))
     } else {
-      toast.error(response.error || '删除任务失败')
+      toast.error(response.error || t('workbench.deleteTaskFailed'))
     }
   }
 
@@ -406,7 +358,7 @@ export function WorkbenchPage() {
     if (response.success && response.data) {
       replaceTask(response.data)
     } else {
-      toast.error(response.error || '更新状态失败')
+      toast.error(response.error || t('workbench.updateStatusFailed'))
     }
   }
 
@@ -415,87 +367,120 @@ export function WorkbenchPage() {
     navigate(`/?room=${task.chatRoomId}${msg}`)
   }
 
+  const statCards = useMemo(() => [
+    { label: t('workbench.statusRunning'), value: stats.running, icon: Clock3, bg: 'bg-cyan-100 dark:bg-cyan-900', icon_color: 'text-cyan-600 dark:text-cyan-400' },
+    { label: t('workbench.statusWaiting'), value: stats.waiting, icon: AlertCircle, bg: 'bg-amber-100 dark:bg-amber-900', icon_color: 'text-amber-600 dark:text-amber-400' },
+    { label: t('workbench.statusCompleted'), value: stats.completed, icon: CheckCircle2, bg: 'bg-emerald-100 dark:bg-emerald-900', icon_color: 'text-emerald-600 dark:text-emerald-400' },
+    { label: t('workbench.statusBlocked'), value: stats.blocked, icon: AlertCircle, bg: 'bg-orange-100 dark:bg-orange-900', icon_color: 'text-orange-600 dark:text-orange-400' },
+  ], [stats, t])
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-gray-50">
-      <div className="flex shrink-0 flex-col gap-4 border-b border-gray-200 bg-white px-6 py-5 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <div className="text-sm text-gray-500">{todayLabel()}</div>
-          <h1 className="mt-1 text-2xl font-semibold text-gray-900">工作台</h1>
+    <div className="flex min-h-0 flex-1 flex-col bg-muted">
+      <div
+        className="flex h-[52px] shrink-0 items-center border-b border-border bg-background px-4"
+        style={isElectron ? { WebkitAppRegion: 'drag' } as React.CSSProperties : {}}
+      >
+        <div
+          className="flex flex-1 items-center gap-2"
+          style={isElectron ? { WebkitAppRegion: 'drag' } as React.CSSProperties : {}}
+        >
+          <LayoutDashboard className="size-4 text-primary" />
+          <h1 className="text-base font-semibold">{t('workbench.title')}</h1>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex rounded-lg border border-gray-200 bg-gray-50 p-1">
-            <button
-              className={cn('flex h-9 items-center gap-1.5 rounded-md px-3 text-sm', view === 'list' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600')}
-              onClick={() => setView('list')}
-            >
-              <ListTodo className="size-4" />
-              今日清单
-            </button>
-            <button
-              className={cn('flex h-9 items-center gap-1.5 rounded-md px-3 text-sm', view === 'screen' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600')}
-              onClick={() => setView('screen')}
-            >
-              <BarChart3 className="size-4" />
-              进度大屏
-            </button>
-          </div>
-          <Button type="button" variant="outline" className="gap-1.5" onClick={refreshTasks}>
+        <div
+          className="flex rounded-md border border-border bg-muted p-0.5"
+          style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+        >
+          <button
+            className={cn('flex h-7 items-center gap-1 rounded px-2.5 text-xs', view === 'list' ? 'bg-background text-blue-600 shadow-sm' : 'text-muted-foreground')}
+            onClick={() => setView('list')}
+          >
+            <ListTodo className="size-3.5" />
+            {t('workbench.todayList')}
+          </button>
+          <button
+            className={cn('flex h-7 items-center gap-1 rounded px-2.5 text-xs', view === 'screen' ? 'bg-background text-blue-600 shadow-sm' : 'text-muted-foreground')}
+            onClick={() => setView('screen')}
+          >
+            <BarChart3 className="size-3.5" />
+            {t('workbench.taskBoard')}
+          </button>
+        </div>
+        <div
+          className="flex flex-1 items-center justify-end gap-2"
+          style={isElectron ? { WebkitAppRegion: 'drag' } as React.CSSProperties : {}}
+        >
+          <Button
+            type="button"
+            variant="outline"
+            className="gap-1.5"
+            onClick={refreshTasks}
+            style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+          >
             <RefreshCw className="size-4" />
-            刷新
+            {t('workbench.refresh')}
           </Button>
           <Button
             type="button"
             disabled={draftTasks.length === 0 || dispatchingIds.size > 0}
             className="gap-1.5 bg-blue-500 hover:bg-blue-600"
             onClick={handleDispatchAll}
+            style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
           >
             {dispatchingIds.size > 0 ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
-            开始今天的工作
+            {t('workbench.startWork')}
           </Button>
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-6">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-          <StatTile label="今日任务" value={stats.total} icon={ListTodo} tone="bg-slate-100 text-slate-700" />
-          <StatTile label="执行中" value={stats.running} icon={Clock3} tone="bg-cyan-100 text-cyan-700" />
-          <StatTile label="待处理" value={stats.waiting} icon={AlertCircle} tone="bg-amber-100 text-amber-700" />
-          <StatTile label="已完成" value={stats.completed} icon={CheckCircle2} tone="bg-emerald-100 text-emerald-700" />
-          <StatTile label="卡住" value={stats.blocked} icon={AlertCircle} tone="bg-red-100 text-red-700" />
-        </div>
-
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
         {view === 'list' ? (
-          <div className="mt-6 grid gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
-            <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+          <>
+            <div className="mb-3 grid shrink-0 grid-cols-4 gap-3">
+              {statCards.map(({ label, value, icon: Icon, bg, icon_color }) => (
+                <div key={label} className="rounded-xl border border-border bg-card px-4 py-3.5 shadow-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-xs text-muted-foreground">{label}</div>
+                      <div className="mt-1 text-3xl font-bold text-foreground">{value}</div>
+                    </div>
+                    <div className={cn('flex size-11 shrink-0 items-center justify-center rounded-xl', bg)}>
+                      <Icon className={cn('size-5', icon_color)} />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="grid min-h-0 flex-1 gap-3 xl:grid-cols-[420px_minmax(0,1fr)]">
+            <section className="overflow-y-auto rounded-lg border border-border bg-card p-3 shadow-sm">
               <div className="mb-4 flex items-center justify-between gap-3">
-                <h2 className="text-base font-semibold text-gray-900">添加今日任务</h2>
-                <Plus className="size-4 text-gray-400" />
+                <h2 className="text-base font-semibold text-foreground">{t('workbench.addTaskTitle')}</h2>
+                <Plus className="size-4 text-muted-foreground" />
               </div>
               <div className="space-y-4">
                 <label className="block">
-                  <span className="mb-1.5 block text-sm font-medium text-gray-700">任务内容 <span className="text-red-500">*</span></span>
+                  <span className="mb-1.5 block text-sm font-medium text-foreground">{t('workbench.taskContent')} <span className="text-red-500">*</span></span>
                   <textarea
                     value={form.title}
                     onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))}
                     rows={4}
-                    className="w-full resize-none rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-                    placeholder="例如：修复桌面版 DMG 启动失败问题"
+                    className="w-full resize-none rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus:border-blue-500 focus:outline-none dark:bg-input/30"
                   />
                 </label>
 
                 <div className="block">
                   <div className="mb-1.5 flex items-center justify-between gap-3">
-                    <span className="block text-sm font-medium text-gray-700">目标群聊 <span className="text-red-500">*</span></span>
+                    <span className="block text-sm font-medium text-foreground">{t('workbench.targetGroup')} <span className="text-red-500">*</span></span>
                     <Button
                       type="button"
                       variant="outline"
                       size="sm"
                       disabled={roomOptions.length === 0 || recommendingRoom}
-                      className="h-8 gap-1.5 border-gray-200 text-gray-600 hover:bg-gray-50"
+                      className="h-8 gap-1.5 border-border text-muted-foreground hover:bg-muted"
                       onClick={handleRecommendRoom}
                     >
                       {recommendingRoom ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
-                      {recommendingRoom ? '推荐中' : '自动推荐'}
+                      {recommendingRoom ? t('workbench.recommending') : t('workbench.autoRecommend')}
                     </Button>
                   </div>
                   <Popover open={roomSelectOpen} onOpenChange={setRoomSelectOpen}>
@@ -506,25 +491,25 @@ export function WorkbenchPage() {
                         role="combobox"
                         aria-expanded={roomSelectOpen}
                         disabled={roomOptions.length === 0}
-                        className="h-10 w-full justify-between rounded-lg border-gray-200 bg-white px-3 text-sm font-normal text-gray-900 hover:bg-white"
+                        className="h-10 w-full justify-between rounded-lg border-input bg-background px-3 text-sm font-normal text-foreground hover:bg-background dark:bg-input/30"
                       >
                         <span className="min-w-0 flex-1 text-left">
                           {selectedRoom ? (
                             <RoomSelectDisplay room={selectedRoom} />
                           ) : roomOptions.length === 0 ? (
-                            <span className="text-gray-400">暂无可选群聊</span>
+                            <span className="text-muted-foreground">{t('workbench.noAvailableGroups')}</span>
                           ) : (
-                            <span className="text-gray-400">请选择目标群聊</span>
+                            <span className="text-muted-foreground">{t('workbench.selectTargetGroup')}</span>
                           )}
                         </span>
-                        <ChevronDown className="ml-2 size-4 shrink-0 text-gray-400" />
+                        <ChevronDown className="ml-2 size-4 shrink-0 text-muted-foreground" />
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] p-0">
                       <Command>
-                        <CommandInput placeholder="搜索群聊名称、描述或助手..." />
+                        <CommandInput placeholder={t('chat.searchAssistantPlaceholder')} />
                         <CommandList className="max-h-72">
-                          <CommandEmpty>没有匹配的群聊</CommandEmpty>
+                          <CommandEmpty>{t('chat.noMatchingAssistants')}</CommandEmpty>
                           <CommandGroup>
                             {roomOptions.map((room) => (
                               <CommandItem
@@ -556,23 +541,21 @@ export function WorkbenchPage() {
                 </div>
 
                 <label className="block">
-                  <span className="mb-1.5 block text-sm font-medium text-gray-700">期望产出</span>
+                  <span className="mb-1.5 block text-sm font-medium text-foreground">{t('workbench.expectedOutput')}</span>
                   <input
                     value={form.expectedOutput}
                     onChange={(event) => setForm((current) => ({ ...current, expectedOutput: event.target.value }))}
-                    className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-                    placeholder="例如：定位原因并提交修复方案"
+                    className="w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus:border-blue-500 focus:outline-none dark:bg-input/30"
                   />
                 </label>
 
                 <label className="block">
-                  <span className="mb-1.5 block text-sm font-medium text-gray-700">补充说明</span>
+                  <span className="mb-1.5 block text-sm font-medium text-foreground">{t('workbench.additionalNotes')}</span>
                   <textarea
                     value={form.description}
                     onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
                     rows={3}
-                    className="w-full resize-none rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-                    placeholder="背景、约束、参考资料等"
+                    className="w-full resize-none rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus:border-blue-500 focus:outline-none dark:bg-input/30"
                   />
                 </label>
 
@@ -583,126 +566,74 @@ export function WorkbenchPage() {
                   onClick={handleCreateTask}
                 >
                   {saving ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
-                  加入今日清单
+                  {t('workbench.addToTodayList')}
                 </Button>
               </div>
             </section>
 
-            <section className="min-w-0">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <h2 className="text-base font-semibold text-gray-900">今日清单</h2>
-                <span className="text-sm text-gray-500">{draftTasks.length} 个待派发</span>
+            <section className="flex min-h-0 min-w-0 flex-col">
+              <div className="mb-3 flex shrink-0 items-center justify-between gap-3">
+                <h2 className="text-base font-semibold text-foreground">{t('workbench.todayListTitle')}</h2>
+                <span className="text-sm text-muted-foreground">{t('workbench.pendingDispatch', { count: draftTasks.length })}</span>
               </div>
-              {loading ? (
-                <div className="flex h-52 items-center justify-center rounded-lg border border-dashed border-gray-200 bg-white text-sm text-gray-500">
-                  <Loader2 className="mr-2 size-4 animate-spin" />
-                  加载中...
-                </div>
-              ) : tasks.length === 0 ? (
-                <div className="flex h-52 items-center justify-center rounded-lg border border-dashed border-gray-200 bg-white text-sm text-gray-500">
-                  今天还没有任务
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {tasks.map((task) => (
-                    <TaskRow
-                      key={task.id}
-                      task={task}
-                      rooms={roomOptions}
-                      busy={dispatchingIds.has(task.id)}
-                      onDispatch={handleDispatch}
-                      onDelete={handleDelete}
-                      onStatusChange={handleStatusChange}
-                      onOpenRoom={handleOpenRoom}
-                    />
-                  ))}
-                </div>
-              )}
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                {loading ? (
+                  <div className="flex h-52 items-center justify-center rounded-lg border border-dashed border-border bg-card text-sm text-muted-foreground">
+                    <Loader2 className="mr-2 size-4 animate-spin" />
+                    {t('workbench.loading')}
+                  </div>
+                ) : tasks.length === 0 ? (
+                  <div className="flex h-52 items-center justify-center rounded-lg border border-dashed border-border bg-card text-sm text-muted-foreground">
+                    {t('workbench.noTasks')}
+                  </div>
+                ) : (
+                  <div className="space-y-3 pb-2">
+                    {tasks.map((task) => (
+                      <TaskRow
+                        key={task.id}
+                        task={task}
+                        rooms={roomOptions}
+                        busy={dispatchingIds.has(task.id)}
+                        onDispatch={handleDispatch}
+                        onDelete={handleDelete}
+                        onStatusChange={handleStatusChange}
+                        onOpenRoom={handleOpenRoom}
+                        t={t}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
             </section>
           </div>
+          </>
         ) : (
-          <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-            <section className="min-w-0">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <h2 className="text-base font-semibold text-gray-900">任务看板</h2>
-                <span className="text-sm text-gray-500">跨群聊今日进度</span>
-              </div>
-              <div className="grid gap-4 lg:grid-cols-5">
-                {columns.map((column) => (
-                  <div key={column} className="min-h-80 rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
-                    <div className="mb-3 flex items-center justify-between">
-                      <h3 className="text-sm font-semibold text-gray-800">{column}</h3>
-                      <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">{tasksByColumn[column]?.length ?? 0}</span>
-                    </div>
-                    <div className="space-y-2">
-                      {(tasksByColumn[column] ?? []).map((task) => (
-                        <button
-                          key={task.id}
-                          type="button"
-                          onClick={() => handleOpenRoom(task)}
-                          className="w-full rounded-lg border border-gray-100 bg-gray-50 p-3 text-left transition-colors hover:border-blue-200 hover:bg-blue-50"
-                        >
-                          <div className="line-clamp-2 text-sm font-medium text-gray-900">{task.title}</div>
-                          <div className="mt-2 text-xs text-gray-500">
-                            <span className="truncate">{task.chatRoom?.name}</span>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
+        <div className="mt-3 flex min-h-0 flex-1 gap-2 overflow-hidden">
+            {columns.map((column) => (
+              <div key={column} className="flex min-h-0 flex-1 flex-col rounded-lg border border-border bg-card p-2 shadow-sm">
+                  <div className="mb-3 flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-foreground">{column}</h3>
+                    <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{tasksByColumn[column]?.length ?? 0}</span>
                   </div>
-                ))}
-              </div>
-            </section>
-
-            <aside className="space-y-6">
-              <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-                <h2 className="text-base font-semibold text-gray-900">群聊进度</h2>
-                <div className="mt-4 space-y-3">
-                  {roomStats.length === 0 ? (
-                    <div className="text-sm text-gray-500">暂无群聊任务</div>
-                  ) : roomStats.map((item) => (
-                    <div key={item.room.id} className="rounded-lg border border-gray-100 p-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="truncate text-sm font-medium text-gray-900">{item.room.name}</div>
-                        <div className="text-xs text-gray-500">{item.total} 个任务</div>
-                      </div>
-                      <div className="mt-2 h-2 overflow-hidden rounded-full bg-gray-100">
-                        <div
-                          className="h-full rounded-full bg-blue-500"
-                          style={{ width: `${item.total ? Math.round((item.completed / item.total) * 100) : 0}%` }}
-                        />
-                      </div>
-                      <div className="mt-2 text-xs text-gray-500">
-                        {item.completed} 完成 / {item.running} 执行中 / {item.blocked} 卡住
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-                <h2 className="text-base font-semibold text-gray-900">最新动态</h2>
-                <div className="mt-4 space-y-3">
-                  {[...tasks]
-                    .sort((a, b) => new Date(b.lastActivityAt || b.updatedAt).getTime() - new Date(a.lastActivityAt || a.updatedAt).getTime())
-                    .slice(0, 8)
-                    .map((task) => (
+                <div className="min-h-0 flex-1 overflow-y-auto">
+                  <div className="space-y-2">
+                    {(tasksByColumn[column] ?? []).map((task) => (
                       <button
                         key={task.id}
                         type="button"
                         onClick={() => handleOpenRoom(task)}
-                        className="flex w-full gap-3 text-left"
+                        className="w-full rounded-lg border border-border bg-muted p-1.5 text-left transition-colors hover:border-blue-200 hover:bg-blue-50 dark:hover:border-blue-800 dark:hover:bg-blue-950"
                       >
-                        <span className="w-12 shrink-0 text-xs text-gray-400">{formatTime(task.lastActivityAt || task.updatedAt)}</span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-sm text-gray-800">{task.title}</span>
-                          <span className="mt-0.5 block text-xs text-gray-500">{statusMeta[task.status].label} · {task.chatRoom?.name}</span>
-                        </span>
+                        <div className="text-sm font-medium text-foreground">{task.title}</div>
+                        <div className="mt-2 text-xs text-muted-foreground">
+                          <span className="truncate">{task.chatRoom?.name}</span>
+                        </div>
                       </button>
                     ))}
+                  </div>
                 </div>
-              </section>
-            </aside>
+              </div>
+            ))}
           </div>
         )}
       </div>
