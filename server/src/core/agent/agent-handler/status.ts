@@ -59,6 +59,15 @@ export function setGlobalEmitReceivedMessage(fn: (message: any, chatRoomId: stri
   globalEmitReceivedMessage = fn;
 }
 
+// 工作台任务状态更新的回调（推送给任务创建者 user:<userId>，实现前端实时刷新）
+export let globalEmitWorkbenchTaskUpdated:
+  | ((task: any, userId: string) => void)
+  | null = null;
+
+export function setGlobalEmitWorkbenchTaskUpdated(fn: (task: any, userId: string) => void) {
+  globalEmitWorkbenchTaskUpdated = fn;
+}
+
 export function setGlobalBroadcastMessage(
   fn: ((message: any, chatRoomId: string) => Promise<void> | void) | null,
 ) {

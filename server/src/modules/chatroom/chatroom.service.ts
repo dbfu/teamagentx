@@ -88,6 +88,7 @@ const agentInclude = {
       description: true,
       type: true,
       agentLevel: true,
+      isActive: true,
       workDir: true,
       speechConfig: true,
     },

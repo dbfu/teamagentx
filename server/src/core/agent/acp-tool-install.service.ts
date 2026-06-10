@@ -12,8 +12,8 @@ export const ACP_TOOL_PACKAGES: Record<string, string> = {
 };
 
 const DEFAULT_ACP_TOOL_INSTALL_REGISTRIES = [
-  'https://registry.npmjs.org',
   'https://registry.npmmirror.com',
+  'https://registry.npmjs.org',
 ];
 
 export interface AcpToolInstallPlan {

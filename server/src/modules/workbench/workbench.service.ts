@@ -5,7 +5,7 @@ import { chatRoomService } from '../chatroom/chatroom.service.js';
 import { llmProviderService } from '../llm-provider/llm-provider.service.js';
 import { createLlmClient } from '../../lib/llm-client.js';
 import { GROUP_COORDINATOR_ID } from '../../core/agent/system-assistant.constants.js';
-import { globalEmit } from '../../core/agent/agent-handler/status.js';
+import { globalEmit, globalEmitWorkbenchTaskUpdated } from '../../core/agent/agent-handler/status.js';
 import type { Message } from '../../types/message.js';
 
 export type WorkbenchTaskStatus =
@@ -14,8 +14,7 @@ export type WorkbenchTaskStatus =
   | 'in_progress'
   | 'waiting_review'
   | 'needs_input'
-  | 'completed'
-  | 'blocked';
+  | 'completed';
 
 export type WorkbenchTaskPriority = 'low' | 'medium' | 'high';
 
@@ -26,7 +25,6 @@ const VALID_STATUSES = new Set<WorkbenchTaskStatus>([
   'waiting_review',
   'needs_input',
   'completed',
-  'blocked',
 ]);
 
 const VALID_PRIORITIES = new Set<WorkbenchTaskPriority>(['low', 'medium', 'high']);
@@ -98,9 +96,12 @@ function getDayRange(date?: string) {
   return { start, end };
 }
 
-function buildDispatchContent(task: Awaited<ReturnType<typeof workbenchTaskService.findByIdOrThrow>>) {
+function buildDispatchContent(
+  task: Awaited<ReturnType<typeof workbenchTaskService.findByIdOrThrow>>,
+  mentionCoordinator: boolean,
+) {
   const lines = [
-    '@群调度助手 工作台派发今日任务：',
+    mentionCoordinator ? '@群调度助手 工作台派发今日任务：' : '工作台派发今日任务：',
     '',
     `任务ID：${task.id}`,
     `任务：${task.title}`,
@@ -294,17 +295,38 @@ export const workbenchTaskService = {
     this.assertOwner(task.createdBy, user.id);
     await this.assertCanUseChatRoom(task.chatRoomId, user.id);
 
-    const coordinatorAgent = await prisma.agent.findUnique({
-      where: { id: GROUP_COORDINATOR_ID },
-      select: { id: true, name: true, isActive: true },
+    const chatRoom = await prisma.chatRoom.findUnique({
+      where: { id: task.chatRoomId },
+      select: { agentTriggerMode: true, defaultAgentId: true },
     });
-    if (!coordinatorAgent?.isActive) {
-      throw new Error('群调度助手不存在或未启用');
+    const triggerMode = chatRoom?.agentTriggerMode ?? 'coordinator';
+
+    // 调度模式决定派发方式：
+    // - coordinator（群调度）：直接发普通消息，handler 自动唤起群调度助手分配任务
+    // - manual（手动）：@群调度助手 来派发任务
+    // - auto（自由协调）：指定了默认接收助手则发普通消息交给它，否则 @群调度助手
+    const mentionCoordinator =
+      triggerMode === 'manual'
+        ? true
+        : triggerMode === 'auto'
+          ? !chatRoom?.defaultAgentId
+          : false;
+    // 协调模式由 handler 自动唤起群调度助手；其余模式仅在显式 @ 时才依赖它
+    const requireCoordinator = triggerMode === 'coordinator' || mentionCoordinator;
+
+    if (requireCoordinator) {
+      const coordinatorAgent = await prisma.agent.findUnique({
+        where: { id: GROUP_COORDINATOR_ID },
+        select: { id: true, name: true, isActive: true },
+      });
+      if (!coordinatorAgent?.isActive) {
+        throw new Error('群调度助手不存在或未启用');
+      }
     }
 
     const messageId = randomUUID();
     const now = new Date();
-    const content = buildDispatchContent(task);
+    const content = buildDispatchContent(task, mentionCoordinator);
 
     await messageService.create({
       id: messageId,
@@ -317,23 +339,12 @@ export const workbenchTaskService = {
       isHuman: true,
     });
 
-    const message: Message = {
-      id: messageId,
-      type: 'message',
-      content,
-      time: now,
-      user: user.username,
-      userId: user.id,
-      chatRoomId: task.chatRoomId,
-      replyMessageId: null,
-      isHuman: true,
-    };
-
-    if (globalEmit) {
-      await globalEmit(message, task.chatRoomId);
-    }
-
-    return prisma.workbenchTask.update({
+    // 必须先把工作台任务落库为 dispatched，再广播消息触发群调度助手。
+    // 协调器在 dispatch 决策后会调用 syncRoomDispatchTaskStatus(false) 把 dispatched→in_progress；
+    // 若广播在前、落库在后，协调器（即便经过 LLM 调用）可能在状态写入前就执行该流转，
+    // 此时任务仍是 draft，流转因查不到 dispatched 任务而丢失，导致任务永久停留在「已派发」、
+    // 进不到「执行中」。
+    const updated = await prisma.workbenchTask.update({
       where: { id },
       data: {
         status: 'dispatched',
@@ -353,6 +364,24 @@ export const workbenchTaskService = {
         },
       },
     });
+
+    const message: Message = {
+      id: messageId,
+      type: 'message',
+      content,
+      time: now,
+      user: user.username,
+      userId: user.id,
+      chatRoomId: task.chatRoomId,
+      replyMessageId: null,
+      isHuman: true,
+    };
+
+    if (globalEmit) {
+      await globalEmit(message, task.chatRoomId);
+    }
+
+    return updated;
   },
 
   async dispatchMany(ids: string[], user: { id: string; username: string }) {
@@ -364,6 +393,97 @@ export const workbenchTaskService = {
       dispatched.push(await this.dispatch(id, user));
     }
     return dispatched;
+  },
+
+  /**
+   * 随群内 agent 执行进度，自动推进该群「已派发」任务的状态。
+   * 由群调度助手在做出决策后调用：
+   * - roomIdle=false（群调度助手调度了 agent）：dispatched → in_progress
+   * - roomIdle=true（群调度助手确认无需调度）：dispatched / in_progress → waiting_review
+   * 仅做状态流转，不写 completedAt；最终是否「已完成」由用户手动确认。
+   * 状态变更会通过 socket 推送给任务创建者，实现前端实时刷新。
+   */
+  async syncRoomDispatchTaskStatus(chatRoomId: string, roomIdle: boolean) {
+    console.log('[workbench] syncRoomDispatchTaskStatus 调用:', {
+      chatRoomId,
+      roomIdle,
+    });
+    const targets = await prisma.workbenchTask.findMany({
+      where: {
+        chatRoomId,
+        status: { in: ['dispatched', 'in_progress'] },
+      },
+    });
+    console.log('[workbench] 找到目标任务:', {
+      count: targets.length,
+      statuses: targets.map(t => ({ id: t.id, status: t.status })),
+    });
+    if (targets.length === 0) return;
+
+    const now = new Date();
+    for (const target of targets) {
+      let nextStatus: WorkbenchTaskStatus | null = null;
+      if (roomIdle) {
+        nextStatus = 'waiting_review';
+      } else if (target.status === 'dispatched') {
+        nextStatus = 'in_progress';
+      }
+      console.log('[workbench] 任务状态更新:', {
+        taskId: target.id,
+        currentStatus: target.status,
+        nextStatus,
+      });
+      if (!nextStatus) continue;
+
+      const updated = await prisma.workbenchTask.update({
+        where: { id: target.id },
+        data: { status: nextStatus, lastActivityAt: now },
+        include: {
+          chatRoom: {
+            select: { id: true, name: true, avatar: true, avatarColor: true },
+          },
+        },
+      });
+
+      console.log('[workbench] 状态已更新:', {
+        taskId: updated.id,
+        status: updated.status,
+      });
+
+      if (globalEmitWorkbenchTaskUpdated && updated.createdBy) {
+        globalEmitWorkbenchTaskUpdated(updated, updated.createdBy);
+      }
+    }
+  },
+
+  /**
+   * 助手消息中 @了用户时，把该群「已派发 / 执行中」的工作台任务流转为 needs_input（需补充）。
+   * 表示助手在等待用户提供额外信息，任务暂时卡住。
+   */
+  async syncNeedsInputOnUserMention(chatRoomId: string) {
+    const targets = await prisma.workbenchTask.findMany({
+      where: {
+        chatRoomId,
+        status: { in: ['dispatched', 'in_progress'] },
+      },
+    });
+    if (targets.length === 0) return;
+
+    const now = new Date();
+    for (const target of targets) {
+      const updated = await prisma.workbenchTask.update({
+        where: { id: target.id },
+        data: { status: 'needs_input', lastActivityAt: now },
+        include: {
+          chatRoom: {
+            select: { id: true, name: true, avatar: true, avatarColor: true },
+          },
+        },
+      });
+      if (globalEmitWorkbenchTaskUpdated && updated.createdBy) {
+        globalEmitWorkbenchTaskUpdated(updated, updated.createdBy);
+      }
+    }
   },
 
   async recommendRoom(data: RecommendRoomData, userId: string): Promise<WorkbenchRoomRecommendation> {
