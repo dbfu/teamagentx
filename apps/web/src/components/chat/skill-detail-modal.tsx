@@ -109,6 +109,44 @@ function isMarkdownFile(path?: string | null): boolean {
   return ext === 'md' || ext === 'markdown';
 }
 
+interface ParsedFrontmatter {
+  name?: string;
+  description?: string;
+  body: string;
+}
+
+// 解析 Markdown（如 SKILL.md）头部的 YAML frontmatter，单独提取 name / description，
+// 其余正文交给 markdown 渲染，避免 frontmatter 被当成普通文本渲染成分割线/标题。
+function parseFrontmatter(content: string): ParsedFrontmatter {
+  const match = /^﻿?---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(content);
+  if (!match) {
+    return { body: content };
+  }
+
+  const result: ParsedFrontmatter = { body: content.slice(match[0].length) };
+  const lines = match[1].split(/\r?\n/);
+
+  for (const line of lines) {
+    const fieldMatch = /^(name|description)\s*:\s*(.*)$/.exec(line);
+    if (!fieldMatch) continue;
+    let value = fieldMatch[2].trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (!value) continue;
+    if (fieldMatch[1] === 'name') {
+      result.name = value;
+    } else {
+      result.description = value;
+    }
+  }
+
+  return result;
+}
+
 function highlightedHtml(code: string, language?: string): string {
   try {
     const highlightLanguage = language === 'html' ? 'xml' : language;
@@ -319,12 +357,29 @@ export function SkillDetailModal({ slug, onClose }: SkillDetailModalProps) {
                       {selectedFile.size && ` (${(selectedFile.size / 1024).toFixed(1)} KB)`}
                     </div>
                     {isMarkdownFile(selectedFile.path) ? (
-                      <div className="max-h-[60vh] overflow-auto rounded-lg border bg-background p-4">
-                        <MarkdownContent
-                          content={selectedFile.content}
-                          className="prose-headings:mt-4 prose-headings:mb-2 [&_p]:my-2"
-                        />
-                      </div>
+                      (() => {
+                        const { name, description, body } = parseFrontmatter(selectedFile.content);
+                        return (
+                          <div className="max-h-[60vh] overflow-auto rounded-lg border bg-background p-4">
+                            {(name || description) && (
+                              <div className="mb-4 rounded-lg border bg-muted/40 p-3">
+                                {name && (
+                                  <div className="text-base font-semibold text-foreground">{name}</div>
+                                )}
+                                {description && (
+                                  <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">
+                                    {description}
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                            <MarkdownContent
+                              content={body}
+                              className="prose-headings:mt-4 prose-headings:mb-2 [&_p]:my-2"
+                            />
+                          </div>
+                        );
+                      })()
                     ) : (
                       <pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap rounded-lg border bg-muted p-4 font-mono text-sm text-foreground">
                         <HighlightedCode code={selectedFile.content} language={languageFromPath(selectedFile.path)} />

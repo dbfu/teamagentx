@@ -3,11 +3,23 @@ import { llmProviderApi, type AudioUsage, type CreateLlmProviderRequest, type Ll
 import { tokenUsageApi, type TokenUsageByProvider } from '@/lib/token-usage-api';
 import { getProviderMeta as getAudioProviderMeta } from '@/lib/voice-provider-metadata';
 import { cn } from '@/lib/utils';
-import { Activity, BadgeCheck, Copy, Cpu, Download, Eye, EyeOff, Image, Mic, Pencil, Plus, Power, RefreshCw, Search, ServerCog, Sparkles, Star, Trash2, Upload, Video, Wifi, WifiOff, X } from 'lucide-react';
+import {
+  createEncryptionContext,
+  decryptValue,
+  deriveKeyFromMeta,
+  encryptValue,
+  isEncryptedValue,
+  looksLikeEncryptionMeta,
+  type ExportEncryptionMeta,
+} from '@/lib/provider-export-crypto';
+import { Activity, AlertTriangle, BadgeCheck, Copy, Cpu, Download, Eye, EyeOff, Image, Lock, Mic, Pencil, Plus, Power, RefreshCw, Search, ServerCog, Sparkles, Star, Trash2, Upload, Video, Wifi, WifiOff, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
+
+// 用 text-security 模拟密码遮罩：输入框保持 type="text"，浏览器不会把它当密码框弹出自动填充/保存提示
+const MASKED_PASSWORD_STYLE = { WebkitTextSecurity: 'disc' } as React.CSSProperties
 
 const IMAGE_PROVIDER_BASE_URLS: Record<string, string> = {
   openai: 'https://api.openai.com/v1',
@@ -77,7 +89,13 @@ type ExportableProvider = Required<Pick<
 interface ModelProvidersImportPayload {
   version: 1
   exportedAt: string
+  encryption?: ExportEncryptionMeta
   providers: ExportableProvider[]
+}
+
+interface ParsedImportFile {
+  rawList: unknown[]
+  encryption: ExportEncryptionMeta | null
 }
 
 function isAudioSttDefaultEligible(provider: Pick<LlmProvider, 'modelType' | 'audioUsage'>): boolean {
@@ -142,6 +160,10 @@ function normalizeImportedProvider(raw: unknown, index: number, t: (key: string,
     throw new Error(t('model.missingRequiredFields', { index: index + 1 }))
   }
 
+  if (isMaskedApiKey(apiKey)) {
+    throw new Error(t('model.maskedApiKeyError', { name }))
+  }
+
   if (modelType === 'image' && (!imageProvider || !imageApiType)) {
     throw new Error(t('model.missingImageFields', { index: index + 1 }))
   }
@@ -161,7 +183,7 @@ function normalizeImportedProvider(raw: unknown, index: number, t: (key: string,
   }
 }
 
-function parseImportPayload(rawText: string, t: (key: string) => string): ExportableProvider[] {
+function parseImportFile(rawText: string, t: (key: string) => string): ParsedImportFile {
   let parsed: unknown
   try {
     parsed = JSON.parse(rawText)
@@ -179,7 +201,12 @@ function parseImportPayload(rawText: string, t: (key: string) => string): Export
     throw new Error(t('model.noProvidersToImport'))
   }
 
-  return list.map((item, index) => normalizeImportedProvider(item, index, t))
+  const encryptionRaw = (parsed && typeof parsed === 'object')
+    ? (parsed as ModelProvidersImportPayload).encryption
+    : undefined
+  const encryption = looksLikeEncryptionMeta(encryptionRaw) ? encryptionRaw : null
+
+  return { rawList: list, encryption }
 }
 
 export function ModelPage() {
@@ -238,6 +265,20 @@ export function ModelPage() {
 
   // 导出选择
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+
+  // 导出确认弹框（含完整密钥风险提示 + 可选加密密码）
+  const [isExportConfirmOpen, setIsExportConfirmOpen] = useState(false)
+  const [exportAcknowledged, setExportAcknowledged] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
+  const [exportPassword, setExportPassword] = useState('')
+  const [showExportPassword, setShowExportPassword] = useState(false)
+
+  // 导入密码弹框（文件加密时需要输入密码解密）
+  const [isImportPasswordOpen, setIsImportPasswordOpen] = useState(false)
+  const [importPassword, setImportPassword] = useState('')
+  const [isImporting, setIsImporting] = useState(false)
+  const [pendingImport, setPendingImport] = useState<ParsedImportFile | null>(null)
+  const [showImportPassword, setShowImportPassword] = useState(false)
 
   // 自动填充音频模型名：当 apiUrl 匹配已知供应商时，填入推荐模型名
   const autoFilledUrlRef = useRef<string | null>(null)
@@ -551,48 +592,103 @@ export function ModelPage() {
     setIsAiDialogOpen(true)
   }
 
-  const handleExport = () => {
-    const toExport = selectedIds.size > 0
-      ? providers.filter(p => selectedIds.has(p.id))
-      : providers
+  const exportCount = selectedIds.size > 0
+    ? providers.filter(p => selectedIds.has(p.id)).length
+    : providers.length
 
-    if (toExport.length === 0) {
+  const handleExport = () => {
+    if (exportCount === 0) {
       toast.error(t('model.exportSelectRequired'))
       return
     }
+    setExportAcknowledged(false)
+    setExportPassword('')
+    setShowExportPassword(false)
+    setIsExportConfirmOpen(true)
+  }
 
-    const payload: ModelProvidersImportPayload = {
-      version: 1,
-      exportedAt: new Date().toISOString(),
-      providers: toExport.map(toExportableProvider),
+  const confirmExport = async () => {
+    const password = exportPassword.trim()
+    // 未加密导出必须勾选风险确认；设置了密码则视为已加密，无需勾选
+    if (!password && !exportAcknowledged) return
+    if (isExporting) return
+
+    const ids = selectedIds.size > 0 ? Array.from(selectedIds) : undefined
+
+    setIsExporting(true)
+    try {
+      // 从服务端拉取完整（未脱敏）的 API Key 用于导出
+      const response = await llmProviderApi.exportProviders(ids)
+      if (!response.success || !response.data) {
+        toast.error(response.error || t('model.exportFailed'))
+        return
+      }
+
+      const toExport = response.data
+      if (toExport.length === 0) {
+        toast.error(t('model.exportNoData'))
+        return
+      }
+
+      const exportable = toExport.map(toExportableProvider)
+      const payload: ModelProvidersImportPayload = {
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        providers: exportable,
+      }
+
+      // 设置了密码则对 API Key 加密
+      if (password) {
+        const { key, meta } = await createEncryptionContext(password)
+        payload.encryption = meta
+        payload.providers = await Promise.all(
+          exportable.map(async (p) => ({ ...p, apiKey: await encryptValue(p.apiKey, key) })),
+        )
+      }
+
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      const date = new Date().toISOString().slice(0, 10)
+      link.href = url
+      link.download = `teamagentx-model-providers-${date}.json`
+      link.click()
+      URL.revokeObjectURL(url)
+      toast.success(password
+        ? t('model.exportSuccessCountEncrypted', { count: toExport.length })
+        : t('model.exportSuccessCount', { count: toExport.length }))
+      setSelectedIds(new Set())
+      setIsExportConfirmOpen(false)
+      setExportPassword('')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('model.exportFailed'))
+    } finally {
+      setIsExporting(false)
     }
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    const date = new Date().toISOString().slice(0, 10)
-    link.href = url
-    link.download = `teamagentx-model-providers-${date}.json`
-    link.click()
-    URL.revokeObjectURL(url)
-    toast.success(t('model.exportSuccessCount', { count: toExport.length }))
-    setSelectedIds(new Set())
   }
 
   const triggerImport = () => {
     importInputRef.current?.click()
   }
 
-  const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    event.target.value = ''
-    if (!file) return
-
+  // 执行导入：必要时先用密钥解密 API Key，再逐条创建。返回是否已进入创建流程
+  const runImport = async (parsed: ParsedImportFile, key: CryptoKey | null): Promise<boolean> => {
     let importedProviders: ExportableProvider[]
     try {
-      importedProviders = parseImportPayload(await file.text(), t)
+      const decryptedList = key
+        ? await Promise.all(parsed.rawList.map(async (item) => {
+            const record = item as Record<string, unknown> | null
+            if (record && typeof record === 'object' && isEncryptedValue(record.apiKey)) {
+              return { ...record, apiKey: await decryptValue(record.apiKey, key) }
+            }
+            return item
+          }))
+        : parsed.rawList
+      importedProviders = decryptedList.map((item, index) => normalizeImportedProvider(item, index, t))
     } catch (error) {
-      toast.error(t('model.importFailed'))
-      return
+      // 解密失败通常是密码错误
+      toast.error(key ? t('model.decryptFailed') : (error instanceof Error ? error.message : t('model.importFailed')))
+      return false
     }
 
     const defaults = importedProviders.filter((provider) => provider.isDefault)
@@ -617,11 +713,57 @@ export function ModelPage() {
 
     if (failedItems.length === 0) {
       toast.success(t('model.importSuccessCount', { count: successCount }))
+    } else {
+      toast.error(t('model.importPartialSuccess', { success: successCount, failed: failedItems.length }))
+      failedItems.slice(0, 3).forEach((message) => toast.error(message))
+    }
+    return true
+  }
+
+  const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
+    let parsed: ParsedImportFile
+    try {
+      parsed = parseImportFile(await file.text(), t)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('model.importFailed'))
       return
     }
 
-    toast.error(t('model.importPartialSuccess', { success: successCount, failed: failedItems.length }))
-    failedItems.slice(0, 3).forEach((message) => toast.error(message))
+    // 加密文件需输入密码后再解密导入
+    if (parsed.encryption) {
+      setPendingImport(parsed)
+      setImportPassword('')
+      setShowImportPassword(false)
+      setIsImportPasswordOpen(true)
+      return
+    }
+
+    await runImport(parsed, null)
+  }
+
+  const confirmImportPassword = async () => {
+    if (!pendingImport?.encryption || isImporting) return
+    const password = importPassword.trim()
+    if (!password) return
+
+    setIsImporting(true)
+    try {
+      const key = await deriveKeyFromMeta(password, pendingImport.encryption)
+      const entered = await runImport(pendingImport, key)
+      if (entered) {
+        setIsImportPasswordOpen(false)
+        setPendingImport(null)
+        setImportPassword('')
+      }
+    } catch {
+      toast.error(t('model.decryptFailed'))
+    } finally {
+      setIsImporting(false)
+    }
   }
 
   return (
@@ -1404,6 +1546,196 @@ export function ModelPage() {
                   <Sparkles className="size-4" />
                 )}
                 {isAiParsing ? t('model.parsing') : t('model.parseConfig')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 导出确认弹框：导出文件包含完整明文 API Key，需用户确认知晓风险 */}
+      {!isExportConfirmOpen ? null : (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-[440px] rounded-md bg-background shadow-xl">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-border px-6 py-4">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="size-5 text-amber-500" />
+                <h2 className="text-lg font-semibold text-foreground">{t('model.exportRiskTitle')}</h2>
+              </div>
+              <button
+                onClick={() => setIsExportConfirmOpen(false)}
+                className="ta-icon-button-compact"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-6">
+              <p className="text-sm text-foreground">
+                {t('model.exportConfirmIntro', { count: exportCount })}
+              </p>
+
+              {/* 加密密码（可选）。用 form 包裹并放置 honeypot 字段，避免浏览器自动填充写入页面其它输入框 */}
+              <form className="mt-4" autoComplete="off" onSubmit={e => e.preventDefault()}>
+                <input type="text" name="username" autoComplete="username" className="hidden" tabIndex={-1} aria-hidden="true" />
+                <label className="mb-1.5 block text-sm font-medium text-gray-700">{t('model.exportPasswordLabel')}</label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    name="export-password"
+                    value={exportPassword}
+                    onChange={e => setExportPassword(e.target.value)}
+                    placeholder={t('model.exportPasswordPlaceholder')}
+                    autoComplete="off"
+                    data-1p-ignore
+                    data-lpignore="true"
+                    data-form-type="other"
+                    style={showExportPassword ? undefined : MASKED_PASSWORD_STYLE}
+                    className="w-full rounded-lg border border-gray-200 px-3 py-2 pr-10 text-sm focus:border-blue-500 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowExportPassword(v => !v)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    tabIndex={-1}
+                    aria-label={showExportPassword ? t('model.hidePassword') : t('model.showPassword')}
+                  >
+                    {showExportPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                  </button>
+                </div>
+                <p className="mt-1.5 text-xs text-muted-foreground">{t('model.exportPasswordHint')}</p>
+              </form>
+
+              {exportPassword.trim() ? (
+                <div className="mt-3 flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-700">
+                  <Lock className="mt-0.5 size-3.5 shrink-0" />
+                  <span>{t('model.exportEncryptedNote')}</span>
+                </div>
+              ) : (
+                <>
+                  <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
+                    {t('model.exportPlaintextWarning')}
+                  </div>
+                  <label className="mt-4 flex cursor-pointer items-start gap-2 text-sm text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={exportAcknowledged}
+                      onChange={e => setExportAcknowledged(e.target.checked)}
+                      className="mt-0.5 size-4 cursor-pointer accent-blue-500"
+                    />
+                    <span>{t('model.exportAcknowledge')}</span>
+                  </label>
+                </>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="flex justify-end gap-3 border-t border-border px-6 py-4">
+              <button
+                type="button"
+                onClick={() => setIsExportConfirmOpen(false)}
+                className="ta-button-secondary"
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={confirmExport}
+                disabled={(!exportPassword.trim() && !exportAcknowledged) || isExporting}
+                className={cn(
+                  'ta-button-primary',
+                  ((!exportPassword.trim() && !exportAcknowledged) || isExporting) && 'cursor-not-allowed opacity-50'
+                )}
+              >
+                {isExporting ? (
+                  <RefreshCw className="size-4 animate-spin" />
+                ) : (
+                  <Download className="size-4" />
+                )}
+                {isExporting ? t('model.exporting') : t('model.confirmExport')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 导入密码弹框：文件已加密时输入密码解密 */}
+      {!isImportPasswordOpen ? null : (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-[440px] rounded-md bg-background shadow-xl">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-border px-6 py-4">
+              <div className="flex items-center gap-2">
+                <Lock className="size-5 text-primary" />
+                <h2 className="text-lg font-semibold text-foreground">{t('model.importPasswordTitle')}</h2>
+              </div>
+              <button
+                onClick={() => { setIsImportPasswordOpen(false); setPendingImport(null) }}
+                className="ta-icon-button-compact"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-6">
+              <p className="mb-3 text-sm text-muted-foreground">{t('model.importPasswordDesc')}</p>
+              <form autoComplete="off" onSubmit={e => e.preventDefault()}>
+                <input type="text" name="username" autoComplete="username" className="hidden" tabIndex={-1} aria-hidden="true" />
+                <div className="relative">
+                  <input
+                    type="text"
+                    name="import-password"
+                    value={importPassword}
+                    onChange={e => setImportPassword(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') confirmImportPassword() }}
+                    placeholder={t('model.importPasswordPlaceholder')}
+                    autoFocus
+                    autoComplete="off"
+                    data-1p-ignore
+                    data-lpignore="true"
+                    data-form-type="other"
+                    style={showImportPassword ? undefined : MASKED_PASSWORD_STYLE}
+                    className="w-full rounded-lg border border-gray-200 px-3 py-2 pr-10 text-sm focus:border-blue-500 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowImportPassword(v => !v)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    tabIndex={-1}
+                    aria-label={showImportPassword ? t('model.hidePassword') : t('model.showPassword')}
+                  >
+                    {showImportPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            {/* Footer */}
+            <div className="flex justify-end gap-3 border-t border-border px-6 py-4">
+              <button
+                type="button"
+                onClick={() => { setIsImportPasswordOpen(false); setPendingImport(null) }}
+                className="ta-button-secondary"
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={confirmImportPassword}
+                disabled={!importPassword.trim() || isImporting}
+                className={cn(
+                  'ta-button-primary',
+                  (!importPassword.trim() || isImporting) && 'cursor-not-allowed opacity-50'
+                )}
+              >
+                {isImporting ? (
+                  <RefreshCw className="size-4 animate-spin" />
+                ) : (
+                  <Lock className="size-4" />
+                )}
+                {isImporting ? t('model.decrypting') : t('model.confirmImportPassword')}
               </button>
             </div>
           </div>

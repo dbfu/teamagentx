@@ -636,6 +636,24 @@ export function isCodexTransientStreamDisconnectError(message: unknown): boolean
   );
 }
 
+/** codex exec 进程退出报错里无诊断价值的 stderr 提示（如读取 stdin 的常规输出）。 */
+const CODEX_EXIT_ERROR_PATTERN = /^Codex Exec exited with (code \d+|signal \w+):?\s*([\s\S]*)$/;
+const CODEX_NOISE_STDERR_PATTERN = /^Reading prompt from stdin\.{0,3}$/i;
+
+/**
+ * 进程退出报错的 stderr 往往只有 "Reading prompt from stdin..." 这类噪音，
+ * 真实失败原因在 stdout 事件流的 turn.failed/error 里。用事件流中记录的
+ * 最后一条错误信息替换噪音 stderr，让上抛的错误可读。
+ */
+export function enrichCodexExitError(error: unknown, lastStreamErrorMessage: string | null): unknown {
+  if (!(error instanceof Error) || !lastStreamErrorMessage) return error;
+  const match = error.message.match(CODEX_EXIT_ERROR_PATTERN);
+  if (!match) return error;
+  const stderr = (match[2] || '').trim();
+  if (stderr && !CODEX_NOISE_STDERR_PATTERN.test(stderr)) return error;
+  return new Error(`Codex Exec exited with ${match[1]}: ${lastStreamErrorMessage}`, { cause: error });
+}
+
 /**
  * 判断错误是否为「输入内容超出模型最大长度」。
  * 典型来源：路由模式下上游返回 `Range of input length should be [1, 202752]`，
@@ -738,7 +756,7 @@ class TeamAgentXCodexRunner {
   ) {}
 
   async *run(args: CodexRunOptions): AsyncGenerator<string> {
-    const commandArgs = ['exec', '--experimental-json'];
+    const commandArgs = ['exec', '--json'];
     for (const override of serializeConfigOverrides(this.configOverrides)) {
       commandArgs.push('--config', override);
     }
@@ -763,7 +781,7 @@ class TeamAgentXCodexRunner {
       env.CODEX_API_KEY = args.apiKey;
     }
 
-    const child = spawn(this.executablePath, commandArgs, { env, signal: args.signal });
+    const child = spawn(this.executablePath, commandArgs, { env, signal: args.signal, stdio: ['pipe', 'pipe', 'pipe'] });
     let spawnError: Error | null = null;
     child.once('error', (error) => {
       spawnError = error;
@@ -915,6 +933,8 @@ export class CodexSdkExecutor implements IAgentExecutor {
   private acpProviderInfo?: AcpProviderInfo;
   private currentAbortController: AbortController | null = null;
   private thread: TeamAgentXCodexThread | null = null;
+  /** 事件流里最后一条被吞掉的瞬时错误信息，用于进程异常退出时还原真实失败原因。 */
+  private lastStreamErrorMessage: string | null = null;
 
   private content = '';
   private thinking = '';
@@ -2052,6 +2072,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
         return normalizeUsage(event.usage);
       case 'turn.failed':
         if (isCodexTransientStreamDisconnectError(event.error.message)) {
+          this.lastStreamErrorMessage = event.error.message;
           debugLog('codexSdkTransientStreamDisconnect', {
             agentName: this.name,
             eventType: event.type,
@@ -2062,6 +2083,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
         throw new Error(event.error.message);
       case 'error':
         if (isCodexTransientStreamDisconnectError(event.message)) {
+          this.lastStreamErrorMessage = event.message;
           debugLog('codexSdkTransientStreamDisconnect', {
             agentName: this.name,
             eventType: event.type,
@@ -2112,6 +2134,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     let tokenUsage: TokenUsage | undefined;
     let firstEventLogged = false;
     let firstVisibleOutputLogged = false;
+    this.lastStreamErrorMessage = null;
 
     const thread = this.getThread();
     const { events } = await thread.runStreamed(input, { signal: abortController.signal });
@@ -2293,10 +2316,11 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       if (error instanceof Error && error.name === 'AbortError') {
         throw error;
       }
-      console.error(`${this.name}: codex sdk 执行失败`, error);
-      const errorMessage = error instanceof Error ? error.message : '未知错误';
+      const enriched = enrichCodexExitError(error, this.lastStreamErrorMessage);
+      console.error(`${this.name}: codex sdk 执行失败`, enriched);
+      const errorMessage = enriched instanceof Error ? enriched.message : '未知错误';
       await emit(`codex 执行出错: ${errorMessage}`, originalMessageId);
-      throw error;
+      throw enriched instanceof Error ? enriched : error;
     } finally {
       cleanup();
       signal?.removeEventListener('abort', abort);

@@ -8,6 +8,7 @@ import {
   buildCodexModelProviderConfig,
   buildCodexRouterBaseUrl,
   CodexSdkExecutor,
+  enrichCodexExitError,
   extractCodexSessionTranscript,
   isCodexTransientStreamDisconnectError,
   isInputLengthExceededError,
@@ -221,6 +222,43 @@ describe('Codex SDK Executor transient stream disconnect detection', () => {
       isCodexTransientStreamDisconnectError('context_length_exceeded'),
       false,
     );
+  });
+});
+
+describe('Codex SDK Executor exit error enrichment', () => {
+  test('stderr 只有 stdin 提示噪音时，用事件流中的真实错误信息替换', () => {
+    const enriched = enrichCodexExitError(
+      new Error('Codex Exec exited with code 1: Reading prompt from stdin...'),
+      'stream disconnected before completion: stream closed before response.completed',
+    );
+    assert.ok(enriched instanceof Error);
+    assert.strictEqual(
+      enriched.message,
+      'Codex Exec exited with code 1: stream disconnected before completion: stream closed before response.completed',
+    );
+  });
+
+  test('stderr 为空时同样使用事件流错误信息', () => {
+    const enriched = enrichCodexExitError(
+      new Error('Codex Exec exited with code 1: '),
+      'turn failed: upstream unavailable',
+    );
+    assert.ok(enriched instanceof Error);
+    assert.strictEqual(enriched.message, 'Codex Exec exited with code 1: turn failed: upstream unavailable');
+  });
+
+  test('stderr 已含有效错误信息时保持原样', () => {
+    const original = new Error(
+      'Codex Exec exited with code 1: {"error":{"message":"Range of input length should be [1, 202752]"}}',
+    );
+    assert.strictEqual(enrichCodexExitError(original, 'stream disconnected before completion'), original);
+  });
+
+  test('没有事件流错误信息或非进程退出错误时不做处理', () => {
+    const exitError = new Error('Codex Exec exited with code 1: Reading prompt from stdin...');
+    assert.strictEqual(enrichCodexExitError(exitError, null), exitError);
+    const otherError = new Error('ECONNRESET');
+    assert.strictEqual(enrichCodexExitError(otherError, 'stream disconnected before completion'), otherError);
   });
 });
 
