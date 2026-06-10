@@ -7,6 +7,9 @@ import { chatRoomService } from '../../modules/chatroom/chatroom.service.js';
 import { messageService } from '../../modules/message/message.service.js';
 import { agentService } from './agent.service.js';
 import { llmProviderService } from '../../modules/llm-provider/llm-provider.service.js';
+import { workbenchTaskService } from '../../modules/workbench/workbench.service.js';
+import { taskQueueService } from '../../modules/task-queue/task-queue.service.js';
+import { coordinatorLogService } from '../../modules/coordinator-log/coordinator-log.service.js';
 import {
   buildInternalCoordinatorPrompt,
   INTERNAL_COORDINATOR_AGENT_NAME,
@@ -44,7 +47,7 @@ const DISPATCH_TOOL_PARAMETERS = {
     targetAgentIds: {
       type: 'array',
       items: { type: 'string' },
-      description: 'dispatch 时必填：目标助手的 agentId 数组（从群成员清单获取），可多个（并行）',
+      description: 'dispatch 时必填：目标助手的「名称」数组，必须与群成员清单中的助手名称完全一致（逐字、不要自造 ID），可多个（并行）',
     },
     content: {
       type: 'string',
@@ -84,7 +87,7 @@ function buildMemberSection(
 ): string {
   const agentLines = chatRoomAgents
     .filter((cra) => cra.agent && (cra.agent as any).isActive && cra.agent.id !== GROUP_COORDINATOR_ID)
-    .map((cra) => `- ${cra.agent!.name}（ID: ${cra.agent!.id}）`);
+    .map((cra) => `- ${cra.agent!.name}`);
 
   const humanLines: string[] = [];
   if (ownerUsername) humanLines.push(`群主：@${ownerUsername}`);
@@ -181,6 +184,73 @@ async function callOpenAICoordinator(
   }
 }
 
+/**
+ * 仅当群内确实没有进行中的任务（无 pending/executing 队列任务）时，
+ * 才把该群「已派发 / 执行中」的工作台任务流转为 waiting_review（待确认）。
+ * 与非协调模式（processor.ts finally 中的逻辑）保持一致，避免协调器在助手执行途中
+ * 因中间消息触发 no_dispatch / ask_owner 而提前将任务标记为待确认。
+ */
+async function syncWorkbenchOnRoomIdle(chatRoomId: string): Promise<void> {
+  try {
+    const activeTasks = await taskQueueService.getActiveTasks(chatRoomId);
+    if (activeTasks.length > 0) {
+      debugLog('workbenchSyncSkippedRoomBusy', {
+        chatRoomId,
+        activeTaskCount: activeTasks.length,
+      });
+      return;
+    }
+    await workbenchTaskService.syncRoomDispatchTaskStatus(chatRoomId, true);
+  } catch (error) {
+    console.error('[workbench] 同步派发任务状态失败:', error);
+  }
+}
+
+// 归一化助手标识 token：去首尾空白、去掉前导 @、小写，便于按名称匹配。
+function normalizeAgentToken(token: string): string {
+  return token.trim().replace(/^@+/, '').toLowerCase();
+}
+
+/**
+ * 把协调器返回的目标助手 token 解析为「真实 agentId」。
+ *
+ * 背景：让 LLM 逐字复现 36 位 UUID 极不可靠，实际线上出现过模型把多个助手的 UUID 片段
+ * 拼接成不存在的 ID（如把「运维」前半段 + 「UI设计」后半段拼出 d489d615-...-eb6d06e），
+ * 导致 findById 查不到、dispatch 静默失败（表现为「又不调度了」）。
+ *
+ * 现在提示词要求 LLM 回传助手「名称」，这里按 名称 / 真实 ID 双路解析：
+ *   1) token 精确等于群内某活跃助手的真实 ID（兼容模型偶尔给出正确 UUID）
+ *   2) token 归一化后等于群内某活跃助手的名称（主路径）
+ *   3) 兜底原样透传：可能是系统级助手 ID（不在群成员清单内），交由后续 findById/级别校验
+ */
+async function resolveTargetAgentIds(chatRoomId: string, tokens: string[]): Promise<string[]> {
+  const roomAgents = await chatRoomService.getAgents(chatRoomId);
+  const active = roomAgents
+    .map((cra) => cra.agent)
+    .filter((a): a is NonNullable<typeof a> =>
+      !!a && (a as any).isActive && a.id !== GROUP_COORDINATOR_ID);
+
+  const idSet = new Set(active.map((a) => a.id));
+  const nameToId = new Map(active.map((a) => [normalizeAgentToken(a.name), a.id]));
+
+  const resolved: string[] = [];
+  for (const token of tokens) {
+    if (!token || !token.trim()) continue;
+    if (idSet.has(token)) {
+      resolved.push(token);
+      continue;
+    }
+    const byName = nameToId.get(normalizeAgentToken(token));
+    if (byName) {
+      resolved.push(byName);
+      continue;
+    }
+    // 兜底透传（系统级助手 id 或正确但不在群清单内的 id）
+    resolved.push(token);
+  }
+  return resolved;
+}
+
 async function executeDecision(
   chatRoomId: string,
   triggerMessage: Message,
@@ -195,9 +265,42 @@ async function executeDecision(
     forwardVerbatim: decision.forwardVerbatim,
   });
 
+  // 记录调度日志的辅助函数
+  const writeLog = async (success: boolean = true, errorMessage?: string) => {
+    try {
+      await coordinatorLogService.create({
+        chatRoomId,
+        triggerMessageId: triggerMessage.id,
+        decision: decision.decision,
+        targetAgentIds: decision.targetAgentIds,
+        content: decision.content,
+        forwardVerbatim: decision.forwardVerbatim,
+        reason: decision.reason,
+        sourceAgentId: triggerMessage.agentId ?? undefined,
+        sourceIsHuman: triggerMessage.isHuman,
+        sourceContent: triggerMessage.content.slice(0, 500),
+        success,
+        errorMessage,
+      });
+    } catch (error) {
+      console.error('[coordinator-dispatch] 写入调度日志失败:', error);
+    }
+  };
+
   switch (decision.decision) {
     case 'no_dispatch':
+      // 群调度助手本次未调度助手 ≠ 群内已空闲：
+      // 助手在执行过程中产生的中间消息（进度/阶段产物）也会触发协调，此时协调器通常给出
+      // no_dispatch。若直接标记 waiting_review，会让任务在真正完成前就跳到「待确认」，
+      // 表现为「不进入执行中、执行完成后才进待确认」。因此只有群内确实没有进行中的任务
+      // （无 pending/executing 队列任务）时，才把派发任务流转为 waiting_review。
+      await syncWorkbenchOnRoomIdle(chatRoomId);
+      await writeLog();
+      return;
+
     case 'cannot_dispatch':
+      // 系统管理请求，不是工作任务，不更新工作台状态
+      await writeLog();
       return;
 
     case 'ask_owner': {
@@ -223,15 +326,23 @@ async function executeDecision(
         isHuman: false,
       });
       if (globalEmit) await globalEmit(msg, chatRoomId);
+      // 等待用户确认 → 同样仅在群内确实空闲时才流转为 waiting_review，避免助手仍在执行时
+      // 因转发其问题而提前把任务标记为待确认。
+      await syncWorkbenchOnRoomIdle(chatRoomId);
+      await writeLog();
       return;
     }
 
     case 'dispatch': {
-      const ids = decision.targetAgentIds ?? [];
-      if (ids.length === 0) {
+      const tokens = decision.targetAgentIds ?? [];
+      if (tokens.length === 0) {
         console.warn('[coordinator-dispatch] dispatch decision missing targetAgentIds');
         return;
       }
+
+      // 协调器现按「名称」回传目标助手，这里容错解析为真实 agentId，
+      // 规避 LLM 编造 / 拼接 UUID 导致 findById 查不到、dispatch 静默失败的问题。
+      const ids = await resolveTargetAgentIds(chatRoomId, tokens);
 
       const dispatchContent = decision.forwardVerbatim
         ? triggerMessage.content
@@ -256,6 +367,16 @@ async function executeDecision(
       }
 
       if (targetAgents.length === 0) return;
+
+      // 必须在「广播调度消息 / enqueue 助手」之前，先把工作台任务从 dispatched 推进到 in_progress。
+      // 否则被调度的助手可能在该流转之前就执行完并产出消息，触发协调器再次裁决得到 no_dispatch，
+      // 而此时群内已空闲（助手任务已出队），no_dispatch 会把 dispatched 直接刷成 waiting_review，
+      // 跳过「执行中」，表现为任务一直停留在「已派发」后直接进「待确认」。
+      try {
+        await workbenchTaskService.syncRoomDispatchTaskStatus(chatRoomId, false);
+      } catch (error) {
+        console.error('[workbench] 同步派发任务状态失败:', error);
+      }
 
       // 保存并广播协调助手的调度消息（与旧流程一致，前端可见）
       const mentionPart = targetAgents.map((a) => `@${a!.name}`).join(' ');
@@ -295,6 +416,9 @@ async function executeDecision(
       if (dispatchedIds.length > 1) {
         startParallelBatch(chatRoomId, dispatchedIds);
       }
+      // 调度日志记录解析后的真实 agentId，而非协调器回传的名称 token。
+      decision.targetAgentIds = dispatchedIds;
+      await writeLog();
       return;
     }
   }

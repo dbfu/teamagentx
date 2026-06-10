@@ -70,7 +70,7 @@ export function buildInternalCoordinatorPrompt(): string {
 ## 决策工具
 始终调用 dispatch_decision 工具，禁止输出纯文本。
 - decision（必填）：dispatch=调度助手；no_dispatch=无需调度（感谢/问候/进度或完成报告/闲聊）；ask_owner=需群主确认；cannot_dispatch=系统管理请求（创建或编辑助手、安装技能、创建或删除群聊、修改群规则、创建定时任务、配置外部平台集成）。
-- targetAgentIds（dispatch 时必填）：从当前群聊成员清单中取目标助手的 agentId 数组，可多个（并行）。上一阶段并行任务中有任一助手尚未完成时，不能 dispatch 下一阶段。
+- targetAgentIds（dispatch 时必填）：从当前群聊成员清单中逐字复制目标助手的「名称」，组成数组，可多个（并行）。必须与清单中的助手名称完全一致，禁止自造或猜测任何 ID。上一阶段并行任务中有任一助手尚未完成时，不能 dispatch 下一阶段。
 - content（dispatch/ask_owner 时必填）：dispatch=调度内容；ask_owner=@群主用户名 + 待回答问题（保留 Markdown 格式）。dispatch 内容不要添加与原始目标无关的新需求；转发用户原始消息时建议 forwardVerbatim: true 而非手动复制原文。
 - forwardVerbatim（可选）：true 时后端直接用 [待裁决消息] 原文发送给目标助手，忽略 content 字段。
 - reason（cannot_dispatch 时填）：no_suitable_assistant 或 system_management。`;
