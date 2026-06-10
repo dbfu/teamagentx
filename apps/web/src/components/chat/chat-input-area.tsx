@@ -5,7 +5,7 @@ import { ImagePreviewList, PendingImage } from './image-preview-list'
 import { useRef, useState, useEffect, DragEvent, ChangeEvent, ClipboardEvent, memo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useChatStore } from '@/stores/chat-store'
-import { useUIStore } from '@/stores'
+import { useUIStore, useCustomCommandStore } from '@/stores'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { toast } from 'sonner'
 import { getApiBaseUrl } from '@/lib/config'
@@ -54,6 +54,8 @@ export const ChatInputArea = memo(function ChatInputArea({
   const inputValue = useChatStore((s) => s.inputDraftsByRoom[chatRoomId] ?? '')
   const setInputValue = useChatStore((s) => s.setInputValue)
   const showGitBranch = useUIStore((s) => s.showGitBranch)
+  const customCommands = useCustomCommandStore((s) => s.commandsByRoom[chatRoomId])
+  const loadCustomCommands = useCustomCommandStore((s) => s.loadCommands)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const mentionInputRef = useRef<MentionInputRef>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -76,6 +78,13 @@ export const ChatInputArea = memo(function ChatInputArea({
     }, 100)
     return () => clearTimeout(timer)
   }, [chatRoomId])
+
+  // 加载群聊自定义指令（用于 / 斜杠下拉）
+  useEffect(() => {
+    if (chatRoomId) {
+      loadCustomCommands(chatRoomId)
+    }
+  }, [chatRoomId, loadCustomCommands])
 
   // #30: 组件卸载时清理 MediaRecorder 和媒体流
   useEffect(() => {
@@ -386,6 +395,7 @@ export const ChatInputArea = memo(function ChatInputArea({
       onKeyDown={handleInputKeyDown}
       placeholder={t('chat.sendTo', { name: chatRoomName })}
       agents={mentionAgents}
+      customCommands={customCommands}
       className={cn(
         "min-w-0",
         isInputExpanded ? "w-full" : "flex-1",
