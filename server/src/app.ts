@@ -18,6 +18,7 @@ import { llmProviderGateway } from './gateway/llm-provider.gateway.js';
 import { speechGateway } from './gateway/speech.gateway.js';
 import { skillGateway } from './gateway/skill.gateway.js';
 import { cronTaskGateway } from './gateway/cron-task.gateway.js';
+import { chatRoomCommandGateway } from './gateway/chatroom-command.gateway.js';
 import { tokenUsageGateway } from './gateway/token-usage.gateway.js';
 import { internalAgentToolsGateway } from './gateway/internal-agent-tools.gateway.js';
 import { codexRouterGateway } from './gateway/codex-router.gateway.js';
@@ -141,6 +142,7 @@ export async function createApp(options?: { enableSwagger?: boolean }) {
     speechGateway,
     skillGateway,
     cronTaskGateway,
+    chatRoomCommandGateway,
     tokenUsageGateway,
     internalAgentToolsGateway,
     codexRouterGateway,
