@@ -41,6 +41,8 @@ export function RoomSettingsPanel({
 
   // 外部平台机器人绑定
   const [roomBots, setRoomBots] = useState<BridgeBot[]>([])
+  const [showUnbindBotConfirm, setShowUnbindBotConfirm] = useState(false)
+  const [pendingUnbindBot, setPendingUnbindBot] = useState<BridgeBot | null>(null)
 
   // 编辑状态
   const [editingName, setEditingName] = useState(false)
@@ -149,14 +151,22 @@ export function RoomSettingsPanel({
     handleSave({ agentTriggerMode: value })
   }
 
-  const handleDeleteChannel = async (channel: BridgeBot) => {
-    if (!window.confirm(t('chat.roomSettings.unbindBotConfirm', { name: channel.name }))) return
+  const handleDeleteChannel = (channel: BridgeBot) => {
+    setPendingUnbindBot(channel)
+    setShowUnbindBotConfirm(true)
+  }
+
+  const handleConfirmUnbindBot = async () => {
+    if (!pendingUnbindBot) return
     try {
-      await bridgeApi.unbindBot(channel.id)
-      setRoomBots((prev) => prev.filter((ch) => ch.id !== channel.id))
-      toast.success(t('chat.roomSettings.botUnbound', { name: channel.name }))
+      await bridgeApi.unbindBot(pendingUnbindBot.id)
+      setRoomBots((prev) => prev.filter((ch) => ch.id !== pendingUnbindBot.id))
+      toast.success(t('chat.roomSettings.botUnbound', { name: pendingUnbindBot.name }))
     } catch (err) {
       toast.error(t('common.deleteFailed'))
+    } finally {
+      setShowUnbindBotConfirm(false)
+      setPendingUnbindBot(null)
     }
   }
 
@@ -503,35 +513,35 @@ export function RoomSettingsPanel({
           {roomBots.length > 0 ? (
             <div className="space-y-2">
               {roomBots.map((bot) => (
-                <div key={bot.id} className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm">
-                  <div className="flex min-w-0 flex-1 items-center gap-3">
-                    <div className={cn(
-                      'flex size-9 shrink-0 items-center justify-center rounded-lg',
-                      bot.enabled ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-500',
-                    )}>
-                      <Bot className="size-4" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium text-foreground">{bot.name}</div>
-                      <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                        <span className="rounded-full bg-blue-50 px-2 py-0.5 font-medium text-blue-700">{bot.platform}</span>
-                        <span className="text-gray-300">•</span>
-                        <span className={cn('inline-flex items-center gap-1', bot.enabled ? 'text-green-600' : 'text-gray-500')}>
-                          <span className={cn('size-1.5 rounded-full', bot.enabled ? 'bg-green-500' : 'bg-gray-400')} />
-                          {bot.enabled ? t('chat.roomSettings.botEnabled') : t('chat.roomSettings.botDisabled')}
-                        </span>
+                  <div key={bot.id} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2 shadow-sm">
+                    <div className="flex min-w-0 flex-1 items-center gap-3">
+                      <div className={cn(
+                        'flex size-9 shrink-0 items-center justify-center rounded-lg',
+                        bot.enabled ? 'bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400' : 'bg-muted text-muted-foreground',
+                      )}>
+                        <Bot className="size-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-medium text-foreground">{bot.name}</div>
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                          <span className="rounded-full bg-blue-50 px-2 py-0.5 font-medium text-blue-700 dark:bg-blue-950 dark:text-blue-300">{bot.platform}</span>
+                          <span className="text-muted-foreground/50">•</span>
+                          <span className={cn('inline-flex items-center gap-1', bot.enabled ? 'text-green-600 dark:text-green-400' : 'text-muted-foreground')}>
+                            <span className={cn('size-1.5 rounded-full', bot.enabled ? 'bg-green-500 dark:bg-green-400' : 'bg-muted-foreground/50')} />
+                            {bot.enabled ? t('chat.roomSettings.botEnabled') : t('chat.roomSettings.botDisabled')}
+                          </span>
+                        </div>
                       </div>
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteChannel(bot)}
+                      className="shrink-0 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted"
+                    >
+                      {t('chat.roomSettings.unbindBot')}
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteChannel(bot)}
-                    className="shrink-0 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
-                  >
-                    {t('chat.roomSettings.unbindBot')}
-                  </button>
-                </div>
-              ))}
+                ))}
             </div>
           ) : (
             <div className="rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
@@ -607,6 +617,17 @@ export function RoomSettingsPanel({
         description={t('chat.roomSettings.deleteChatConfirm', { name: chatRoom.name })}
         confirmText={t('common.delete')}
         onConfirm={handleDelete}
+        icon={Trash2}
+      />
+
+      {/* 解绑机器人确认对话框 */}
+      <ConfirmDialog
+        open={showUnbindBotConfirm}
+        onOpenChange={setShowUnbindBotConfirm}
+        title={t('chat.roomSettings.unbindBot')}
+        description={t('chat.roomSettings.unbindBotConfirm', { name: pendingUnbindBot?.name ?? '' })}
+        confirmText={t('chat.roomSettings.unbindBot')}
+        onConfirm={handleConfirmUnbindBot}
         icon={Trash2}
       />
     </div>

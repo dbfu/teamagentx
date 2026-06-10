@@ -50,6 +50,7 @@ import { SystemAssistantModelModal, type SystemAssistantRuntimeConfig } from './
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { QuickChatStartDialog } from './quick-chat-start-dialog'
 import { AgentCard } from './agent-card'
+import { CoordinatorLogModal } from '@/components/coordinator-log-modal'
 import { useAuthStore } from '@/stores'
 import { toast } from 'sonner'
 import { useChatRoomStore } from '@/stores/chat-room-store'
@@ -144,6 +145,7 @@ function SortableAgentCard({
   onDelete: (agent: Agent) => void
   onStartQuickChat?: (agent: Agent) => void
   onInstallSkill?: (agent: Agent) => void
+  onCoordinatorLogs?: (agent: Agent) => void
   onClick?: (agent: Agent) => void
 }) {
   const isSystemAgent = agent.agentLevel === 'system'
@@ -282,6 +284,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
   const [creatingQuickChat, setCreatingQuickChat] = useState(false)
   const [systemModelAgent, setSystemModelAgent] = useState<Agent | null>(null)
   const [systemModelModalOpen, setSystemModelModalOpen] = useState(false)
+  const [coordinatorLogModalOpen, setCoordinatorLogModalOpen] = useState(false)
 
   // dnd-kit 状态
   const [activeAgent, setActiveAgent] = useState<Agent | null>(null)
@@ -620,6 +623,11 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     closeMenu()
     setQuickChatAgent(agent)
     setQuickChatDialogOpen(true)
+  }
+
+  const openCoordinatorLogsDialog = (_agent: Agent) => {
+    closeMenu()
+    setCoordinatorLogModalOpen(true)
   }
 
   // 新建快速对话
@@ -1083,6 +1091,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
                               onDelete={openDeleteDialog}
                               onStartQuickChat={openQuickChatDialog}
                               onInstallSkill={openInstallSkillModal}
+                              onCoordinatorLogs={openCoordinatorLogsDialog}
                               onClick={handleAgentClick}
                             />
                           ))}
@@ -1405,6 +1414,12 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
         agent={quickChatAgent}
         onConfirm={handleStartQuickChat}
         loading={creatingQuickChat}
+      />
+
+      {/* 调度日志弹框 */}
+      <CoordinatorLogModal
+        open={coordinatorLogModalOpen}
+        onClose={() => setCoordinatorLogModalOpen(false)}
       />
     </>
   )

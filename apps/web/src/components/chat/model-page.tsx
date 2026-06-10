@@ -3,6 +3,7 @@ import { llmProviderApi, type AudioUsage, type CreateLlmProviderRequest, type Ll
 import { tokenUsageApi, type TokenUsageByProvider } from '@/lib/token-usage-api';
 import { getProviderMeta as getAudioProviderMeta } from '@/lib/voice-provider-metadata';
 import { cn } from '@/lib/utils';
+import { AgentAvatarImage } from '@/lib/agent-avatars';
 import {
   createEncryptionContext,
   decryptValue,
@@ -279,6 +280,19 @@ export function ModelPage() {
   const [isImporting, setIsImporting] = useState(false)
   const [pendingImport, setPendingImport] = useState<ParsedImportFile | null>(null)
   const [showImportPassword, setShowImportPassword] = useState(false)
+
+  // 关联助手列表弹框
+  const [isAgentsDialogOpen, setIsAgentsDialogOpen] = useState(false)
+  const [agentsListProvider, setAgentsListProvider] = useState<LlmProvider | null>(null)
+
+  const handleShowAgentsList = async (provider: LlmProvider) => {
+    if (provider._count?.agents === 0) return
+    const response = await llmProviderApi.getById(provider.id)
+    if (response.success && response.data) {
+      setAgentsListProvider(response.data)
+      setIsAgentsDialogOpen(true)
+    }
+  }
 
   // 自动填充音频模型名：当 apiUrl 匹配已知供应商时，填入推荐模型名
   const autoFilledUrlRef = useRef<string | null>(null)
@@ -955,7 +969,19 @@ export function ModelPage() {
                       <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
                         <span className={cn("rounded px-1.5 py-0.5 font-medium", meta.badge)}>{meta.label}</span>
                         {provider.modelType === 'text' ? (
-                          <span>{t('model.agentsCount', { count: provider._count?.agents || 0 })}</span>
+                          <button
+                            type="button"
+                            disabled={!provider._count?.agents}
+                            onClick={() => handleShowAgentsList(provider)}
+                            className={cn(
+                              'rounded px-1 py-0.5 text-xs font-medium transition-colors',
+                              provider._count?.agents
+                                ? 'cursor-pointer bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-950 dark:text-blue-400 dark:hover:bg-blue-900'
+                                : 'cursor-default text-muted-foreground'
+                            )}
+                          >
+                            {t('model.agentsCount', { count: provider._count?.agents || 0 })}
+                          </button>
                         ) : provider.modelType === 'image' ? (
                           <span>{provider.imageProvider || 'custom'} / {provider.imageApiType || 'sync'}</span>
                         ) : provider.modelType === 'audio' ? (
@@ -1430,7 +1456,7 @@ export function ModelPage() {
                       }))}
                       className={cn(
                         'relative h-5 w-10 shrink-0 rounded-full transition-colors',
-                        formData.codexWireApi === 'chat' ? 'bg-primary' : 'bg-muted'
+                        formData.codexWireApi === 'chat' ? 'bg-blue-500' : 'bg-gray-200'
                       )}
                       aria-pressed={formData.codexWireApi === 'chat'}
                     >
@@ -1737,6 +1763,68 @@ export function ModelPage() {
                 )}
                 {isImporting ? t('model.decrypting') : t('model.confirmImportPassword')}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 关联助手列表弹框 */}
+      {isAgentsDialogOpen && agentsListProvider && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setIsAgentsDialogOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-background shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-border px-6 py-4">
+              <h2 className="text-base font-semibold text-foreground">
+                {t('model.agentsCount', { count: agentsListProvider.agents?.length || 0 })}
+              </h2>
+              <button
+                type="button"
+                onClick={() => setIsAgentsDialogOpen(false)}
+                className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="max-h-[400px] overflow-y-auto px-6 py-4">
+              {agentsListProvider.agents && agentsListProvider.agents.length > 0 ? (
+                <div className="space-y-2">
+                  {agentsListProvider.agents.map((agent) => (
+                    <div
+                      key={agent.id}
+                      className="flex items-center justify-between rounded-lg border border-border bg-muted/50 px-3 py-2"
+                    >
+                      <div className="flex items-center gap-2">
+                        <AgentAvatarImage
+                          avatar={agent.avatar}
+                          alt={agent.name}
+                          className="size-6 rounded-full"
+                        />
+                        <span className="text-sm font-medium text-foreground">{agent.name}</span>
+                      </div>
+                      <span className={cn(
+                        'inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium',
+                        agent.isActive
+                          ? 'bg-green-500/10 text-green-600 dark:text-green-400'
+                          : 'bg-muted text-muted-foreground'
+                      )}>
+                        {agent.isActive ? t('model.enabled') : t('model.disabled')}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center text-sm text-muted-foreground">
+                  {t('model.noAgents')}
+                </div>
+              )}
             </div>
           </div>
         </div>

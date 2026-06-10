@@ -7,6 +7,19 @@ import { DEFAULT_TERMINAL_OPEN_TARGET, type TerminalOpenTarget } from '@/lib/ope
 const TOAST_LIMIT = 1
 const TOAST_REMOVE_DELAY = 5000 // 5 seconds
 
+// 主导航项类型
+export type MainNavTab = 'message' | 'workbench' | 'assistant' | 'skill' | 'model' | 'integration'
+
+// 默认导航顺序
+const DEFAULT_NAV_ORDER: MainNavTab[] = [
+  'message',
+  'workbench',
+  'assistant',
+  'skill',
+  'model',
+  'integration',
+]
+
 type ToasterToast = ToastProps & {
   id: string
   title?: React.ReactNode
@@ -31,6 +44,9 @@ interface UIStore {
   // 终端打开方式
   terminalOpenTarget: TerminalOpenTarget
 
+  // 导航项顺序
+  navOrder: MainNavTab[]
+
   // Actions
   addToast: (toast: Omit<ToasterToast, 'id'>) => { id: string; dismiss: () => void; update: (props: ToasterToast) => void }
   updateToast: (toast: Partial<ToasterToast> & { id: string }) => void
@@ -41,6 +57,7 @@ interface UIStore {
   setSoundEnabled: (enabled: boolean) => void
   setShowGitBranch: (show: boolean) => void
   setTerminalOpenTarget: (target: TerminalOpenTarget) => void
+  setNavOrder: (order: MainNavTab[]) => void
 }
 
 // Toast ID 生成器
@@ -75,6 +92,7 @@ export const useUIStore = create<UIStore>()(
       soundEnabled: true, // 默认开启提示音
       showGitBranch: true, // 默认在群聊里显示当前分支
       terminalOpenTarget: DEFAULT_TERMINAL_OPEN_TARGET,
+      navOrder: DEFAULT_NAV_ORDER, // 默认导航顺序
 
       addToast: (toastProps) => {
         const id = genId()
@@ -148,6 +166,7 @@ export const useUIStore = create<UIStore>()(
       setSoundEnabled: (enabled) => set({ soundEnabled: enabled }),
       setShowGitBranch: (show) => set({ showGitBranch: show }),
       setTerminalOpenTarget: (target) => set({ terminalOpenTarget: target }),
+      setNavOrder: (order) => set({ navOrder: order }),
     }),
     {
       name: 'ui-settings',
@@ -155,6 +174,7 @@ export const useUIStore = create<UIStore>()(
         soundEnabled: state.soundEnabled,
         showGitBranch: state.showGitBranch,
         terminalOpenTarget: state.terminalOpenTarget,
+        navOrder: state.navOrder,
       }),
     }
   )

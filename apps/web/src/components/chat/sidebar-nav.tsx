@@ -2,6 +2,8 @@
 import { CreateAssistantModal } from '@/components/chat/create-assistant-modal'
 import { CreateGroupModal } from '@/components/chat/create-group-modal'
 import { GlobalSearchModal } from '@/components/chat/global-search-modal'
+import { SortableNavItem } from '@/components/chat/sortable-nav-item'
+import { useNavOrder } from '@/components/chat/hooks/use-nav-order'
 import { UserAvatar } from '@/components/chat/user-avatar'
 import { useTheme } from '@/components/theme-provider'
 import {
@@ -21,6 +23,16 @@ import { BookOpenText, Bot, Check, CircleArrowUp, Cpu, Globe, LayoutDashboard, M
 import type { LucideIcon } from 'lucide-react'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
+import {
+  DndContext,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
 import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
 
@@ -86,6 +98,27 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
   const navMeasureRefs = useRef<Array<HTMLDivElement | null>>([])
   const hiddenNavTabSet = new Set(hiddenNavTabs)
   const isMoreTabActive = isOptionalNavTab(activeTab) && hiddenNavTabSet.has(activeTab)
+
+  // 导航项拖拽排序
+  const { navOrder, handleDragEnd } = useNavOrder()
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        delay: 300,
+        tolerance: 5,
+      },
+    })
+  )
+
+  // 导航项配置（id -> 图标和标签）
+  const navItemConfig: Record<MainNavTab, { icon: LucideIcon; label: string }> = {
+    message: { icon: MessageSquare, label: t('nav.messages') },
+    workbench: { icon: LayoutDashboard, label: t('nav.workbench') },
+    assistant: { icon: Bot, label: t('nav.assistants') },
+    skill: { icon: Package, label: t('nav.skills') },
+    model: { icon: Cpu, label: t('nav.models') },
+    integration: { icon: Globe, label: t('nav.integrations') },
+  }
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -325,110 +358,31 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {/* 消息 Tab */}
-        <button
-          onClick={() => handleTabChange('message')}
-          className={cn(
-            'relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
-            activeTab === 'message'
-              ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
-              : 'text-muted-foreground hover:bg-sidebar-accent'
-          )}
-          style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
-        >
-          <MessageSquare className="size-5" />
-          <span className="text-xs">{t('nav.messages')}</span>
-          {!!messageBadge && messageBadge > 0 && (
-            <span className="absolute right-3 top-0.5 flex size-4 items-center justify-center rounded-full bg-red-500 text-[10px] text-white">
-              {messageBadge > 99 ? '99' : messageBadge}
-            </span>
-          )}
-        </button>
+        {/* 可排序导航项 - 用 DndContext 包装 */}
+        <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+          <SortableContext items={navOrder} strategy={verticalListSortingStrategy}>
+            {navOrder.map((navId) => {
+              // 消息 Tab 永不隐藏，其他 Tab 检查是否在隐藏集合中
+              if (navId !== 'message' && isOptionalNavTab(navId) && hiddenNavTabSet.has(navId)) return null
 
-        {/* 工作台 Tab */}
-        {!hiddenNavTabSet.has('workbench') && (
-          <button
-            onClick={() => handleTabChange('workbench')}
-            className={cn(
-              'relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
-              activeTab === 'workbench'
-                ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
-                : 'text-muted-foreground hover:bg-sidebar-accent'
-            )}
-            style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
-          >
-            <LayoutDashboard className="size-5" />
-            <span className="text-xs">{t('nav.workbench')}</span>
-          </button>
-        )}
+              const config = navItemConfig[navId]
+              if (!config) return null
 
-        {/* 助手 Tab */}
-        {!hiddenNavTabSet.has('assistant') && (
-          <button
-            onClick={() => handleTabChange('assistant')}
-            className={cn(
-              'relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
-              activeTab === 'assistant'
-                ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
-                : 'text-muted-foreground hover:bg-sidebar-accent'
-            )}
-            style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
-          >
-            <Bot className="size-5" />
-            <span className="text-xs">{t('nav.assistants')}</span>
-          </button>
-        )}
-
-        {/* 技能 Tab */}
-        {!hiddenNavTabSet.has('skill') && (
-          <button
-            onClick={() => handleTabChange('skill')}
-            className={cn(
-              'relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
-              activeTab === 'skill'
-                ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
-                : 'text-muted-foreground hover:bg-sidebar-accent'
-            )}
-            style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
-          >
-            <Package className="size-5" />
-            <span className="text-xs">{t('nav.skills')}</span>
-          </button>
-        )}
-
-        {/* 模型 Tab */}
-        {!hiddenNavTabSet.has('model') && (
-          <button
-            onClick={() => handleTabChange('model')}
-            className={cn(
-              'relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
-              activeTab === 'model'
-                ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
-                : 'text-muted-foreground hover:bg-sidebar-accent'
-            )}
-            style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
-          >
-            <Cpu className="size-5" />
-            <span className="text-xs">{t('nav.models')}</span>
-          </button>
-        )}
-
-        {/* 频道 Tab */}
-        {!hiddenNavTabSet.has('integration') && (
-          <button
-            onClick={() => handleTabChange('integration')}
-            className={cn(
-              'relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
-              activeTab === 'integration'
-                ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
-                : 'text-muted-foreground hover:bg-sidebar-accent'
-            )}
-            style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
-          >
-            <Globe className="size-5" />
-            <span className="text-xs">{t('nav.integrations')}</span>
-          </button>
-        )}
+              return (
+                <SortableNavItem
+                  key={navId}
+                  id={navId}
+                  icon={config.icon}
+                  label={config.label}
+                  isActive={activeTab === navId}
+                  onClick={() => handleTabChange(navId)}
+                  isElectron={isElectron}
+                  badge={navId === 'message' ? messageBadge : undefined}
+                />
+              )
+            })}
+          </SortableContext>
+        </DndContext>
 
         {hiddenMenuTabs.length > 0 && (
           <DropdownMenu>

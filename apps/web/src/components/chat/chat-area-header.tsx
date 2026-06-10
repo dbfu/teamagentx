@@ -28,6 +28,7 @@ interface ChatAreaHeaderProps {
   onStopAllTasks?: () => void
   onOpenRoomRules?: () => void
   onOpenEnvVars?: () => void
+  onOpenCustomCommands?: () => void
   onScreenshot?: () => void
 }
 
@@ -46,6 +47,7 @@ export function ChatAreaHeader({
   onStopAllTasks,
   onOpenRoomRules,
   onOpenEnvVars,
+  onOpenCustomCommands,
   onScreenshot,
 }: ChatAreaHeaderProps) {
   const { t } = useTranslation()
@@ -505,6 +507,13 @@ export function ChatAreaHeader({
                 >
                   <KeyRound className="size-4 text-current" />
                   {t('chat.envVars.title')}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="hover:bg-primary/10 hover:text-primary hover:[&_svg]:text-primary focus:bg-primary/10 focus:text-primary focus:[&_svg]:text-primary"
+                  onClick={onOpenCustomCommands}
+                >
+                  <TerminalSquare className="size-4 text-current" />
+                  {t('chat.customCommands.menuTitle')}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   className="hover:bg-primary/10 hover:text-primary hover:[&_svg]:text-primary focus:bg-primary/10 focus:text-primary focus:[&_svg]:text-primary"

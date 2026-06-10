@@ -156,7 +156,6 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
   const [acpTools, setAcpTools] = useState<AcpToolInfo[]>([])
   const [loadingAcpTools, setLoadingAcpTools] = useState(false)
   const [installingToolId, setInstallingToolId] = useState<string | null>(null)
-  const [installLog, setInstallLog] = useState<Record<string, string>>({})
   const [openAtLogin, setOpenAtLogin] = useState(false)
   const [openAtLoginSupported, setOpenAtLoginSupported] = useState(true)
   const [savingOpenAtLogin, setSavingOpenAtLogin] = useState(false)
@@ -485,11 +484,8 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
 
   const handleInstallAcpSdk = async (toolId: string) => {
     setInstallingToolId(toolId)
-    setInstallLog(prev => ({ ...prev, [toolId]: '' }))
     try {
-      const exitCode = await acpToolsApi.installTool(toolId, (text) => {
-        setInstallLog(prev => ({ ...prev, [toolId]: (prev[toolId] || '') + text }))
-      })
+      const exitCode = await acpToolsApi.installTool(toolId, () => {})
       if (exitCode === 0) {
         toast.success(t('settings.sdkInstallSuccess'))
         await refreshAcpTools()
@@ -909,7 +905,6 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
             <div className="space-y-3">
               {acpTools.map((tool) => {
                 const isInstalling = installingToolId === tool.id
-                const log = installLog[tool.id]
                 return (
                   <div key={tool.id} className="rounded-lg border border-border bg-background p-3">
                     <div className="flex items-start justify-between gap-3">
@@ -959,10 +954,6 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
                         )}
                       </button>
                     </div>
-
-                    {log && (
-                      <pre className="mt-3 max-h-32 overflow-y-auto rounded-md bg-muted/50 p-2 text-xs text-muted-foreground whitespace-pre-wrap">{log}</pre>
-                    )}
                   </div>
                 )
               })}

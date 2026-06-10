@@ -383,7 +383,7 @@ export function CreateCronTaskModal({
                 onClick={() => setEnabled(!enabled)}
                 className={cn(
                   'relative h-5 w-10 rounded-full transition-colors',
-                  enabled ? 'bg-primary' : 'bg-muted'
+                  enabled ? 'bg-blue-500' : 'bg-gray-200'
                 )}
               >
                 <span
