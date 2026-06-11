@@ -72,7 +72,8 @@ describe('ACP Tools Service', () => {
       assert.ok(codex);
       assert.strictEqual(codex.sdkInstalled, true);
       assert.strictEqual(codex.installed, true);
-      assert.strictEqual(codex.preferredRuntime, 'sdk');
+      // 运行时优先宿主机 CLI，仅在未检测到 CLI 时回退到应用本地 SDK。
+      assert.strictEqual(codex.preferredRuntime, codex.cliInstalled ? 'cli' : 'sdk');
     } finally {
       if (originalToolsDir === undefined) {
         delete process.env.TOOLS_DIR;

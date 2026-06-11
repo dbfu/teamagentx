@@ -311,29 +311,6 @@ function resolveClaudeCodeExecutable(): string | undefined {
 
   const tried: string[] = [];
 
-  // 1. 查找 SDK 自带的原生二进制（打包后通常被 yml filter 排除以减小体积，
-  //    所以这里多半失败，是预期的；下方 step 2/3 会找用户本地安装的 claude）
-  for (const packageName of packageNames) {
-    try {
-      const resolved = requireFromClaudeSdk.resolve(
-        `${packageName}/claude${extension}`,
-      );
-      if (fs.existsSync(resolved)) {
-        console.log(
-          `[ClaudeSDK] resolved claude executable via sdk-native[${packageName}]: ${resolved}`,
-        );
-        return resolved;
-      }
-      tried.push(
-        `sdk-native[${packageName}]: ${resolved} (missing — 通常是因为打包阶段排除了 native 子包)`,
-      );
-    } catch (error) {
-      tried.push(
-        `sdk-native[${packageName}]: resolve threw ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  }
-
   // SDK 直接 spawn 该路径，且非 .js/.mjs/.cjs/.ts/.tsx/.jsx 都被当成 native binary 执行。
   // 这意味着 Windows 上的 .cmd/.ps1 shim 不能作为 pathToClaudeCodeExecutable —— spawn
   // 不走 shell，会直接 ENOENT。我们只接受真正的 native binary 或 JS 文件。
@@ -369,58 +346,10 @@ function resolveClaudeCodeExecutable(): string | undefined {
     return candidate;
   };
 
-  // 2. 查找应用本地安装目录（TOOLS_DIR）
-  const toolsDir = process.env.TOOLS_DIR;
-  if (toolsDir) {
-    // 2a. @anthropic-ai/claude-code 包的 bin/claude(.exe) —— postinstall 复制的真 native binary，最优
-    const claudeCodePkgBin = path.join(
-      toolsDir,
-      'node_modules',
-      '@anthropic-ai',
-      'claude-code',
-      'bin',
-      'claude' + extension,
-    );
-    const v2a = tryPathStrict(
-      'tools-dir/@anthropic-ai/claude-code/bin',
-      claudeCodePkgBin,
-    );
-    if (v2a) return v2a;
-
-    // 2b. .bin shim：非 Windows 走这里（Windows 上 .bin/claude.cmd 不可直接 spawn，跳过）
-    if (!isWindows) {
-      const localBin = path.join(toolsDir, 'node_modules', '.bin', 'claude');
-      const v2b = tryPathStrict('tools-dir/node_modules/.bin', localBin);
-      if (v2b) return v2b;
-    }
-
-    // 2c. Windows 上 npm global-style --prefix 直接根目录有 .exe 的情况（少见但兜底）
-    if (isWindows) {
-      const v2c = tryPathStrict(
-        'tools-dir/claude.exe',
-        path.join(toolsDir, 'claude.exe'),
-      );
-      if (v2c) return v2c;
-    }
-
-    // 2d. cli-wrapper.cjs —— postinstall 失败时的兜底，SDK 会用 node 执行 .cjs
-    const cliWrapper = path.join(
-      toolsDir,
-      'node_modules',
-      '@anthropic-ai',
-      'claude-code',
-      'cli-wrapper.cjs',
-    );
-    const v2d = tryPathStrict(
-      'tools-dir/@anthropic-ai/claude-code/cli-wrapper.cjs',
-      cliWrapper,
-    );
-    if (v2d) return v2d;
-  } else {
-    tried.push('TOOLS_DIR: <unset>');
-  }
-
-  // 3. 在 PATH 中查找系统安装的 claude CLI
+  // 1. 优先使用用户本地（PATH）安装的 claude CLI —— 让桌面版的「claude 原生」
+  //    与用户在终端里直接跑 claude 的行为保持一致：模型别名（如 opus）解析、新特性
+  //    都跟随用户自己安装的 CLI 版本，避免内置旧 CLI 把别名解析成与终端不同的具体
+  //    模型。找不到 PATH 里的 claude 时，再回退到下方的内置/SDK 自带版本。
   try {
     const cmd = isWindows ? 'where' : 'which';
     const result = execFileSync(cmd, ['claude'], {
@@ -454,6 +383,80 @@ function resolveClaudeCodeExecutable(): string | undefined {
     tried.push(
       `PATH lookup threw: ${error instanceof Error ? error.message : String(error)}`,
     );
+  }
+
+  // 2. 回退：SDK 自带的原生二进制（打包后通常被 yml filter 排除以减小体积，
+  //    所以这里多半失败，是预期的）
+  for (const packageName of packageNames) {
+    try {
+      const resolved = requireFromClaudeSdk.resolve(
+        `${packageName}/claude${extension}`,
+      );
+      if (fs.existsSync(resolved)) {
+        console.log(
+          `[ClaudeSDK] resolved claude executable via sdk-native[${packageName}]: ${resolved}`,
+        );
+        return resolved;
+      }
+      tried.push(
+        `sdk-native[${packageName}]: ${resolved} (missing — 通常是因为打包阶段排除了 native 子包)`,
+      );
+    } catch (error) {
+      tried.push(
+        `sdk-native[${packageName}]: resolve threw ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  // 3. 回退：应用本地安装目录（TOOLS_DIR，桌面版打包内置的 claude）
+  const toolsDir = process.env.TOOLS_DIR;
+  if (toolsDir) {
+    // 3a. @anthropic-ai/claude-code 包的 bin/claude(.exe) —— postinstall 复制的真 native binary，最优
+    const claudeCodePkgBin = path.join(
+      toolsDir,
+      'node_modules',
+      '@anthropic-ai',
+      'claude-code',
+      'bin',
+      'claude' + extension,
+    );
+    const v3a = tryPathStrict(
+      'tools-dir/@anthropic-ai/claude-code/bin',
+      claudeCodePkgBin,
+    );
+    if (v3a) return v3a;
+
+    // 3b. .bin shim：非 Windows 走这里（Windows 上 .bin/claude.cmd 不可直接 spawn，跳过）
+    if (!isWindows) {
+      const localBin = path.join(toolsDir, 'node_modules', '.bin', 'claude');
+      const v3b = tryPathStrict('tools-dir/node_modules/.bin', localBin);
+      if (v3b) return v3b;
+    }
+
+    // 3c. Windows 上 npm global-style --prefix 直接根目录有 .exe 的情况（少见但兜底）
+    if (isWindows) {
+      const v3c = tryPathStrict(
+        'tools-dir/claude.exe',
+        path.join(toolsDir, 'claude.exe'),
+      );
+      if (v3c) return v3c;
+    }
+
+    // 3d. cli-wrapper.cjs —— postinstall 失败时的兜底，SDK 会用 node 执行 .cjs
+    const cliWrapper = path.join(
+      toolsDir,
+      'node_modules',
+      '@anthropic-ai',
+      'claude-code',
+      'cli-wrapper.cjs',
+    );
+    const v3d = tryPathStrict(
+      'tools-dir/@anthropic-ai/claude-code/cli-wrapper.cjs',
+      cliWrapper,
+    );
+    if (v3d) return v3d;
+  } else {
+    tried.push('TOOLS_DIR: <unset>');
   }
 
   console.warn(

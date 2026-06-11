@@ -334,12 +334,12 @@ export function checkAllAcpTools(): AcpToolInfo[] {
       name: tool.name,
       description: tool.description,
       installed,
-      version: sdk.installed ? sdk.version : cli.version,
+      version: cli.installed ? cli.version : sdk.version,
       cliInstalled: cli.installed,
       cliVersion: cli.version,
       sdkInstalled: sdk.installed,
       sdkVersion: sdk.version,
-      preferredRuntime: sdk.installed ? 'sdk' : cli.installed ? 'cli' : undefined,
+      preferredRuntime: cli.installed ? 'cli' : sdk.installed ? 'sdk' : undefined,
       ...checkLocalConfig(tool.id),
     };
   });

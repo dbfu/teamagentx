@@ -490,22 +490,7 @@ export function buildCodexRouterBaseUrl(port: number, token: string, providerId:
  * 当 electron-builder 排除了 @openai/codex 原生二进制包时作为回退。
  */
 function findLocalCodexBinary(): string | undefined {
-  // 1. TOOLS_DIR 本地安装（npm install --prefix TOOLS_DIR @openai/codex）
-  const toolsDir = process.env.TOOLS_DIR;
-  if (toolsDir) {
-    const extension = process.platform === 'win32' ? '.exe' : '';
-    const localBin = path.join(toolsDir, 'node_modules', '.bin', 'codex' + extension);
-    const resolvedLocalBin = resolveCodexSpawnCandidate(localBin);
-    if (resolvedLocalBin) return resolvedLocalBin;
-    if (process.platform === 'win32') {
-      const fromCmdShim =
-        resolveCodexSpawnCandidate(path.join(toolsDir, 'node_modules', '.bin', 'codex.cmd')) ||
-        resolveCodexSpawnCandidate(path.join(toolsDir, 'node_modules', '.bin', 'codex.CMD'));
-      if (fromCmdShim) return fromCmdShim;
-    }
-  }
-
-  // 2. 系统 PATH
+  // 1. 优先使用宿主机 PATH 中的 codex CLI —— 与用户终端行为保持一致
   try {
     const which = process.platform === 'win32' ? 'where' : 'which';
     const result = execFileSync(which, ['codex'], {
@@ -521,6 +506,21 @@ function findLocalCodexBinary(): string | undefined {
     }
   } catch {}
 
+  // 2. 回退：TOOLS_DIR 本地安装（npm install --prefix TOOLS_DIR @openai/codex）
+  const toolsDir = process.env.TOOLS_DIR;
+  if (toolsDir) {
+    const extension = process.platform === 'win32' ? '.exe' : '';
+    const localBin = path.join(toolsDir, 'node_modules', '.bin', 'codex' + extension);
+    const resolvedLocalBin = resolveCodexSpawnCandidate(localBin);
+    if (resolvedLocalBin) return resolvedLocalBin;
+    if (process.platform === 'win32') {
+      const fromCmdShim =
+        resolveCodexSpawnCandidate(path.join(toolsDir, 'node_modules', '.bin', 'codex.cmd')) ||
+        resolveCodexSpawnCandidate(path.join(toolsDir, 'node_modules', '.bin', 'codex.CMD'));
+      if (fromCmdShim) return fromCmdShim;
+    }
+  }
+
   return undefined;
 }
 
@@ -529,6 +529,25 @@ function findSpawnableCodexBinary(): string | undefined {
   const extension = isWindows ? '.exe' : '';
   const tryPath = (candidate: string | undefined): string | undefined => resolveCodexSpawnCandidate(candidate, isWindows);
 
+  // 1. 优先使用宿主机 PATH 中的 codex CLI —— 让助手与用户终端里直接跑 codex 行为一致
+  try {
+    const which = isWindows ? 'where' : 'which';
+    const result = execFileSync(which, ['codex'], {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 3000,
+      windowsHide: true,
+    }).trim();
+    const candidates = result.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    for (const candidate of candidates) {
+      const found = resolveCodexSpawnCandidate(candidate, isWindows);
+      if (found) return found;
+    }
+  } catch {
+    // PATH lookup is best-effort; the bundled SDK path may still work in dev.
+  }
+
+  // 2. 回退：TOOLS_DIR 内置（应用本地 SDK / @openai/codex）
   const toolsDir = process.env.TOOLS_DIR;
   if (toolsDir) {
     const fromPackage = getCodexBinaryFromCodexPackageDir(
@@ -551,23 +570,6 @@ function findSpawnableCodexBinary(): string | undefined {
       const unixShim = tryPath(path.join(toolsDir, 'node_modules', '.bin', 'codex'));
       if (unixShim) return unixShim;
     }
-  }
-
-  try {
-    const which = isWindows ? 'where' : 'which';
-    const result = execFileSync(which, ['codex'], {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 3000,
-      windowsHide: true,
-    }).trim();
-    const candidates = result.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-    for (const candidate of candidates) {
-      const found = resolveCodexSpawnCandidate(candidate, isWindows);
-      if (found) return found;
-    }
-  } catch {
-    // PATH lookup is best-effort; the bundled SDK path may still work in dev.
   }
 
   return findLocalCodexBinary();
