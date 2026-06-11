@@ -27,6 +27,14 @@ export interface DuplicateChatRoomData {
   name?: string;
 }
 
+export interface ForkChatRoomData {
+  sourceChatRoomId: string;
+  name?: string;
+  // 指定从某条群历史归档 Fork：复制该归档内的消息作为新群的初始对话。
+  // 不传则复制源群当前可见消息（archiveId = null）。
+  archiveId?: string;
+}
+
 export interface UpdateChatRoomData {
   name?: string;
   avatar?: string;
@@ -392,6 +400,198 @@ export const chatRoomService = {
             lastInjectedMessageId: null,
             joinedAt: now,
             lastReadAt: now,
+          })),
+        });
+      }
+    });
+
+    ensureWorkDirExists(newChatRoomId, copiedWorkDir);
+
+    const result = await prisma.chatRoom.findUnique({
+      where: { id: newChatRoomId },
+      include: {
+        chatRoomAgents: {
+          include: agentInclude,
+        },
+        owner: {
+          select: {
+            id: true,
+            username: true,
+            avatar: true,
+            avatarColor: true,
+          },
+        },
+      },
+    });
+
+    if (!result) return null;
+    const systemAgents = await getSystemAgents();
+    return addVirtualSystemAgents(syncQuickChatRoomAvatar(result), systemAgents);
+  },
+
+  // Fork：从某个群聊“带历史”复制出一个新群聊，新群可接着聊。
+  // 路线 A：复制房间配置 + 成员 + 历史消息（含附件）+ 长期记忆摘要，
+  // 但不克隆各助手的 SDK session/thread——新群助手靠群历史注入（索引+工具+记忆摘要）接上下文。
+  async fork(data: ForkChatRoomData) {
+    // archiveId 指定时复制该归档的消息，否则复制当前可见消息（archiveId = null）。
+    const messageArchiveFilter = data.archiveId ? data.archiveId : null;
+    const source = await prisma.chatRoom.findUnique({
+      where: { id: data.sourceChatRoomId },
+      include: {
+        chatRoomAgents: true,
+        messages: {
+          where: { archiveId: messageArchiveFilter },
+          orderBy: { time: 'asc' },
+          include: { attachments: true },
+        },
+      },
+    });
+
+    if (!source) {
+      return null;
+    }
+
+    // 从归档 Fork 时，校验归档确实属于该群。
+    if (data.archiveId) {
+      const archive = await prisma.chatRoomMessageArchive.findUnique({
+        where: { id: data.archiveId },
+        select: { chatRoomId: true },
+      });
+      if (!archive || archive.chatRoomId !== source.id) {
+        return null;
+      }
+    }
+
+    const now = new Date();
+    const newChatRoomId = randomUUID();
+    const copiedName = data.name?.trim() || `${source.name} 副本`;
+    // workDir 共享：新群沿用老群目录，保持文件状态连续。
+    const copiedWorkDir = source.workDir?.trim() || null;
+
+    // 预生成 老消息ID -> 新消息ID 的映射，用于重写 replyMessageId / coveredMessageId。
+    const messageIdMap = new Map<string, string>();
+    for (const message of source.messages) {
+      messageIdMap.set(message.id, randomUUID());
+    }
+
+    // 长期记忆摘要（按助手聚合）随历史一起带入新群；
+    // 但从归档 Fork 时不带——当前记忆对应的是归档之后的群状态，与快照不匹配。
+    const sourceMemories = data.archiveId
+      ? []
+      : await prisma.agentRoomMemory.findMany({
+          where: { chatRoomId: source.id },
+        });
+
+    await prisma.$transaction(async (tx) => {
+      await tx.chatRoom.create({
+        data: {
+          id: newChatRoomId,
+          name: copiedName,
+          avatar: source.avatar,
+          avatarColor: source.avatarColor,
+          description: source.description,
+          rules: source.rules,
+          workDir: copiedWorkDir,
+          envVars: source.envVars,
+          ownerId: source.ownerId,
+          isQuickChatRoom: source.isQuickChatRoom,
+          quickChatAgentId: source.quickChatAgentId,
+          defaultAgentId: source.defaultAgentId,
+          agentTriggerMode: source.agentTriggerMode,
+          updatedAt: now,
+        },
+      });
+
+      if (source.chatRoomAgents.length > 0) {
+        await tx.chatRoomAgent.createMany({
+          data: source.chatRoomAgents.map((roomAgent) => ({
+            id: randomUUID(),
+            chatRoomId: newChatRoomId,
+            userId: roomAgent.userId,
+            agentId: roomAgent.agentId,
+            role: roomAgent.role,
+            injectGroupHistory: roomAgent.injectGroupHistory,
+            customWorkDir: roomAgent.customWorkDir,
+            // 重写到新消息ID：精确续上老群当时的增量注入状态。
+            lastInjectedMessageId: roomAgent.lastInjectedMessageId
+              ? messageIdMap.get(roomAgent.lastInjectedMessageId) ?? null
+              : null,
+            joinedAt: roomAgent.joinedAt,
+            lastReadAt: now,
+          })),
+        });
+      }
+
+      if (source.messages.length > 0) {
+        await tx.message.createMany({
+          data: source.messages.map((message) => ({
+            id: messageIdMap.get(message.id)!,
+            type: message.type,
+            content: message.content,
+            time: message.time,
+            userId: message.userId,
+            agentId: message.agentId,
+            chatRoomId: newChatRoomId,
+            // 回复链重写；指向集合外（如已归档）的回复目标则置空。
+            replyMessageId: message.replyMessageId
+              ? messageIdMap.get(message.replyMessageId) ?? null
+              : null,
+            isHuman: message.isHuman,
+            // 不带入执行审计/归档关联。
+            executionRecordId: null,
+            archiveId: null,
+            executionDuration: message.executionDuration,
+            totalTokens: message.totalTokens,
+            cacheReadTokens: message.cacheReadTokens,
+            model: message.model,
+            createdAt: message.createdAt,
+            updatedAt: now,
+          })),
+        });
+
+        const attachments = source.messages.flatMap((message) =>
+          message.attachments.map((attachment) => ({
+            id: randomUUID(),
+            messageId: messageIdMap.get(message.id)!,
+            type: attachment.type,
+            filename: attachment.filename,
+            mimeType: attachment.mimeType,
+            size: attachment.size,
+            // url 共享：物理文件不复制。
+            url: attachment.url,
+            width: attachment.width,
+            height: attachment.height,
+            durationMs: attachment.durationMs,
+            transcript: attachment.transcript,
+            waveform: attachment.waveform,
+            createdAt: attachment.createdAt,
+          })),
+        );
+        if (attachments.length > 0) {
+          await tx.attachment.createMany({ data: attachments });
+        }
+      }
+
+      if (sourceMemories.length > 0) {
+        await tx.agentRoomMemory.createMany({
+          data: sourceMemories.map((memory) => ({
+            id: randomUUID(),
+            chatRoomId: newChatRoomId,
+            agentId: memory.agentId,
+            summary: memory.summary,
+            coveredMessageId: memory.coveredMessageId
+              ? messageIdMap.get(memory.coveredMessageId) ?? null
+              : null,
+            coveredMessageTime: memory.coveredMessageTime,
+            messageCount: memory.messageCount,
+            tokenEstimate: memory.tokenEstimate,
+            version: memory.version,
+            // 压缩状态重置，避免带入老群的 running/failed 中间态。
+            compactStatus: 'idle',
+            compactStartedAt: null,
+            compactError: null,
+            createdAt: now,
+            updatedAt: now,
           })),
         });
       }

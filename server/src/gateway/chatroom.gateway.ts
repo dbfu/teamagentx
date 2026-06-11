@@ -760,6 +760,58 @@ export async function chatRoomGateway(app: FastifyInstance) {
     return reply.code(201).send({ success: true, data: serializeChatRoomForResponse(chatRoom) });
   });
 
+  app.post<{ Params: ChatRoomParams; Body: { name?: string; archiveId?: string } }>('/chatrooms/:id/fork', {
+    schema: {
+      description: '从某个群聊“带历史”复制出新群聊（复制消息/附件，可接着聊；不克隆助手 SDK 会话）。传 archiveId 则从指定群历史归档 Fork。',
+      tags: ['ChatRooms'],
+      params: {
+        type: 'object',
+        properties: { id: { type: 'string' } },
+      },
+      body: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Fork 后的群聊名称；不传则使用“原名称 副本”' },
+          archiveId: { type: 'string', description: '群历史归档 ID；传则复制该归档内的消息作为新群初始对话' },
+        },
+      },
+      response: {
+        201: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: chatRoomSchema,
+          },
+        },
+        404: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const { name, archiveId } = request.body ?? {};
+
+    const chatRoom = await chatRoomService.fork({
+      sourceChatRoomId: id,
+      name,
+      archiveId,
+    });
+
+    if (!chatRoom) {
+      return reply.code(404).send({ success: false, error: '群聊不存在' });
+    }
+
+    const io = (app as any).io as Server | undefined;
+    io?.emit('chatroom:created', { chatRoom });
+
+    return reply.code(201).send({ success: true, data: serializeChatRoomForResponse(chatRoom) });
+  });
+
   // Add agent to chatRoom
   app.post<{ Params: ChatRoomParams; Body: AddAgentBody }>('/chatrooms/:id/agents', {
     schema: {

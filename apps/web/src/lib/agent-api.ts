@@ -610,6 +610,14 @@ export const chatRoomApi = {
     })
   },
 
+  // Fork 群组（带历史消息/附件，可接着聊）。传 archiveId 则从指定群历史归档 Fork。
+  async fork(id: string, data?: { name?: string; archiveId?: string }): Promise<ApiResponse<ChatRoom>> {
+    return request<ChatRoom>(`/chatrooms/${id}/fork`, {
+      method: 'POST',
+      body: JSON.stringify(data ?? {}),
+    })
+  },
+
   // 删除群组
   async delete(id: string): Promise<ApiResponse<void>> {
     return request<void>(`/chatrooms/${id}`, {

@@ -638,7 +638,7 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
         )}
         {message.model && (
           <span
-            className="inline-flex items-center rounded-full bg-emerald-100 dark:bg-emerald-900/30 px-2 py-0.5 text-xs leading-none text-emerald-600 dark:text-emerald-400"
+            className="inline-flex items-center rounded-full bg-emerald-100 dark:bg-emerald-900/30 px-2 py-0.5 text-xs text-emerald-600 dark:text-emerald-400"
             title={message.model}
           >
             {t('chat.model')}：{message.model}

@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, History, Loader2, MessageSquare } from 'lucide-react'
+import { ArrowLeft, GitFork, History, Loader2, MessageSquare } from 'lucide-react'
+import { toast } from 'sonner'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ChatMessagesList } from './chat-messages-list'
-import { ChatRoom, ChatRoomMessageArchive, Message, messageApi } from '@/lib/agent-api'
+import { ChatRoom, ChatRoomMessageArchive, Message, messageApi, chatRoomApi } from '@/lib/agent-api'
 import { cn, formatDateTime } from '@/lib/utils'
 import { useTranslation } from 'react-i18next'
+import { useChatRoomStore } from '@/stores'
 
 interface MessageArchivesModalProps {
   open: boolean
@@ -35,6 +37,9 @@ export function MessageArchivesModal({
   currentUser,
 }: MessageArchivesModalProps) {
   const { t } = useTranslation()
+  const selectRoom = useChatRoomStore((s) => s.selectRoom)
+  const loadChatRooms = useChatRoomStore((s) => s.loadChatRooms)
+  const [forkingId, setForkingId] = useState<string | null>(null)
   const [archives, setArchives] = useState<ChatRoomMessageArchive[]>([])
   const [selectedArchive, setSelectedArchive] = useState<ChatRoomMessageArchive | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
@@ -87,6 +92,30 @@ export function MessageArchivesModal({
       setLoadingMessages(false)
     }
   }, [])
+
+  // 从某条群历史归档 Fork 出新群，带着该归档的消息接着聊。
+  const handleFork = useCallback(async (archive: ChatRoomMessageArchive) => {
+    if (forkingId) return
+    setForkingId(archive.id)
+    try {
+      const response = await chatRoomApi.fork(chatRoom.id, {
+        archiveId: archive.id,
+        name: archive.title,
+      })
+      if (response.success && response.data) {
+        toast.success(t('chat.groupForked'))
+        await loadChatRooms()
+        selectRoom(response.data.id)
+        onOpenChange(false)
+      } else {
+        toast.error(t('chat.forkFailed'))
+      }
+    } catch (error) {
+      toast.error(t('chat.forkFailed'))
+    } finally {
+      setForkingId(null)
+    }
+  }, [chatRoom.id, forkingId, loadChatRooms, onOpenChange, selectRoom, t])
 
   const loadOlderMessages = useCallback(async () => {
     if (!selectedArchive || loadingOlderMessages || messages.length === 0 || !hasOlderMessages) return
@@ -155,12 +184,19 @@ export function MessageArchivesModal({
             ) : (
               <div className="grid gap-2">
                 {archives.map((archive) => (
-                  <button
+                  <div
                     key={archive.id}
-                    type="button"
+                    role="button"
+                    tabIndex={0}
                     onClick={() => void loadArchiveMessages(archive)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        void loadArchiveMessages(archive)
+                      }
+                    }}
                     className={cn(
-                      'flex w-full items-center gap-3 rounded-lg border border-gray-200 p-3 text-left transition-colors',
+                      'group flex w-full cursor-pointer items-center gap-3 rounded-lg border border-gray-200 p-3 text-left transition-colors',
                       'hover:border-blue-200 hover:bg-blue-50/60 dark:border-border dark:hover:bg-blue-950/20'
                     )}
                   >
@@ -176,15 +212,47 @@ export function MessageArchivesModal({
                     <div className="shrink-0 rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
                       {t('chat.messageCountShort', { count: archive.messageCount })}
                     </div>
-                  </button>
+                    <button
+                      type="button"
+                      title={t('chat.forkFromArchive')}
+                      disabled={!!forkingId}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        void handleFork(archive)
+                      }}
+                      className="flex shrink-0 items-center gap-1 rounded-lg border border-gray-200 px-2 py-1 text-xs text-gray-600 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-50 dark:border-border dark:text-muted-foreground dark:hover:bg-blue-950/20"
+                    >
+                      {forkingId === archive.id ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <GitFork className="size-3.5" />
+                      )}
+                      {t('chat.fork')}
+                    </button>
+                  </div>
                 ))}
               </div>
             )}
           </div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col">
-            <div className="border-b border-border px-5 py-2 text-xs text-muted-foreground">
-              {t('chat.readOnlyArchiveHint', { range: formatArchiveRange(selectedArchive), count: selectedArchive.messageCount })}
+            <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-2 text-xs text-muted-foreground">
+              <span className="min-w-0 truncate">
+                {t('chat.readOnlyArchiveHint', { range: formatArchiveRange(selectedArchive), count: selectedArchive.messageCount })}
+              </span>
+              <button
+                type="button"
+                disabled={!!forkingId}
+                onClick={() => void handleFork(selectedArchive)}
+                className="flex shrink-0 items-center gap-1 rounded-lg border border-gray-200 px-2.5 py-1 text-xs text-gray-600 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-50 dark:border-border dark:text-muted-foreground dark:hover:bg-blue-950/20"
+              >
+                {forkingId === selectedArchive.id ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <GitFork className="size-3.5" />
+                )}
+                {t('chat.forkFromArchive')}
+              </button>
             </div>
             <ChatMessagesList
               chatRoomId={chatRoom.id}

@@ -143,12 +143,12 @@ export function CustomCommandModal({ isOpen, onClose, chatRoomId }: CustomComman
             ) : (
               <div
                 key={cmd.id}
-                className="group flex items-start gap-3 rounded-lg border border-border bg-background px-4 py-3"
+                className="group flex items-center gap-3 rounded-lg border border-border bg-background px-4 py-3"
               >
-                <span className="mt-0.5 inline-flex shrink-0 whitespace-nowrap rounded-md bg-blue-500/10 px-2 py-0.5 font-mono text-xs font-medium text-blue-600">
+                <span className="inline-flex shrink-0 whitespace-nowrap rounded-md bg-blue-500/10 px-2 py-0.5 font-mono text-xs font-medium text-blue-600">
                   /{cmd.name}
                 </span>
-                <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-sm text-foreground line-clamp-2">
+                <span className="min-w-0 flex-1 truncate text-sm text-foreground">
                   {cmd.content}
                 </span>
                 <div className="flex shrink-0 items-center gap-1">
