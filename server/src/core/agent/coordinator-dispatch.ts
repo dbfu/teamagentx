@@ -451,7 +451,10 @@ export async function runCoordinatorDispatch(
   const memberSection = buildMemberSection(chatRoomMembers, chatRoom.owner?.username, humanMembers);
 
   const contextBlock = await buildCoordinatorLayeredContext(chatRoomId, message.id);
-  const userContent = withCoordinatorContext(message.content, contextBlock);
+  const userContent = withCoordinatorContext(message.content, contextBlock, {
+    isHuman: message.isHuman,
+    name: message.isHuman ? message.user : message.agentName,
+  });
 
   const systemPrompt = buildInternalCoordinatorPrompt();
   const protocol = ((provider as any).apiProtocol ?? 'anthropic') as string;

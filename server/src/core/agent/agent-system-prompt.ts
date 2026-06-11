@@ -86,7 +86,7 @@ Format rules for this line (otherwise it will NOT trigger and the task silently 
 - It must NOT be inside a code block, blockquote, or example.
 - target_assistant must be an existing assistant in this chatroom.
 If the correct assistant is genuinely unclear, do NOT guess — end by asking the user to choose instead.
-2. FINISH — the task is complete, or it now needs the user (more input, a decision, or confirmation). Do NOT mention any assistant; just give the result or state what you need from the user.
+2. FINISH — the task is complete, or it now needs the user (more input, a decision, or confirmation). Do NOT mention any assistant. If you are asking the user a question or waiting for their confirmation/decision, the reply MUST @ that user (e.g. @username) so the system can route their answer straight back to you; otherwise just give the result.
 It is FORBIDDEN to end a reply that implies further work is still needed (e.g. "next we should…", "then it needs to be tested / built / reviewed / handled by …") WITHOUT a HAND OFF line. Before sending, re-read your last line: if your reply implies someone else must act, confirm that last line starts with "@" followed by an existing assistant name.`
     : '';
 
@@ -97,6 +97,7 @@ It is FORBIDDEN to end a reply that implies further work is still needed (e.g. "
     getImageGenerationSkillInstructions(imageGenerationProvider),
     `## Assistant Mentions
 In TeamAgentX, an @assistant mention can trigger another assistant task. A single message may contain at most one triggerable @assistant mention. When handing off or asking another assistant, choose one target assistant and mention only that assistant. If multiple assistants could help, choose the best next assistant or ask the user to choose; refer to any additional assistants by name without @.
+Whenever you end a reply by asking the user to confirm, decide, or answer something before you can continue, you MUST @ that user (e.g. @username) in the reply. This lets the system route the user's reply directly back to you. Mentioning a user does NOT count toward the one-triggerable-@assistant limit. Do not @ the user for messages that are just a final result and need no response.
 ${collaborationTriggerCheckSection}`,
     `## Working Directory
 Your working directory is: ${workDir}
@@ -115,7 +116,7 @@ export function buildHandoffTurnReminder(
   agentTriggerMode?: AgentTriggerMode,
 ): string {
   if (agentTriggerMode !== 'auto') return '';
-  return `[Handoff Reminder] End this reply with exactly ONE of: (a) if another assistant must continue, make the LAST line "@assistant_name what to do next" — @ at the start of that line, only one such mention in the whole reply, not inside a code block; (b) if the task is done or now needs the user, do not mention any assistant. Never end a reply that implies further work is still needed without a handoff line.`;
+  return `[Handoff Reminder] End this reply with exactly ONE of: (a) if another assistant must continue, make the LAST line "@assistant_name what to do next" — @ at the start of that line, only one such mention in the whole reply, not inside a code block; (b) if the task is done or now needs the user, do not mention any assistant — but if you are asking the user to confirm, decide, or answer before you can continue, @ that user (@username) so their reply routes back to you. Never end a reply that implies further work is still needed without a handoff line.`;
 }
 
 interface BuildGroupChatMemberInfoSectionOptions {

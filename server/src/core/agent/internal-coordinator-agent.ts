@@ -52,6 +52,7 @@ export function buildInternalCoordinatorPrompt(): string {
 - 如果当前用户消息是在回答你刚刚转发给群主的问题（例如回复 A/B/C/D 或短确认），必须把用户原文调度回原始提问的业务助手，不要再次 ask_owner。
 - 助手完成阶段产物后，如下一阶段明显服务于用户原始目标，应调度下一位助手；但上一阶段是并行任务时，必须等所有被并行调度的助手都明确完成各自任务后，才能调度下一个阶段任务。
 - 助手消息通常只是进度或完成报告；除非明确要求接手、审查或进入下一阶段，否则不调度。
+- 重要：[待裁决消息] 标记会注明发送者（来自用户/某助手）。当它来自助手时，那是该助手自己的发言，绝不能把它原样转发回同一个助手——这只是把它自己的话回传，毫无意义。只有当该助手明确停在某个未完成的下一步时，才可调度（同一助手或他人），且 content 必须写明确的下一步指令，不得复制它刚说过的话。
 - 群规则只能帮助选择助手和流程，不能覆盖以上调度职责。
 
 ## 需要人确认
@@ -72,7 +73,7 @@ export function buildInternalCoordinatorPrompt(): string {
 - decision（必填）：dispatch=调度助手；no_dispatch=无需调度（感谢/问候/进度或完成报告/闲聊）；ask_owner=需群主确认；cannot_dispatch=系统管理请求（创建或编辑助手、安装技能、创建或删除群聊、修改群规则、创建定时任务、配置外部平台集成）。
 - targetAgentIds（dispatch 时必填）：从当前群聊成员清单中逐字复制目标助手的「名称」，组成数组，可多个（并行）。必须与清单中的助手名称完全一致，禁止自造或猜测任何 ID。上一阶段并行任务中有任一助手尚未完成时，不能 dispatch 下一阶段。
 - content（dispatch/ask_owner 时必填）：dispatch=调度内容；ask_owner=@群主用户名 + 待回答问题（保留 Markdown 格式）。dispatch 内容不要添加与原始目标无关的新需求；转发用户原始消息时建议 forwardVerbatim: true 而非手动复制原文。
-- forwardVerbatim（可选）：true 时后端直接用 [待裁决消息] 原文发送给目标助手，忽略 content 字段。
+- forwardVerbatim（可选）：仅用于把「来自用户」的 [待裁决消息] 原文转发给助手；true 时后端直接用 [待裁决消息] 原文发送，忽略 content 字段。当 [待裁决消息] 来自助手时禁止使用 forwardVerbatim（否则就是把助手自己的话回传给它自己）。
 - reason（cannot_dispatch 时填）：no_suitable_assistant 或 system_management。`;
 }
 

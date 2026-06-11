@@ -15,7 +15,7 @@ import { GROUP_COORDINATOR_ID } from '../system-assistant.constants.js';
 import { workbenchTaskService } from '../../../modules/workbench/workbench.service.js';
 import { scheduleStallWatchdog, resetStallWatchdog } from './stall-watchdog.js';
 import { runCoordinatorDispatch } from '../coordinator-dispatch.js';
-import { messageMentionsRoomUser } from './user-mention-utils.js';
+import { messageMentionsRoomUser, findDirectReplyAgentId } from './user-mention-utils.js';
 import { checkAndClearInterrupted } from './stall-watchdog.js';
 import {
   startParallelBatch,
@@ -39,13 +39,14 @@ export function shouldTriggerCoordinatorAgent(params: {
   hasMentions: boolean;
   messageIsHuman?: boolean | undefined;
   sourceAgentId?: string | null;
-  hasUserMentions?: boolean;
 }) {
   if (params.agentTriggerMode !== 'coordinator') return false;
   if (params.isQuickChatRoom) return false;
   if (params.sourceAgentId === GROUP_COORDINATOR_ID) return false;
-  // 助手直接 @用户时不触发群调度，让用户直接看到助手的消息
-  if (params.hasUserMentions) return false;
+  // 注意：协调模式下，助手即使 @用户也必须照常进群调度裁决，绝不能在这里跳过。
+  // 否则该助手处于并行批次时，markBatchAgentComplete 永远不会被调用（它在群调度块内），
+  // 批次永远到不了 'last'，下一阶段任务永不触发，整条链路卡死。
+  // 助手 @用户的问题改由群调度的 ask_owner 转发给群主（保留原 @ 与 Markdown）。
 
   return !params.hasMentions || !params.messageIsHuman;
 }
@@ -260,8 +261,45 @@ export function setupAIHandlers(
         return;
       }
 
-      // 协调模式：用户显式 @ 仍直接触发；助手消息即使 @ 其他助手，也先交给内置群调度助手裁决。
-      // 但如果助手直接 @用户，不触发群调度，让用户直接看到助手的消息。
+      // 直达回复：用户这条无 @、且未手动引用的回复，若紧邻的上一条是「助手 @ 了本用户」，
+      // 说明用户在回复那个助手的提问/确认，直接派给该助手。
+      // 优先级：手动引用(replyMessageId) > 直达 > 群调度助手/默认助手。
+      if (
+        chatRoom &&
+        (agentTriggerMode === 'coordinator' || agentTriggerMode === 'auto') &&
+        !chatRoom.isQuickChatRoom &&
+        message.isHuman &&
+        !hasMentions &&
+        !message.replyMessageId
+      ) {
+        const directReplyAgentId = await findDirectReplyAgentId(
+          chatRoomId,
+          message,
+        );
+        if (directReplyAgentId) {
+          const agent = await agentService.findById(directReplyAgentId);
+          if (agent && agent.isActive) {
+            let isMember = true;
+            if (agent.agentLevel !== 'system') {
+              isMember = await chatRoomService.isAgentMember(chatRoomId, agent.id);
+            }
+            if (isMember) {
+              debugLog('directReplyTrigger', {
+                chatRoomId,
+                agentId: agent.id,
+                agentName: agent.name,
+                triggerMessageId: message.id,
+              });
+              await enqueueAgentTask(chatRoomId, message, agent, null, { bridgeInfo });
+              return;
+            }
+          }
+        }
+      }
+
+      // 协调模式：用户显式 @ 仍直接触发；助手消息即使 @ 其他助手或 @用户，也一律先交给内置
+      // 群调度助手裁决。助手 @用户的问题由群调度的 ask_owner 转发给群主；绝不能因 @用户而跳过
+      // 群调度，否则并行批次的完成计数（markBatchAgentComplete，在本块内）会丢失导致任务卡死。
       if (
         chatRoom &&
         shouldTriggerCoordinatorAgent({
@@ -270,7 +308,6 @@ export function setupAIHandlers(
           hasMentions,
           messageIsHuman: message.isHuman,
           sourceAgentId: message.agentId,
-          hasUserMentions,
         })
       ) {
         // 并行批次检查：协调者同时派发多个助手时，等所有助手都完成后再触发协调者一次，

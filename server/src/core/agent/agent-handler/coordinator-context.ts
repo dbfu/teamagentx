@@ -58,12 +58,39 @@ ${lines.join('\n')}`;
 }
 
 /**
+ * 待裁决消息的发送者信息，用于在标记里标注「来自用户/助手 + 名称」。
+ * 协调器据此判断这条是用户新需求还是助手自己的进度/完成报告，避免把助手
+ * 自己的话原样 forwardVerbatim 回传给它自己（自环转发）。
+ */
+export interface CoordinatorSender {
+  isHuman?: boolean;
+  name?: string | null;
+}
+
+function formatSenderLabel(sender?: CoordinatorSender): string {
+  if (!sender) return '';
+  const name = sender.name?.trim();
+  if (sender.isHuman) {
+    return name ? `来自用户 ${name}` : '来自用户';
+  }
+  return name ? `来自助手 ${name}` : '来自助手';
+}
+
+/**
  * 把「待裁决消息」放在最前面，让模型首先识别要裁决的内容；
  * 「仅供裁决参考」的上下文块放在后面作为辅助信息。
  * 上下文为空时仍包裹 [待裁决消息] 标记，保持格式一致。
+ * 提供 sender 时在标记里标注发送者（来自用户/助手 + 名称），帮助协调器区分
+ * 「用户新需求」与「助手自己的报告」。
  */
-export function withCoordinatorContext(content: string, contextBlock: string): string {
-  const base = `[待裁决消息]\n${content}`;
+export function withCoordinatorContext(
+  content: string,
+  contextBlock: string,
+  sender?: CoordinatorSender,
+): string {
+  const label = formatSenderLabel(sender);
+  const header = label ? `[待裁决消息 · ${label}]` : '[待裁决消息]';
+  const base = `${header}\n${content}`;
   return contextBlock ? `${base}\n\n${contextBlock}` : base;
 }
 
