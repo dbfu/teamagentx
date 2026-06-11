@@ -18,7 +18,6 @@ import {
   LayoutDashboard,
   ListTodo,
   Loader2,
-  MessageSquare,
   Plus,
   RefreshCw,
   Send,
@@ -91,10 +90,17 @@ function TaskRow({
             <TaskStatusBadge status={task.status} t={t} />
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-            <span className="inline-flex items-center gap-1">
-              <MessageSquare className="size-3.5" />
-              {task.chatRoom?.name ?? rooms.find((room) => room.id === task.chatRoomId)?.name ?? t('workbench.noMatchingGroup')}
-            </span>
+            {(() => {
+              const matchedRoom = rooms.find((room) => room.id === task.chatRoomId)
+              const roomName = task.chatRoom?.name ?? matchedRoom?.name ?? t('workbench.noMatchingGroup')
+              const roomAvatar = task.chatRoom?.avatar ?? matchedRoom?.avatar ?? null
+              return (
+                <span className="inline-flex items-center gap-1.5">
+                  <GroupAvatarImage avatar={roomAvatar} alt={roomName} className="size-4 rounded-full" />
+                  {roomName}
+                </span>
+              )
+            })()}
             <span>{t('workbench.latestTime')}{formatTime(task.lastActivityAt || task.updatedAt, t('workbench.noActivity'))}</span>
           </div>
           {(task.expectedOutput || task.description) && (
@@ -451,7 +457,7 @@ export function WorkbenchPage() {
                 </div>
               ))}
             </div>
-            <div className="grid min-h-0 flex-1 gap-3 xl:grid-cols-[420px_minmax(0,1fr)]">
+            <div className="grid min-h-0 flex-1 gap-3 grid-cols-[420px_minmax(0,1fr)]">
             <section className="overflow-y-auto rounded-lg border border-border bg-card p-3 shadow-sm">
               <div className="mb-4 flex items-center justify-between gap-3">
                 <h2 className="text-base font-semibold text-foreground">{t('workbench.addTaskTitle')}</h2>
