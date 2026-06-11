@@ -372,7 +372,7 @@ function estimateMessageHeight(message?: Message): number {
   return 72 + textHeight + attachmentHeight
 }
 
-export function ChatMessagesList({
+export const ChatMessagesList = memo(function ChatMessagesList({
   chatRoomId,
   messages,
   loading,
@@ -1699,4 +1699,4 @@ export function ChatMessagesList({
       )}
     </div>
   )
-}
+})

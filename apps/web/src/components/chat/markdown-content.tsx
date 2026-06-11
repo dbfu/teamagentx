@@ -1,15 +1,17 @@
 import { cn } from '@/lib/utils'
 import { Check, Copy } from 'lucide-react'
-import { isValidElement, useRef, useState } from 'react'
+import { type ComponentProps, isValidElement, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { resolveAssetUrl } from '@/lib/asset-url'
 import { MENTION_MARKER_CLASS, remarkMentions } from '@/lib/remark-mentions'
 import { remarkTrimUrlPunctuation } from '@/lib/remark-trim-url-punctuation'
 import { isSystemAssistantDetailBlocked } from '@/lib/system-agents'
 import { MermaidDiagram } from './mermaid-diagram'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { type Components } from 'react-markdown'
 import rehypeRaw from 'rehype-raw'
 import remarkGfm from 'remark-gfm'
+
+type RemarkPlugins = NonNullable<ComponentProps<typeof ReactMarkdown>['remarkPlugins']>
 
 interface MentionAgent {
   id: string
@@ -113,6 +115,81 @@ export function MarkdownContent({
   const normalizedContent = normalizeOrderedListMarkerBreaks(content)
   const hasMentions = Boolean(mentionAgents?.length)
 
+  // 记忆化 remark 插件与组件渲染器：内联对象/函数每次渲染都会变更引用，
+  // 在流式视图等高频重渲场景下会让 react-markdown 认为组件 type 变化而卸载重挂，
+  // 导致代码块复制按钮等内部状态被反复重置（视觉上表现为闪烁）。
+  const remarkPlugins = useMemo<RemarkPlugins>(
+    () =>
+      hasMentions
+        ? [remarkGfm, remarkTrimUrlPunctuation, [remarkMentions, { mentionAgents }]]
+        : [remarkGfm, remarkTrimUrlPunctuation],
+    [hasMentions, mentionAgents],
+  )
+
+  const components = useMemo<Components>(
+    () => ({
+      pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
+      code: ({ className, children, ...props }) => {
+        // fenced 代码块带 language-xxx 类名；行内代码无此类名
+        const language = /language-(\w+)/.exec(className || '')?.[1]
+        if (language === 'mermaid' && !disableMermaid) {
+          return <MermaidDiagram chart={String(children)} />
+        }
+        return (
+          <code className={className} {...props}>
+            {children}
+          </code>
+        )
+      },
+      a: ({ href, children }) => (
+        <a href={href} target="_blank" rel="noopener noreferrer" className="break-all">
+          {children}
+        </a>
+      ),
+      img: ({ src, alt }) => {
+        const imageUrl = resolveAssetUrl(src)
+        return (
+          <img
+            src={imageUrl}
+            alt={alt || t('chat.image')}
+            className={cn(
+              'max-h-[360px] w-auto max-w-[min(560px,80vw)] rounded-lg object-contain',
+              onImageClick && 'cursor-pointer transition-opacity hover:opacity-90',
+            )}
+            onClick={() => imageUrl && onImageClick?.({ url: imageUrl, name: alt || t('chat.image') })}
+          />
+        )
+      },
+      span: ({ className, children, ...props }) => {
+        if (className === MENTION_MARKER_CLASS) {
+          const agentId = (props as any).agentId || (props as any)['data-agent-id']
+          const agentName = (props as any).agentName || (props as any)['data-agent-name']
+
+          if (agentId && agentName) {
+            const blocksDetail = isSystemAssistantDetailBlocked({ id: agentId, name: agentName })
+            return (
+              <span
+                className={cn(
+                  'text-primary whitespace-nowrap',
+                  blocksDetail ? 'cursor-default' : 'cursor-pointer hover:text-primary/80'
+                )}
+                onClick={() => {
+                  if (!blocksDetail) onMentionClick?.(agentId, agentName)
+                }}
+                title={blocksDetail ? undefined : t('common.clickToViewAgentDetails', { name: agentName })}
+              >
+                {children}
+              </span>
+            )
+          }
+        }
+
+        return <span className={className} {...props}>{children}</span>
+      },
+    }),
+    [disableMermaid, onImageClick, onMentionClick, t],
+  )
+
   return (
     <div
       className={cn(
@@ -122,72 +199,9 @@ export function MarkdownContent({
       )}
     >
       <ReactMarkdown
-        remarkPlugins={
-          hasMentions
-            ? [remarkGfm, remarkTrimUrlPunctuation, [remarkMentions, { mentionAgents }]]
-            : [remarkGfm, remarkTrimUrlPunctuation]
-        }
+        remarkPlugins={remarkPlugins}
         rehypePlugins={hasMentions ? [rehypeRaw] : undefined}
-        components={{
-          pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
-          code: ({ className, children, ...props }) => {
-            // fenced 代码块带 language-xxx 类名；行内代码无此类名
-            const language = /language-(\w+)/.exec(className || '')?.[1]
-            if (language === 'mermaid' && !disableMermaid) {
-              return <MermaidDiagram chart={String(children)} />
-            }
-            return (
-              <code className={className} {...props}>
-                {children}
-              </code>
-            )
-          },
-          a: ({ href, children }) => (
-            <a href={href} target="_blank" rel="noopener noreferrer" className="break-all">
-              {children}
-            </a>
-          ),
-          img: ({ src, alt }) => {
-            const imageUrl = resolveAssetUrl(src)
-            return (
-              <img
-                src={imageUrl}
-                alt={alt || t('chat.image')}
-                className={cn(
-                  'max-h-[360px] w-auto max-w-[min(560px,80vw)] rounded-lg object-contain',
-                  onImageClick && 'cursor-pointer transition-opacity hover:opacity-90',
-                )}
-                onClick={() => imageUrl && onImageClick?.({ url: imageUrl, name: alt || t('chat.image') })}
-              />
-            )
-          },
-          span: ({ className, children, ...props }) => {
-            if (className === MENTION_MARKER_CLASS) {
-              const agentId = (props as any).agentId || (props as any)['data-agent-id']
-              const agentName = (props as any).agentName || (props as any)['data-agent-name']
-
-              if (agentId && agentName) {
-                const blocksDetail = isSystemAssistantDetailBlocked({ id: agentId, name: agentName })
-                return (
-                  <span
-                    className={cn(
-                      'text-primary whitespace-nowrap',
-                      blocksDetail ? 'cursor-default' : 'cursor-pointer hover:text-primary/80'
-                    )}
-                    onClick={() => {
-                      if (!blocksDetail) onMentionClick?.(agentId, agentName)
-                    }}
-                    title={blocksDetail ? undefined : t('common.clickToViewAgentDetails', { name: agentName })}
-                  >
-                    {children}
-                  </span>
-                )
-              }
-            }
-
-            return <span className={className} {...props}>{children}</span>
-          },
-        }}
+        components={components}
       >
         {normalizedContent}
       </ReactMarkdown>
