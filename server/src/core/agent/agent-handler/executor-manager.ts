@@ -277,7 +277,7 @@ export async function initAgents() {
 
       // 创建 emit 回调
       const emitCallback = async (content: string, replyMessageId?: string) => {
-        const aiMessage = buildAIMessage(
+        const aiMessage = await buildAIMessage(
           content,
           replyMessageId || null,
           agentName,

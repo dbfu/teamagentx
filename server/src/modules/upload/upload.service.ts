@@ -70,6 +70,29 @@ function validateAudioMagicBytes(buffer: Buffer, mimeType: string): void {
   }
 }
 
+/**
+ * 校验图片文件魔数，确保确实是图片再落盘，避免把任意本地文件复制进 uploads
+ */
+function validateImageMagicBytes(buffer: Buffer): void {
+  if (buffer.length < 12) {
+    throw new Error('图片文件过小，无法校验格式');
+  }
+
+  const matchesPrefix = (offset: number, bytes: number[]): boolean =>
+    bytes.every((b, i) => buffer[offset + i] === b);
+
+  // PNG 89 50 4E 47
+  if (matchesPrefix(0, [0x89, 0x50, 0x4e, 0x47])) return;
+  // JPEG FF D8 FF
+  if (matchesPrefix(0, [0xff, 0xd8, 0xff])) return;
+  // GIF "GIF8"
+  if (matchesPrefix(0, [0x47, 0x49, 0x46, 0x38])) return;
+  // WEBP: "RIFF"...."WEBP"
+  if (matchesPrefix(0, [0x52, 0x49, 0x46, 0x46]) && matchesPrefix(8, [0x57, 0x45, 0x42, 0x50])) return;
+
+  throw new Error('图片文件魔数不匹配');
+}
+
 interface UploadResult {
   type: 'image' | 'audio';
   filename: string;  // 原始文件名
@@ -138,6 +161,34 @@ export const uploadService = {
       size: buffer.length,
       url: `/uploads/images/${filename}`,
     };
+  },
+
+  /**
+   * 从本地文件保存一张图片到 uploads 目录，返回可访问的 /uploads/images/... URL。
+   * 用于把助手消息里指向工作目录的本地图片转存为静态资源。
+   */
+  async saveImageFromFile(sourcePath: string): Promise<string> {
+    const rawExt = path.extname(sourcePath).toLowerCase().replace(/^\./, '');
+    const ext = rawExt === 'jpeg' ? 'jpg' : rawExt;
+    if (!['png', 'jpg', 'gif', 'webp'].includes(ext)) {
+      throw new Error(`不支持的图片类型: ${rawExt}`);
+    }
+
+    const buffer = await fs.readFile(sourcePath);
+    if (buffer.length === 0) {
+      throw new Error('图片文件为空');
+    }
+    if (buffer.length > MAX_FILE_SIZE) {
+      throw new Error(`文件大小超出限制: ${buffer.length} > ${MAX_FILE_SIZE}`);
+    }
+
+    // 校验魔数，防止把任意本地文件当作图片转存
+    validateImageMagicBytes(buffer);
+
+    const filename = `${uuidv4()}.${ext}`;
+    await fs.writeFile(path.join(IMAGE_UPLOAD_DIR, filename), buffer);
+
+    return `/uploads/images/${filename}`;
   },
 
   /**

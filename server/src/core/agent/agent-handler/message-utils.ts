@@ -1,11 +1,70 @@
 import { randomUUID } from 'crypto';
+import path from 'path';
 import { messageService } from '../../../modules/message/message.service.js';
+import { uploadService } from '../../../modules/upload/upload.service.js';
 import type { Message } from '../../../types/message.js';
+import { getDefaultChatRoomWorkDir } from '../work-dir.js';
 import { globalBroadcastMessage, globalEmit } from './status.js';
 import { debugLog } from './debug.js';
 
-// 构建 AI 消息对象
-export function buildAIMessage(
+const INLINE_IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp']);
+// 匹配 markdown 图片语法 ![alt](path "title")
+const MARKDOWN_IMAGE_RE = /!\[([^\]]*)\]\(\s*([^)]+?)\s*\)/g;
+
+function isServedOrRemoteUrl(url: string): boolean {
+  return /^(https?:|data:|blob:)/i.test(url) || url.startsWith('/uploads/');
+}
+
+/**
+ * 助手 markdown 里常写出指向「房间工作目录」的相对/本地路径图片（如
+ * `![](auth_qrcode.png)`）。浏览器无法加载本地文件，这里在消息落库/广播前
+ * 把这些图片转存到 uploads 目录，并把路径替换为 `/uploads/...`，从而前端可直接渲染。
+ */
+export async function uploadInlineWorkspaceImages(
+  content: string,
+  chatRoomId: string,
+): Promise<string> {
+  if (!content || !content.includes('![')) return content;
+
+  const workDir = getDefaultChatRoomWorkDir(chatRoomId);
+  const uploadedByPath = new Map<string, string>(); // 原始路径 -> 新 url
+  const fullToReplacement = new Map<string, string>(); // 整段 markdown -> 替换后
+
+  for (const match of content.matchAll(MARKDOWN_IMAGE_RE)) {
+    const full = match[0];
+    const alt = match[1];
+    const inside = match[2].trim();
+    // inside 可能形如 `path "title"`，仅取第一段作为路径，保留标题
+    const firstSpace = inside.search(/\s/);
+    const rawPath = (firstSpace === -1 ? inside : inside.slice(0, firstSpace)).replace(/^<|>$/g, '');
+    const titlePart = firstSpace === -1 ? '' : inside.slice(firstSpace);
+
+    if (!rawPath || isServedOrRemoteUrl(rawPath)) continue;
+    if (!INLINE_IMAGE_EXT.has(path.extname(rawPath).toLowerCase())) continue;
+
+    let url = uploadedByPath.get(rawPath);
+    if (!url) {
+      const absPath = path.isAbsolute(rawPath) ? rawPath : path.resolve(workDir, rawPath);
+      try {
+        url = await uploadService.saveImageFromFile(absPath);
+        uploadedByPath.set(rawPath, url);
+      } catch (err) {
+        debugLog('inlineImageUploadFailed', { chatRoomId, rawPath, error: String(err) });
+        continue;
+      }
+    }
+    fullToReplacement.set(full, `![${alt}](${url}${titlePart})`);
+  }
+
+  let result = content;
+  for (const [from, to] of fullToReplacement) {
+    result = result.split(from).join(to);
+  }
+  return result;
+}
+
+// 构建 AI 消息对象（落库/广播前内联工作目录图片）
+export async function buildAIMessage(
   content: string,
   replyToId: string | null,
   agentName: string,
@@ -13,11 +72,12 @@ export function buildAIMessage(
   chatRoomId: string,
   avatar?: string | null,
   avatarColor?: string | null,
-): Message {
+): Promise<Message> {
+  const finalContent = await uploadInlineWorkspaceImages(content, chatRoomId);
   return {
     id: randomUUID(),
     type: 'reply',
-    content,
+    content: finalContent,
     time: new Date(),
     user: agentName,
     agentId,

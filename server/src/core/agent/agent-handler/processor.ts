@@ -184,7 +184,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
               return;
             }
 
-            const aiMessage = buildAIMessage(
+            const aiMessage = await buildAIMessage(
               content,
               replyMessageId || null,
               task.agentName,
@@ -535,7 +535,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
           }
 
           if (wasAborted) {
-            const cancelledMessage = buildAIMessage(
+            const cancelledMessage = await buildAIMessage(
               cancellationMessageContent,
               task.messageId,
               task.agentName,

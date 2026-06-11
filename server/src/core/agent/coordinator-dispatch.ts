@@ -311,7 +311,7 @@ async function executeDecision(
     case 'ask_owner': {
       const content = decision.content?.trim();
       if (!content) return;
-      const msg = buildAIMessage(
+      const msg = await buildAIMessage(
         content,
         triggerMessage.id,
         INTERNAL_COORDINATOR_AGENT_NAME,
@@ -386,7 +386,7 @@ async function executeDecision(
       // 保存并广播协调助手的调度消息（与旧流程一致，前端可见）
       const mentionPart = targetAgents.map((a) => `@${a!.name}`).join(' ');
       const visibleContent = `${mentionPart} ${dispatchContent}`;
-      const dispatchMsg = buildAIMessage(
+      const dispatchMsg = await buildAIMessage(
         visibleContent,
         triggerMessage.id,
         INTERNAL_COORDINATOR_AGENT_NAME,
