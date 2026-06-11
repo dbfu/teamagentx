@@ -42,7 +42,6 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
   const [visibleOwnerMentionTodoIds, setVisibleOwnerMentionTodoIds] = useState<Set<string>>(new Set())
   const completingVisibleTodoIdsRef = useRef<Set<string>>(new Set())
   const {
-    inputValue,
     setInputValue,
     messages,
     loading,
@@ -313,7 +312,11 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
 
   // 处理点击助手名称自动 @
   const handleMentionAgent = (_agentId: string, agentName: string) => {
-    const currentValue = inputValue.trim()
+    // 惰性读取当前输入值，避免订阅 inputValue 导致输入时整片消息列表重渲染
+    const draft = chatRoom?.id
+      ? useChatStore.getState().inputDraftsByRoom[chatRoom.id] ?? ''
+      : useChatStore.getState().inputValue
+    const currentValue = draft.trim()
     // 如果输入框已有内容且不以空格结尾，添加空格
     const prefix = currentValue && !currentValue.endsWith(' ') ? `${currentValue} ` : currentValue
     // 添加 @助手名 和一个空格

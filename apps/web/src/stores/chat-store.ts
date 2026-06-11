@@ -1761,7 +1761,8 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
 
   // 使用 selectors 选择具体的值，避免整个 store 对象变化
   const messages = useChatStore((s) => chatRoomId ? s.messagesByRoom[chatRoomId] ?? EMPTY_MESSAGES : EMPTY_MESSAGES)
-  const inputValue = useChatStore((s) => chatRoomId ? s.inputDraftsByRoom[chatRoomId] ?? '' : s.inputValue)
+  // 注意：不要在这里订阅 inputValue，否则每次输入都会重渲染 ChatArea 及其下的消息列表，
+  // 导致带图片的消息闪烁、滚动条跳动。需要当前输入值的地方改为通过 getState() 惰性读取。
   const loading = useChatStore((s) => chatRoomId ? s.loadingByRoom[chatRoomId] ?? false : false)
   const loadingOlderMessages = useChatStore((s) => chatRoomId ? s.loadingOlderMessagesByRoom[chatRoomId] ?? false : false)
   const hasOlderMessages = useChatStore((s) => chatRoomId ? s.hasOlderMessagesByRoom[chatRoomId] ?? true : true)
@@ -2203,7 +2204,10 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
   }, [addInputHistory, allAgents, chatRoom, clearMessages, completeTodo, isMobile, messages, sendMessage, setInputValue])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (shouldNavigateInputHistory(e, inputValue)) {
+    const currentInputValue = chatRoomId
+      ? useChatStore.getState().inputDraftsByRoom[chatRoomId] ?? ''
+      : useChatStore.getState().inputValue
+    if (shouldNavigateInputHistory(e, currentInputValue)) {
       const navigated = navigateInputHistory(e.key === 'ArrowUp' ? 'previous' : 'next')
       if (navigated) {
         e.preventDefault()
@@ -2216,7 +2220,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
       e.preventDefault()
       handleSend()
     }
-  }, [handleSend, inputValue, navigateInputHistory])
+  }, [chatRoomId, handleSend, navigateInputHistory])
 
   const handleAddAgents = useCallback(async (agentIds: string[]) => {
     if (!chatRoom) return
@@ -2430,7 +2434,6 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
   }, [chatRoom, setStreamEvents])
 
   return {
-    inputValue,
     setInputValue,
     messages,
     loading,
