@@ -878,6 +878,7 @@ export interface Message {
   executionDuration?: number | null  // 执行耗时（毫秒）
   totalTokens?: number | null        // 消息消耗的 token 数
   cacheReadTokens?: number | null    // 缓存读取 token 数
+  model?: string | null              // 生成该消息所使用的模型名称
   avatar?: string | null
   avatarColor?: string | null
   createdAt: string

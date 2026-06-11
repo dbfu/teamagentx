@@ -83,7 +83,7 @@ export function setupAIHandlers(
     chatRoomId: string,
   ) => void,
   emitDone: (
-    data: {agentId: string; agentName: string; triggerMessageId: string; executionRecordId?: string; messageIds?: string[]; duration?: number; totalTokens?: number},
+    data: {agentId: string; agentName: string; triggerMessageId: string; executionRecordId?: string; messageIds?: string[]; duration?: number; totalTokens?: number; model?: string},
     chatRoomId: string,
   ) => void,
   emitStream: (

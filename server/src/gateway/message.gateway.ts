@@ -36,6 +36,7 @@ const messageSchema = {
     executionDuration: { type: 'integer', nullable: true },
     totalTokens: { type: 'integer', nullable: true },
     cacheReadTokens: { type: 'integer', nullable: true },
+    model: { type: 'string', nullable: true },
     createdAt: { type: 'string' },
     updatedAt: { type: 'string' },
     user: {

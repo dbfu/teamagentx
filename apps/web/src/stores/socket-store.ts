@@ -106,6 +106,7 @@ interface AgentDoneData {
   duration?: number | null
   totalTokens?: number | null
   cacheReadTokens?: number | null
+  model?: string | null
 }
 
 interface AgentStreamData {

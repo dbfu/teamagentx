@@ -381,6 +381,7 @@ export const messageService = {
     executionDuration?: number,
     totalTokens?: number,
     cacheReadTokens?: number,
+    model?: string | null,
   ) {
     return prisma.message.updateMany({
       where: { id: { in: messageIds } },
@@ -389,6 +390,7 @@ export const messageService = {
         executionDuration: executionDuration ?? null,
         totalTokens: totalTokens ?? null,
         cacheReadTokens: cacheReadTokens ?? null,
+        model: model ?? null,
       },
     });
   },

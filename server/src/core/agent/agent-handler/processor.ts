@@ -548,6 +548,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
             cancelledMessage.executionDuration = execRecord.duration ?? null;
             cancelledMessage.totalTokens = execRecord.totalTokens ?? null;
             cancelledMessage.cacheReadTokens = execRecord.cacheReadTokens ?? null;
+            cancelledMessage.model = execResult?.model ?? null;
 
             await messageService.create({
               id: cancelledMessage.id,
@@ -575,6 +576,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
               execRecord.duration ?? undefined,
               execRecord.totalTokens ?? undefined,
               execRecord.cacheReadTokens ?? undefined,
+              execResult?.model ?? null,
             );
             debugLog('executionRecordIdBackfilled', {
               chatRoomId,
@@ -601,6 +603,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
                 duration: execRecord.duration ?? undefined,
                 totalTokens: execRecord.totalTokens ?? undefined,
                 cacheReadTokens: execRecord.cacheReadTokens ?? undefined,
+                model: execResult?.model ?? undefined,
               },
               chatRoomId,
             );

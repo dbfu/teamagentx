@@ -31,4 +31,5 @@ export interface Message {
   executionDuration?: number | null;
   totalTokens?: number | null;
   cacheReadTokens?: number | null;
+  model?: string | null;
 }

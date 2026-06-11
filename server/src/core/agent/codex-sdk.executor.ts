@@ -2311,6 +2311,8 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       return {
         actions: [{ type: 'message', content: finalResponse }],
         tokenUsage,
+        // Codex SDK 事件流不返回模型名，回落到配置值
+        model: this.llmProvider?.model || this.codexModel || undefined,
       };
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {

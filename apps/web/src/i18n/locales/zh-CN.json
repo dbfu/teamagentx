@@ -512,6 +512,7 @@
     "playing": "播放中",
     "viewExecutionDetail": "查看执行详情",
     "tokens": "Token",
+    "model": "模型",
     "copyContent": "复制内容",
     "deleteMessage": "删除消息",
     "multiSelect": "多选",

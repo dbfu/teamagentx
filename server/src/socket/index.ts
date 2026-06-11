@@ -99,7 +99,7 @@ export function setupSocket(io: Server) {
   };
 
   // Emit done indicator when agent finishes working
-  const emitDone = (data: { agentId: string; agentName: string; triggerMessageId: string; executionRecordId?: string; messageIds?: string[]; duration?: number | null; totalTokens?: number | null; cacheReadTokens?: number | null }, chatRoomId: string) => {
+  const emitDone = (data: { agentId: string; agentName: string; triggerMessageId: string; executionRecordId?: string; messageIds?: string[]; duration?: number | null; totalTokens?: number | null; cacheReadTokens?: number | null; model?: string | null }, chatRoomId: string) => {
     stopTypingLoop(chatRoomId);
     io.to(chatRoomId).emit('agent:done', data);
 

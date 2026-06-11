@@ -520,6 +520,7 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
 
   private content = '';
   private thinking = '';
+  private runtimeModel: string | null = null; // SDK 返回的实际模型名称
   private toolCalls: ToolCall[] = [];
   private hasBackgroundedLongRunningCommand = false;
   private waitingForTaskOutput = false;
@@ -1736,9 +1737,14 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
       case 'stream_event':
         this.handleStreamEvent(message);
         return undefined;
-      case 'assistant':
+      case 'assistant': {
+        const assistantModel = (message as any).message?.model;
+        if (typeof assistantModel === 'string' && assistantModel) {
+          this.runtimeModel = assistantModel;
+        }
         this.handleAssistantMessage(message);
         return normalizeUsage((message as any).message?.usage);
+      }
       case 'user':
         this.handleUserMessage(message);
         return undefined;
@@ -1752,6 +1758,12 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
         });
         return undefined;
       case 'system':
+        if ((message as any).subtype === 'init') {
+          const initModel = (message as any).model;
+          if (typeof initModel === 'string' && initModel && !this.runtimeModel) {
+            this.runtimeModel = initModel;
+          }
+        }
         if ((message as any).subtype === 'status') {
           const status =
             (message as any).status?.text || (message as any).status?.message;
@@ -2037,6 +2049,7 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
       return {
         actions: [{type: 'message', content: finalResponse}],
         tokenUsage,
+        model: this.runtimeModel ?? this.llmProvider?.model ?? undefined,
       };
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {

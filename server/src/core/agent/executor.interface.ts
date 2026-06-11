@@ -84,6 +84,7 @@ export interface TokenUsage {
 export interface AgentExecResult {
   actions: AgentAction[];
   tokenUsage?: TokenUsage;  // Token 使用信息
+  model?: string;  // 本次执行实际使用的模型名称
 }
 
 // 群聊助手信息（包含工作目录）

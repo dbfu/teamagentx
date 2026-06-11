@@ -244,6 +244,7 @@ model Message {
   executionDuration Int? // 执行耗时（毫秒）
   totalTokens       Int? // 消息消耗的 token 数
   cacheReadTokens   Int? // 缓存读取 token 数
+  model             String? // 生成该消息所使用的模型名称
   createdAt         DateTime                @default(now())
   updatedAt         DateTime
   replyTo           Message?                @relation("MessageToMessage", fields: [replyMessageId], references: [id])

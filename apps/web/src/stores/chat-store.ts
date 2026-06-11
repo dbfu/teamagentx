@@ -1379,6 +1379,7 @@ export function useAgentEventSubscription(chatRoomId: string | null) {
                 executionDuration: data.duration,
                 totalTokens: data.totalTokens,
                 cacheReadTokens: data.cacheReadTokens,
+                model: data.model ?? msg.model ?? null,
               }
             : msg
         )
@@ -1846,6 +1847,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
       executionDuration: msg.executionDuration ?? null,
       totalTokens: msg.totalTokens ?? null,
       cacheReadTokens: msg.cacheReadTokens ?? null,
+      model: msg.model ?? null,
       avatar: msg.avatar ?? null,
       avatarColor: msg.avatarColor ?? null,
       createdAt: new Date().toISOString(),
