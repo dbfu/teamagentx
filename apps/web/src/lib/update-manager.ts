@@ -1,6 +1,6 @@
 export type UpdateStatus = 'idle' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'error'
 
-export type UpdateCheckReason = 'startup' | 'socket-connected' | 'window-focus' | 'visibility-change' | 'online' | 'manual' | 'test'
+export type UpdateCheckReason = 'startup' | 'socket-connected' | 'window-focus' | 'visibility-change' | 'online' | 'interval' | 'manual' | 'test'
 
 export interface UpdateManagerState {
   visible: boolean
