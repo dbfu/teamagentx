@@ -481,27 +481,27 @@ describe('Codex SDK Executor message context', () => {
       assert.ok(!developerInstructions.includes(agentMemoryFile));
       assert.match(
         developerInstructions,
-        /Write the final answer in human-readable Markdown\./,
+        /最终回答请使用人类可读的 Markdown。/,
       );
-      assert.match(developerInstructions, /\[Group Chat Member Info\]/);
+      assert.match(developerInstructions, /\[群聊成员信息\]/);
       assert.match(
         developerInstructions,
-        /Assistants in the current chatroom: CodexAgent, HelperAgent/,
+        /当前群聊中的助手：CodexAgent, HelperAgent/,
       );
-      assert.match(developerInstructions, /Other assistants: HelperAgent/);
+      assert.match(developerInstructions, /其他助手：HelperAgent/);
       assert.match(
         developerInstructions,
-        /When you need to message another assistant/,
+        /当你需要给另一个助手发消息时/,
       );
       assert.doesNotMatch(developerInstructions, /Global memory applies\./);
       assert.doesNotMatch(fullMessage, /\[System Instructions\]/);
       assert.doesNotMatch(fullMessage, /\[Long-Term Memory Rules\]/);
-      assert.doesNotMatch(fullMessage, /\[Group Chat Member Info\]/);
+      assert.doesNotMatch(fullMessage, /\[群聊成员信息\]/);
       assert.doesNotMatch(fullMessage, /You are a careful coding assistant\./);
       assert.match(fullMessage, /\[Global Assistant Long-Term Memory\]/);
       assert.match(fullMessage, /Global memory applies\./);
       assert.doesNotMatch(fullMessage, /\[Current Room Assistant Long-Term Memory\]/);
-      assert.match(fullMessage, /\[Current Message\]\nDo the task$/);
+      assert.match(fullMessage, /\[当前消息\]\nDo the task$/);
     } finally {
       fs.rmSync(workDir, { recursive: true, force: true });
       fs.rmSync(agentMemoryFile, { force: true });
@@ -532,8 +532,8 @@ describe('Codex SDK Executor message context', () => {
       assert.doesNotMatch(fullMessage, /\[Recent Group History\]/);
       assert.doesNotMatch(fullMessage, /sender=产品经理/);
       assert.doesNotMatch(fullMessage, /这个 todolist 给谁用/);
-      assert.doesNotMatch(fullMessage, /\[Group History Access\]/);
-      assert.match(fullMessage, /\[Current Message\]\nA$/);
+      assert.doesNotMatch(fullMessage, /\[群历史访问\]/);
+      assert.match(fullMessage, /\[当前消息\]\nA$/);
     } finally {
       fs.rmSync(workDir, { recursive: true, force: true });
     }
@@ -569,7 +569,7 @@ describe('Codex SDK Executor message context', () => {
       assert.match(fullMessage, /messageId=message-1/);
       assert.match(fullMessage, /preview="这个 todolist 给谁用？"/);
       assert.doesNotMatch(fullMessage, /完整正文不应直接注入/);
-      assert.match(fullMessage, /\[Group History Access\]/);
+      assert.match(fullMessage, /\[群历史访问\]/);
     } finally {
       fs.rmSync(workDir, { recursive: true, force: true });
     }

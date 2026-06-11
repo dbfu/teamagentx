@@ -7,6 +7,8 @@ import { GROUP_COORDINATOR_ID } from '../system-assistant.constants.js';
 import { runCoordinatorDispatch } from '../coordinator-dispatch.js';
 import { debugLog } from './debug.js';
 import { messageMentionsRoomUser } from './user-mention-utils.js';
+import { stopAgentExecution } from './cache.js';
+import { broadcastAgentStatus } from './status.js';
 import type { Message } from '../../../types/message.js';
 
 /**
@@ -26,6 +28,12 @@ const watchdogTimers = new Map<string, NodeJS.Timeout>();
 const consecutiveDispatches = new Map<string, number>();
 // 记录刚刚被用户中断的房间，这些房间不应该触发 watchdog（用户主动介入）
 const interruptedRooms = new Set<string>();
+// 正在进行中的「卡住检测自动调度」中止控制器（按房间）：watchdog 唤醒群调度后持有，
+// 用户在调度途中发言即可凭此 abort 掉这次自动调度。
+const watchdogDispatchControllers = new Map<string, AbortController>();
+// 本轮自动调度实际派发出去的助手 id（按房间）：用户介入时连同其执行/排队任务一并停掉，
+// 实现「即使已经派发也要终止」。
+const watchdogDispatchedAgents = new Map<string, Set<string>>();
 
 /**
  * 人类发言时清零连续救援计数：用户重新介入即视为一个新的协作回合。
@@ -59,6 +67,55 @@ export function cancelStallWatchdog(chatRoomId: string): void {
  */
 export function checkAndClearInterrupted(chatRoomId: string): boolean {
   return interruptedRooms.delete(chatRoomId);
+}
+
+/**
+ * 用户发言时调用：若该房间正处于卡住检测触发的自动调度中（或刚派发出助手），
+ * 立即终止本次自动调度——abort 进行中的群调度决策，并停掉本轮已派发助手的执行/排队任务。
+ *
+ * 设计意图：auto 模式闲置约 1 分钟后 watchdog 会唤醒群调度自动续跑；一旦用户主动介入发言，
+ * 这种「投机式」自动续跑应让位于用户，即便群调度已经把助手派发出去也要停下。
+ * 非自动调度状态下为无副作用的空操作（两个表都为空）。
+ */
+export function abortWatchdogDispatch(chatRoomId: string): void {
+  const controller = watchdogDispatchControllers.get(chatRoomId);
+  const dispatched = watchdogDispatchedAgents.get(chatRoomId);
+  if (!controller && (!dispatched || dispatched.size === 0)) return;
+
+  if (controller && !controller.signal.aborted) {
+    controller.abort();
+  }
+  watchdogDispatchControllers.delete(chatRoomId);
+
+  if (dispatched && dispatched.size > 0) {
+    void stopWatchdogDispatchedAgents(chatRoomId, [...dispatched]);
+  }
+  watchdogDispatchedAgents.delete(chatRoomId);
+
+  console.log(`[stall-watchdog] ${chatRoomId} 用户介入发言，终止进行中的自动调度`);
+  debugLog('watchdogDispatchAborted', { chatRoomId });
+}
+
+/**
+ * 停掉本轮自动调度派发出去的助手：正在执行的走 abort，尚未执行的排队任务标记取消。
+ */
+async function stopWatchdogDispatchedAgents(chatRoomId: string, agentIds: string[]): Promise<void> {
+  try {
+    for (const agentId of agentIds) {
+      // 正在执行：复用与「手动停止」一致的 abort 路径。
+      stopAgentExecution(chatRoomId, agentId);
+      // 尚未执行：把 pending 排队任务标记为取消，避免被打断后又接着跑。
+      const queued = await taskQueueService.getAgentQueueAll(chatRoomId, agentId);
+      for (const task of queued) {
+        if (task.status === 'pending') {
+          await taskQueueService.updateStatus(task.id, 'cancelled');
+        }
+      }
+    }
+    broadcastAgentStatus(chatRoomId);
+  } catch (error) {
+    console.error('[stall-watchdog] 终止自动调度助手失败:', error);
+  }
 }
 
 /**
@@ -140,7 +197,27 @@ async function runStallWatchdog(chatRoomId: string): Promise<void> {
     consecutive: count + 1,
   });
 
-  await runCoordinatorDispatch(chatRoomId, triggerMessage, coordinatorAgent);
+  // 本次自动调度持有一个中止控制器：用户中途发言 → abortWatchdogDispatch 可 abort 它。
+  const controller = new AbortController();
+  watchdogDispatchControllers.set(chatRoomId, controller);
+  watchdogDispatchedAgents.delete(chatRoomId);
+
+  try {
+    await runCoordinatorDispatch(chatRoomId, triggerMessage, coordinatorAgent, {
+      signal: controller.signal,
+      onAgentsDispatched: (ids) => {
+        const set = watchdogDispatchedAgents.get(chatRoomId) ?? new Set<string>();
+        for (const id of ids) set.add(id);
+        watchdogDispatchedAgents.set(chatRoomId, set);
+      },
+    });
+  } finally {
+    // 仅清理「中止控制器」；已派发助手集合保留到用户介入或下一轮 watchdog，
+    // 以便调度完成后用户再发言时仍能停掉正在跑的助手（即「即使已派发也要终止」）。
+    if (watchdogDispatchControllers.get(chatRoomId) === controller) {
+      watchdogDispatchControllers.delete(chatRoomId);
+    }
+  }
 }
 
 type ChatRoomMessageRow = Awaited<ReturnType<typeof messageService.findByChatRoomId>>[number];

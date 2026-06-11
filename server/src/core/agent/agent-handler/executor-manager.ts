@@ -18,6 +18,7 @@ import {
   isInternalCoordinatorAgentName,
 } from '../internal-coordinator-agent.js';
 import { clearExecutorCacheEntries, executorCache, getCacheKey } from './cache.js';
+import { normalizeLocale } from './locale.js';
 import { setBroadcastCronTriggerMessageFn } from '../../cron/cron-scheduler.service.js';
 import { broadcastCronTriggerMessage } from './message-utils.js';
 import { recoveryService } from '../../../modules/recovery/recovery.service.js';
@@ -59,13 +60,17 @@ export async function getExecutor(
     return executorCache.get(cacheKey)!;
   }
 
+  // 提示词语言跟随群主界面语言（房间维度统一）。先取房间 owner 的 preferredLanguage。
+  const roomForLocale = await chatRoomService.findById(chatRoomId);
+  const locale = normalizeLocale((roomForLocale?.owner as any)?.preferredLanguage);
+
   // Load from database. The internal coordinator has its own hidden system agent.
   const isInternalCoordinator = isInternalCoordinatorAgentName(agentName);
   const baseAgent = isInternalCoordinator
     ? await agentService.findById(GROUP_COORDINATOR_ID)
     : await agentService.findByName(agentName);
   const agent = isInternalCoordinator && baseAgent
-    ? createInternalCoordinatorAgent(baseAgent, { executorOnly: true })
+    ? createInternalCoordinatorAgent(baseAgent, { executorOnly: true, locale })
     : baseAgent;
   if (!agent || !agent.isActive) {
     return null;
@@ -79,8 +84,8 @@ export async function getExecutor(
   const injectGroupHistory = chatRoomAgent?.injectGroupHistory ?? false;
   const lastInjectedMessageId = chatRoomAgent?.lastInjectedMessageId ?? undefined;  // 上次注入位置
 
-  // 获取群聊配置
-  const chatRoom = await chatRoomService.findById(chatRoomId);
+  // 获取群聊配置（复用前面为解析 locale 已取过的房间数据，避免重复查询）
+  const chatRoom = roomForLocale;
   const roomHumanNames = new Set<string>();
   const roomOwnerUsername = chatRoom?.owner?.username;
   if (chatRoom?.owner?.username) {
@@ -152,6 +157,7 @@ export async function getExecutor(
     roomEnvVars,  // 传递群聊环境变量
     agentTriggerMode: (chatRoom?.agentTriggerMode ?? 'coordinator') as AgentTriggerMode,
     stateless: agent.id === GROUP_COORDINATOR_ID,
+    locale,
   });
   executorCache.set(cacheKey, executor);
   return executor;

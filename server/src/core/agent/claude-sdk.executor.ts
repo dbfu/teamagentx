@@ -32,9 +32,10 @@ import {
   buildAgentBaseSystemPrompt,
   buildGroupChatMemberInfoSection,
   buildHandoffTurnReminder,
-  CLAUDE_SHELL_COMMANDS_SECTION,
-  RESPONSE_STYLE_INSTRUCTION,
+  getClaudeShellCommandsSection,
+  getResponseStyleInstruction,
 } from './agent-system-prompt.js';
+import { normalizeLocale, pickLocaleText, type Locale } from './agent-handler/locale.js';
 import { debugLog } from './agent-handler/debug.js';
 import {
   buildShellEnvFromRoomEnvVars,
@@ -52,6 +53,7 @@ import type {
     HistoryMessage,
     IAgentExecutor,
     MessageEmitCallback,
+    RecordEmitCallback,
     StreamEmitCallback,
     ThinkingEmitCallback,
     TokenUsage,
@@ -515,6 +517,7 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
   private _lastInjectedMessageId?: string;
   private systemPrompt: string;
   private agentTriggerMode?: AgentTriggerMode;
+  private locale: Locale = 'zh-CN';
   private agentId: string | null = null;
   private sessionId: string;
   private hasStartedSession = false;
@@ -543,6 +546,9 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
   private emitStream: StreamEmitCallback | null = null;
   private emitThinking: ThinkingEmitCallback | null = null;
   private emitToolCall: ToolCallEmitCallback | null = null;
+  private emitRecord: RecordEmitCallback | null = null;
+  // 当前文本段是否已记入执行详情（避免同一段在多个 tool_use 块上重复记录）
+  private pendingSegmentRecorded = false;
 
   constructor(
     name: string,
@@ -562,6 +568,7 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
     stateless: boolean = false,
     agentTriggerMode?: AgentTriggerMode,
     roomEnvVars: RoomEnvVar[] = [],
+    locale?: string,
   ) {
     this.name = name;
     this.chatRoomId = chatRoomId;
@@ -576,6 +583,7 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
     this.stateless = stateless;
     this.roomEnvVars = roomEnvVars;
     this.agentTriggerMode = agentTriggerMode;
+    this.locale = normalizeLocale(locale);
     this.workDir = resolveAgentWorkDir({
       chatRoomId,
       sessionDir,
@@ -593,8 +601,9 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
       chatRoomRules,
       workDir: this.workDir,
       agentTriggerMode,
-      commandSection: CLAUDE_SHELL_COMMANDS_SECTION,
+      commandSection: getClaudeShellCommandsSection(this.locale),
       roomEnvVars: this.roomEnvVars,
+      locale: this.locale,
     });
 
     this.ensureWorkDirectory();
@@ -949,7 +958,7 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
         this.name,
       ),
       this.buildGroupChatMemberInfoSection(),
-      RESPONSE_STYLE_INSTRUCTION,
+      getResponseStyleInstruction(this.locale),
     ]
       .filter((section) => section.trim().length > 0)
       .join('\n\n');
@@ -961,6 +970,7 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
       agentName: this.name,
       workDir: this.workDir,
       includeAssistantTriggerNecessityReminder: true,
+      locale: this.locale,
     });
   }
 
@@ -984,15 +994,24 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
         fullMessage += `${messageIndexSection}\n\n`;
       }
 
-      fullMessage += `[Group History Access]
-You may access current chatroom history through tools. Use \`get_recent_room_messages\` for message indexes, \`search_room_messages\` to search indexes by keyword, or \`get_room_message_detail\` to inspect exact message content by messageId. These tools automatically use the current chatroom; do not ask for or provide a chatRoomId. Fetch at most 50 message indexes per call; use \`skip\` for pagination and \`order\` as \`asc\` or \`desc\` for chronological direction. Recent/search results are navigation previews, so call \`get_room_message_detail\` before relying on exact prior content.
-
-`;
+      fullMessage += pickLocaleText(
+        {
+          'zh-CN': `[群历史访问]
+你可以通过工具访问当前群聊历史。用 \`get_recent_room_messages\` 获取消息索引，\`search_room_messages\` 按关键词搜索索引，\`get_room_message_detail\` 按 messageId 查看精确消息内容。这些工具自动作用于当前群聊；不要索取或提供 chatRoomId。每次最多获取 50 条消息索引；用 \`skip\` 分页，\`order\` 取 \`asc\` 或 \`desc\` 控制时间方向。最近/搜索结果只是导航预览，所以在依赖精确历史内容前先调用 \`get_room_message_detail\`。`,
+          'en-US': `[Group History Access]
+You may access current chatroom history through tools. Use \`get_recent_room_messages\` for message indexes, \`search_room_messages\` to search indexes by keyword, or \`get_room_message_detail\` to inspect exact message content by messageId. These tools automatically use the current chatroom; do not ask for or provide a chatRoomId. Fetch at most 50 message indexes per call; use \`skip\` for pagination and \`order\` as \`asc\` or \`desc\` for chronological direction. Recent/search results are navigation previews, so call \`get_room_message_detail\` before relying on exact prior content.`,
+        },
+        this.locale,
+      ) + '\n\n';
     }
 
-    fullMessage += `[Current Message]\n${message}`;
+    const currentMessageLabel = pickLocaleText(
+      { 'zh-CN': '[当前消息]', 'en-US': '[Current Message]' },
+      this.locale,
+    );
+    fullMessage += `${currentMessageLabel}\n${message}`;
 
-    const handoffReminder = buildHandoffTurnReminder(this.agentTriggerMode);
+    const handoffReminder = buildHandoffTurnReminder(this.agentTriggerMode, this.locale);
     if (handoffReminder) {
       fullMessage += `\n\n${handoffReminder}`;
     }
@@ -1040,6 +1059,7 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
     this.waitingForTaskOutput = false;
     this.waitingForAssistantAfterToolResult = false;
     this.receivedAssistantEndTurn = false;
+    this.pendingSegmentRecorded = false;
   }
 
   private resetSession(): void {
@@ -1649,6 +1669,23 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
     this.waitingForAssistantAfterToolResult = false;
     const stopReason = message.message?.stop_reason;
 
+    // 确保 this.content 已包含本条消息的文本（流式可能尚未累积）
+    if (!this.content) {
+      const text = extractTextFromContent(content);
+      if (text) this.content = text;
+    }
+
+    // 工具调用会在 tool_result 到来时清空 this.content（只保留最后一段最终回答），
+    // 这里先把「工具调用之前的这段文字」记入执行详情（仅记录，不发群消息），
+    // 避免多次工具调用之间的中间文本段在执行记录里丢失。
+    const hasToolUse = content.some(
+      (block: any) => block?.type === 'tool_use',
+    );
+    if (hasToolUse && !this.pendingSegmentRecorded && this.content.trim()) {
+      this.emitRecord?.(this.content);
+      this.pendingSegmentRecorded = true;
+    }
+
     for (const block of content) {
       if (block?.type === 'thinking' && typeof block.thinking === 'string') {
         this.appendThinking(block.thinking);
@@ -1670,11 +1707,6 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
       }
     }
 
-    if (!this.content) {
-      const text = extractTextFromContent(content);
-      if (text) this.content = text;
-    }
-
     if (stopReason === 'end_turn' && this.content.trim()) {
       this.receivedAssistantEndTurn = true;
     }
@@ -1688,6 +1720,12 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
       if (block?.type === 'tool_result') {
         this.waitingForTaskOutput = false;
         this.waitingForAssistantAfterToolResult = true;
+        // 工具结果返回意味着此前累积的文本只是中间过程，丢弃它，
+        // 只保留最后一次工具调用之后产生的那段最终回答。
+        // （该中间文本已在 handleAssistantMessage 里通过 emitRecord 记入执行详情）
+        this.content = '';
+        // 进入下一段，允许记录新的中间文本段
+        this.pendingSegmentRecorded = false;
         const toolUseId = block.tool_use_id || message.uuid || randomUUID();
         const output = extractTextFromContent(block.content);
         const status = block.is_error ? 'error' : 'completed';
@@ -1944,10 +1982,12 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
     emitThinking?: ThinkingEmitCallback,
     signal?: AbortSignal,
     attachments?: AttachmentData[],
+    emitRecord?: RecordEmitCallback,
   ): Promise<AgentExecResult> {
     this.emitStream = emitStream || null;
     this.emitToolCall = emitToolCall || null;
     this.emitThinking = emitThinking || null;
+    this.emitRecord = emitRecord || null;
     this.ensureSkillsSymlink();
     this.resetCollectors();
 
@@ -2073,6 +2113,7 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
       this.emitStream = null;
       this.emitToolCall = null;
       this.emitThinking = null;
+      this.emitRecord = null;
     }
   }
 

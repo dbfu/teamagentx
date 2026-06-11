@@ -28,6 +28,7 @@ export interface CreateExecutorOptions {
   agentTriggerMode?: AgentTriggerMode;  // 助手触发模式
   stateless?: boolean;  // 每次执行使用新会话，不恢复 SDK session/thread
   roomEnvVars?: RoomEnvVar[];  // 群聊环境变量，注入到助手 shell 命令环境与提示词
+  locale?: string;  // 系统提示词语言（跟随群主界面语言），zh-CN / en-US
 }
 
 function getAgentThinkingMode(agent: Agent): AgentThinkingMode {
@@ -54,6 +55,7 @@ export function createExecutor(options: CreateExecutorOptions): IAgentExecutor {
     agentTriggerMode,
     stateless,
     roomEnvVars = [],
+    locale,
   } = options;
   const thinkingMode = getAgentThinkingMode(agent);
   const collaborationTriggerMode = agent.agentLevel === 'system'
@@ -82,6 +84,7 @@ export function createExecutor(options: CreateExecutorOptions): IAgentExecutor {
           stateless,
           collaborationTriggerMode,
           roomEnvVars,
+          locale,
         );
       }
       if (acpTool === 'codex') {
@@ -106,6 +109,7 @@ export function createExecutor(options: CreateExecutorOptions): IAgentExecutor {
           stateless,
           collaborationTriggerMode,
           roomEnvVars,
+          locale,
         );
       }
       throw new Error(`Unsupported agent tool: ${acpTool}`);
@@ -130,6 +134,7 @@ export function createExecutor(options: CreateExecutorOptions): IAgentExecutor {
         stateless,
         collaborationTriggerMode,
         roomEnvVars,
+        locale,
       );
   }
 }

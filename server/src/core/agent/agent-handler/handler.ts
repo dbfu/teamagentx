@@ -13,7 +13,7 @@ import { debugLog } from './debug.js';
 import { enqueueAgentTask } from './agent-dispatch.service.js';
 import { GROUP_COORDINATOR_ID } from '../system-assistant.constants.js';
 import { workbenchTaskService } from '../../../modules/workbench/workbench.service.js';
-import { scheduleStallWatchdog, resetStallWatchdog } from './stall-watchdog.js';
+import { scheduleStallWatchdog, resetStallWatchdog, abortWatchdogDispatch } from './stall-watchdog.js';
 import { runCoordinatorDispatch } from '../coordinator-dispatch.js';
 import { messageMentionsRoomUser, findDirectReplyAgentId } from './user-mention-utils.js';
 import { checkAndClearInterrupted } from './stall-watchdog.js';
@@ -172,6 +172,8 @@ export function setupAIHandlers(
       // 但如果房间刚刚被用户中断（手动停止任务），不触发 watchdog，防止群调度介入。
       if (message.isHuman) {
         resetStallWatchdog(chatRoomId);
+        // 用户主动发言：终止卡住检测触发的「自动续跑」调度（含已派发的助手），让位于用户。
+        abortWatchdogDispatch(chatRoomId);
       } else if (
         agentTriggerMode === 'auto' &&
         chatRoom &&

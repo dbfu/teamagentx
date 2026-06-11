@@ -2,17 +2,50 @@ import {
   roomMessageIndexService,
   type RoomMessageIndexHistoryMessage,
 } from '../../../modules/message/room-message-index.service.js';
+import { type Locale, pickLocaleText } from './locale.js';
 
 // 调度助手裁决时参考的最近消息条数（较完整内容）和更早消息条数（摘要）。
 export const COORDINATOR_RECENT_HISTORY_LIMIT = 5;
 const COORDINATOR_OLDER_HISTORY_LIMIT = 10;
 
+// 注入上下文与调度提示词之间的「逐字契约」标记文案。
+// 调度提示词（internal-coordinator-agent.ts）按 locale 引用相同标记，二者必须同语种，
+// 否则模型会因「提示词里说找 X 标记、实际注入的是 Y 标记」而对不上。
+export const COORDINATOR_PENDING_DECISION_LABEL: Record<Locale, string> = {
+  'zh-CN': '待裁决消息',
+  'en-US': 'Pending Decision',
+};
+export const COORDINATOR_RECENT_MESSAGES_LABEL: Record<Locale, string> = {
+  'zh-CN': '群最近消息 · 仅供裁决参考，禁止转发或引用本区块',
+  'en-US':
+    'Recent Room Messages · for routing reference only; do NOT forward or quote this block',
+};
+
+export function coordinatorPendingDecisionLabel(locale?: string): string {
+  return pickLocaleText(COORDINATOR_PENDING_DECISION_LABEL, locale);
+}
+export function coordinatorRecentMessagesLabel(locale?: string): string {
+  return pickLocaleText(COORDINATOR_RECENT_MESSAGES_LABEL, locale);
+}
+
 // 近 N 条消息的首尾截取：保留换行，避免列表/代码块结构被压平。
-export function headTailPreview(content: string, head = 300, tail = 300): string {
+export function headTailPreview(
+  content: string,
+  head = 300,
+  tail = 300,
+  locale?: string,
+): string {
   const t = content.trim();
   if (t.length <= head + tail) return t;
   const omitted = t.length - head - tail;
-  return `${t.slice(0, head)}\n…（中间省略 ${omitted} 字）…\n${t.slice(-tail)}`;
+  const ellipsis = pickLocaleText(
+    {
+      'zh-CN': `\n…（中间省略 ${omitted} 字）…\n`,
+      'en-US': `\n… (${omitted} chars omitted) …\n`,
+    },
+    locale,
+  );
+  return `${t.slice(0, head)}${ellipsis}${t.slice(-tail)}`;
 }
 
 /**
@@ -27,6 +60,7 @@ export function headTailPreview(content: string, head = 300, tail = 300): string
 export async function buildCoordinatorRecentContext(
   chatRoomId: string,
   currentMessageId: string,
+  locale?: string,
 ): Promise<string> {
   let entries: RoomMessageIndexHistoryMessage[] = [];
   try {
@@ -45,16 +79,38 @@ export async function buildCoordinatorRecentContext(
 
   if (entries.length === 0) return '';
 
-  const lines = entries.map((entry) => {
-    const attachments = entry.attachments.length > 0
-      ? ` [附件:${entry.attachments.map((a) => a.filename || a.type || 'attachment').join(',')}]`
-      : '';
-    return `- ${entry.senderName}（${entry.senderType}）：${entry.preview}${attachments}`;
-  });
+  const lines = entries.map((entry) => formatContextLine(entry, entry.preview));
 
-  return `[群最近消息 · 仅供裁决参考，禁止转发或引用本区块]
-以下是当前消息之前的最近群消息预览，仅用于帮助你判断任务进展与下一步该谁执行；预览可能被截断，不要把它当作要转发的内容。
+  const intro = pickLocaleText(
+    {
+      'zh-CN':
+        '以下是当前消息之前的最近群消息预览，仅用于帮助你判断任务进展与下一步该谁执行；预览可能被截断，不要把它当作要转发的内容。',
+      'en-US':
+        'Below are previews of recent room messages before the current one, only to help you judge task progress and who should act next; previews may be truncated, do not treat them as content to forward.',
+    },
+    locale,
+  );
+  return `[${coordinatorRecentMessagesLabel(locale)}]
+${intro}
 ${lines.join('\n')}`;
+}
+
+// 上下文消息行：发送者 + 类型 + 预览 + 附件，按 locale 渲染括号与附件标签。
+function formatContextLine(
+  entry: RoomMessageIndexHistoryMessage,
+  preview: string,
+  locale?: string,
+): string {
+  const attachmentLabel = pickLocaleText(
+    { 'zh-CN': '附件', 'en-US': 'attachments' },
+    locale,
+  );
+  const attachments = entry.attachments.length > 0
+    ? ` [${attachmentLabel}:${entry.attachments.map((a) => a.filename || a.type || 'attachment').join(',')}]`
+    : '';
+  const sep = pickLocaleText({ 'zh-CN': '（', 'en-US': ' (' }, locale);
+  const sepEnd = pickLocaleText({ 'zh-CN': '）：', 'en-US': '): ' }, locale);
+  return `- ${entry.senderName}${sep}${entry.senderType}${sepEnd}${preview}${attachments}`;
 }
 
 /**
@@ -67,13 +123,25 @@ export interface CoordinatorSender {
   name?: string | null;
 }
 
-function formatSenderLabel(sender?: CoordinatorSender): string {
+function formatSenderLabel(sender?: CoordinatorSender, locale?: string): string {
   if (!sender) return '';
   const name = sender.name?.trim();
   if (sender.isHuman) {
-    return name ? `来自用户 ${name}` : '来自用户';
+    return pickLocaleText(
+      {
+        'zh-CN': name ? `来自用户 ${name}` : '来自用户',
+        'en-US': name ? `from user ${name}` : 'from user',
+      },
+      locale,
+    );
   }
-  return name ? `来自助手 ${name}` : '来自助手';
+  return pickLocaleText(
+    {
+      'zh-CN': name ? `来自助手 ${name}` : '来自助手',
+      'en-US': name ? `from assistant ${name}` : 'from assistant',
+    },
+    locale,
+  );
 }
 
 /**
@@ -87,9 +155,11 @@ export function withCoordinatorContext(
   content: string,
   contextBlock: string,
   sender?: CoordinatorSender,
+  locale?: string,
 ): string {
-  const label = formatSenderLabel(sender);
-  const header = label ? `[待裁决消息 · ${label}]` : '[待裁决消息]';
+  const marker = coordinatorPendingDecisionLabel(locale);
+  const label = formatSenderLabel(sender, locale);
+  const header = label ? `[${marker} · ${label}]` : `[${marker}]`;
   const base = `${header}\n${content}`;
   return contextBlock ? `${base}\n\n${contextBlock}` : base;
 }
@@ -101,6 +171,7 @@ export function withCoordinatorContext(
 export async function buildCoordinatorLayeredContext(
   chatRoomId: string,
   currentMessageId: string,
+  locale?: string,
 ): Promise<string> {
   let entries: RoomMessageIndexHistoryMessage[] = [];
   try {
@@ -125,13 +196,10 @@ export async function buildCoordinatorLayeredContext(
   const older = entries.slice(0, -COORDINATOR_RECENT_HISTORY_LIMIT);
 
   const formatEntry = (entry: RoomMessageIndexHistoryMessage, fullContent: boolean): string => {
-    const attachments = entry.attachments.length > 0
-      ? ` [附件:${entry.attachments.map((a) => a.filename || a.type || 'attachment').join(',')}]`
-      : '';
     const preview = fullContent
-      ? headTailPreview(entry.rawContent || entry.preview)
+      ? headTailPreview(entry.rawContent || entry.preview, 300, 300, locale)
       : entry.preview;
-    return `- ${entry.senderName}（${entry.senderType}）：${preview}${attachments}`;
+    return formatContextLine(entry, preview, locale);
   };
 
   const lines = [
@@ -139,7 +207,16 @@ export async function buildCoordinatorLayeredContext(
     ...recent.map((e) => formatEntry(e, true)),
   ];
 
-  return `[群最近消息 · 仅供裁决参考，禁止转发或引用本区块]
-以下是当前消息之前的最近群消息预览，仅用于帮助你判断任务进展与下一步该谁执行；近 5 条保留较完整内容，更早消息为摘要。
+  const intro = pickLocaleText(
+    {
+      'zh-CN':
+        '以下是当前消息之前的最近群消息预览，仅用于帮助你判断任务进展与下一步该谁执行；近 5 条保留较完整内容，更早消息为摘要。',
+      'en-US':
+        'Below are previews of recent room messages before the current one, only to help you judge task progress and who should act next; the latest 5 keep fuller content, earlier ones are summaries.',
+    },
+    locale,
+  );
+  return `[${coordinatorRecentMessagesLabel(locale)}]
+${intro}
 ${lines.join('\n')}`;
 }

@@ -4,6 +4,7 @@ export interface User {
   id: string
   username: string
   avatar: string | null
+  preferredLanguage?: string
   createdAt: string
 }
 
@@ -26,6 +27,7 @@ export interface LoginRequest {
 export interface UpdateProfileRequest {
   username?: string
   avatar?: string
+  preferredLanguage?: string
 }
 
 interface ApiResponse<T> {

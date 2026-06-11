@@ -207,11 +207,25 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
     { value: 'en-US', label: 'English' },
   ] as const
 
-  // 切换语言
+  // 切换语言：本地立即生效，并持久化到服务端（决定 Agent 系统提示词语种）
   const handleLanguageChange = (lang: string) => {
     i18n.changeLanguage(lang)
     localStorage.setItem('teamagentx-lang', lang)
     toast.success(t('settings.languageChanged'))
+
+    if (token) {
+      authApi
+        .updateProfile(token, { preferredLanguage: lang })
+        .then((response) => {
+          if (response.success && response.data) {
+            setUser(response.data)
+          }
+        })
+        .catch(() => {
+          // 持久化失败不阻塞界面切换，仅记录
+          console.error('[settings] 同步界面语言到服务端失败')
+        })
+    }
   }
 
   const isElectronDesktop = window.electronAPI?.isElectron ?? false

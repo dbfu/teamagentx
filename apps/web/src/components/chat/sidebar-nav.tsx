@@ -305,7 +305,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
     >
       {/* Logo area - 拖拽区域 */}
       <div className={cn(
-        "mb-4 flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-sidebar-border bg-[var(--surface-raised)] shadow-[var(--control-shadow)]",
+        "mb-2 flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-sidebar-border bg-[var(--surface-raised)] shadow-[var(--control-shadow)]",
         isMac ? "mt-10" : "mt-4"
       )}>
         <img src={`${import.meta.env.BASE_URL}app-logo.png`} alt="TeamAgentX" className="size-full object-cover" />
@@ -315,7 +315,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
       <div ref={navItemsRef} className="flex min-h-0 w-full flex-1 flex-col items-center gap-1 px-2 pb-4 select-none">
         <button
           onClick={() => setIsSearchOpen(true)}
-          className="group flex w-full cursor-pointer items-center justify-center rounded-lg py-2 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+          className="group flex w-full cursor-pointer items-center justify-center rounded-lg py-1 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
           title={t('globalSearch.title')}
           style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
         >

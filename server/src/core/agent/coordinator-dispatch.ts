@@ -17,8 +17,10 @@ import {
 import { GROUP_COORDINATOR_ID } from './system-assistant.constants.js';
 import {
   buildCoordinatorLayeredContext,
+  coordinatorPendingDecisionLabel,
   withCoordinatorContext,
 } from './agent-handler/coordinator-context.js';
+import { pickLocaleText, type Locale, normalizeLocale } from './agent-handler/locale.js';
 import { enqueueAgentTask } from './agent-handler/agent-dispatch.service.js';
 import { startParallelBatch } from './agent-handler/parallel-batch-tracker.js';
 import {
@@ -39,37 +41,91 @@ export interface DispatchDecision {
   reason?: 'no_suitable_assistant' | 'system_management';
 }
 
+export interface CoordinatorDispatchOptions {
+  /** 中止信号：用于在自由协作（auto）模式卡住检测自动调度途中，被用户发言打断时取消本次调度。 */
+  signal?: AbortSignal;
+  /** 本次调度实际派发的目标助手 id 回调（含尚未执行的排队任务），供调用方在用户介入时一并停掉。 */
+  onAgentsDispatched?: (agentIds: string[]) => void;
+}
+
 const DISPATCH_TOOL_NAME = 'dispatch_decision';
-const DISPATCH_TOOL_DESCRIPTION = '协调决策工具：输出调度决策（dispatch/no_dispatch/ask_owner/cannot_dispatch）。';
-const DISPATCH_TOOL_PARAMETERS = {
-  type: 'object' as const,
-  properties: {
-    decision: {
-      type: 'string',
-      enum: ['dispatch', 'no_dispatch', 'ask_owner', 'cannot_dispatch'],
-      description: '决策类型：dispatch=调度助手；no_dispatch=无需调度；ask_owner=需群主确认；cannot_dispatch=系统管理请求',
+
+function getDispatchToolDescription(locale?: string): string {
+  return pickLocaleText(
+    {
+      'zh-CN': '协调决策工具：输出调度决策（dispatch/no_dispatch/ask_owner/cannot_dispatch）。',
+      'en-US':
+        'Coordination decision tool: output a dispatch decision (dispatch/no_dispatch/ask_owner/cannot_dispatch).',
     },
-    targetAgentIds: {
-      type: 'array',
-      items: { type: 'string' },
-      description: 'dispatch 时必填：目标助手的「名称」数组，必须与群成员清单中的助手名称完全一致（逐字、不要自造 ID），可多个（并行）',
+    locale,
+  );
+}
+
+function getDispatchToolParameters(locale?: string) {
+  const pendingMarker = coordinatorPendingDecisionLabel(locale);
+  return {
+    type: 'object' as const,
+    properties: {
+      decision: {
+        type: 'string',
+        enum: ['dispatch', 'no_dispatch', 'ask_owner', 'cannot_dispatch'],
+        description: pickLocaleText(
+          {
+            'zh-CN': '决策类型：dispatch=调度助手；no_dispatch=无需调度；ask_owner=需群主确认；cannot_dispatch=系统管理请求',
+            'en-US':
+              'Decision type: dispatch = dispatch an assistant; no_dispatch = no dispatch needed; ask_owner = owner confirmation needed; cannot_dispatch = system-management request',
+          },
+          locale,
+        ),
+      },
+      targetAgentIds: {
+        type: 'array',
+        items: { type: 'string' },
+        description: pickLocaleText(
+          {
+            'zh-CN': 'dispatch 时必填：目标助手的「名称」数组，必须与群成员清单中的助手名称完全一致（逐字、不要自造 ID），可多个（并行）',
+            'en-US':
+              'Required for dispatch: an array of target assistant "names", each matching a chatroom member name exactly (verbatim, never invent IDs); may be multiple (parallel)',
+          },
+          locale,
+        ),
+      },
+      content: {
+        type: 'string',
+        description: pickLocaleText(
+          {
+            'zh-CN': 'dispatch/ask_owner 时的消息内容；ask_owner 时格式：@群主用户名 + 问题（保留 Markdown）',
+            'en-US':
+              'Message content for dispatch/ask_owner; for ask_owner the format is @owner_username + question (preserve Markdown)',
+          },
+          locale,
+        ),
+      },
+      forwardVerbatim: {
+        type: 'boolean',
+        description: pickLocaleText(
+          {
+            'zh-CN': `true 时后端直接用 [${pendingMarker}] 原文发送给目标助手，忽略 content`,
+            'en-US': `When true, the backend sends the [${pendingMarker}] original text directly to the target assistant and ignores content`,
+          },
+          locale,
+        ),
+      },
+      reason: {
+        type: 'string',
+        enum: ['no_suitable_assistant', 'system_management'],
+        description: pickLocaleText(
+          {
+            'zh-CN': 'cannot_dispatch 时的原因',
+            'en-US': 'Reason when cannot_dispatch',
+          },
+          locale,
+        ),
+      },
     },
-    content: {
-      type: 'string',
-      description: 'dispatch/ask_owner 时的消息内容；ask_owner 时格式：@群主用户名 + 问题（保留 Markdown）',
-    },
-    forwardVerbatim: {
-      type: 'boolean',
-      description: 'true 时后端直接用 [待裁决消息] 原文发送给目标助手，忽略 content',
-    },
-    reason: {
-      type: 'string',
-      enum: ['no_suitable_assistant', 'system_management'],
-      description: 'cannot_dispatch 时的原因',
-    },
-  },
-  required: ['decision'],
-};
+    required: ['decision'],
+  };
+}
 
 async function findCoordinatorProvider(coordinatorAgent: AgentWithRelations): Promise<LlmProvider | null> {
   if (coordinatorAgent.llmProvider) return coordinatorAgent.llmProvider;
@@ -89,24 +145,34 @@ function buildMemberSection(
   chatRoomAgents: Awaited<ReturnType<typeof chatRoomService.getAgents>>,
   ownerUsername: string | null | undefined,
   humanMembers: Array<{ user?: { username?: string | null } | null }>,
+  locale?: string,
 ): string {
+  const t = (entry: Record<Locale, string>) => pickLocaleText(entry, locale);
+  const ownerLabel = t({ 'zh-CN': '群主：', 'en-US': 'Owner: ' });
+  const memberLabel = t({ 'zh-CN': '成员：', 'en-US': 'Member: ' });
+
   const agentLines = chatRoomAgents
     .filter((cra) => cra.agent && (cra.agent as any).isActive && cra.agent.id !== GROUP_COORDINATOR_ID)
     .map((cra) => `- ${cra.agent!.name}`);
 
   const humanLines: string[] = [];
-  if (ownerUsername) humanLines.push(`群主：@${ownerUsername}`);
+  if (ownerUsername) humanLines.push(`${ownerLabel}@${ownerUsername}`);
   for (const member of humanMembers) {
     const name = member.user?.username;
-    if (name && name !== ownerUsername) humanLines.push(`成员：@${name}`);
+    if (name && name !== ownerUsername) humanLines.push(`${memberLabel}@${name}`);
   }
 
-  const agentSection = agentLines.length > 0
-    ? `业务助手：\n${agentLines.join('\n')}`
-    : '业务助手：（无）';
-  const humanSection = humanLines.length > 0 ? `\n人类成员：\n${humanLines.join('\n')}` : '';
+  const agentsTitle = t({ 'zh-CN': '业务助手：', 'en-US': 'Business assistants:' });
+  const noneText = t({ 'zh-CN': '业务助手：（无）', 'en-US': 'Business assistants: (none)' });
+  const humansTitle = t({ 'zh-CN': '人类成员：', 'en-US': 'Human members:' });
+  const sectionTitle = t({ 'zh-CN': '当前群聊成员', 'en-US': 'Current chatroom members' });
 
-  return `## 当前群聊成员\n${agentSection}${humanSection}`;
+  const agentSection = agentLines.length > 0
+    ? `${agentsTitle}\n${agentLines.join('\n')}`
+    : noneText;
+  const humanSection = humanLines.length > 0 ? `\n${humansTitle}\n${humanLines.join('\n')}` : '';
+
+  return `## ${sectionTitle}\n${agentSection}${humanSection}`;
 }
 
 async function callAnthropicCoordinator(
@@ -114,6 +180,8 @@ async function callAnthropicCoordinator(
   systemPrompt: string,
   memberSection: string,
   userContent: string,
+  locale?: string,
+  signal?: AbortSignal,
 ): Promise<DispatchDecision | null> {
   const client = new Anthropic({
     apiKey: provider.apiKey,
@@ -122,8 +190,8 @@ async function callAnthropicCoordinator(
 
   const tool: Anthropic.Messages.Tool = {
     name: DISPATCH_TOOL_NAME,
-    description: DISPATCH_TOOL_DESCRIPTION,
-    input_schema: DISPATCH_TOOL_PARAMETERS as Anthropic.Messages.Tool['input_schema'],
+    description: getDispatchToolDescription(locale),
+    input_schema: getDispatchToolParameters(locale) as Anthropic.Messages.Tool['input_schema'],
   };
 
   const response = await client.messages.create({
@@ -137,7 +205,7 @@ async function callAnthropicCoordinator(
     messages: [{ role: 'user', content: userContent }],
     tools: [tool],
     tool_choice: { type: 'any' },
-  });
+  }, { signal });
 
   const toolUse = response.content.find(
     (c): c is Anthropic.Messages.ToolUseBlock =>
@@ -151,6 +219,8 @@ async function callOpenAICoordinator(
   systemPrompt: string,
   memberSection: string,
   userContent: string,
+  locale?: string,
+  signal?: AbortSignal,
 ): Promise<DispatchDecision | null> {
   const client = new OpenAI({
     apiKey: provider.apiKey,
@@ -161,8 +231,8 @@ async function callOpenAICoordinator(
     type: 'function',
     function: {
       name: DISPATCH_TOOL_NAME,
-      description: DISPATCH_TOOL_DESCRIPTION,
-      parameters: DISPATCH_TOOL_PARAMETERS,
+      description: getDispatchToolDescription(locale),
+      parameters: getDispatchToolParameters(locale),
     },
   };
 
@@ -176,7 +246,7 @@ async function callOpenAICoordinator(
     ],
     tools: [tool],
     tool_choice: { type: 'function', function: { name: DISPATCH_TOOL_NAME } },
-  });
+  }, { signal });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const raw = (response.choices[0]?.message?.tool_calls?.[0] as any)?.function?.arguments as string | undefined;
@@ -261,7 +331,13 @@ async function executeDecision(
   triggerMessage: Message,
   decision: DispatchDecision,
   coordinatorAgent: AgentWithRelations,
+  options?: CoordinatorDispatchOptions,
 ): Promise<void> {
+  // 被用户发言打断：放弃执行本次调度决策（不派发、不改工作台状态）。
+  if (options?.signal?.aborted) {
+    debugLog('coordinatorDispatchAborted', { chatRoomId, phase: 'beforeExecute' });
+    return;
+  }
   debugLog('coordinatorStructuredDecision', {
     chatRoomId,
     decision: decision.decision,
@@ -373,6 +449,10 @@ async function executeDecision(
 
       if (targetAgents.length === 0) return;
 
+      // 提前回报本次将要派发的目标助手 id：即便在「广播 / enqueue」过程中被用户打断，
+      // 调用方（卡住检测 watchdog）也能凭此把这些助手的执行/排队任务一并停掉。
+      options?.onAgentsDispatched?.(targetAgents.map((a) => a!.id));
+
       // 必须在「广播调度消息 / enqueue 助手」之前，先把工作台任务从 dispatched 推进到 in_progress。
       // 否则被调度的助手可能在该流转之前就执行完并产出消息，触发协调器再次裁决得到 no_dispatch，
       // 而此时群内已空闲（助手任务已出队），no_dispatch 会把 dispatched 直接刷成 waiting_review，
@@ -436,7 +516,9 @@ export async function runCoordinatorDispatch(
   chatRoomId: string,
   message: Message,
   coordinatorAgent: AgentWithRelations,
+  options?: CoordinatorDispatchOptions,
 ): Promise<void> {
+  const signal = options?.signal;
   const provider = await findCoordinatorProvider(coordinatorAgent);
   if (!provider) {
     console.warn('[coordinator-dispatch] 找不到 LLM Provider，跳过协调');
@@ -446,17 +528,20 @@ export async function runCoordinatorDispatch(
   const chatRoom = await chatRoomService.findById(chatRoomId);
   if (!chatRoom) return;
 
+  // 提示词语言跟随群主的界面语言（房间维度统一），保证注入上下文与提示词同语种。
+  const locale: Locale = normalizeLocale((chatRoom.owner as any)?.preferredLanguage);
+
   const chatRoomMembers = await chatRoomService.getAgents(chatRoomId);
   const humanMembers = chatRoom.chatRoomAgents.filter((cra: any) => cra.user);
-  const memberSection = buildMemberSection(chatRoomMembers, chatRoom.owner?.username, humanMembers);
+  const memberSection = buildMemberSection(chatRoomMembers, chatRoom.owner?.username, humanMembers, locale);
 
-  const contextBlock = await buildCoordinatorLayeredContext(chatRoomId, message.id);
+  const contextBlock = await buildCoordinatorLayeredContext(chatRoomId, message.id, locale);
   const userContent = withCoordinatorContext(message.content, contextBlock, {
     isHuman: message.isHuman,
     name: message.isHuman ? message.user : message.agentName,
-  });
+  }, locale);
 
-  const systemPrompt = buildInternalCoordinatorPrompt();
+  const systemPrompt = buildInternalCoordinatorPrompt(locale);
   const protocol = ((provider as any).apiProtocol ?? 'anthropic') as string;
 
   if (globalEmitTyping) {
@@ -469,9 +554,20 @@ export async function runCoordinatorDispatch(
   let decision: DispatchDecision | null;
   try {
     decision = protocol === 'openai'
-      ? await callOpenAICoordinator(provider, systemPrompt, memberSection, userContent)
-      : await callAnthropicCoordinator(provider, systemPrompt, memberSection, userContent);
+      ? await callOpenAICoordinator(provider, systemPrompt, memberSection, userContent, locale, signal)
+      : await callAnthropicCoordinator(provider, systemPrompt, memberSection, userContent, locale, signal);
   } catch (error) {
+    // 被用户发言打断（abort）属预期路径，不当作错误。
+    if (signal?.aborted) {
+      debugLog('coordinatorDispatchAborted', { chatRoomId, phase: 'llm' });
+      if (globalEmitDone) {
+        globalEmitDone(
+          { agentId: GROUP_COORDINATOR_ID, agentName: INTERNAL_COORDINATOR_AGENT_NAME, triggerMessageId: message.id },
+          chatRoomId,
+        );
+      }
+      return;
+    }
     console.error('[coordinator-dispatch] LLM 调用失败:', error);
     if (globalEmitDone) {
       globalEmitDone(
@@ -495,7 +591,7 @@ export async function runCoordinatorDispatch(
 
   console.log('[coordinator-dispatch] 调度决策:', JSON.stringify(decision, null, 2));
 
-  await executeDecision(chatRoomId, message, decision, coordinatorAgent);
+  await executeDecision(chatRoomId, message, decision, coordinatorAgent, options);
 
   if (globalEmitDone) {
     globalEmitDone(

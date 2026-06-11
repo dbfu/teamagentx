@@ -22,9 +22,10 @@ import {
   buildAgentBaseSystemPrompt,
   buildGroupChatMemberInfoSection,
   buildHandoffTurnReminder,
-  CODEX_BACKGROUND_COMMANDS_SECTION,
-  RESPONSE_STYLE_INSTRUCTION,
+  getCodexBackgroundCommandsSection,
+  getResponseStyleInstruction,
 } from './agent-system-prompt.js';
+import { normalizeLocale, pickLocaleText, type Locale } from './agent-handler/locale.js';
 import { debugLog } from './agent-handler/debug.js';
 import {
   buildShellEnvFromRoomEnvVars,
@@ -52,6 +53,7 @@ import type {
   HistoryMessage,
   IAgentExecutor,
   MessageEmitCallback,
+  RecordEmitCallback,
   StreamEmitCallback,
   ThinkingEmitCallback,
   TokenUsage,
@@ -929,6 +931,7 @@ export class CodexSdkExecutor implements IAgentExecutor {
   private _lastInjectedMessageId?: string;
   private systemPrompt: string;
   private agentTriggerMode?: AgentTriggerMode;
+  private locale: Locale = 'zh-CN';
   private agentId: string | null = null;
   private threadId: string | null;
   private lastInjectedSkillsSignature?: string;
@@ -941,6 +944,9 @@ export class CodexSdkExecutor implements IAgentExecutor {
   private content = '';
   private thinking = '';
   private toolCalls: ToolCall[] = [];
+  // 标记上一段文本之后是否出现过工具调用：若有，下一条 agent_message
+  // 视为新的最终段，需先清空 content，从而只保留最后一段内容。
+  private toolCalledSinceContent = false;
 
   private lastContext: string | null = null;
   private lastResponse: string | null = null;
@@ -949,6 +955,7 @@ export class CodexSdkExecutor implements IAgentExecutor {
   private emitStream: StreamEmitCallback | null = null;
   private emitThinking: ThinkingEmitCallback | null = null;
   private emitToolCall: ToolCallEmitCallback | null = null;
+  private emitRecord: RecordEmitCallback | null = null;
 
   constructor(
     name: string,
@@ -971,6 +978,7 @@ export class CodexSdkExecutor implements IAgentExecutor {
     stateless: boolean = false,
     agentTriggerMode?: AgentTriggerMode,
     roomEnvVars: RoomEnvVar[] = [],
+    locale?: string,
   ) {
     this.name = name;
     this.chatRoomId = chatRoomId;
@@ -988,6 +996,7 @@ export class CodexSdkExecutor implements IAgentExecutor {
     this.stateless = stateless;
     this.roomEnvVars = roomEnvVars;
     this.agentTriggerMode = agentTriggerMode;
+    this.locale = normalizeLocale(locale);
 
     this.workDir = resolveAgentWorkDir({
       chatRoomId,
@@ -1003,8 +1012,9 @@ export class CodexSdkExecutor implements IAgentExecutor {
       chatRoomRules,
       workDir: this.workDir,
       agentTriggerMode,
-      commandSection: CODEX_BACKGROUND_COMMANDS_SECTION,
+      commandSection: getCodexBackgroundCommandsSection(this.locale),
       roomEnvVars: this.roomEnvVars,
+      locale: this.locale,
     });
 
     this.ensureWorkDirectory();
@@ -1771,15 +1781,24 @@ Output the summary only.`;
         fullMessage += `${messageIndexSection}\n\n`;
       }
 
-      fullMessage += `[Group History Access]
-You may access current chatroom history through tools. Use \`get_recent_room_messages\` for message indexes, \`search_room_messages\` to search indexes by keyword, or \`get_room_message_detail\` to inspect exact message content by messageId. These tools automatically use the current chatroom; do not ask for or provide a chatRoomId. Fetch at most 50 message indexes per call; use \`skip\` for pagination and \`order\` as \`asc\` or \`desc\` for chronological direction. Recent/search results are navigation previews, so call \`get_room_message_detail\` before relying on exact prior content.
-
-`;
+      fullMessage += pickLocaleText(
+        {
+          'zh-CN': `[群历史访问]
+你可以通过工具访问当前群聊历史。用 \`get_recent_room_messages\` 获取消息索引，\`search_room_messages\` 按关键词搜索索引，\`get_room_message_detail\` 按 messageId 查看精确消息内容。这些工具自动作用于当前群聊；不要索取或提供 chatRoomId。每次最多获取 50 条消息索引；用 \`skip\` 分页，\`order\` 取 \`asc\` 或 \`desc\` 控制时间方向。最近/搜索结果只是导航预览，所以在依赖精确历史内容前先调用 \`get_room_message_detail\`。`,
+          'en-US': `[Group History Access]
+You may access current chatroom history through tools. Use \`get_recent_room_messages\` for message indexes, \`search_room_messages\` to search indexes by keyword, or \`get_room_message_detail\` to inspect exact message content by messageId. These tools automatically use the current chatroom; do not ask for or provide a chatRoomId. Fetch at most 50 message indexes per call; use \`skip\` for pagination and \`order\` as \`asc\` or \`desc\` for chronological direction. Recent/search results are navigation previews, so call \`get_room_message_detail\` before relying on exact prior content.`,
+        },
+        this.locale,
+      ) + '\n\n';
     }
 
-    fullMessage += `[Current Message]\n${message}`;
+    const currentMessageLabel = pickLocaleText(
+      { 'zh-CN': '[当前消息]', 'en-US': '[Current Message]' },
+      this.locale,
+    );
+    fullMessage += `${currentMessageLabel}\n${message}`;
 
-    const handoffReminder = buildHandoffTurnReminder(this.agentTriggerMode);
+    const handoffReminder = buildHandoffTurnReminder(this.agentTriggerMode, this.locale);
     if (handoffReminder) {
       fullMessage += `\n\n${handoffReminder}`;
     }
@@ -1798,8 +1817,9 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
         chatRoomAgents: this.chatRoomAgents,
         agentName: this.name,
         workDir: this.workDir,
+        locale: this.locale,
       }),
-      RESPONSE_STYLE_INSTRUCTION,
+      getResponseStyleInstruction(this.locale),
     ]
       .filter((section) => section.trim().length > 0)
       .join('\n\n');
@@ -1828,6 +1848,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     this.content = '';
     this.thinking = '';
     this.toolCalls = [];
+    this.toolCalledSinceContent = false;
   }
 
   private getCodexRunner(): TeamAgentXCodexRunner {
@@ -1935,6 +1956,15 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
   }
 
   private upsertToolCall(toolCall: ToolCall): void {
+    // 工具调用之前累积的这段文字，会在下一条 agent_message 到来时被丢弃
+    // （只保留最后一段最终回答）。这里在真正开始工具调用前，先把它记入执行详情
+    // （仅记录，不发群消息），避免多次工具调用之间的中间文本段在执行记录里丢失。
+    // 仅在「本段尚未发生过工具调用」的首个工具调用时记录一次。
+    if (!this.toolCalledSinceContent && this.content.trim()) {
+      this.emitRecord?.(this.content);
+    }
+    // 出现工具调用，标记此后到来的 agent_message 为新的最终段。
+    this.toolCalledSinceContent = true;
     const existing = this.toolCalls.find((item) => item.toolCallId === toolCall.toolCallId);
     if (!existing) {
       this.toolCalls.push(toolCall);
@@ -1990,6 +2020,12 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
   private handleItem(item: ThreadItem): void {
     switch (item.type) {
       case 'agent_message':
+        // 上一段之后若发生过工具调用，则此条消息是新的最终段，
+        // 先清空此前累积的中间过程文本，只保留最后一段内容。
+        if (this.toolCalledSinceContent) {
+          this.content = '';
+          this.toolCalledSinceContent = false;
+        }
         this.appendContent(item.text);
         return;
       case 'reasoning':
@@ -2192,10 +2228,12 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     emitThinking?: ThinkingEmitCallback,
     signal?: AbortSignal,
     attachments?: AttachmentData[],
+    emitRecord?: RecordEmitCallback,
   ): Promise<AgentExecResult> {
     this.emitStream = emitStream || null;
     this.emitToolCall = emitToolCall || null;
     this.emitThinking = emitThinking || null;
+    this.emitRecord = emitRecord || null;
     this.resetCollectors();
     this.ensureInstalledSkillsDirectory();
 
@@ -2336,6 +2374,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       this.emitStream = null;
       this.emitToolCall = null;
       this.emitThinking = null;
+      this.emitRecord = null;
     }
   }
 

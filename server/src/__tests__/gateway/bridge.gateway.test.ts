@@ -40,6 +40,7 @@ describe('Bridge Gateway API', () => {
       id: 'bridge-test-user',
       username: 'bridge-tester',
       avatar: null,
+      preferredLanguage: 'zh-CN',
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
     });
     await app.register(bridgeGateway);

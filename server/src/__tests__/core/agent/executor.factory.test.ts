@@ -37,12 +37,12 @@ describe('createExecutor', () => {
       });
 
       const debugInfo = executor.getDebugInfo();
-      assert.match(debugInfo.systemPrompt, /## Group Rules/);
+      assert.match(debugInfo.systemPrompt, /## 群规则/);
       assert.match(debugInfo.systemPrompt, /所有回复必须使用中文。/);
-      assert.match(debugInfo.systemPrompt, /## Assistant Mentions/);
-      assert.match(debugInfo.systemPrompt, /at most one triggerable @assistant mention/);
-      assert.match(debugInfo.systemPrompt, /End-of-Turn Handoff Protocol \(MANDATORY\)/);
-      assert.match(debugInfo.systemPrompt, /Every reply MUST end in exactly ONE of these two ways/);
+      assert.match(debugInfo.systemPrompt, /## 助手提及/);
+      assert.match(debugInfo.systemPrompt, /最多包含一个可触发的 @助手 提及/);
+      assert.match(debugInfo.systemPrompt, /收尾交接协议（强制）/);
+      assert.match(debugInfo.systemPrompt, /每条回复必须恰好以下面两种方式之一结束/);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -68,12 +68,12 @@ describe('createExecutor', () => {
       });
 
       const debugInfo = executor.getDebugInfo();
-      assert.match(debugInfo.systemPrompt, /## Group Rules/);
+      assert.match(debugInfo.systemPrompt, /## 群规则/);
       assert.match(debugInfo.systemPrompt, /输出前先检查群规则。/);
-      assert.match(debugInfo.systemPrompt, /## Assistant Mentions/);
-      assert.match(debugInfo.systemPrompt, /at most one triggerable @assistant mention/);
-      assert.match(debugInfo.systemPrompt, /End-of-Turn Handoff Protocol \(MANDATORY\)/);
-      assert.match(debugInfo.systemPrompt, /Every reply MUST end in exactly ONE of these two ways/);
+      assert.match(debugInfo.systemPrompt, /## 助手提及/);
+      assert.match(debugInfo.systemPrompt, /最多包含一个可触发的 @助手 提及/);
+      assert.match(debugInfo.systemPrompt, /收尾交接协议（强制）/);
+      assert.match(debugInfo.systemPrompt, /每条回复必须恰好以下面两种方式之一结束/);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

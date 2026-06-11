@@ -8,6 +8,7 @@ const userResponseSchema = {
     id: { type: 'string' },
     username: { type: 'string' },
     avatar: { type: 'string', nullable: true },
+    preferredLanguage: { type: 'string' },
     createdAt: { type: 'string' },
   },
 };
@@ -178,6 +179,7 @@ export async function authGateway(app: FastifyInstance) {
         properties: {
           username: { type: 'string', minLength: 1, maxLength: 50, description: '用户名' },
           avatar: { type: 'string', description: '头像索引（数字）' },
+          preferredLanguage: { type: 'string', description: '界面语言：zh-CN / en-US' },
         },
       },
       response: {

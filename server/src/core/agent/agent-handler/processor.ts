@@ -152,6 +152,10 @@ export async function processQueue(chatRoomId: string, agentId: string) {
 
           // 收集执行事件（用于保存到 ExecutionRecord）
           const executionEvents: ExecutionEvent[] = [];
+          // 记录最近一次「仅记录」的中间文本段内容，用于去重：
+          // Codex 在工具调用后直接结束（无收尾消息）时，最终回答会与已记录的中间段相同，
+          // 避免在执行详情里出现两个一模一样的输出节点。
+          let lastRecordedSegmentContent: string | null = null;
 
           // 创建 emit 回调，在 tool 调用时直接广播消息
           const emitCallback = async (content: string, replyMessageId?: string) => {
@@ -165,6 +169,11 @@ export async function processQueue(chatRoomId: string, agentId: string) {
             if (lastEvent && lastEvent.type === 'output') {
               // 在同一个 output 事件内累加内容
               lastEvent.data.content = (lastEvent.data.content || '') + content;
+            } else if (
+              content.trim() &&
+              content.trim() === lastRecordedSegmentContent?.trim()
+            ) {
+              // 与刚记录的中间段完全相同：不再重复写入执行详情，但下面仍照常发群消息
             } else {
               // 创建新的 output 事件
               executionEvents.push({
@@ -268,6 +277,18 @@ export async function processQueue(chatRoomId: string, agentId: string) {
 
             // 更新恢复服务状态（Agent 发送了消息）
             recoveryService.updateRoomState(chatRoomId, task.agentName);
+          };
+
+          // 仅记录回调：把工具调用之前的中间文本段写入执行详情，但不发群消息、不广播。
+          // 用于在执行详情里完整保留 agent 在多次工具调用之间产生的每一段文字。
+          const recordCallback = (content: string) => {
+            if (!content || !content.trim()) return;
+            executionEvents.push({
+              type: 'output',
+              timestamp: Date.now(),
+              data: { content, type: 'message' },
+            });
+            lastRecordedSegmentContent = content;
           };
 
           // 流式内容回调
@@ -444,6 +465,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
               thinkingCallback,
               abortController.signal,
               attachments,  // 传递图片附件
+              recordCallback,  // 记录工具调用前的中间文本段到执行详情
             );
           } catch (error) {
             // 检查是否是中止错误

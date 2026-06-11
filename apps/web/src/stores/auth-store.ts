@@ -1,6 +1,15 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { authApi, User } from '@/lib/auth-api'
+import i18n from '@/i18n'
+
+// 用服务端保存的界面语言偏好初始化 i18n（跨设备一致的语言来源）。
+function applyServerPreferredLanguage(user: User | null | undefined) {
+  const lang = user?.preferredLanguage
+  if (!lang || lang === i18n.language) return
+  i18n.changeLanguage(lang)
+  localStorage.setItem('teamagentx-lang', lang)
+}
 
 // 声明 FlutterChannel 类型
 declare global {
@@ -73,6 +82,7 @@ export const useAuthStore = create<AuthStore>()(
           // Validate token with server
           const response = await authApi.me(storedToken)
           if (response.success && response.data) {
+            applyServerPreferredLanguage(response.data)
             set({
               user: response.data,
               token: storedToken,
@@ -102,6 +112,7 @@ export const useAuthStore = create<AuthStore>()(
       login: async (username: string, password: string) => {
         const response = await authApi.login({ username, password })
         if (response.success && response.data) {
+          applyServerPreferredLanguage(response.data.user)
           localStorage.setItem(TOKEN_KEY, response.data.token)
           localStorage.setItem('auth_user', JSON.stringify(response.data.user))
           set({

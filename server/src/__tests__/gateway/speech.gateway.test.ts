@@ -15,6 +15,7 @@ describe('Speech Gateway API', () => {
       id: 'test-user-id',
       username: 'tester',
       avatar: null,
+      preferredLanguage: 'zh-CN',
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
     });
 
@@ -80,6 +81,7 @@ describe('Speech Gateway API', () => {
       id: 'speech-gateway-test-user',
       username: 'tester',
       avatar: null,
+      preferredLanguage: 'zh-CN',
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
     });
 
@@ -147,6 +149,7 @@ describe('Speech Gateway API', () => {
       id: 'speech-gateway-test-user',
       username: 'tester',
       avatar: null,
+      preferredLanguage: 'zh-CN',
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
     });
 

@@ -527,6 +527,7 @@ model User {
   password       String
   avatar         String?
   avatarColor    String?
+  preferredLanguage String       @default("zh-CN") // 用户界面语言，决定 Agent 系统提示词语种（zh-CN / en-US）
   createdAt      DateTime        @default(now())
   updatedAt      DateTime
   ownedChatRooms ChatRoom[]

@@ -7,6 +7,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, chmod } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { clearExecutorCacheEntries } from '../../core/agent/agent-handler/cache.js';
 
 export interface RegisterData {
   username: string;
@@ -22,12 +23,14 @@ export interface LoginData {
 export interface UpdateProfileData {
   username?: string;
   avatar?: string;
+  preferredLanguage?: string;
 }
 
 export interface UserResponse {
   id: string;
   username: string;
   avatar: string | null;
+  preferredLanguage: string;
   createdAt: Date;
 }
 
@@ -41,8 +44,16 @@ interface LocalUserConfig {
   username: string;
   password: string;
   avatar: string | null;
+  preferredLanguage: string;
   createdAt: string;
   updatedAt: string;
+}
+
+// 仅支持中英文，其它一律落到默认中文。
+function normalizePreferredLanguage(value: unknown): 'zh-CN' | 'en-US' {
+  return typeof value === 'string' && value.toLowerCase().startsWith('en')
+    ? 'en-US'
+    : 'zh-CN';
 }
 
 const LOCAL_USER_PASSWORD_SENTINEL = '__TEAMAGENTX_LOCAL_USER_FILE__';
@@ -57,6 +68,7 @@ function toUserResponse(user: LocalUserConfig): UserResponse {
     id: user.id,
     username: user.username,
     avatar: user.avatar,
+    preferredLanguage: user.preferredLanguage,
     createdAt: new Date(user.createdAt),
   };
 }
@@ -89,6 +101,7 @@ function normalizeLocalUser(data: unknown): LocalUserConfig {
     username: raw.username,
     password: raw.password,
     avatar: typeof raw.avatar === 'string' ? raw.avatar : null,
+    preferredLanguage: normalizePreferredLanguage(raw.preferredLanguage),
     createdAt: typeof raw.createdAt === 'string' && raw.createdAt ? raw.createdAt : now,
     updatedAt: typeof raw.updatedAt === 'string' && raw.updatedAt ? raw.updatedAt : now,
   };
@@ -137,6 +150,7 @@ async function syncCompatibilityUser(user: LocalUserConfig, socketId?: string | 
         username: user.username,
         password: LOCAL_USER_PASSWORD_SENTINEL,
         avatar: user.avatar,
+        preferredLanguage: user.preferredLanguage,
         ...(socketId !== undefined && { socketId }),
         updatedAt: now,
       },
@@ -145,6 +159,7 @@ async function syncCompatibilityUser(user: LocalUserConfig, socketId?: string | 
         username: user.username,
         password: LOCAL_USER_PASSWORD_SENTINEL,
         avatar: user.avatar,
+        preferredLanguage: user.preferredLanguage,
         socketId: socketId ?? null,
         updatedAt: now,
       },
@@ -159,6 +174,7 @@ async function syncCompatibilityUser(user: LocalUserConfig, socketId?: string | 
         data: {
           password: LOCAL_USER_PASSWORD_SENTINEL,
           avatar: user.avatar,
+          preferredLanguage: user.preferredLanguage,
           ...(socketId !== undefined && { socketId }),
           updatedAt: now,
         },
@@ -187,6 +203,7 @@ async function migrateLegacyUser(username?: string, password?: string): Promise<
     username: legacyUser.username,
     password: localPassword,
     avatar: legacyUser.avatar ?? '0',
+    preferredLanguage: normalizePreferredLanguage((legacyUser as any).preferredLanguage),
     createdAt: legacyUser.createdAt.toISOString(),
     updatedAt: new Date().toISOString(),
   });
@@ -228,6 +245,7 @@ export const authService = {
       username,
       password,
       avatar: avatar || '0',
+      preferredLanguage: 'zh-CN',
       createdAt: now,
       updatedAt: now,
     });
@@ -318,7 +336,7 @@ export const authService = {
   },
 
   async updateProfile(userId: string, data: UpdateProfileData): Promise<UserResponse> {
-    const { username, avatar } = data;
+    const { username, avatar, preferredLanguage } = data;
     const user = await loadLocalUser();
 
     if (!user || user.id !== userId) {
@@ -332,13 +350,24 @@ export const authService = {
       if (existingUser) throw new Error('用户名已存在');
     }
 
+    const nextLanguage = preferredLanguage !== undefined
+      ? normalizePreferredLanguage(preferredLanguage)
+      : user.preferredLanguage;
+    const languageChanged = nextLanguage !== user.preferredLanguage;
+
     const updatedUser = await writeLocalUser({
       ...user,
       ...(username && { username }),
       ...(avatar !== undefined && { avatar }),
+      preferredLanguage: nextLanguage,
       updatedAt: new Date().toISOString(),
     });
     await syncCompatibilityUser(updatedUser);
+
+    // 界面语言改变后，已缓存的执行器持有旧语种系统提示词，清空缓存让下次执行按新语种重建。
+    if (languageChanged) {
+      clearExecutorCacheEntries();
+    }
 
     return toUserResponse(updatedUser);
   },

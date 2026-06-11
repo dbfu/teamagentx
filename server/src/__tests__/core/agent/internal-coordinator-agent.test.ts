@@ -75,7 +75,7 @@ describe('internal coordinator no-dispatch handling', () => {
     const prompt = buildInternalCoordinatorPrompt();
 
     assert.match(prompt, /forwardVerbatim/);
-    assert.match(prompt, /原文发送给目标助手/);
+    assert.match(prompt, /原文发送，忽略 content 字段/);
     assert.match(prompt, /不要添加与原始目标无关的新需求/);
   });
 

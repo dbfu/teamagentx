@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 
 // 全局输出目录，放在用户 home 目录下，避免污染项目目录
-const GLOBAL_OUTPUT_DIR = path.join(os.homedir(), '.teamagentx-output');
+const GLOBAL_OUTPUT_DIR = path.join(os.homedir(), '.teamagentx', 'output');
 
 /**
  * TaskOutput - 管理命令输出文件

@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'child_process';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as fsp from 'fs/promises';
+import * as os from 'os';
 import * as path from 'path';
 import treeKill from 'tree-kill';
 import type { BackgroundTask } from '@prisma/client';
@@ -78,7 +79,8 @@ class BackgroundCommandService {
     }
 
     const taskId = randomUUID();
-    const outputDir = path.join(workDir, '.teamagentx-output');
+    // 输出文件统一放在用户 home 目录下的全局目录，避免污染助手工作目录
+    const outputDir = path.join(os.homedir(), '.teamagentx', 'output');
     fs.mkdirSync(outputDir, {recursive: true});
     const stdoutPath = path.join(outputDir, `${taskId}.stdout`);
     const stderrPath = path.join(outputDir, `${taskId}.stderr`);

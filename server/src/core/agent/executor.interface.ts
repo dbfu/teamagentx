@@ -33,6 +33,9 @@ export type MessageEmitCallback = (
 // 流式内容回调类型
 export type StreamEmitCallback = (content: string) => void;
 
+// 仅记录到执行详情的输出回调类型（工具调用前的中间文本段，不发群消息）
+export type RecordEmitCallback = (content: string) => void;
+
 // 思考过程回调类型
 export type ThinkingEmitCallback = (thinking: string) => void;
 
@@ -139,6 +142,7 @@ export interface IAgentExecutor {
     emitThinking?: ThinkingEmitCallback,
     signal?: AbortSignal,
     attachments?: AttachmentData[],  // 图片附件（包含 base64）
+    emitRecord?: RecordEmitCallback,  // 仅记录到执行详情的中间文本段（不发群消息）
   ): Promise<AgentExecResult>;
 
   // 获取调试信息
