@@ -1,5 +1,7 @@
 import type { ToolCall } from '../executor.interface.js';
+import type { AgentExecResult, IAgentExecutor } from '../executor.interface.js';
 import { coerceThinkingText } from '../executor.interface.js';
+import type { LlmProvider } from '@prisma/client';
 import { taskQueueService, type HistoryMessage } from '../../../modules/task-queue/task-queue.service.js';
 import { executionRecordService, type ExecutionEvent } from '../../../modules/execution-record/execution-record.service.js';
 import { recoveryService } from '../../../modules/recovery/recovery.service.js';
@@ -8,7 +10,9 @@ import { messageService } from '../../../modules/message/message.service.js';
 import { roomMessageIndexService } from '../../../modules/message/room-message-index.service.js';
 import { todoService } from '../../../modules/todo/todo.service.js';
 import { agentService } from '../agent.service.js';
+import { parseFallbackLlmProviderIds } from '../agent.service.js';
 import { chatRoomService } from '../../../modules/chatroom/chatroom.service.js';
+import { llmProviderService } from '../../../modules/llm-provider/llm-provider.service.js';
 import { workbenchTaskService } from '../../../modules/workbench/workbench.service.js';
 import {
   processingMap,
@@ -39,6 +43,29 @@ import { buildAIMessage } from './message-utils.js';
 import { debugLog } from './debug.js';
 import { notifySourceAgentOnFailure } from './task-failure-notification.js';
 import { shouldSuppressInternalCoordinatorMessage } from '../internal-coordinator-agent.js';
+
+function normalizeExecutionError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+async function resolveFallbackLlmProviders(
+  fallbackLlmProviderIdsJson: string | null | undefined,
+  primaryProviderId?: string | null,
+): Promise<LlmProvider[]> {
+  const fallbackIds = parseFallbackLlmProviderIds(fallbackLlmProviderIdsJson);
+  if (fallbackIds.length === 0) return [];
+
+  const activeProviders = await llmProviderService.findActive('text');
+  const activeProviderById = new Map(activeProviders.map((provider) => [provider.id, provider]));
+  const providers: LlmProvider[] = [];
+  for (const providerId of fallbackIds) {
+    if (providerId === primaryProviderId) continue;
+    const provider = activeProviderById.get(providerId);
+    if (provider) providers.push(provider);
+  }
+  return providers;
+}
 
 // 处理队列中的任务
 export async function processQueue(chatRoomId: string, agentId: string) {
@@ -453,9 +480,16 @@ export async function processQueue(chatRoomId: string, agentId: string) {
           let execResult;
           let executionError: Error | null = null;
           let wasAborted = false;
+          const primaryProviderId = executor.getDebugInfo().llmProvider?.id ?? null;
+          const fallbackLlmProviders = await resolveFallbackLlmProviders(
+            (agentInfo as { fallbackLlmProviderIds?: string | null } | null)?.fallbackLlmProviderIds,
+            primaryProviderId,
+          );
+          const shouldUseModelFallback = fallbackLlmProviders.length > 0;
+          let executionDebugExecutor = executor;
 
-          try {
-            execResult = await executor.exec(
+          const runExecutor = (candidateExecutor: IAgentExecutor): Promise<AgentExecResult> => (
+            candidateExecutor.exec(
               task.messageContent + ruleReminder + bridgeContextSection,
               emitCallback,
               task.messageId,
@@ -466,7 +500,94 @@ export async function processQueue(chatRoomId: string, agentId: string) {
               abortController.signal,
               attachments,  // 传递图片附件
               recordCallback,  // 记录工具调用前的中间文本段到执行详情
-            );
+              shouldUseModelFallback ? { suppressFailureMessage: true } : undefined,
+            )
+          );
+
+          const runWithModelFallback = async (): Promise<AgentExecResult> => {
+            if (!shouldUseModelFallback) {
+              const result = await runExecutor(executor);
+              executionDebugExecutor = executor;
+              return result;
+            }
+
+            const candidates: Array<{
+              provider: LlmProvider | null;
+              executor: IAgentExecutor;
+            }> = [{ provider: null, executor }];
+
+            for (const provider of fallbackLlmProviders) {
+              const fallbackExecutor = await getExecutor(
+                chatRoomId,
+                task.agentName,
+                task.sessionDir ?? undefined,
+                provider,
+              );
+              if (fallbackExecutor) {
+                candidates.push({ provider, executor: fallbackExecutor });
+              }
+            }
+
+            let lastError: unknown;
+            for (let index = 0; index < candidates.length; index += 1) {
+              const candidate = candidates[index];
+              const providerLabel = candidate.provider
+                ? `${candidate.provider.name} (${candidate.provider.model})`
+                : 'primary';
+
+              try {
+                const result = await runExecutor(candidate.executor);
+                executionDebugExecutor = candidate.executor;
+                return result;
+              } catch (firstError) {
+                if (firstError instanceof Error && firstError.name === 'AbortError') throw firstError;
+                lastError = firstError;
+                debugLog('agentModelAttemptFailed', {
+                  chatRoomId,
+                  agentId: task.agentId,
+                  agentName: task.agentName,
+                  provider: providerLabel,
+                  attempt: 1,
+                  error: firstError instanceof Error ? firstError.message : String(firstError),
+                });
+              }
+
+              try {
+                const result = await runExecutor(candidate.executor);
+                executionDebugExecutor = candidate.executor;
+                return result;
+              } catch (secondError) {
+                if (secondError instanceof Error && secondError.name === 'AbortError') throw secondError;
+                const sameError = normalizeExecutionError(secondError) === normalizeExecutionError(lastError);
+                debugLog('agentModelAttemptFailed', {
+                  chatRoomId,
+                  agentId: task.agentId,
+                  agentName: task.agentName,
+                  provider: providerLabel,
+                  attempt: 2,
+                  sameError,
+                  error: secondError instanceof Error ? secondError.message : String(secondError),
+                });
+                lastError = secondError;
+                if (!sameError || index === candidates.length - 1) {
+                  throw secondError;
+                }
+                const nextProvider = candidates[index + 1]?.provider;
+                debugLog('agentModelFallbackSwitch', {
+                  chatRoomId,
+                  agentId: task.agentId,
+                  agentName: task.agentName,
+                  from: providerLabel,
+                  to: nextProvider ? `${nextProvider.name} (${nextProvider.model})` : 'unknown',
+                });
+              }
+            }
+
+            throw lastError instanceof Error ? lastError : new Error(String(lastError ?? '未知错误'));
+          };
+
+          try {
+            execResult = await runWithModelFallback();
           } catch (error) {
             // 检查是否是中止错误
             if (error instanceof Error && error.name === 'AbortError') {
@@ -479,6 +600,13 @@ export async function processQueue(chatRoomId: string, agentId: string) {
                 `Task execution failed for agent ${task.agentName}:`,
                 error,
               );
+              if (shouldUseModelFallback) {
+                try {
+                  await emitCallback(`${task.agentName} 执行出错: ${executionError.message}`, task.messageId);
+                } catch (emitError) {
+                  console.error('[processor] 发送最终失败消息时出错:', emitError);
+                }
+              }
             }
           }
 
@@ -504,7 +632,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
           }
 
           // 获取执行器的调试信息
-          const debugInfo = executor.getDebugInfo();
+          const debugInfo = executionDebugExecutor.getDebugInfo();
 
           // 按时间戳排序事件
           executionEvents.sort((a, b) => a.timestamp - b.timestamp);
@@ -664,15 +792,11 @@ export async function processQueue(chatRoomId: string, agentId: string) {
         // 任务完成后立即广播状态更新（队列长度变化，可能从 busy 变成 executing）
         broadcastAgentStatus(chatRoomId);
 
-        // 工作台任务自动状态流转：
-        // - 协调模式：等待群调度助手确认后再更新（在 coordinator-dispatch.ts 中处理）
-        // - 非协调模式：任务完成后直接判断群内空闲并更新
+        // 工作台任务自动状态流转：统一为「群内空闲时流转」判定，不再按触发模式区分。
+        // 协调器裁决路径（coordinator-dispatch.ts 的 syncWorkbenchOnRoomIdle）语义一致、幂等。
         try {
-          const chatRoom = await chatRoomService.findById(chatRoomId);
-          if (chatRoom && chatRoom.agentTriggerMode !== 'coordinator') {
-            const roomActiveTasks = await taskQueueService.getActiveTasks(chatRoomId);
-            await workbenchTaskService.syncRoomDispatchTaskStatus(chatRoomId, roomActiveTasks.length === 0);
-          }
+          const roomActiveTasks = await taskQueueService.getActiveTasks(chatRoomId);
+          await workbenchTaskService.syncRoomDispatchTaskStatus(chatRoomId, roomActiveTasks.length === 0);
         } catch (error) {
           console.error('[workbench] 同步派发任务状态失败:', error);
         }

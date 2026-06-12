@@ -1,7 +1,7 @@
 import {FastifyInstance} from 'fastify';
 import {Server} from 'socket.io';
 import {clearExecutorCache, getAgentDebugInfo} from '../core/agent/agent-handler/index.js';
-import {agentService, UpdateAgentInput, UpdateSortOrderInput} from '../core/agent/agent.service.js';
+import {agentService, parseFallbackLlmProviderIds, UpdateAgentInput, UpdateSortOrderInput} from '../core/agent/agent.service.js';
 import {executionRecordService} from '../modules/execution-record/execution-record.service.js';
 import {checkAllAcpTools} from '../core/agent/acp-tools.service.js';
 import {chatRoomService} from '../modules/chatroom/chatroom.service.js';
@@ -48,28 +48,37 @@ function isAgentValidationError(error: unknown): error is Error {
     '目前仅支持',
     '该 ACP 工具暂不支持',
     '助手只能绑定文本模型',
+    '备用 LLM 供应商不存在',
+    '备用模型只能选择文本模型',
     '图片能力只能绑定图片模型',
     '开启图片能力时必须选择图片模型',
     '图片模型供应商不存在',
     'Claude 仅支持',
     'Codex 仅支持',
+    'Claude 备用模型仅支持',
+    'Codex 备用模型仅支持',
     '代理配置',
     '代理地址',
     '思考模式',
   ].some((prefix) => error.message.startsWith(prefix));
 }
 
-function serializeAgentForResponse<T extends { speechConfig?: string | null }>(agent: T): Omit<T, 'speechConfig'> & { speechConfig: unknown | null } {
+function serializeAgentForResponse<T extends { speechConfig?: string | null; fallbackLlmProviderIds?: string | null }>(
+  agent: T,
+): Omit<T, 'speechConfig' | 'fallbackLlmProviderIds'> & { speechConfig: unknown | null; fallbackLlmProviderIds: string[] } {
+  const { speechConfig, fallbackLlmProviderIds, ...rest } = agent;
   if (!agent.speechConfig) {
     return {
-      ...agent,
+      ...rest,
+      fallbackLlmProviderIds: parseFallbackLlmProviderIds(fallbackLlmProviderIds),
       speechConfig: null,
     };
   }
 
   return {
-    ...agent,
-    speechConfig: deserializeAgentSpeechConfig(agent.speechConfig),
+    ...rest,
+    fallbackLlmProviderIds: parseFallbackLlmProviderIds(fallbackLlmProviderIds),
+    speechConfig: deserializeAgentSpeechConfig(speechConfig),
   };
 }
 
@@ -141,6 +150,11 @@ const agentResponseSchema = {
       },
     },
     llmProviderId: { type: 'string', nullable: true },
+    fallbackLlmProviderIds: {
+      type: 'array',
+      items: { type: 'string' },
+      nullable: true,
+    },
     llmProvider: {
       type: 'object',
       nullable: true,
@@ -236,6 +250,12 @@ const createAgentBodySchema = {
     },
     categoryId: { type: 'string', description: '分类 ID' },
     llmProviderId: { type: 'string', nullable: true, description: 'LLM 供应商 ID（builtin 直接使用；acp 目前仅支持 claude/codex 最小闭环）' },
+    fallbackLlmProviderIds: {
+      type: 'array',
+      items: { type: 'string' },
+      nullable: true,
+      description: '备用 LLM 供应商 ID 列表，按切换顺序',
+    },
     imageGeneration: {
       type: 'object',
       additionalProperties: false,
@@ -301,6 +321,12 @@ const updateAgentBodySchema = {
     isActive: { type: 'boolean' },
     categoryId: { type: 'string', description: '分类 ID，设为 null 移除分类' },
     llmProviderId: { type: 'string', nullable: true, description: 'LLM 供应商 ID，设为 null 移除供应商' },
+    fallbackLlmProviderIds: {
+      type: 'array',
+      items: { type: 'string' },
+      nullable: true,
+      description: '备用 LLM 供应商 ID 列表，按切换顺序',
+    },
     imageGeneration: {
       type: 'object',
       additionalProperties: false,
@@ -336,6 +362,7 @@ interface CreateAgentBody {
   speechConfig?: UpdateAgentInput['speechConfig'];
   categoryId?: string;
   llmProviderId?: string;
+  fallbackLlmProviderIds?: string[] | null;
   imageGeneration?: ImageGenerationCapabilityBody;
 }
 
@@ -357,6 +384,7 @@ interface UpdateAgentBody {
   isActive?: boolean;
   categoryId?: string | null;
   llmProviderId?: string | null;
+  fallbackLlmProviderIds?: string[] | null;
   imageGeneration?: ImageGenerationCapabilityBody;
 }
 
@@ -630,7 +658,7 @@ export async function agentGateway(app: FastifyInstance) {
       },
     },
     async (request, reply) => {
-      const {name, avatar, avatarColor, description, prompt, type, acpTool, workDir, proxyConfig, codexModel, codexFastMode, claudeModel, thinkingMode, speechConfig, categoryId, llmProviderId, imageGeneration} = request.body;
+      const {name, avatar, avatarColor, description, prompt, type, acpTool, workDir, proxyConfig, codexModel, codexFastMode, claudeModel, thinkingMode, speechConfig, categoryId, llmProviderId, fallbackLlmProviderIds, imageGeneration} = request.body;
 
       try {
         const agent = await agentService.create({
@@ -650,6 +678,7 @@ export async function agentGateway(app: FastifyInstance) {
           speechConfig,
           categoryId,
           llmProviderId,
+          fallbackLlmProviderIds,
           imageGeneration,
         });
         await installDefaultSkillsForNewAgent(agent);

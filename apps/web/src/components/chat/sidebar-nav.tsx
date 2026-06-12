@@ -192,6 +192,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
     thinkingMode?: AgentThinkingMode | null
     categoryId: string | null
     llmProviderId: string | null
+    fallbackLlmProviderIds: string[]
     speechConfig: AgentSpeechConfig | null
     imageGeneration?: { enabled: boolean; llmProviderId: string | null }
   }): Promise<boolean> => {
@@ -209,6 +210,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
       thinkingMode: data.thinkingMode || 'high',
       categoryId: data.categoryId || undefined,
       llmProviderId: data.llmProviderId || undefined,
+      fallbackLlmProviderIds: data.fallbackLlmProviderIds,
       speechConfig: data.speechConfig,
       imageGeneration: data.imageGeneration,
     })

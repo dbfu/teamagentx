@@ -13,6 +13,7 @@ import { getCodexModelOptions } from '@/lib/codex-models'
 import { getClaudeModelOptions } from '@/lib/claude-models'
 import { llmProviderApi, type LlmProvider } from '@/lib/llm-provider-api'
 import { getProviderProtocolHint, isProviderCompatibleWithAgent } from '@/lib/llm-provider-compat'
+import { FallbackModelSelector } from './fallback-model-selector'
 import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
 
@@ -27,6 +28,7 @@ export interface SystemAssistantRuntimeConfig {
   claudeModel: string | null
   thinkingMode: AgentThinkingMode
   llmProviderId: string | null
+  fallbackLlmProviderIds: string[]
   imageGeneration: ImageGenerationCapabilityRequest
 }
 
@@ -48,6 +50,7 @@ export function SystemAssistantModelModal({
   const [acpTools, setAcpTools] = useState<AcpToolInfo[]>([])
   const [acpTool, setAcpTool] = useState('claude')
   const [selectedProviderId, setSelectedProviderId] = useState('')
+  const [fallbackLlmProviderIds, setFallbackLlmProviderIds] = useState<string[]>([])
   const [providerSelectionTouched, setProviderSelectionTouched] = useState(false)
   const [thinkingMode, setThinkingMode] = useState<AgentThinkingMode>('high')
   const [codexModel, setCodexModel] = useState('')
@@ -79,6 +82,7 @@ export function SystemAssistantModelModal({
     ),
     ...compatibleProviders,
   ], [compatibleProviders, selectedProvider])
+  const compatibleFallbackProviders = compatibleProviders.filter((provider) => provider.id !== effectiveSelectedProviderId)
   const selectedAcpTool = acpTools.find((tool) => tool.id === acpTool)
   const selectedAcpToolLabel = selectedAcpTool?.name
     || (acpTool === 'codex' ? 'Codex' : acpTool === 'claude' ? 'Claude' : acpTool)
@@ -120,6 +124,7 @@ export function SystemAssistantModelModal({
     const providerId = assistant.llmProviderId || assistant.llmProvider?.id || ''
     console.log('[SystemAssistantModelModal] 设置 selectedProviderId:', providerId)
     setSelectedProviderId(providerId)
+    setFallbackLlmProviderIds(assistant.fallbackLlmProviderIds || [])
     setProviderSelectionTouched(false)
     setThinkingMode(assistant.thinkingMode || 'high')
     setCodexModel(assistant.codexModel || '')
@@ -212,6 +217,14 @@ export function SystemAssistantModelModal({
     }
   }, [acpTool, effectiveSelectedProviderId, providerSelectionTouched, providers, selectedProviderId])
 
+  useEffect(() => {
+    const compatibleIds = new Set(compatibleFallbackProviders.map((provider) => provider.id))
+    const nextIds = fallbackLlmProviderIds.filter((id) => compatibleIds.has(id))
+    if (nextIds.length !== fallbackLlmProviderIds.length) {
+      setFallbackLlmProviderIds(nextIds)
+    }
+  }, [compatibleFallbackProviders, fallbackLlmProviderIds])
+
   if (!isOpen || !assistant) return null
 
   const handleSubmit = async (e: FormEvent) => {
@@ -229,6 +242,7 @@ export function SystemAssistantModelModal({
         claudeModel: showLocalClaudeConfig ? claudeModel.trim() || null : null,
         thinkingMode,
         llmProviderId: effectiveSelectedProviderId || null,
+        fallbackLlmProviderIds,
         imageGeneration: {
           enabled: false,
           llmProviderId: null,
@@ -344,6 +358,13 @@ export function SystemAssistantModelModal({
                 </p>
               )}
             </div>
+
+            <FallbackModelSelector
+              providers={compatibleFallbackProviders}
+              primaryProviderId={effectiveSelectedProviderId}
+              selectedIds={fallbackLlmProviderIds}
+              onChange={setFallbackLlmProviderIds}
+            />
 
             {(acpTool === 'claude' || acpTool === 'codex') && (
               <div>

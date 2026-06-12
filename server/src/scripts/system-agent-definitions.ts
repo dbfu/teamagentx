@@ -436,7 +436,7 @@ export function getGroupCoordinatorDefinition(
     name: INTERNAL_COORDINATOR_AGENT_NAME,
     avatar: 'Route',
     avatarColor: 'bg-slate-500',
-    description: '隐藏的群聊协调模式调度执行器，只负责自动路由任务。',
+    description: '隐藏的群聊智能协作调度执行器，只负责自动路由任务。',
     prompt: buildInternalCoordinatorPrompt(),
     type: 'acp',
     acpTool: 'claude',

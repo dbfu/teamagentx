@@ -534,7 +534,7 @@ export async function chatRoomGateway(app: FastifyInstance) {
 
   app.get<{ Params: ChatRoomParams }>('/chatrooms/:id/package-scripts', {
     schema: {
-      description: '获取群聊工作目录 package.json scripts',
+      description: '获取群聊工作目录 package.json scripts 和 sh 脚本',
       tags: ['ChatRooms'],
       params: {
         type: 'object',
@@ -549,6 +549,8 @@ export async function chatRoomGateway(app: FastifyInstance) {
               type: 'object',
               properties: {
                 hasPackageJson: { type: 'boolean' },
+                hasShellScripts: { type: 'boolean' },
+                hasScripts: { type: 'boolean' },
                 workDir: { type: 'string', nullable: true },
                 packageManager: { type: 'string', nullable: true },
                 scripts: {
@@ -562,6 +564,8 @@ export async function chatRoomGateway(app: FastifyInstance) {
                       runCommand: { type: 'string' },
                       relativeDir: { type: 'string' },
                       workDir: { type: 'string' },
+                      source: { type: 'string' },
+                      filePath: { type: 'string' },
                     },
                   },
                 },
@@ -593,7 +597,7 @@ export async function chatRoomGateway(app: FastifyInstance) {
 
   app.post<{ Params: ChatRoomParams; Body: RunPackageScriptBody }>('/chatrooms/:id/package-scripts/run', {
     schema: {
-      description: '执行群聊工作目录 package.json script',
+      description: '执行群聊工作目录 package.json script 或 sh 脚本',
       tags: ['ChatRooms'],
       params: {
         type: 'object',

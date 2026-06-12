@@ -4,6 +4,26 @@ import { ChatRoom, chatRoomApi } from '@/lib/agent-api'
 
 const STORAGE_KEY = 'selectedChatRoomId'
 
+function readUserId(rawValue: string | null): string | null {
+  if (!rawValue) return null
+
+  try {
+    const parsed = JSON.parse(rawValue) as { id?: unknown; state?: { user?: { id?: unknown } | null } }
+    if (typeof parsed.id === 'string') return parsed.id
+    if (typeof parsed.state?.user?.id === 'string') return parsed.state.user.id
+    return null
+  } catch {
+    return null
+  }
+}
+
+function getCurrentUserIdFromStorage(): string | null {
+  if (typeof localStorage === 'undefined') return null
+
+  return readUserId(localStorage.getItem('auth_user'))
+    ?? readUserId(localStorage.getItem('auth-storage'))
+}
+
 interface LastMessage {
   id: string
   content: string
@@ -24,6 +44,7 @@ interface LastMessage {
 interface ChatRoomStore {
   chatRooms: ChatRoom[]
   selectedRoomId: string | null
+  chatRoomsCacheUserId: string | null
   setChatRooms: (rooms: ChatRoom[]) => void
   selectRoom: (id: string) => void
   addRoom: (room: ChatRoom) => void
@@ -34,12 +55,16 @@ interface ChatRoomStore {
 
 export const useChatRoomStore = create<ChatRoomStore>()(
   persist(
-    (set, _get) => ({
+    (set, get) => ({
       chatRooms: [],
       selectedRoomId: localStorage.getItem(STORAGE_KEY),
+      chatRoomsCacheUserId: getCurrentUserIdFromStorage(),
 
       setChatRooms: (rooms: ChatRoom[]) => {
-        set({ chatRooms: rooms })
+        set({
+          chatRooms: rooms,
+          chatRoomsCacheUserId: getCurrentUserIdFromStorage(),
+        })
       },
 
       selectRoom: (id: string) => {
@@ -61,9 +86,22 @@ export const useChatRoomStore = create<ChatRoomStore>()(
       },
 
       loadChatRooms: async () => {
+        const currentUserId = getCurrentUserIdFromStorage()
+        if (get().chatRoomsCacheUserId !== currentUserId) {
+          localStorage.removeItem(STORAGE_KEY)
+          set({
+            chatRooms: [],
+            selectedRoomId: null,
+            chatRoomsCacheUserId: currentUserId,
+          })
+        }
+
         const response = await chatRoomApi.getAll()
         if (response.success && response.data) {
-          set({ chatRooms: response.data })
+          set({
+            chatRooms: response.data,
+            chatRoomsCacheUserId: currentUserId,
+          })
         }
       },
 
@@ -86,8 +124,22 @@ export const useChatRoomStore = create<ChatRoomStore>()(
     }),
     {
       name: 'chat-room-storage',
+      merge: (persistedState, currentState) => {
+        const persisted = persistedState as Partial<ChatRoomStore> | undefined
+        const currentUserId = getCurrentUserIdFromStorage()
+        const shouldRestoreChatRooms = !!currentUserId && persisted?.chatRoomsCacheUserId === currentUserId
+
+        return {
+          ...currentState,
+          ...persisted,
+          chatRooms: shouldRestoreChatRooms ? persisted?.chatRooms ?? [] : [],
+          chatRoomsCacheUserId: currentUserId,
+        }
+      },
       partialize: (state) => ({
         selectedRoomId: state.selectedRoomId,
+        chatRooms: state.chatRooms,
+        chatRoomsCacheUserId: state.chatRoomsCacheUserId,
       }),
     }
   )

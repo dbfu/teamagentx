@@ -90,6 +90,10 @@ export interface AgentExecResult {
   model?: string;  // 本次执行实际使用的模型名称
 }
 
+export interface AgentExecOptions {
+  suppressFailureMessage?: boolean;
+}
+
 // 群聊助手信息（包含工作目录）
 export interface ChatRoomAgentInfo {
   name: string;
@@ -143,6 +147,7 @@ export interface IAgentExecutor {
     signal?: AbortSignal,
     attachments?: AttachmentData[],  // 图片附件（包含 base64）
     emitRecord?: RecordEmitCallback,  // 仅记录到执行详情的中间文本段（不发群消息）
+    options?: AgentExecOptions,
   ): Promise<AgentExecResult>;
 
   // 获取调试信息

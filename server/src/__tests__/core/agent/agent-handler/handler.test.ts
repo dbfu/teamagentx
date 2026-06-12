@@ -1,9 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  getTriggerMentionNames,
-  shouldTriggerCoordinatorAgent,
+  classifyAssistantHandoff,
 } from '../../../../core/agent/agent-handler/handler.js';
+import {
+  normalizeTriggerMode,
+  isSmartCollaborationMode,
+} from '../../../../core/agent/agent-handler/trigger-mode.js';
+import {
+  resetCollaborationBudget,
+  registerHandoff,
+  clampParallelDispatch,
+} from '../../../../core/agent/agent-handler/collaboration-budget.js';
+import {
+  startParallelBatch,
+  markBatchAgentComplete,
+  markBatchUserIntervention,
+  hasActiveParallelBatch,
+  clearParallelBatch,
+} from '../../../../core/agent/agent-handler/parallel-batch-tracker.js';
 import {
   cancelStallWatchdog,
   checkAndClearInterrupted,
@@ -14,7 +29,6 @@ import {
   buildCoordinatorRecentContext,
   withCoordinatorContext,
 } from '../../../../core/agent/agent-handler/coordinator-context.js';
-import { GROUP_COORDINATOR_ID } from '../../../../core/agent/system-assistant.constants.js';
 import { config } from '../../../../config/index.js';
 import { chatRoomService } from '../../../../modules/chatroom/chatroom.service.js';
 import { messageService } from '../../../../modules/message/message.service.js';
@@ -43,43 +57,152 @@ test.afterEach(() => {
   checkAndClearInterrupted(WATCHDOG_USER_MENTION_ROOM_ID);
 });
 
-test('coordinator mode lets explicit user mentions trigger the target assistant directly', () => {
+test('trigger mode normalization maps legacy auto to smart collaboration', () => {
+  assert.equal(normalizeTriggerMode('auto'), 'coordinator');
+  assert.equal(normalizeTriggerMode('coordinator'), 'coordinator');
+  assert.equal(normalizeTriggerMode(undefined), 'coordinator');
+  assert.equal(normalizeTriggerMode('manual'), 'manual');
+  assert.equal(isSmartCollaborationMode('auto'), true);
+  assert.equal(isSmartCollaborationMode('manual'), false);
+});
+
+test('assistant handoff classification: none / single / multiple / self-mention', () => {
+  const agentIdByName = new Map([
+    ['工程师', 'agent-eng'],
+    ['测试员', 'agent-test'],
+    ['文档员', 'agent-doc'],
+  ]);
+
+  // 无 @ → none
   assert.equal(
-    shouldTriggerCoordinatorAgent({
-      agentTriggerMode: 'coordinator',
-      isQuickChatRoom: false,
-      hasMentions: true,
-      messageIsHuman: true,
-      sourceAgentId: null,
-    }),
-    false,
+    classifyAssistantHandoff({ mentionNames: [], selfAgentId: 'agent-eng', agentIdByName }).kind,
+    'none',
+  );
+  // 仅 @自己 → none
+  assert.equal(
+    classifyAssistantHandoff({ mentionNames: ['工程师'], selfAgentId: 'agent-eng', agentIdByName }).kind,
+    'none',
+  );
+  // 恰好一个其他助手 → single（快路径）
+  const single = classifyAssistantHandoff({
+    mentionNames: ['测试员'],
+    selfAgentId: 'agent-eng',
+    agentIdByName,
+  });
+  assert.equal(single.kind, 'single');
+  assert.deepEqual(single.names, ['测试员']);
+  // 同一助手重复 @ 去重后仍是 single
+  assert.equal(
+    classifyAssistantHandoff({
+      mentionNames: ['测试员', '测试员'],
+      selfAgentId: 'agent-eng',
+      agentIdByName,
+    }).kind,
+    'single',
+  );
+  // ≥2 个 → multiple（升级协调器）
+  const multiple = classifyAssistantHandoff({
+    mentionNames: ['测试员', '文档员'],
+    selfAgentId: 'agent-eng',
+    agentIdByName,
+  });
+  assert.equal(multiple.kind, 'multiple');
+  assert.deepEqual(multiple.names, ['测试员', '文档员']);
+  // 自己 + 一个其他助手 → 过滤自己后 single
+  assert.equal(
+    classifyAssistantHandoff({
+      mentionNames: ['工程师', '文档员'],
+      selfAgentId: 'agent-eng',
+      agentIdByName,
+    }).kind,
+    'single',
   );
 });
 
-test('coordinator mode routes assistant mentions through the coordinator', () => {
-  assert.equal(
-    shouldTriggerCoordinatorAgent({
-      agentTriggerMode: 'coordinator',
-      isQuickChatRoom: false,
-      hasMentions: true,
-      messageIsHuman: false,
-      sourceAgentId: 'assistant-1',
-    }),
-    true,
-  );
+test('collaboration budget enforces hop limit and consecutive ping-pong detection', () => {
+  const roomId = 'room-budget-test';
+  const originalMaxHops = config.agent.maxHandoffHops;
+  const originalCycleLimit = config.agent.handoffCycleRepeatLimit;
+  config.agent.maxHandoffHops = 20;
+  config.agent.handoffCycleRepeatLimit = 2; // 允许 2 个来回（4 连跳），第 5 跳熔断
+  try {
+    resetCollaborationBudget(roomId);
+    // 连续乒乓：A↔B 不间断往返，超过 2 个来回即熔断
+    assert.equal(registerHandoff(roomId, 'A', 'B'), 'ok');
+    assert.equal(registerHandoff(roomId, 'B', 'A'), 'ok');
+    assert.equal(registerHandoff(roomId, 'A', 'B'), 'ok');
+    assert.equal(registerHandoff(roomId, 'B', 'A'), 'ok');
+    assert.equal(registerHandoff(roomId, 'A', 'B'), 'cycle');
+    // 人类发言清零后恢复
+    resetCollaborationBudget(roomId);
+    assert.equal(registerHandoff(roomId, 'A', 'B'), 'ok');
+
+    // 轮辐式协作（主持人 H 逐一与各玩家往返）：同一条边跨阶段重复属合法推进，
+    // 连续同对长度永远只有 2，绝不触发环路熔断（谁是卧底游戏房间的真实模式）
+    resetCollaborationBudget(roomId);
+    for (let round = 0; round < 3; round++) {
+      for (const player of ['P1', 'P2', 'P3']) {
+        assert.equal(registerHandoff(roomId, 'H', player), 'ok');
+        assert.equal(registerHandoff(roomId, player, 'H'), 'ok');
+      }
+    }
+    // 18 跳后命中的是跳数预算而不是环路
+    config.agent.maxHandoffHops = 18;
+    assert.equal(registerHandoff(roomId, 'H', 'P1'), 'hop_limit');
+  } finally {
+    config.agent.maxHandoffHops = originalMaxHops;
+    config.agent.handoffCycleRepeatLimit = originalCycleLimit;
+    resetCollaborationBudget(roomId);
+  }
 });
 
-test('coordinator mode routes unmentioned messages through the coordinator', () => {
-  assert.equal(
-    shouldTriggerCoordinatorAgent({
-      agentTriggerMode: 'coordinator',
-      isQuickChatRoom: false,
-      hasMentions: false,
-      messageIsHuman: true,
-      sourceAgentId: null,
-    }),
-    true,
-  );
+test('clampParallelDispatch truncates to the configured concurrency cap', () => {
+  const originalCap = config.agent.maxParallelDispatch;
+  config.agent.maxParallelDispatch = 2;
+  try {
+    assert.deepEqual(clampParallelDispatch(['a', 'b', 'c']), ['a', 'b']);
+    assert.deepEqual(clampParallelDispatch(['a']), ['a']);
+  } finally {
+    config.agent.maxParallelDispatch = originalCap;
+  }
+});
+
+test('parallel batch merges concurrent dispatches instead of overwriting', () => {
+  const roomId = 'room-batch-merge-test';
+  try {
+    startParallelBatch(roomId, ['B', 'C']);
+    assert.equal(hasActiveParallelBatch(roomId), true);
+    // 批次进行中又开新批次 → 合并，不覆盖
+    startParallelBatch(roomId, ['D', 'E']);
+    assert.equal(markBatchAgentComplete(roomId, 'B'), 'pending');
+    assert.equal(markBatchAgentComplete(roomId, 'C'), 'pending');
+    assert.equal(markBatchAgentComplete(roomId, 'D'), 'pending');
+    assert.equal(markBatchAgentComplete(roomId, 'E'), 'last');
+    assert.equal(hasActiveParallelBatch(roomId), false);
+    // 不在批次里 → none
+    assert.equal(markBatchAgentComplete(roomId, 'B'), 'none');
+  } finally {
+    clearParallelBatch(roomId);
+  }
+});
+
+test('user intervention during a batch silences the join arbitration', () => {
+  const roomId = 'room-batch-intervention-test';
+  try {
+    startParallelBatch(roomId, ['B', 'C']);
+    // 用户在批次期间发言 → 接管：join 不再自动派发
+    markBatchUserIntervention(roomId);
+    assert.equal(markBatchAgentComplete(roomId, 'B'), 'pending');
+    assert.equal(markBatchAgentComplete(roomId, 'C'), 'last_user_intervened');
+    assert.equal(hasActiveParallelBatch(roomId), false);
+    // 无批次时标记为空操作，不影响下一个批次
+    markBatchUserIntervention(roomId);
+    startParallelBatch(roomId, ['B', 'C']);
+    assert.equal(markBatchAgentComplete(roomId, 'B'), 'pending');
+    assert.equal(markBatchAgentComplete(roomId, 'C'), 'last');
+  } finally {
+    clearParallelBatch(roomId);
+  }
 });
 
 test('coordinator context block includes only the latest message previews and is marked reference-only', async () => {
@@ -139,49 +262,7 @@ test('coordinator context block includes only the latest message previews and is
   assert.equal(withCoordinatorContext('原文', ''), '[待裁决消息]\n原文');
 });
 
-test('coordinator messages do not recursively trigger the coordinator', () => {
-  assert.equal(
-    shouldTriggerCoordinatorAgent({
-      agentTriggerMode: 'coordinator',
-      isQuickChatRoom: false,
-      hasMentions: true,
-      messageIsHuman: false,
-      sourceAgentId: GROUP_COORDINATOR_ID,
-    }),
-    false,
-  );
-});
-
-test('coordinator mode lets only the internal coordinator trigger multiple mentions', () => {
-  assert.deepEqual(
-    getTriggerMentionNames({
-      agentTriggerMode: 'coordinator',
-      sourceAgentId: GROUP_COORDINATOR_ID,
-      mentionNames: ['工程师', '测试员', '文档员'],
-    }),
-    ['工程师', '测试员', '文档员'],
-  );
-
-  assert.deepEqual(
-    getTriggerMentionNames({
-      agentTriggerMode: 'coordinator',
-      sourceAgentId: 'assistant-1',
-      mentionNames: ['工程师', '测试员'],
-    }),
-    ['工程师'],
-  );
-
-  assert.deepEqual(
-    getTriggerMentionNames({
-      agentTriggerMode: 'auto',
-      sourceAgentId: GROUP_COORDINATOR_ID,
-      mentionNames: ['工程师', '测试员'],
-    }),
-    ['工程师'],
-  );
-});
-
-test('auto stall watchdog skips when the latest assistant message mentions a room user', async () => {
+test('smart-mode stall watchdog skips when the latest assistant message mentions a room user', async () => {
   let coordinatorLookups = 0;
 
   config.agent.stallWatchdogDelayMs = 1;

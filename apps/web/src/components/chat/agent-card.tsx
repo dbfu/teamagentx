@@ -197,13 +197,6 @@ export function AgentCard({
   const isSystemAgent = assistant.agentLevel === 'system'
   const subtitle = getAgentSubtitle(assistant, t)
   const model = getAgentModel(assistant)
-  const thinkingLabels: Record<string, string> = {
-    high: t('assistant.thinkingHigh'),
-    medium: t('assistant.thinkingMedium'),
-    low: t('assistant.thinkingLow'),
-    off: t('assistant.thinkingOff'),
-  }
-  const thinkingLabel = thinkingLabels[assistant.thinkingMode] || assistant.thinkingMode
 
   return (
     <div
@@ -314,7 +307,7 @@ export function AgentCard({
         {assistant.description || t('assistant.noDescription', { defaultValue: '暂无描述' })}
       </p>
 
-      {/* 状态 / 思考模式 / 模型 */}
+      {/* 状态 / 模型 */}
       <div className="mt-auto flex items-center gap-2">
         {/* 状态 */}
         <span
@@ -328,11 +321,6 @@ export function AgentCard({
           {assistant.isActive
             ? t('assistant.enabled', { defaultValue: '已启用' })
             : t('assistant.disabled')}
-        </span>
-
-        {/* 思考模式 */}
-        <span className="shrink-0 rounded-md bg-violet-500/10 px-2.5 py-1 text-xs text-violet-600 dark:text-violet-400">
-          {t('assistant.thinkingModeShort', { defaultValue: '思考' })} · {thinkingLabel}
         </span>
 
         {/* 模型（未配置时显示使用默认模型配置） */}

@@ -2,6 +2,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { AcpToolInfo, AgentSpeechConfig, acpToolsApi, AgentCategory, categoryApi, type AgentThinkingMode } from '@/lib/agent-api';
 import { AgentAvatarImage, agentAvatarOptions, getRandomAgentAvatarValue } from '@/lib/agent-avatars';
 import { AvatarSelector } from './avatar-selector';
+import { FallbackModelSelector } from './fallback-model-selector';
 import { getCodexModelOptions } from '@/lib/codex-models';
 import { getClaudeModelOptions } from '@/lib/claude-models';
 import { llmProviderApi, type LlmProvider } from '@/lib/llm-provider-api';
@@ -30,6 +31,7 @@ interface CreateAssistantModalProps {
     thinkingMode?: AgentThinkingMode | null
     categoryId: string | null
     llmProviderId: string | null
+    fallbackLlmProviderIds: string[]
     imageGeneration?: {
       enabled: boolean
       llmProviderId: string | null
@@ -172,6 +174,7 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
   const [categories, setCategories] = useState<AgentCategory[]>([])
   const [llmProviders, setLlmProviders] = useState<LlmProvider[]>([])
   const [llmProviderId, setLlmProviderId] = useState<string>('')
+  const [fallbackLlmProviderIds, setFallbackLlmProviderIds] = useState<string[]>([])
   const [codexModel, setCodexModel] = useState('')
   const [codexFastMode, setCodexFastMode] = useState(false)
   const [claudeModel, setClaudeModel] = useState('')
@@ -184,6 +187,7 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
   const compatibleLlmProviders = llmProviders.filter(
     (provider) => provider.isActive && isProviderCompatibleWithAgent(provider, assistantType, acpTool)
   )
+  const compatibleFallbackProviders = compatibleLlmProviders.filter((provider) => provider.id !== llmProviderId)
   const imageProviders = llmProviders.filter(
     (provider) => provider.isActive && provider.modelType === 'image'
   )
@@ -243,6 +247,14 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
     }
   }, [assistantType, acpTool, llmProviderId, llmProviders])
 
+  useEffect(() => {
+    const compatibleIds = new Set(compatibleFallbackProviders.map((provider) => provider.id))
+    const nextIds = fallbackLlmProviderIds.filter((id) => compatibleIds.has(id))
+    if (nextIds.length !== fallbackLlmProviderIds.length) {
+      setFallbackLlmProviderIds(nextIds)
+    }
+  }, [compatibleFallbackProviders, fallbackLlmProviderIds])
+
   if (!isOpen) return null
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -269,6 +281,7 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
         thinkingMode,
         categoryId: categoryId || null,
         llmProviderId: llmProviderId || null,
+        fallbackLlmProviderIds,
         imageGeneration: {
           enabled: imageGenerationEnabled,
           llmProviderId: imageGenerationEnabled ? imageProviderId || null : null,
@@ -286,6 +299,7 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
         setAcpTool('claude')
         setCategoryId('')
         setLlmProviderId('')
+        setFallbackLlmProviderIds([])
         setCodexModel('')
         setCodexFastMode(false)
         setClaudeModel('')
@@ -411,6 +425,13 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
                 {getProviderProtocolHint(assistantType, acpTool)}
               </p>
             </div>
+
+            <FallbackModelSelector
+              providers={compatibleFallbackProviders}
+              primaryProviderId={llmProviderId}
+              selectedIds={fallbackLlmProviderIds}
+              onChange={setFallbackLlmProviderIds}
+            />
 
             {assistantType === 'acp' && (acpTool === 'claude' || acpTool === 'codex') && (
               <div className="mb-4">

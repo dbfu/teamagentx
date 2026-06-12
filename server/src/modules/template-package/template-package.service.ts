@@ -353,7 +353,10 @@ export const templatePackageService = {
           rules: input.snapshot.room.rules,
           workDir: null,
           defaultAgentId: null,
-          agentTriggerMode: input.snapshot.room.agentTriggerMode,
+          // 老模板的 auto（自由协作）已并入智能协作，导入时映射为 coordinator
+          agentTriggerMode: input.snapshot.room.agentTriggerMode === 'auto'
+            ? 'coordinator'
+            : input.snapshot.room.agentTriggerMode,
           avatar: input.snapshot.room.avatar ?? null,
           avatarColor: input.snapshot.room.avatarColor ?? null,
           ownerId: input.ownerId ?? null,

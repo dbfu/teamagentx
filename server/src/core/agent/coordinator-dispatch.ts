@@ -23,6 +23,7 @@ import {
 import { pickLocaleText, type Locale, normalizeLocale } from './agent-handler/locale.js';
 import { enqueueAgentTask } from './agent-handler/agent-dispatch.service.js';
 import { startParallelBatch } from './agent-handler/parallel-batch-tracker.js';
+import { clampParallelDispatch } from './agent-handler/collaboration-budget.js';
 import {
   globalEmit,
   globalBroadcastMessage,
@@ -448,6 +449,18 @@ async function executeDecision(
       }
 
       if (targetAgents.length === 0) return;
+
+      // 并发上限：协调器一次并行派发的助手数硬截断（收敛性预算的一部分）
+      const clampedAgents = clampParallelDispatch(targetAgents);
+      if (clampedAgents.length < targetAgents.length) {
+        debugLog('coordinatorDispatchClamped', {
+          chatRoomId,
+          requested: targetAgents.length,
+          allowed: clampedAgents.length,
+        });
+        targetAgents.length = 0;
+        targetAgents.push(...clampedAgents);
+      }
 
       // 提前回报本次将要派发的目标助手 id：即便在「广播 / enqueue」过程中被用户打断，
       // 调用方（卡住检测 watchdog）也能凭此把这些助手的执行/排队任务一并停掉。

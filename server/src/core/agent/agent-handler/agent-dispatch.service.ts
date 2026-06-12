@@ -137,16 +137,13 @@ export async function sendMessageToAgent(params: {
   if (!sourceAgent || !sourceAgent.isActive) {
     throw new Error('来源助手不存在或未启用');
   }
-  // 手动 / 协调模式下，只有内置群调度助手可以派发其他助手（普通助手不能自动触发其他助手）
+  // 手动模式下，只有内置群调度助手可以派发其他助手；
+  // 智能协作模式允许助手互相派发（消息进入统一处理流程后走快路径，受协作预算约束）。
   if (
-    (chatRoom.agentTriggerMode === 'manual' || chatRoom.agentTriggerMode === 'coordinator') &&
+    chatRoom.agentTriggerMode === 'manual' &&
     sourceAgent.id !== GROUP_COORDINATOR_ID
   ) {
-    throw new Error(
-      chatRoom.agentTriggerMode === 'manual'
-        ? '当前群聊为手动模式，只有群调度助手可以派发其他助手'
-        : '当前群聊为协调模式，只有内置协调助手可以派发其他助手',
-    );
+    throw new Error('当前群聊为手动模式，只有群调度助手可以派发其他助手');
   }
   if (sourceAgent.agentLevel !== 'system') {
     const isSourceMember = await chatRoomService.isAgentMember(params.chatRoomId, sourceAgent.id);

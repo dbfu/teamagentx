@@ -71,7 +71,7 @@ export function ChatAreaHeader({
   const packageScriptsTooltipSuppressTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
   const moreTooltipSuppressTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
   const visibleScripts = packageScripts?.scripts ?? []
-  const shouldShowPackageScriptsMenu = packageScripts?.hasPackageJson === true
+  const shouldShowPackageScriptsMenu = (packageScripts?.hasScripts ?? packageScripts?.hasPackageJson ?? false) || visibleScripts.length > 0
 
   const loadPackageScripts = useCallback(async (options?: { reset?: boolean; showLoading?: boolean }) => {
     const requestId = packageScriptsRequestRef.current + 1
@@ -259,7 +259,7 @@ export function ChatAreaHeader({
       </Tooltip>
       <DropdownMenuContent align="end" className="max-h-[420px] w-[420px] max-w-[calc(100vw-24px)] overflow-y-auto">
         <DropdownMenuLabel className="text-xs text-muted-foreground">
-          {packageScripts?.packageManager ?? 'npm'} scripts
+          {t('chat.availableScripts')}
         </DropdownMenuLabel>
         {loadingScripts ? (
           <div className="flex items-center gap-2 px-2 py-2 text-sm text-muted-foreground">
@@ -280,7 +280,12 @@ export function ChatAreaHeader({
                 <div className="min-w-0">
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <div className="truncate font-medium">{scriptLabel}</div>
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="truncate font-medium">{scriptLabel}</span>
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {script.source === 'shell' ? t('chat.shellScript') : packageScripts?.packageManager ?? 'npm'}
+                        </span>
+                      </div>
                     </TooltipTrigger>
                     <TooltipContent side="left" align="start" className="max-w-[420px] break-all text-xs">
                       {scriptLabel}

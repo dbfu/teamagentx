@@ -9,12 +9,13 @@ import { debugLog } from './debug.js';
 import { messageMentionsRoomUser } from './user-mention-utils.js';
 import { stopAgentExecution } from './cache.js';
 import { broadcastAgentStatus } from './status.js';
+import { normalizeTriggerMode } from './trigger-mode.js';
 import type { Message } from '../../../types/message.js';
 
 /**
- * 自由协作（auto）模式下的「卡住检测」兜底。
+ * 智能协作模式下的「卡住检测」兜底。
  *
- * 背景：auto 模式靠助手自己在回复里 @下一个助手 来推进任务，助手一旦忘记 @，
+ * 背景：智能协作模式的快路径靠助手自己在回复里 @下一个助手 来推进任务，助手一旦忘记 @，
  * 协作链会静默断开、任务卡住。本模块在助手发完消息后启动一个房间级防抖定时器，
  * 若超过 stallWatchdogDelayMs 仍无新活动、且房间内没有正在跑/排队的任务，
  * 就唤醒内置群调度助手裁决：任务真结束则输出「无需调度」（静默），否则 @对应助手继续。
@@ -143,8 +144,8 @@ export function scheduleStallWatchdog(chatRoomId: string): void {
 
 async function runStallWatchdog(chatRoomId: string): Promise<void> {
   const chatRoom = await chatRoomService.findById(chatRoomId);
-  // 仅在 auto 模式、非快速对话群兜底；其他模式有各自的调度链路。
-  if (!chatRoom || chatRoom.agentTriggerMode !== 'auto' || chatRoom.isQuickChatRoom) {
+  // 仅在智能协作模式、非快速对话群兜底；手动模式无自动接力，无需救援。
+  if (!chatRoom || normalizeTriggerMode(chatRoom.agentTriggerMode) !== 'coordinator' || chatRoom.isQuickChatRoom) {
     return;
   }
 

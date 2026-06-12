@@ -79,8 +79,8 @@ export function CreateGroupModal({ isOpen, onClose, onSuccess, ownerId }: Create
         description: description.trim() || undefined,
         workDir: workDir.trim() || null,
         ownerId,
-        // 默认使用自由协作模式
-        agentTriggerMode: 'auto',
+        // 默认使用智能协作模式
+        agentTriggerMode: 'coordinator',
       })
 
       if (!createResponse.success || !createResponse.data) {

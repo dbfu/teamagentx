@@ -133,7 +133,8 @@ ${chatRoomRules.trim()}`,
       )
     : '';
 
-  const collaborationTriggerCheckSection = agentTriggerMode === 'auto'
+  // 智能协作模式（合并后的 auto/coordinator，存储值 coordinator；兼容存量 auto）统一注入交接协议
+  const collaborationTriggerCheckSection = agentTriggerMode === 'auto' || agentTriggerMode === 'coordinator'
     ? pickLocaleText(
         {
           'zh-CN': `### 收尾交接协议（强制）
@@ -165,19 +166,31 @@ It is FORBIDDEN to end a reply that implies further work is still needed (e.g. "
       )
     : '';
 
-  const assistantMentionsSection = pickLocaleText(
-    {
-      'zh-CN': `## 助手提及
+  // 手动模式的语义是「助手 @ 不触发」，不能注入「必须用 @ 交接」的协议，
+  // 否则提示词与系统行为冲突；改为明确告知 @ 仅作展示、交接交由用户决定。
+  const assistantMentionsSection = agentTriggerMode === 'manual'
+    ? pickLocaleText(
+        {
+          'zh-CN': `## 助手提及（手动模式）
+本群为手动模式：助手消息中的 @助手 不会触发其他助手，仅作公开展示；只有用户的 @ 才会触发助手。不要依赖 @ 来交接任务。当你认为需要其他助手协助时，在回复中说明建议（按名称提到该助手即可，不要期待它被自动触发），由用户决定是否 @ 它继续。`,
+          'en-US': `## Assistant Mentions (Manual Mode)
+This chatroom is in manual mode: @assistant mentions in assistant messages do NOT trigger other assistants and are display-only; only the user's @mentions trigger assistants. Do not rely on @ to hand off tasks. When you believe another assistant should help, state your suggestion in the reply (refer to that assistant by name without expecting it to be triggered) and let the user decide whether to @ it.`,
+        },
+        locale,
+      )
+    : pickLocaleText(
+        {
+          'zh-CN': `## 助手提及
 在 TeamAgentX 中，一个 @助手 提及可以触发另一个助手任务。单条消息最多包含一个可触发的 @助手 提及。交接或询问其他助手时，选定一个目标助手并只提及它。如果有多个助手都能帮忙，选最合适的下一个助手，或请用户选择；其他助手按名称提到即可，不要加 @。
 每当你在回复结尾请用户确认、决策或回答某事后才能继续时，回复中必须 @ 该用户（如 @username）。这能让系统把用户的回答直接路由回你。提及用户不计入「一个可触发 @助手」的限额。对于只是给出最终结果、无需回应的消息，不要 @ 用户。
 ${collaborationTriggerCheckSection}`,
-      'en-US': `## Assistant Mentions
+          'en-US': `## Assistant Mentions
 In TeamAgentX, an @assistant mention can trigger another assistant task. A single message may contain at most one triggerable @assistant mention. When handing off or asking another assistant, choose one target assistant and mention only that assistant. If multiple assistants could help, choose the best next assistant or ask the user to choose; refer to any additional assistants by name without @.
 Whenever you end a reply by asking the user to confirm, decide, or answer something before you can continue, you MUST @ that user (e.g. @username) in the reply. This lets the system route the user's reply directly back to you. Mentioning a user does NOT count toward the one-triggerable-@assistant limit. Do not @ the user for messages that are just a final result and need no response.
 ${collaborationTriggerCheckSection}`,
-    },
-    locale,
-  );
+        },
+        locale,
+      );
 
   const workingDirSection = pickLocaleText(
     {
@@ -205,14 +218,14 @@ When you perform file operations or run commands, operate in this directory by d
 
 /**
  * 每轮消息末尾追加的「收尾提醒」：利用近因效应（prompt 末尾服从度最高）
- * 强化 auto 模式下的交接协议。完整规则在系统提示词（buildAgentBaseSystemPrompt），
+ * 强化智能协作模式下的交接协议。完整规则在系统提示词（buildAgentBaseSystemPrompt），
  * 这里只放临门一脚的一句话，避免每轮重复整段、浪费 token 与破坏缓存。
  */
 export function buildHandoffTurnReminder(
   agentTriggerMode?: AgentTriggerMode,
   locale?: string,
 ): string {
-  if (agentTriggerMode !== 'auto') return '';
+  if (agentTriggerMode !== 'auto' && agentTriggerMode !== 'coordinator') return '';
   return pickLocaleText(
     {
       'zh-CN': `[交接提醒] 本条回复必须恰好以以下之一结束：(a) 若另一个助手必须继续，把最后一行写成 "@助手名 接下来要做什么" —— @ 位于该行开头，整条回复只有这一个此类提及，且不在代码块内；(b) 若任务已完成或现在需要用户，不要提及任何助手 —— 但如果你在请用户确认、决策或回答后才能继续，则 @ 该用户（@username），以便其回答路由回你。绝不要在暗示仍有后续工作时不带交接行就结束回复。`,

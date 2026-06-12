@@ -2,6 +2,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { AcpToolInfo, Agent, AgentSpeechConfig, agentApi, AgentCategory, acpToolsApi, categoryApi, type AgentThinkingMode } from '@/lib/agent-api';
 import { AgentAvatarImage, agentAvatarOptions } from '@/lib/agent-avatars';
 import { AvatarSelector } from './avatar-selector';
+import { FallbackModelSelector } from './fallback-model-selector';
 import { getCodexModelOptions } from '@/lib/codex-models';
 import { getClaudeModelOptions } from '@/lib/claude-models';
 import { normalizeAgentSpeechConfig } from '@/lib/agent-speech';
@@ -32,6 +33,7 @@ interface EditAssistantModalProps {
     thinkingMode?: AgentThinkingMode | null
     categoryId: string | null
     llmProviderId: string | null
+    fallbackLlmProviderIds: string[]
     imageGeneration?: {
       enabled: boolean
       llmProviderId: string | null
@@ -174,6 +176,7 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
   const [categoryId, setCategoryId] = useState<string>('')
   const [llmProviders, setLlmProviders] = useState<LlmProvider[]>([])
   const [llmProviderId, setLlmProviderId] = useState<string>('')
+  const [fallbackLlmProviderIds, setFallbackLlmProviderIds] = useState<string[]>([])
   const [codexModel, setCodexModel] = useState('')
   const [codexFastMode, setCodexFastMode] = useState(false)
   const [claudeModel, setClaudeModel] = useState('')
@@ -191,6 +194,7 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
   const compatibleLlmProviders = llmProviders.filter(
     (provider) => provider.isActive && isProviderCompatibleWithAgent(provider, assistantType, formAcpTool)
   )
+  const compatibleFallbackProviders = compatibleLlmProviders.filter((provider) => provider.id !== effectiveLlmProviderId)
   const selectedProviderFromList = llmProviders.find((provider) => provider.id === effectiveLlmProviderId)
   const selectedProviderInfo = selectedProviderFromList
     || (assistantForForm?.llmProvider?.id === effectiveLlmProviderId ? assistantForForm.llmProvider : null)
@@ -308,6 +312,14 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
     }
   }, [assistantForForm, assistantType, formAcpTool, llmProviderId, llmProviders])
 
+  useEffect(() => {
+    const compatibleIds = new Set(compatibleFallbackProviders.map((provider) => provider.id))
+    const nextIds = fallbackLlmProviderIds.filter((id) => compatibleIds.has(id))
+    if (nextIds.length !== fallbackLlmProviderIds.length) {
+      setFallbackLlmProviderIds(nextIds)
+    }
+  }, [compatibleFallbackProviders, fallbackLlmProviderIds])
+
   // 获取已安装的 Skills
   const fetchInstalledSkills = async () => {
     if (!assistantForForm?.id) return
@@ -340,6 +352,7 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
       setAcpTool(assistantForForm.acpTool || 'claude')
       setCategoryId(assistantForForm.categoryId || '')
       setLlmProviderId(assistantForForm.llmProviderId || assistantForForm.llmProvider?.id || '')
+      setFallbackLlmProviderIds(assistantForForm.fallbackLlmProviderIds || [])
       setCodexModel(assistantForForm.codexModel || '')
       setCodexFastMode(Boolean(assistantForForm.codexFastMode))
       setClaudeModel(assistantForForm.claudeModel || '')
@@ -422,6 +435,7 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
         thinkingMode,
         categoryId: categoryId || null,
         llmProviderId: submittedLlmProviderId,
+        fallbackLlmProviderIds,
         imageGeneration: {
           enabled: imageGenerationEnabled,
           llmProviderId: imageGenerationEnabled ? imageProviderId || null : null,
@@ -578,6 +592,13 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
                 </p>
               )}
             </div>
+
+            <FallbackModelSelector
+              providers={compatibleFallbackProviders}
+              primaryProviderId={effectiveLlmProviderId}
+              selectedIds={fallbackLlmProviderIds}
+              onChange={setFallbackLlmProviderIds}
+            />
 
             {assistantType === 'acp' && (formAcpTool === 'claude' || formAcpTool === 'codex') && (
               <div className="mb-4">

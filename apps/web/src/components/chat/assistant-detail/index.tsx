@@ -306,6 +306,7 @@ export function AssistantDetailPage() {
     thinkingMode?: AgentThinkingMode | null
     categoryId: string | null
     llmProviderId: string | null
+    fallbackLlmProviderIds: string[]
     speechConfig: AgentSpeechConfig | null
     imageGeneration?: { enabled: boolean; llmProviderId: string | null }
   }): Promise<boolean> => {
@@ -324,6 +325,7 @@ export function AssistantDetailPage() {
       thinkingMode: data.thinkingMode || 'high',
       categoryId: data.categoryId,
       llmProviderId: data.llmProviderId,
+      fallbackLlmProviderIds: data.fallbackLlmProviderIds,
       speechConfig: data.speechConfig,
       imageGeneration: data.imageGeneration,
     })

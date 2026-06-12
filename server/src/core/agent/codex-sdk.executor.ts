@@ -2229,6 +2229,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     signal?: AbortSignal,
     attachments?: AttachmentData[],
     emitRecord?: RecordEmitCallback,
+    options?: { suppressFailureMessage?: boolean },
   ): Promise<AgentExecResult> {
     this.emitStream = emitStream || null;
     this.emitToolCall = emitToolCall || null;
@@ -2361,7 +2362,9 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       const enriched = enrichCodexExitError(error, this.lastStreamErrorMessage);
       console.error(`${this.name}: codex sdk 执行失败`, enriched);
       const errorMessage = enriched instanceof Error ? enriched.message : '未知错误';
-      await emit(`codex 执行出错: ${errorMessage}`, originalMessageId);
+      if (!options?.suppressFailureMessage) {
+        await emit(`codex 执行出错: ${errorMessage}`, originalMessageId);
+      }
       throw enriched instanceof Error ? enriched : error;
     } finally {
       cleanup();

@@ -448,7 +448,7 @@ describe('ChatRoom Gateway API', () => {
   });
 
   describe('PUT /chatrooms/:id', () => {
-    test('协调模式会清空默认接收助手', async () => {
+    test('切换智能协作模式保留默认接收助手', async () => {
       await syncSystemAgent(getGroupAssistantDefinition());
       const createdAgent = await agentService.create({
         name: 'Default Receiver ' + Date.now(),
@@ -496,7 +496,8 @@ describe('ChatRoom Gateway API', () => {
       assert.strictEqual(response.statusCode, 200);
       const body = response.json();
       assert.strictEqual(body.success, true);
-      assert.strictEqual(body.data.defaultAgentId, null);
+      // 智能协作模式下默认助手优先、群调度助手兜底，切换模式不再清空默认接收助手
+      assert.strictEqual(body.data.defaultAgentId, createdAgent.id);
       assert.strictEqual(body.data.agentTriggerMode, 'coordinator');
     });
 
@@ -718,6 +719,92 @@ describe('ChatRoom Gateway API', () => {
           { name: 'web', relativeDir: path.join('apps', 'web') },
         ],
       );
+    });
+
+    test('应该扫描工作目录中的 sh 脚本', async () => {
+      const roomWorkDir = path.join(workDirRoot, 'shell-script-room');
+      const nestedScriptDir = path.join(roomWorkDir, 'scripts');
+      const ignoredDir = path.join(roomWorkDir, 'node_modules', 'pkg');
+      fs.mkdirSync(nestedScriptDir, { recursive: true });
+      fs.mkdirSync(ignoredDir, { recursive: true });
+      fs.writeFileSync(path.join(roomWorkDir, 'start.sh'), '#!/bin/sh\necho start\n');
+      fs.writeFileSync(path.join(nestedScriptDir, 'deploy.sh'), '#!/bin/sh\necho deploy\n');
+      fs.writeFileSync(path.join(ignoredDir, 'ignored.sh'), '#!/bin/sh\necho ignored\n');
+
+      const chatRoomResponse = await app.inject({
+        method: 'POST',
+        url: '/chatrooms',
+        payload: {
+          name: 'Shell Scripts Room ' + Date.now(),
+          workDir: roomWorkDir,
+        },
+      });
+      const createdRoom = chatRoomResponse.json();
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/chatrooms/${createdRoom.data.id}/package-scripts`,
+      });
+
+      assert.strictEqual(response.statusCode, 200);
+      const body = response.json();
+      assert.strictEqual(body.success, true);
+      assert.strictEqual(body.data.hasPackageJson, false);
+      assert.strictEqual(body.data.hasShellScripts, true);
+      assert.strictEqual(body.data.hasScripts, true);
+      assert.strictEqual(body.data.packageManager, null);
+      assert.deepStrictEqual(
+        body.data.scripts.map((script: { name: string; relativeDir: string; source: string; runCommand: string }) => ({
+          name: script.name,
+          relativeDir: script.relativeDir,
+          source: script.source,
+          runCommand: script.runCommand,
+        })),
+        [
+          { name: 'start.sh', relativeDir: '', source: 'shell', runCommand: "sh './start.sh'" },
+          { name: 'deploy.sh', relativeDir: 'scripts', source: 'shell', runCommand: "sh './deploy.sh'" },
+        ],
+      );
+    });
+
+    test('应该返回 sh 脚本的运行命令', async () => {
+      const roomWorkDir = path.join(workDirRoot, 'run-shell-script-room');
+      const scriptDir = path.join(roomWorkDir, 'scripts');
+      fs.mkdirSync(scriptDir, { recursive: true });
+      fs.writeFileSync(path.join(scriptDir, 'deploy.sh'), '#!/bin/sh\necho deploy\n');
+
+      const chatRoomResponse = await app.inject({
+        method: 'POST',
+        url: '/chatrooms',
+        payload: {
+          name: 'Run Shell Script Room ' + Date.now(),
+          workDir: roomWorkDir,
+        },
+      });
+      const createdRoom = chatRoomResponse.json();
+
+      const listResponse = await app.inject({
+        method: 'GET',
+        url: `/chatrooms/${createdRoom.data.id}/package-scripts`,
+      });
+      const listBody = listResponse.json();
+      const script = listBody.data.scripts.find((item: { name: string }) => item.name === 'deploy.sh');
+      assert.ok(script);
+
+      const runResponse = await app.inject({
+        method: 'POST',
+        url: `/chatrooms/${createdRoom.data.id}/package-scripts/run`,
+        payload: {
+          scriptId: script.id,
+        },
+      });
+
+      assert.strictEqual(runResponse.statusCode, 200);
+      const runBody = runResponse.json();
+      assert.strictEqual(runBody.success, true);
+      assert.strictEqual(runBody.data.scriptName, 'deploy.sh');
+      assert.strictEqual(runBody.data.command, "sh './deploy.sh'");
+      assert.strictEqual(runBody.data.workDir, scriptDir);
     });
   });
 

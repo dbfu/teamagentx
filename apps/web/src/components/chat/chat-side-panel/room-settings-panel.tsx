@@ -33,7 +33,10 @@ export function RoomSettingsPanel({
   const [rules, setRules] = useState(chatRoom.rules || '')
   const [workDir, setWorkDir] = useState(chatRoom.workDir || '')
   const [defaultAgentId, setDefaultAgentId] = useState(chatRoom.defaultAgentId || '')
-  const [agentTriggerMode, setAgentTriggerMode] = useState<AgentTriggerMode>(chatRoom.agentTriggerMode || 'coordinator')
+  // 智能协作（coordinator，兼容存量 auto）/ 手动（manual）
+  const [agentTriggerMode, setAgentTriggerMode] = useState<AgentTriggerMode>(
+    chatRoom.agentTriggerMode === 'manual' ? 'manual' : 'coordinator',
+  )
   // 头像预览使用真实头像值（可能是自定义上传地址或预设索引），而不是归一化后的索引
   const [avatarValue, setAvatarValue] = useState<string | number | null | undefined>(chatRoom.avatar)
   const [saving, setSaving] = useState(false)
@@ -59,7 +62,6 @@ export function RoomSettingsPanel({
   const rulesInputRef = useRef<HTMLTextAreaElement>(null)
   const selectableAgents = (chatRoom.chatRoomAgents || []).filter((roomAgent) => roomAgent.agent)
   const hasSelectedDefaultAgent = selectableAgents.some((roomAgent) => roomAgent.agent?.id === defaultAgentId)
-  const isCoordinatorMode = agentTriggerMode === 'coordinator'
 
   useEffect(() => {
     setName(chatRoom.name)
@@ -68,7 +70,7 @@ export function RoomSettingsPanel({
     setWorkDir(chatRoom.workDir || '')
     setWorkDirDraft(chatRoom.workDir || '')
     setDefaultAgentId(chatRoom.defaultAgentId || '')
-    setAgentTriggerMode(chatRoom.agentTriggerMode || 'coordinator')
+    setAgentTriggerMode(chatRoom.agentTriggerMode === 'manual' ? 'manual' : 'coordinator')
     setAvatarValue(chatRoom.avatar)
   }, [chatRoom.id, chatRoom.name, chatRoom.description, chatRoom.rules, chatRoom.workDir, chatRoom.defaultAgentId, chatRoom.agentTriggerMode, chatRoom.avatar])
 
@@ -143,11 +145,6 @@ export function RoomSettingsPanel({
 
   const handleTriggerModeChange = (value: AgentTriggerMode) => {
     setAgentTriggerMode(value)
-    if (value === 'coordinator') {
-      setDefaultAgentId('')
-      handleSave({ agentTriggerMode: value, defaultAgentId: null })
-      return
-    }
     handleSave({ agentTriggerMode: value })
   }
 
@@ -345,8 +342,8 @@ export function RoomSettingsPanel({
           />
         </div>
 
-        {/* 默认接收助手 */}
-        {!chatRoom.isQuickChatRoom && !isCoordinatorMode && (
+        {/* 默认接收助手（智能协作模式下默认助手优先、群调度助手兜底） */}
+        {!chatRoom.isQuickChatRoom && (
           <div>
             <label className="mb-1.5 block text-sm font-medium text-muted-foreground">{t('chat.roomSettings.defaultAssistantLabel')}</label>
             <div className="text-xs text-muted-foreground mb-2">
@@ -380,7 +377,6 @@ export function RoomSettingsPanel({
           <div>
             <label className="mb-1.5 block text-sm font-medium text-muted-foreground">{t('chat.roomSettings.triggerModeLabel')}</label>
             <div className="text-xs text-muted-foreground mb-2">
-              {t('chat.roomSettings.triggerModeAutoHint')}<br />
               {t('chat.roomSettings.triggerModeCoordinatorHint')}<br />
               {t('chat.roomSettings.triggerModeManualHint')}
             </div>
@@ -393,7 +389,6 @@ export function RoomSettingsPanel({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="auto">{t('chat.roomSettings.triggerModeAuto')}</SelectItem>
                 <SelectItem value="coordinator">{t('chat.roomSettings.triggerModeCoordinator')}</SelectItem>
                 <SelectItem value="manual">{t('chat.roomSettings.triggerModeManual')}</SelectItem>
               </SelectContent>

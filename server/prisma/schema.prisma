@@ -127,6 +127,7 @@ model Agent {
   category          AgentCategory?     @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   llmProviderId     String? // LLM 供应商 ID
   llmProvider       LlmProvider?       @relation(fields: [llmProviderId], references: [id], onDelete: SetNull)
+  fallbackLlmProviderIds String? // 备用 LLM 供应商 ID 列表（JSON 数组，按切换顺序）
   speechConfig      String? // 助手语音配置（JSON 字符串）
   sortOrder         Int                @default(0) // 同分类内的排序顺序
   createdAt         DateTime           @default(now())

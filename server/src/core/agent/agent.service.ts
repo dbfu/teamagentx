@@ -45,6 +45,7 @@ export type CreateAgentInput = {
   thinkingMode?: AgentThinkingMode | null;
   categoryId?: string;
   llmProviderId?: string;
+  fallbackLlmProviderIds?: string[] | null;
   imageGeneration?: AgentCapabilityInput;
   speechConfig?: AgentSpeechConfig | null;
 };
@@ -114,6 +115,75 @@ async function assertLlmProviderCompatible(
   if (provider.apiProtocol !== requiredProtocol) {
     const label = acpTool === 'claude' ? 'Claude' : 'Codex';
     throw new Error(`${label} 仅支持 ${requiredProtocol} 协议供应商，当前供应商 ${provider.name} 的协议是 ${provider.apiProtocol}`);
+  }
+}
+
+function normalizeProviderIdList(value: string[] | null | undefined): string[] | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (!Array.isArray(value)) return [];
+
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string') continue;
+    const id = item.trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids;
+}
+
+export function parseFallbackLlmProviderIds(value: string | null | undefined): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return normalizeProviderIdList(parsed) ?? [];
+  } catch {
+    return [];
+  }
+}
+
+function serializeFallbackLlmProviderIds(value: string[] | null | undefined): string | null | undefined {
+  const normalized = normalizeProviderIdList(value);
+  if (normalized === undefined) return undefined;
+  if (normalized === null || normalized.length === 0) return null;
+  return JSON.stringify(normalized);
+}
+
+async function assertFallbackLlmProvidersCompatible(
+  type: AgentType | undefined | null,
+  acpTool: string | undefined | null,
+  fallbackLlmProviderIds: string[] | null | undefined,
+): Promise<void> {
+  if (!fallbackLlmProviderIds?.length) return;
+
+  const requiredProtocol = getRequiredProviderProtocol(type, acpTool);
+  if (type === 'acp' && !requiredProtocol) {
+    throw new Error('该 ACP 工具暂不支持自定义 LLM 供应商');
+  }
+
+  const providers = await prisma.llmProvider.findMany({
+    where: { id: { in: fallbackLlmProviderIds } },
+    select: { id: true, apiProtocol: true, name: true, modelType: true },
+  });
+  const providerById = new Map(providers.map((provider) => [provider.id, provider]));
+
+  for (const providerId of fallbackLlmProviderIds) {
+    const provider = providerById.get(providerId);
+    if (!provider) {
+      const error = new Error('备用 LLM 供应商不存在') as Error & { code?: string };
+      error.code = 'P2025';
+      throw error;
+    }
+    if (((provider as any).modelType || 'text') !== 'text') {
+      throw new Error(`备用模型只能选择文本模型，当前供应商 ${provider.name} 的模型类型是 ${(provider as any).modelType}`);
+    }
+    if (requiredProtocol && provider.apiProtocol !== requiredProtocol) {
+      const label = acpTool === 'claude' ? 'Claude' : 'Codex';
+      throw new Error(`${label} 备用模型仅支持 ${requiredProtocol} 协议供应商，当前供应商 ${provider.name} 的协议是 ${provider.apiProtocol}`);
+    }
   }
 }
 
@@ -196,9 +266,11 @@ export const agentService = {
     // 处理外键字段：空字符串转换为 null
     const categoryId = (data.categoryId === '' || data.categoryId === 'null') ? null : data.categoryId;
     const llmProviderId = (data.llmProviderId === '' || data.llmProviderId === 'null') ? null : data.llmProviderId;
+    const fallbackLlmProviderIds = normalizeProviderIdList(data.fallbackLlmProviderIds) ?? [];
     const agentType = data.type || 'builtin';
     assertAcpToolSupported(agentType, data.acpTool);
     await assertLlmProviderCompatible(agentType, data.acpTool, llmProviderId);
+    await assertFallbackLlmProvidersCompatible(agentType, data.acpTool, fallbackLlmProviderIds);
     if (data.imageGeneration?.enabled) {
       await assertImageProviderCompatible(data.imageGeneration.llmProviderId);
     }
@@ -233,6 +305,7 @@ export const agentService = {
           thinkingMode: normalizeAgentThinkingMode(data.thinkingMode) ?? DEFAULT_AGENT_THINKING_MODE,
           categoryId,
           llmProviderId,
+          fallbackLlmProviderIds: serializeFallbackLlmProviderIds(fallbackLlmProviderIds),
           speechConfig: serializeAgentSpeechConfig(data.speechConfig),
           sortOrder: (currentFirstAgent?.sortOrder ?? 0) + AGENT_SORT_ORDER_STEP,
           updatedAt: now,
@@ -306,6 +379,7 @@ export const agentService = {
             'claudeModel',
             'thinkingMode',
             'llmProviderId',
+            'fallbackLlmProviderIds',
             'imageGeneration',
           ] as const
         : []),
@@ -349,9 +423,11 @@ export const agentService = {
           },
         }
       : effectiveData;
-    const { categoryId, llmProviderId, speechConfig, imageGeneration, proxyConfig, codexModel, claudeModel, thinkingMode, ...restData } = normalizedEffectiveData;
+    const { categoryId, llmProviderId, fallbackLlmProviderIds, speechConfig, imageGeneration, proxyConfig, codexModel, claudeModel, thinkingMode, ...restData } = normalizedEffectiveData;
     const processedCategoryId = categoryId === '' ? undefined : categoryId === 'null' ? null : categoryId;
     const processedLlmProviderId = llmProviderId === '' ? undefined : llmProviderId === 'null' ? null : llmProviderId;
+    const processedFallbackLlmProviderIds = normalizeProviderIdList(fallbackLlmProviderIds);
+    const serializedFallbackLlmProviderIds = serializeFallbackLlmProviderIds(processedFallbackLlmProviderIds);
     const processedProxyConfig = normalizeAgentProxyConfig(proxyConfig);
     const processedCodexModel = normalizeNullableString(codexModel);
     const processedClaudeModel = normalizeNullableString(claudeModel);
@@ -374,6 +450,11 @@ export const agentService = {
       restData.acpTool ?? currentAgent.acpTool,
       processedLlmProviderId === undefined ? currentAgent.llmProviderId : processedLlmProviderId,
     );
+    await assertFallbackLlmProvidersCompatible(
+      restData.type ?? currentAgent.type,
+      restData.acpTool ?? currentAgent.acpTool,
+      processedFallbackLlmProviderIds,
+    );
     if (imageGeneration?.enabled) {
       await assertImageProviderCompatible(imageGeneration.llmProviderId);
     }
@@ -385,6 +466,7 @@ export const agentService = {
           ...restData,
           ...(processedCategoryId !== undefined && { categoryId: processedCategoryId }),
           ...(processedLlmProviderId !== undefined && { llmProviderId: processedLlmProviderId }),
+          ...(serializedFallbackLlmProviderIds !== undefined && { fallbackLlmProviderIds: serializedFallbackLlmProviderIds }),
           ...(processedProxyConfig !== undefined && { proxyConfig: processedProxyConfig }),
           ...(processedCodexModel !== undefined && { codexModel: processedCodexModel }),
           ...(processedClaudeModel !== undefined && { claudeModel: processedClaudeModel }),

@@ -97,11 +97,20 @@ export const config = {
     memoryLessonPromoteMinDays: parseInt(process.env.AGENT_MEMORY_LESSON_PROMOTE_MIN_DAYS || '1', 10),
     // 未晋升的候选记忆若超过这么多天未再出现，则丢弃，避免一次性信息长期占用候选池。
     memoryCandidateTtlDays: parseInt(process.env.AGENT_MEMORY_CANDIDATE_TTL_DAYS || '14', 10),
-    // 自由协作（auto）模式下的「卡住检测」兜底：助手发完消息、房间内无在跑/排队任务且
+    // 智能协作模式下的「卡住检测」兜底：助手发完消息、房间内无在跑/排队任务且
     // 超过该延迟无新活动时，唤醒群调度助手裁决任务是否真的结束。
     stallWatchdogDelayMs: parseInt(process.env.AGENT_STALL_WATCHDOG_DELAY_MS || '180000', 10),
     // 连续救援上限：两次人类发言之间，watchdog 最多自动唤醒调度助手的次数，防止死循环。
     stallWatchdogMaxConsecutive: parseInt(process.env.AGENT_STALL_WATCHDOG_MAX_CONSECUTIVE || '5', 10),
+    // 协作预算（智能协作模式）：两次人类发言之间，助手快路径接力的最大跳数。
+    // 默认 20：兼顾游戏/长流水线等轮辐式长链路（一局「谁是卧底」≈24 跳，主要靠
+    // 环路检测兜病态环路，跳数只做绝对保险）；可经环境变量调整。
+    maxHandoffHops: parseInt(process.env.AGENT_MAX_HANDOFF_HOPS || '20', 10),
+    // 环路检测：同一对助手（A↔B）之间允许「连续」往返的最大来回数，超过即熔断。
+    // 判定连续乒乓而非累计重复：轮辐式协作（主持人逐一 @ 各成员）跨阶段重复同一条边是合法推进。
+    handoffCycleRepeatLimit: parseInt(process.env.AGENT_HANDOFF_CYCLE_REPEAT_LIMIT || '3', 10),
+    // 并发上限：单次派发（用户多 @ 或协调器 dispatch）最多同时触发的助手数。
+    maxParallelDispatch: parseInt(process.env.AGENT_MAX_PARALLEL_DISPATCH || '3', 10),
   },
   jwt: {
     get secret(): string {

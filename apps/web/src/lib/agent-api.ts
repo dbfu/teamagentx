@@ -1,6 +1,7 @@
 import { getApiBaseUrl } from './config'
 import type { SpeechProfile } from '@/speech'
 
+// 智能协作（coordinator）/ 手动（manual）；'auto' 为历史值，仅为兼容旧数据保留，等同 coordinator
 export type AgentTriggerMode = 'auto' | 'manual' | 'coordinator'
 export type AgentThinkingMode = 'off' | 'low' | 'medium' | 'high'
 
@@ -50,6 +51,7 @@ export interface Agent {
   categoryId: string | null
   category: AgentCategory | null
   llmProviderId: string | null
+  fallbackLlmProviderIds: string[]
   llmProvider: {
     id: string
     name: string
@@ -119,6 +121,7 @@ export interface CreateAgentRequest {
   speechConfig?: AgentSpeechConfig | null
   categoryId?: string
   llmProviderId?: string | null
+  fallbackLlmProviderIds?: string[] | null
   imageGeneration?: ImageGenerationCapabilityRequest
   sortOrder?: number
 }
@@ -141,6 +144,7 @@ export interface UpdateAgentRequest {
   speechConfig?: AgentSpeechConfig | null
   categoryId?: string | null
   llmProviderId?: string | null
+  fallbackLlmProviderIds?: string[] | null
   imageGeneration?: ImageGenerationCapabilityRequest
   sortOrder?: number
 }
@@ -186,7 +190,7 @@ export interface ChatRoom {
   isQuickChatRoom?: boolean
   quickChatAgentId?: string | null
   defaultAgentId?: string | null
-  agentTriggerMode?: AgentTriggerMode  // 助手触发模式：auto(自由协作) | manual(手动) | coordinator(协调)
+  agentTriggerMode?: AgentTriggerMode  // 助手触发模式：coordinator(智能协作) | manual(手动)；auto 为历史兼容值
   owner?: {
     id: string
     username: string
@@ -229,10 +233,14 @@ export interface PackageScriptInfo {
   runCommand: string
   relativeDir: string
   workDir: string
+  source?: 'package' | 'shell'
+  filePath?: string
 }
 
 export interface PackageScriptsResult {
   hasPackageJson: boolean
+  hasShellScripts?: boolean
+  hasScripts?: boolean
   workDir: string | null
   packageManager: string | null
   scripts: PackageScriptInfo[]

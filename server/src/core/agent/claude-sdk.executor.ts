@@ -2000,6 +2000,7 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
     signal?: AbortSignal,
     attachments?: AttachmentData[],
     emitRecord?: RecordEmitCallback,
+    options?: { suppressFailureMessage?: boolean },
   ): Promise<AgentExecResult> {
     this.emitStream = emitStream || null;
     this.emitToolCall = emitToolCall || null;
@@ -2120,7 +2121,9 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
       }
       console.error(`${this.name}: claude sdk 执行失败`, error);
       const errorMessage = error instanceof Error ? error.message : '未知错误';
-      await emit(`claude 执行出错: ${errorMessage}`, originalMessageId);
+      if (!options?.suppressFailureMessage) {
+        await emit(`claude 执行出错: ${errorMessage}`, originalMessageId);
+      }
       throw error;
     } finally {
       signal?.removeEventListener('abort', abort);

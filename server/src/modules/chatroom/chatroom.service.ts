@@ -865,7 +865,7 @@ export const chatRoomService = {
 
   async update(id: string, data: UpdateChatRoomData) {
     const { defaultAgentId, agentTriggerMode, ...restData } = data;
-    const shouldClearDefaultAgent = agentTriggerMode === 'coordinator';
+    // 智能协作模式保留默认接收助手（默认助手优先、群调度助手兜底），不再切换模式时清空。
     const normalizedDefaultAgentId = defaultAgentId !== undefined
       ? await normalizeDefaultAgentId(id, defaultAgentId)
       : undefined;
@@ -876,8 +876,8 @@ export const chatRoomService = {
         ...restData,
         ...(agentTriggerMode !== undefined && { agentTriggerMode }),
         ...(data.workDir !== undefined && { workDir: data.workDir?.trim() || null }),
-        ...((defaultAgentId !== undefined || shouldClearDefaultAgent) && {
-          defaultAgentId: shouldClearDefaultAgent ? null : normalizedDefaultAgentId,
+        ...(defaultAgentId !== undefined && {
+          defaultAgentId: normalizedDefaultAgentId,
         }),
         updatedAt: new Date(),
       },

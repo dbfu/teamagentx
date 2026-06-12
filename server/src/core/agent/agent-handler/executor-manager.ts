@@ -1,4 +1,5 @@
 import { writeFileSync, unlinkSync, existsSync } from 'fs';
+import type { LlmProvider } from '@prisma/client';
 import { chatRoomService } from '../../../modules/chatroom/chatroom.service.js';
 import { llmProviderService } from '../../../modules/llm-provider/llm-provider.service.js';
 import type {
@@ -50,10 +51,14 @@ export async function getExecutor(
   chatRoomId: string,
   agentName: string,
   sessionDir?: string,  // 显式运行目录；快速对话未指定时使用群默认目录
+  llmProviderOverride?: LlmProvider,
 ): Promise<IAgentExecutor | null> {
-  const cacheKey = sessionDir
+  const baseCacheKey = sessionDir
     ? `${chatRoomId}_${agentName}_${sessionDir}`  // 自定义运行目录使用独立缓存 key
     : getCacheKey(chatRoomId, agentName);
+  const cacheKey = llmProviderOverride
+    ? `${baseCacheKey}_provider_${llmProviderOverride.id}`
+    : baseCacheKey;
 
   // Check cache
   if (executorCache.has(cacheKey)) {
@@ -118,7 +123,7 @@ export async function getExecutor(
 
   // 获取 LLM Provider：优先使用助手绑定的；builtin 和系统 ACP 未绑定时使用兼容默认供应商。
   // 普通 ACP 未绑定时沿用 CLI 自身配置，避免改变已有外部助手行为。
-  let llmProvider = agent.llmProvider;
+  let llmProvider = llmProviderOverride ?? agent.llmProvider;
   if (!llmProvider && agent.type === 'builtin') {
     // builtin 类型助手如果没有绑定供应商，尝试获取默认供应商
     llmProvider = await llmProviderService.findDefault();

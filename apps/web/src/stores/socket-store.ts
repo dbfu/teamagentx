@@ -231,6 +231,8 @@ interface PackageScriptsUpdatedData {
   chatRoomId: string
   data: {
     hasPackageJson: boolean
+    hasShellScripts?: boolean
+    hasScripts?: boolean
     workDir: string | null
     packageManager: string | null
     scripts: {
@@ -240,6 +242,8 @@ interface PackageScriptsUpdatedData {
       runCommand: string
       relativeDir: string
       workDir: string
+      source?: 'package' | 'shell'
+      filePath?: string
     }[]
   }
 }

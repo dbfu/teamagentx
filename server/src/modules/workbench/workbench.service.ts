@@ -302,17 +302,13 @@ export const workbenchTaskService = {
     const triggerMode = chatRoom?.agentTriggerMode ?? 'coordinator';
 
     // 调度模式决定派发方式：
-    // - coordinator（群调度）：直接发普通消息，handler 自动唤起群调度助手分配任务
+    // - 智能协作（coordinator，兼容存量 auto）：直接发普通消息——有默认接收助手时由它处理，
+    //   否则 handler 的无 @ 兜底会自动唤起群调度助手分配任务
     // - manual（手动）：@群调度助手 来派发任务
-    // - auto（自由协调）：指定了默认接收助手则发普通消息交给它，否则 @群调度助手
-    const mentionCoordinator =
-      triggerMode === 'manual'
-        ? true
-        : triggerMode === 'auto'
-          ? !chatRoom?.defaultAgentId
-          : false;
-    // 协调模式由 handler 自动唤起群调度助手；其余模式仅在显式 @ 时才依赖它
-    const requireCoordinator = triggerMode === 'coordinator' || mentionCoordinator;
+    const mentionCoordinator = triggerMode === 'manual';
+    // 智能协作模式仅在无默认助手时依赖群调度助手兜底；手动模式显式 @ 它
+    const requireCoordinator =
+      mentionCoordinator || (triggerMode !== 'manual' && !chatRoom?.defaultAgentId);
 
     if (requireCoordinator) {
       const coordinatorAgent = await prisma.agent.findUnique({

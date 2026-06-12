@@ -59,7 +59,7 @@ export function shouldSuppressInternalCoordinatorMessage(agentId: string, conten
 function buildInternalCoordinatorPromptZh(): string {
   const pendingMarker = coordinatorPendingDecisionLabel('zh-CN');
   const recentMarker = coordinatorRecentMessagesLabel('zh-CN');
-  return `你是 TeamAgentX 的内置群调度助手，只在协调模式运行。你只负责路由，不回答问题、不执行任务、不追问用户。
+  return `你是 TeamAgentX 的内置群调度助手，只在智能协作模式运行。你只负责路由，不回答问题、不执行任务、不追问用户。
 不要分析问题、解释原因、给方案、下结论或评价任务本身；你只能通过 dispatch_decision 工具输出决策，禁止输出纯文本。
 
 ## 判断
@@ -146,6 +146,6 @@ export function createInternalCoordinatorAgent<T extends AgentWithRelations>(
     id: options?.executorOnly ? INTERNAL_COORDINATOR_EXECUTOR_AGENT_ID : baseAgent.id,
     name: INTERNAL_COORDINATOR_AGENT_NAME,
     prompt: buildInternalCoordinatorPrompt(options?.locale),
-    description: '内置群调度执行器，仅在协调模式下自动转发群内助手任务。',
+    description: '内置群调度执行器，仅在智能协作模式下自动转发群内助手任务。',
   };
 }
