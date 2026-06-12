@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronDown, GitBranch, Loader2, Search } from 'lucide-react'
 import { toast } from 'sonner'
 import { chatRoomApi, type GitBranchStatus } from '@/lib/agent-api'
@@ -18,12 +18,36 @@ interface GitBranchSwitcherProps {
   className?: string
 }
 
+// 后台轮询间隔：用户可能在终端里切换分支，界面需要定期感知
+const GIT_BRANCH_POLL_INTERVAL = 5000
+
+// 从工作目录路径取最后一截作为项目名称
+function getProjectName(workDir?: string | null): string {
+  if (!workDir) return ''
+  const segments = workDir.replace(/[/\\]+$/, '').split(/[/\\]+/)
+  return segments[segments.length - 1] ?? ''
+}
+
+// 判断两次拉取到的 git 状态是否有实质变化，避免无意义的重渲染
+function isSameGitStatus(a: GitBranchStatus | null, b: GitBranchStatus | null) {
+  if (a === b) return true
+  if (!a || !b) return false
+  if (a.isGitRepo !== b.isGitRepo) return false
+  if (a.currentBranch !== b.currentBranch) return false
+  const aNames = a.branches.map((branch) => branch.name).join('\n')
+  const bNames = b.branches.map((branch) => branch.name).join('\n')
+  return aNames === bNames
+}
+
 export function GitBranchSwitcher({ chatRoomId, workDir, className }: GitBranchSwitcherProps) {
   const { t } = useTranslation()
   const [status, setStatus] = useState<GitBranchStatus | null>(null)
   const [loading, setLoading] = useState(false)
   const [switchingBranch, setSwitchingBranch] = useState<string | null>(null)
   const [branchQuery, setBranchQuery] = useState('')
+  // 后台轮询期间避免覆盖正在进行的手动切换
+  const switchingRef = useRef<string | null>(null)
+  switchingRef.current = switchingBranch
 
   const loadStatus = async () => {
     setLoading(true)
@@ -63,6 +87,33 @@ export function GitBranchSwitcher({ chatRoomId, workDir, className }: GitBranchS
     }
   }, [chatRoomId, workDir])
 
+  // 后台静默轮询：用户可能在终端里切换分支，定期同步而不显示 loading
+  useEffect(() => {
+    let cancelled = false
+
+    const poll = async () => {
+      // 正在手动切换时跳过本轮，避免覆盖即时结果
+      if (switchingRef.current) return
+      try {
+        const response = await chatRoomApi.getGitStatus(chatRoomId)
+        if (cancelled || switchingRef.current) return
+        const next = response.success && response.data ? response.data : null
+        setStatus((prev) => (isSameGitStatus(prev, next) ? prev : next))
+      } catch {
+        // 轮询失败保持当前状态，不打断用户
+      }
+    }
+
+    const timer = window.setInterval(() => {
+      void poll()
+    }, GIT_BRANCH_POLL_INTERVAL)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [chatRoomId, workDir])
+
   const handleSwitchBranch = async (branch: string) => {
     if (branch === status?.currentBranch) return
 
@@ -92,9 +143,19 @@ export function GitBranchSwitcher({ chatRoomId, workDir, className }: GitBranchS
 
   const currentBranch = status.currentBranch
   const hasBranches = filteredBranches.length > 0
+  // 仅展示用户自己选择的目录名称；未选（使用默认目录）时不展示
+  const projectName = getProjectName(workDir)
 
   return (
-    <div className={cn('flex items-center', className)}>
+    <div className={cn('flex items-center gap-1.5', className)}>
+      {projectName ? (
+        <span
+          className="max-w-[10rem] truncate text-xs font-medium text-foreground"
+          title={workDir || projectName}
+        >
+          {projectName}
+        </span>
+      ) : null}
       <DropdownMenu onOpenChange={(open) => {
         if (open) {
           void loadStatus()

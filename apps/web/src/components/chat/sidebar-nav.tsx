@@ -5,6 +5,7 @@ import { GlobalSearchModal } from '@/components/chat/global-search-modal'
 import { SortableNavItem } from '@/components/chat/sortable-nav-item'
 import { useNavOrder } from '@/components/chat/hooks/use-nav-order'
 import { UserAvatar } from '@/components/chat/user-avatar'
+import { UserProfileModal } from '@/components/chat/user-profile-modal'
 import { useTheme } from '@/components/theme-provider'
 import {
   DropdownMenu,
@@ -19,7 +20,7 @@ import { updateManager } from '@/lib/update-manager'
 import { cn } from '@/lib/utils'
 import { useAuthStore, useChatRoomStore, useSocketStore } from '@/stores'
 import { useChatStore } from '@/stores/chat-store'
-import { BookOpenText, Bot, Check, CircleArrowUp, Cpu, Globe, LayoutDashboard, MessageSquare, Monitor, Moon, MoreHorizontal, Package, Palette, Plus, Search, Sun, Users } from 'lucide-react'
+import { BookOpenText, Bot, Check, CircleArrowUp, Cpu, Globe, LayoutDashboard, MessageSquare, Monitor, Moon, MoreHorizontal, Package, Palette, Plus, Search, Settings, Sun, Users } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
@@ -68,6 +69,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
   const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false)
   const [isCreateAssistantOpen, setIsCreateAssistantOpen] = useState(false)
   const [isSearchOpen, setIsSearchOpen] = useState(false)
+  const [isProfileOpen, setIsProfileOpen] = useState(false)
   const chatRooms = useChatRoomStore((s) => s.chatRooms)
   const { user } = useAuthStore()
   const { user: socketUser } = useSocketStore()
@@ -92,6 +94,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
             : location.pathname.startsWith('/integration')
               ? 'integration'
               : 'message'
+  const isSettingsActive = location.pathname.startsWith('/settings')
   const currentUser = user || socketUser
   const [hiddenNavTabs, setHiddenNavTabs] = useState<OptionalNavTab[]>([])
   const navItemsRef = useRef<HTMLDivElement>(null)
@@ -167,6 +170,12 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
     } else {
       navigate(`/${tab}`)
     }
+  }
+
+  const handleOpenSettings = () => {
+    // 切换到设置时关闭侧拉框
+    setSidePanelMode(null)
+    navigate('/settings')
   }
 
   const handleCreateAssistant = async (data: {
@@ -293,6 +302,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
       {renderMeasuredNavTab('message', MessageSquare, t('nav.messages'))}
       {navTabs.map((tab) => !hiddenTabsSet.has(tab.id) && renderMeasuredNavTab(tab.id, tab.icon, tab.label))}
       {hiddenTabs.length > 0 && renderMeasuredNavTab('more', MoreHorizontal, t('common.more'))}
+      {renderMeasuredNavTab('settings', Settings, t('nav.settings'))}
     </div>
     )
   }
@@ -420,6 +430,22 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
           </DropdownMenu>
         )}
 
+        {/* 设置 Tab - 常驻末尾 */}
+        <button
+          onClick={handleOpenSettings}
+          className={cn(
+            'relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
+            isSettingsActive
+              ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
+              : 'text-muted-foreground hover:bg-sidebar-accent'
+          )}
+          title={t('nav.settings')}
+          style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
+        >
+          <Settings className="size-5" />
+          <span className="text-xs">{t('nav.settings')}</span>
+        </button>
+
         {/* 中间空白区域 - 可拖拽 */}
       </div>
 
@@ -521,11 +547,11 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
           <BookOpenText className="size-4" />
         </button>
 
-        {/* User avatar - 跳转到设置 */}
+        {/* User avatar - 打开用户信息弹框 */}
         <button
           className="flex size-9 cursor-pointer items-center justify-center rounded-lg text-muted-foreground hover:bg-sidebar-accent"
-          onClick={() => navigate('/settings')}
-          title={t('nav.settings')}
+          onClick={() => setIsProfileOpen(true)}
+          title={t('settings.userInfo')}
           style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
         >
           {currentUser ? (
@@ -560,6 +586,11 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
       open={isSearchOpen}
       onClose={() => setIsSearchOpen(false)}
       chatRooms={chatRooms}
+    />
+
+    <UserProfileModal
+      open={isProfileOpen}
+      onClose={() => setIsProfileOpen(false)}
     />
 
     </>

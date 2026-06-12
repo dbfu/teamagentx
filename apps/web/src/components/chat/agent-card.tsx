@@ -151,6 +151,30 @@ function MenuContent({
   )
 }
 
+// ACP 工具与能力标签的展示名（卡片副标题/标签的近似映射）
+const ACP_TOOL_LABELS: Record<string, string> = {
+  claude: 'Claude',
+  codex: 'Codex',
+}
+
+// 副标题：使用的 agent（ACP 工具名 / 模型提供方名）
+function getAgentSubtitle(assistant: Agent, t: (key: string) => string): string {
+  if (assistant.type === 'acp' && assistant.acpTool) {
+    return ACP_TOOL_LABELS[assistant.acpTool] || assistant.acpTool
+  }
+  return assistant.llmProvider?.name || t('assistant.builtinAgent')
+}
+
+// 使用的模型
+function getAgentModel(assistant: Agent): string | null {
+  if (assistant.type === 'acp') {
+    if (assistant.acpTool === 'claude') return assistant.claudeModel
+    if (assistant.acpTool === 'codex') return assistant.codexModel
+    return null
+  }
+  return assistant.llmProvider?.model || null
+}
+
 export function AgentCard({
   assistant,
   openMenuId,
@@ -170,12 +194,23 @@ export function AgentCard({
   const { t } = useTranslation()
   const isGroupAssistant = assistant.id === GROUP_ASSISTANT_ID || assistant.name === '群助手'
   const isSystemChatDisabled = assistant.agentLevel === 'system' && !isGroupAssistant
+  const isSystemAgent = assistant.agentLevel === 'system'
+  const subtitle = getAgentSubtitle(assistant, t)
+  const model = getAgentModel(assistant)
+  const thinkingLabels: Record<string, string> = {
+    high: t('assistant.thinkingHigh'),
+    medium: t('assistant.thinkingMedium'),
+    low: t('assistant.thinkingLow'),
+    off: t('assistant.thinkingOff'),
+  }
+  const thinkingLabel = thinkingLabels[assistant.thinkingMode] || assistant.thinkingMode
 
   return (
     <div
       className={cn(
-        'group relative flex flex-col items-center gap-2 rounded-lg p-3 transition-all duration-200 hover:bg-accent cursor-pointer',
+        'group relative flex h-[180px] w-full max-w-[360px] flex-col gap-3 overflow-hidden rounded-2xl bg-card p-5 shadow-sm transition-all duration-200 hover:shadow-md cursor-pointer',
         isDragging && 'opacity-40 scale-95',
+        !assistant.isActive && 'opacity-60',
         assistant.agentLevel === 'system' && (!assistant.isActive || !onStartQuickChat || isSystemChatDisabled) && 'cursor-default'
       )}
       onContextMenu={(e) => onContextMenu(e, assistant)}
@@ -192,21 +227,14 @@ export function AgentCard({
         onClick?.(assistant)
       }}
     >
-      {/* Status indicator */}
-      {!assistant.isActive && (
-        <div className="absolute left-2 top-2">
-          <div className="size-2 rounded-full bg-muted-foreground" title={t('assistant.disabled')} />
-        </div>
-      )}
-
       {/* More menu button */}
-      <div className="absolute right-1 top-1 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="absolute right-3 top-3 opacity-0 group-hover:opacity-100 transition-opacity">
         <button
           onClick={(e) => {
             e.stopPropagation()
             onToggleMenu(assistant.id, null)
           }}
-          className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <MoreHorizontal className="size-4" />
         </button>
@@ -236,7 +264,7 @@ export function AgentCard({
 
       {/* Context Menu - Dropdown */}
       {openMenuId === assistant.id && !contextMenuPosition && (
-        <div className="absolute right-0 top-6 z-10 min-w-32 rounded-lg border border-border bg-popover p-1 shadow-lg">
+        <div className="absolute right-3 top-10 z-10 min-w-32 rounded-lg border border-border bg-popover p-1 shadow-lg">
           <MenuContent
             assistant={assistant}
             onEdit={onEdit}
@@ -250,22 +278,68 @@ export function AgentCard({
         </div>
       )}
 
-      {/* Avatar */}
-      <AgentAvatar
-        avatar={assistant.avatar}
-        avatarColor={assistant.avatarColor}
-        agentLevel={assistant.agentLevel}
-        size="md"
-        className={cn(!assistant.isActive && '[&>div]:opacity-50')}
-      />
+      {/* Header: avatar + name + subtitle */}
+      <div className="flex items-start gap-3">
+        <AgentAvatar
+          avatar={assistant.avatar}
+          avatarColor={assistant.avatarColor}
+          agentLevel={assistant.agentLevel}
+          size="lg"
+          className={cn(!assistant.isActive && '[&>div]:opacity-50')}
+        />
+        <div className="min-w-0 flex-1 pr-6">
+          <div className="flex items-center gap-2">
+            <span className="truncate text-[15px] font-semibold text-foreground">
+              {assistant.name}
+            </span>
+            {isSystemAgent && (
+              <span className="inline-flex shrink-0 items-center rounded-md bg-orange-500/10 px-1.5 py-0.5 text-xs font-medium text-orange-600 dark:text-orange-400">
+                {t('assistant.systemBadge', { defaultValue: '系统' })}
+              </span>
+            )}
+          </div>
+          <span className="mt-0.5 block truncate text-sm text-muted-foreground">
+            {subtitle}
+          </span>
+        </div>
+      </div>
 
-      {/* Name */}
-      <span className={cn(
-        'text-xs text-muted-foreground',
-        !assistant.isActive && 'text-muted-foreground/50'
-      )}>
-        {assistant.name}
-      </span>
+      {/* Description（无描述时显示占位） */}
+      <p
+        className={cn(
+          'line-clamp-2 min-h-[2.5rem] text-sm',
+          assistant.description ? 'text-muted-foreground' : 'text-muted-foreground/50'
+        )}
+      >
+        {assistant.description || t('assistant.noDescription', { defaultValue: '暂无描述' })}
+      </p>
+
+      {/* 状态 / 思考模式 / 模型 */}
+      <div className="mt-auto flex items-center gap-2">
+        {/* 状态 */}
+        <span
+          className={cn(
+            'shrink-0 rounded-md px-2.5 py-1 text-xs',
+            assistant.isActive
+              ? 'bg-green-500/10 text-green-600 dark:text-green-400'
+              : 'bg-muted text-muted-foreground'
+          )}
+        >
+          {assistant.isActive
+            ? t('assistant.enabled', { defaultValue: '已启用' })
+            : t('assistant.disabled')}
+        </span>
+
+        {/* 思考模式 */}
+        <span className="shrink-0 rounded-md bg-violet-500/10 px-2.5 py-1 text-xs text-violet-600 dark:text-violet-400">
+          {t('assistant.thinkingModeShort', { defaultValue: '思考' })} · {thinkingLabel}
+        </span>
+
+        {/* 模型（未配置时显示使用默认模型配置） */}
+        <span className="min-w-0 truncate rounded-md bg-muted px-2.5 py-1 text-xs text-muted-foreground">
+          {model || t('assistant.defaultModelConfig', { defaultValue: '默认模型配置' })}
+        </span>
+      </div>
     </div>
   )
 }

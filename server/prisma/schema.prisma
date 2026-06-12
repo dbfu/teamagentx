@@ -76,6 +76,7 @@ model LlmProvider {
   apiUrl            String?
   apiKey            String // 明文存储（本地应用）
   model             String
+  contextLength     Int               @default(1000000) // 模型上下文长度（token），默认 1M
   sttModel          String? // 语音识别模型（audio 类型专用，留空则与 model 共用）
   audioUsage        String            @default("both") // audio 类型用途：tts | stt | both
   imageProvider     String?

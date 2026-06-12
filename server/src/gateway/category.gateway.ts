@@ -92,6 +92,46 @@ export async function categoryGateway(app: FastifyInstance) {
     }
   );
 
+  // 批量更新分类排序
+  app.put<{ Body: { items: { id: string; sortOrder: number }[] } }>(
+    '/categories/sort-order',
+    {
+      schema: {
+        description: '批量更新分类排序顺序',
+        tags: ['Categories'],
+        body: {
+          type: 'object',
+          required: ['items'],
+          properties: {
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                required: ['id', 'sortOrder'],
+                properties: {
+                  id: { type: 'string' },
+                  sortOrder: { type: 'integer' },
+                },
+              },
+            },
+          },
+        },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      await categoryService.reorderBatch(request.body.items);
+      return reply.send({ success: true });
+    }
+  );
+
   // 获取单个分类（包含该分类下的助手）
   app.get<{ Params: CategoryParams }>(
     '/categories/:id',

@@ -15,6 +15,7 @@ export type CreateLlmProviderInput = {
   apiUrl?: string;
   apiKey: string;
   model: string;
+  contextLength?: number;
   sttModel?: string | null;
   audioUsage?: string | null;
   imageProvider?: string | null;
@@ -32,6 +33,15 @@ export type ParsedModelConfig = {
   model: string | null;
   apiProtocol: 'anthropic' | 'openai' | null;
 };
+
+const DEFAULT_CONTEXT_LENGTH = 1000000;
+
+function normalizeContextLength(value?: number | null): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_CONTEXT_LENGTH;
+  const rounded = Math.floor(value);
+  if (rounded < 1) return DEFAULT_CONTEXT_LENGTH;
+  return rounded;
+}
 
 function normalizeAudioUsage(audioUsage?: string | null): 'tts' | 'stt' | 'both' {
   if (audioUsage === 'tts' || audioUsage === 'stt') return audioUsage;
@@ -195,6 +205,7 @@ export const llmProviderService = {
         apiUrl: data.apiUrl,
         apiKey: data.apiKey,
         model: data.model,
+        contextLength: normalizeContextLength(data.contextLength),
         sttModel: modelType === 'audio' ? (data.sttModel || null) : null,
         audioUsage: modelType === 'audio' ? audioUsage : 'both',
         imageProvider: modelType === 'image' ? data.imageProvider : null,
@@ -295,6 +306,9 @@ export const llmProviderService = {
       && (typeof restData.apiKey !== 'string' || restData.apiKey.trim() === '' || isMaskedApiKey(restData.apiKey))
     ) {
       delete restData.apiKey;
+    }
+    if ('contextLength' in restData) {
+      restData.contextLength = normalizeContextLength(restData.contextLength);
     }
 
     return prisma.llmProvider.update({

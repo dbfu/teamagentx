@@ -1200,6 +1200,14 @@ export const categoryApi = {
       method: 'DELETE',
     })
   },
+
+  // 批量更新分类排序
+  async updateSortOrder(items: { id: string; sortOrder: number }[]): Promise<ApiResponse<void>> {
+    return request<void>('/categories/sort-order', {
+      method: 'PUT',
+      body: JSON.stringify({ items }),
+    })
+  },
 }
 
 // 分组显示类型

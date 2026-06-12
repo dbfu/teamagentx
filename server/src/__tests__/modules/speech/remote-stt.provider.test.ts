@@ -18,6 +18,7 @@ function createOpenAiProvider(overrides: Partial<LlmProvider> = {}): LlmProvider
     apiUrl: 'https://api.example.com/v1',
     apiKey: 'test-key',
     model: 'whisper-1',
+    contextLength: 1000000,
     sttModel: 'FunAudioLLM/SenseVoiceSmall',
     modelType: 'audio',
     imageProvider: null,

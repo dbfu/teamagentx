@@ -850,6 +850,7 @@
     "systemAgentCannotDragIn": "系统助手不允许其他助手拖入",
     "agentMoveFailed": "移动失败",
     "agentSortFailed": "排序失败",
+    "categorySortFailed": "分类排序保存失败",
     "searchAssistant": "搜索助手",
     "noAssistants": "暂无助手",
     "noMatchingAssistants": "未找到匹配的助手",
@@ -859,6 +860,7 @@
     "deleteCategoryDescAgents": "确定要删除分类「{{name}}」吗？该分类下的 {{count}} 个助手也将被删除，此操作无法撤销。",
     "deleteCategoryDesc": "确定要删除分类「{{name}}」吗？此操作无法撤销。",
     "uncategorized": "未分类",
+    "searchResults": "搜索结果",
     "addAssistant": "添加助手",
     "editCategoryName": "修改名称",
     "systemCategory": "系统分类",
@@ -1025,6 +1027,10 @@
     "thinkingMediumShort": "中",
     "thinkingLowShort": "低",
     "thinkingOffShort": "关",
+    "systemBadge": "系统",
+    "noDescription": "暂无描述",
+    "thinkingModeShort": "思考",
+    "defaultModelConfig": "默认模型配置",
     "thinkingModeHint": "仅原生模型（Claude / Codex 官方）支持该设置；使用第三方模型（如 GLM、DeepSeek 等 Anthropic/OpenAI 兼容协议）时此设置可能不生效。",
     "fastModeLabel": "Fast 模式",
     "fastModeHint": "开启后大约能提升 1.5 倍速度，但 token 消耗速度会变快",
@@ -1266,7 +1272,9 @@
     "aiCreateDialogPlaceholder": "描述您的 API 配置信息...",
     "parseConfig": "解析配置",
     "parsing": "解析中...",
-    "modelPlaceholder": "输入模型 ID"
+    "modelPlaceholder": "输入模型 ID",
+    "contextLengthLabel": "上下文长度",
+    "contextLengthHint": "后端模型的真实上下文窗口（token）。Claude 助手会据此提前自动压缩历史，避免撑爆较小窗口导致卡死。有效范围 10万~100万，默认 1000000（1M）"
   },
   "skill": {
     "pageTitle": "技能管理",
@@ -1384,6 +1392,10 @@
   },
   "settings": {
     "pageTitle": "设置",
+    "navAccount": "账户管理",
+    "navGeneral": "通用",
+    "navSoftware": "系统设置",
+    "navAbout": "帮助与反馈",
     "accountInfo": "账户信息",
     "userInfo": "个人信息",
     "username": "用户名",

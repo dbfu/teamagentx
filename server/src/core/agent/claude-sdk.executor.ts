@@ -249,6 +249,20 @@ function getClaudeThinkingOptions(
   return {type: 'enabled', budgetTokens};
 }
 
+// 根据自定义供应商的真实上下文窗口，计算 Claude SDK 的自动压缩窗口。
+// SDK 的 autoCompactWindow 仅接受 100K~1M 的整数（超出会被静默丢弃），
+// 因此这里夹取到该区间，让 Claude 在接近后端模型真实上限前提前压缩，避免撑爆卡死。
+const CLAUDE_AUTO_COMPACT_MIN = 100_000;
+const CLAUDE_AUTO_COMPACT_MAX = 1_000_000;
+
+function getClaudeAutoCompactWindow(provider?: LlmProvider): number | undefined {
+  // 仅在接入自定义供应商时覆盖；使用宿主机 Claude 默认配置时不干预其原生窗口
+  if (!provider) return undefined;
+  const raw = (provider as any).contextLength;
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) return undefined;
+  return Math.min(CLAUDE_AUTO_COMPACT_MAX, Math.max(CLAUDE_AUTO_COMPACT_MIN, Math.floor(raw)));
+}
+
 function isSessionAlreadyInUseError(message: string): boolean {
   return (
     /Session ID .+ is already in use/.test(message) ||
@@ -298,6 +312,7 @@ export const __claudeSdkTestUtils = {
   getClaudeSettingSources,
   getBackgroundIdleFinishMs,
   shouldApplyBackgroundIdleFinish,
+  getClaudeAutoCompactWindow,
 };
 
 function resolveClaudeCodeExecutable(): string | undefined {
@@ -1869,12 +1884,14 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
     this.lastClaudeStderr = '';
     this.logQueryStart(env);
     const settingSources = getClaudeSettingSources(Boolean(this.llmProvider));
+    const autoCompactWindow = getClaudeAutoCompactWindow(this.llmProvider);
     const allowedTaxTools = this.getAllowedTaxTools();
     const q = query({
       prompt: this.buildPrompt(fullMessage, attachments),
       options: {
         cwd: this.workDir,
         env,
+        ...(autoCompactWindow ? { settings: { autoCompactEnabled: true, autoCompactWindow } } : {}),
         systemPrompt: this.buildSdkSystemPrompt(),
         model: this.llmProvider?.model,
         includePartialMessages: true,

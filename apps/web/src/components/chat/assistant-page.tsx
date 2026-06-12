@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { flushSync } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -6,22 +6,18 @@ import {
   DndContext,
   DragOverlay,
   closestCenter,
-  pointerWithin,
-  rectIntersection,
   KeyboardSensor,
   PointerSensor,
   useSensor,
   useSensors,
   DragStartEvent,
-  DragOverEvent,
   DragEndEvent,
-  type CollisionDetection,
-  useDroppable,
 } from '@dnd-kit/core'
 import {
   SortableContext,
   arrayMove,
   rectSortingStrategy,
+  horizontalListSortingStrategy,
   sortableKeyboardCoordinates,
   useSortable,
 } from '@dnd-kit/sortable'
@@ -44,10 +40,9 @@ import { CreateAssistantModal } from './create-assistant-modal'
 import { EditAssistantModal } from './edit-assistant-modal'
 import { InstallSkillModal } from './install-skill-modal'
 import { CreateCategoryModal } from './create-category-modal'
-import { CategoryToggleButton } from './category-toggle-button'
-import { shouldRenderUncategorizedSection } from './assistant-page-dnd'
 import { SystemAssistantModelModal, type SystemAssistantRuntimeConfig } from './system-assistant-model-modal'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { FloatingMenu } from '@/components/ui/floating-menu'
 import { QuickChatStartDialog } from './quick-chat-start-dialog'
 import { AgentCard } from './agent-card'
 import { CoordinatorLogModal } from '@/components/coordinator-log-modal'
@@ -59,32 +54,24 @@ import { GROUP_ASSISTANT_ID, GROUP_COORDINATOR_ID } from '@/lib/system-agents'
 // 系统分类 ID
 const SYSTEM_CATEGORY_ID = 'system-category-00000000-0000-0000-0000-000000000001'
 const SORT_ORDER_STEP = 1000
-const UNCATEGORIZED_DROP_ID = '__uncategorized__'
+const UNCATEGORIZED_TAB_KEY = '__uncategorized__'
+const SEARCH_TAB_KEY = '__search__'
 
 type SortOrderUpdate = { id: string; sortOrder: number; categoryId?: string | null }
-type DragPreview = { targetCategoryId: string | null; targetAgents: Agent[] }
-type DragSourceCategoryId = string | null | undefined
 
-const assistantCollisionDetection: CollisionDetection = (args) => {
-  const pointerCollisions = pointerWithin(args)
-  if (pointerCollisions.length > 0) {
-    return pointerCollisions
-  }
-
-  const intersectionCollisions = rectIntersection(args)
-  if (intersectionCollisions.length > 0) {
-    return intersectionCollisions
-  }
-
-  return closestCenter(args)
+// 分类 Tab 定义
+type AssistantTab = {
+  key: string
+  categoryId: string | null // null 表示未分类
+  name: string
+  type: 'system' | 'normal' | 'uncategorized' | 'search'
+  category?: AgentCategory
 }
 
-function getCategoryDropId(categoryId: string | null) {
-  return categoryId || UNCATEGORIZED_DROP_ID
-}
-
-function getCategoryTailDropId(categoryId: string | null) {
-  return `${getCategoryDropId(categoryId)}__tail`
+// 搜索结果：跨所有分类（含未分类）扁平化的全部助手
+function getAllAgents(data: AgentsGrouped | null) {
+  if (!data) return []
+  return [...data.categories.flatMap(cg => cg.agents), ...data.uncategorized]
 }
 
 function getAgentsInCategory(data: AgentsGrouped | null, categoryId: string | null) {
@@ -181,59 +168,51 @@ function SortableAgentCard({
   )
 }
 
-// 可放置的分类区域组件
-function DroppableCategoryArea({
-  categoryId,
-  isSystemCategory,
-  children,
+// 可拖拽排序的分类 Tab（仅普通分类）
+function SortableCategoryTab({
+  tab,
+  isActive,
+  onSelect,
+  onContextMenu,
 }: {
-  categoryId: string | null // null 表示未分类
-  isSystemCategory: boolean
-  children: React.ReactNode
+  tab: AssistantTab
+  isActive: boolean
+  onSelect: () => void
+  onContextMenu: (e: React.MouseEvent) => void
 }) {
-  const { setNodeRef } = useDroppable({
-    id: getCategoryDropId(categoryId),
-    data: { categoryId, isSystemCategory },
-    disabled: isSystemCategory, // 系统分类不允许放置
-  })
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: tab.categoryId as string })
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 10 : undefined,
+  }
 
   return (
-    <div
+    <button
       ref={setNodeRef}
-      className="rounded-lg"
-    >
-      {children}
-    </div>
-  )
-}
-
-function DroppableAgentGrid({
-  categoryId,
-  isEmpty,
-  isMobile,
-  children,
-}: {
-  categoryId: string | null
-  isEmpty: boolean
-  isMobile?: boolean
-  children: React.ReactNode
-}) {
-  const { setNodeRef } = useDroppable({
-    id: getCategoryTailDropId(categoryId),
-    data: { categoryId, isCategoryTail: true },
-  })
-
-  return (
-    <div
-      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      onClick={onSelect}
+      onContextMenu={onContextMenu}
       className={cn(
-        "gap-3",
-        isMobile ? "grid grid-cols-3" : "grid grid-cols-6",
-        isEmpty && "min-h-[84px]"
+        "touch-none whitespace-nowrap rounded-lg px-4 py-2 text-sm transition-colors",
+        isActive
+          ? "bg-blue-500/10 font-semibold text-blue-600"
+          : "font-medium text-muted-foreground hover:bg-muted/60 hover:text-foreground"
       )}
     >
-      {children}
-    </div>
+      {tab.name}
+    </button>
   )
 }
 
@@ -263,8 +242,12 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
   const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number } | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deletingAssistant, setDeletingAssistant] = useState<Agent | null>(null)
-  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set())
   const [isCreateCategoryModalOpen, setIsCreateCategoryModalOpen] = useState(false)
+
+  // 当前激活的分类 Tab
+  const [activeTabKey, setActiveTabKey] = useState<string | null>(null)
+  // 分类 Tab 右键菜单（重命名/删除）
+  const [tabMenu, setTabMenu] = useState<{ categoryId: string; x: number; y: number } | null>(null)
 
   // 删除分类对话框状态
   const [deleteCategoryDialogOpen, setDeleteCategoryDialogOpen] = useState(false)
@@ -286,10 +269,9 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
   const [systemModelModalOpen, setSystemModelModalOpen] = useState(false)
   const [coordinatorLogModalOpen, setCoordinatorLogModalOpen] = useState(false)
 
-  // dnd-kit 状态
+  // dnd-kit 状态（仅用于同组内排序）
   const [activeAgent, setActiveAgent] = useState<Agent | null>(null)
-  const dragPreviewRef = useRef<DragPreview | null>(null)
-  const dragSourceCategoryIdRef = useRef<DragSourceCategoryId>(undefined)
+  const activeTabKeyRef = useRef<string | null>(null)
 
   // dnd-kit 传感器配置
   const sensors = useSensors(
@@ -303,9 +285,8 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     })
   )
 
-  const fetchData = useCallback(async (options: { showLoading?: boolean; resetExpanded?: boolean } = {}) => {
+  const fetchData = useCallback(async (options: { showLoading?: boolean } = {}) => {
     const showLoading = options.showLoading ?? true
-    const resetExpanded = options.resetExpanded ?? true
 
     if (showLoading) {
       setLoading(true)
@@ -320,11 +301,6 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
         ...groupedResponse.data.uncategorized
       ]
       setAssistants(allAgents)
-      if (resetExpanded) {
-        // 默认展开所有分类（包括未分类）
-        const allCategoryIds = [...groupedResponse.data.categories.map(cg => cg.category.id), '__uncategorized__']
-        setExpandedCategories(new Set(allCategoryIds))
-      }
     }
     // Fetch categories for management
     const categoriesResponse = await categoryApi.getAll()
@@ -433,7 +409,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
       imageGeneration: data.imageGeneration,
     })
     if (response.success) {
-      await fetchData({ showLoading: false, resetExpanded: false })
+      await fetchData({ showLoading: false })
       await loadChatRooms()
       setIsEditModalOpen(false)
       setEditingAssistant(null)
@@ -474,17 +450,6 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
 
   const loadAssistantForModal = async (assistant: Agent): Promise<Agent> => {
     const response = await agentApi.getById(assistant.id)
-    // DEBUG: 打印 API 返回的数据
-    console.log('[assistant-page] loadAssistantForModal 返回:', {
-      success: response.success,
-      assistantId: assistant.id,
-      returnedData: response.success && response.data ? {
-        id: response.data.id,
-        name: response.data.name,
-        llmProviderId: response.data.llmProviderId,
-        llmProvider: response.data.llmProvider,
-      } : null,
-    })
     return response.success && response.data ? response.data : assistant
   }
 
@@ -542,18 +507,6 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
   const closeMenu = () => {
     setOpenMenuId(null)
     setContextMenuPosition(null)
-  }
-
-  const toggleCategoryExpansion = (categoryId: string) => {
-    setExpandedCategories(prev => {
-      const newSet = new Set(prev)
-      if (newSet.has(categoryId)) {
-        newSet.delete(categoryId)
-      } else {
-        newSet.add(categoryId)
-      }
-      return newSet
-    })
   }
 
   const handleCreateCategory = async (data: { name: string; description: string }) => {
@@ -661,7 +614,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     if (response.success) {
       toast.success(t('assistant.assistantUpdated', { name: systemModelAgent.name }))
       // fetchData 会获取最新数据并更新状态，不需要再用旧数据覆盖
-      await fetchData({ showLoading: false, resetExpanded: false })
+      await fetchData({ showLoading: false })
       await loadChatRooms()
       setSystemModelAgent(null)
       return true
@@ -688,75 +641,10 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
       || findAgentInGroupedData(groupedData, String(active.id))
       || assistants.find(a => a.id === active.id)
     setActiveAgent(agent || null)
-    dragPreviewRef.current = null
-    dragSourceCategoryIdRef.current = agent ? agent.categoryId || null : undefined
-  }
-
-  const handleDragOver = (event: DragOverEvent) => {
-    const { active, over } = event
-
-    if (!over) {
-      dragPreviewRef.current = null
-      return
-    }
-
-    if (active.id === over.id) return
-
-    const activeId = active.id as string
-    const draggedAgent = (active.data.current?.agent as Agent | undefined)
-      || findAgentInGroupedData(groupedData, activeId)
-      || assistants.find(agent => agent.id === activeId)
-
-    if (!groupedData || !draggedAgent || draggedAgent.agentLevel === 'system') {
-      dragPreviewRef.current = null
-      return
-    }
-
-    const overData = over.data.current
-    let targetCategoryId: string | null | undefined
-    let insertIndex: number | undefined
-    if (overData?.categoryId !== undefined) {
-      targetCategoryId = overData.categoryId as string | null
-      insertIndex = getAgentsInCategory(groupedData, targetCategoryId).length
-    } else {
-      const overAgent = (overData?.agent as Agent | undefined)
-        || findAgentInGroupedData(groupedData, String(over.id))
-        || assistants.find(agent => agent.id === over.id)
-      if (overAgent) {
-        targetCategoryId = overAgent.categoryId || null
-        insertIndex = getAgentsInCategory(groupedData, targetCategoryId).findIndex(agent => agent.id === over.id)
-      }
-    }
-
-    const currentCategoryId = dragSourceCategoryIdRef.current !== undefined
-      ? dragSourceCategoryIdRef.current
-      : draggedAgent.categoryId || null
-    if (
-      targetCategoryId === undefined
-      || insertIndex === undefined
-      || insertIndex < 0
-      || targetCategoryId === currentCategoryId
-      || targetCategoryId === SYSTEM_CATEGORY_ID
-    ) {
-      dragPreviewRef.current = null
-      return
-    }
-
-    const targetAgents = getAgentsInCategory(groupedData, targetCategoryId)
-      .filter(agent => agent.id !== activeId)
-    const boundedInsertIndex = Math.min(insertIndex, targetAgents.length)
-    const targetAgentsWithPreview = [
-      ...targetAgents.slice(0, boundedInsertIndex),
-      { ...draggedAgent, categoryId: targetCategoryId },
-      ...targetAgents.slice(boundedInsertIndex),
-    ]
-    dragPreviewRef.current = { targetCategoryId, targetAgents: targetAgentsWithPreview }
   }
 
   const handleDragCancel = () => {
     setActiveAgent(null)
-    dragPreviewRef.current = null
-    dragSourceCategoryIdRef.current = undefined
   }
 
   const syncFlatAssistants = (updatedAgents: Agent[]) => {
@@ -764,18 +652,15 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     setAssistants(prev => prev.map(agent => updatedAgentMap.get(agent.id) || agent))
   }
 
-  // dnd-kit 拖拽结束
+  // dnd-kit 拖拽结束 - 仅支持同组内排序，不支持跨分类拖拽
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event
-    const dragPreview = dragPreviewRef.current
-    dragPreviewRef.current = null
-    const sourceCategoryId = dragSourceCategoryIdRef.current
-    dragSourceCategoryIdRef.current = undefined
     setActiveAgent(null)
 
-    if (!over) return
+    if (!over || active.id === over.id) return
 
     const activeId = active.id as string
+    const overId = over.id as string
 
     // 找到拖拽的助手
     const draggedAgent = (active.data.current?.agent as Agent | undefined)
@@ -783,190 +668,143 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
       || assistants.find(a => a.id === activeId)
     if (!draggedAgent || draggedAgent.agentLevel === 'system') return
 
-    const currentCategoryId = sourceCategoryId !== undefined
-      ? sourceCategoryId
-      : draggedAgent.categoryId || null
+    // 当前激活 Tab 对应的分类（同组内排序）
+    const activeKey = activeTabKeyRef.current
+    // 搜索结果 Tab 跨分类聚合，不支持排序
+    if (!activeKey || activeKey === SYSTEM_CATEGORY_ID || activeKey === SEARCH_TAB_KEY) return
+    const categoryId = activeKey === UNCATEGORIZED_TAB_KEY ? null : activeKey
 
-    if (active.id === over.id) {
-      if (!dragPreview || dragPreview.targetCategoryId === currentCategoryId) return
+    const agentsInCategory = getAgentsInCategory(groupedData, categoryId)
+    const draggedIndex = agentsInCategory.findIndex(a => a.id === activeId)
+    const targetIndex = agentsInCategory.findIndex(a => a.id === overId)
 
-      const targetCategoryId = dragPreview.targetCategoryId
-      const reorderedTargetAgents = withStableSortOrders(dragPreview.targetAgents)
-      const sourceAgentsWithoutDragged = getAgentsInCategory(groupedData, currentCategoryId)
-        .filter(agent => agent.id !== activeId)
+    if (draggedIndex === -1 || targetIndex === -1 || draggedIndex === targetIndex) return
 
-      setGroupedData(prev => {
-        if (!prev) return prev
-        const newData = JSON.parse(JSON.stringify(prev))
-        replaceAgentsInCategory(newData, currentCategoryId, sourceAgentsWithoutDragged)
-        replaceAgentsInCategory(newData, targetCategoryId, reorderedTargetAgents)
-        return newData
-      })
-      syncFlatAssistants(reorderedTargetAgents)
+    const reorderedAgents = withStableSortOrders(arrayMove(agentsInCategory, draggedIndex, targetIndex))
 
-      agentApi.updateSortOrder(buildSortOrderUpdates(reorderedTargetAgents, targetCategoryId)).then(response => {
-        if (!response.success) {
-          toast.error(t('assistant.agentMoveFailed'))
-          fetchData()
-        }
-      })
-      return
-    }
+    // 乐观更新
+    setGroupedData(prev => {
+      if (!prev) return prev
+      const newData = JSON.parse(JSON.stringify(prev))
+      replaceAgentsInCategory(newData, categoryId, reorderedAgents)
+      return newData
+    })
+    syncFlatAssistants(reorderedAgents)
 
-    const overId = over.id as string
-
-    // 判断目标是否是分类区域（通过 over.data）
-    const overData = over.data.current
-    const isOverCategory = overData?.categoryId !== undefined
-
-    if (isOverCategory) {
-      // 拖到分类区域
-      const targetCategoryId = overData.categoryId as string | null
-
-      // 系统分类不允许拖入
-      if (targetCategoryId === SYSTEM_CATEGORY_ID) {
-        toast.error(t('assistant.systemCategoryCannotAddAgent'))
-        return
+    agentApi.updateSortOrder(buildSortOrderUpdates(reorderedAgents)).then(response => {
+      if (!response.success) {
+        toast.error(t('assistant.agentSortFailed'))
+        fetchData()
       }
-
-      if (currentCategoryId === targetCategoryId) return
-
-      const sourceAgents = getAgentsInCategory(groupedData, currentCategoryId)
-      const targetAgents = getAgentsInCategory(groupedData, targetCategoryId)
-      const sourceAgentsWithoutDragged = sourceAgents.filter(agent => agent.id !== activeId)
-      const reorderedTargetAgents = withStableSortOrders([
-        ...targetAgents,
-        { ...draggedAgent, categoryId: targetCategoryId },
-      ])
-
-      // 乐观更新
-      setGroupedData(prev => {
-        if (!prev) return prev
-        const newData = JSON.parse(JSON.stringify(prev))
-
-        replaceAgentsInCategory(newData, currentCategoryId, sourceAgentsWithoutDragged)
-        replaceAgentsInCategory(newData, targetCategoryId, reorderedTargetAgents)
-
-        return newData
-      })
-      syncFlatAssistants(reorderedTargetAgents)
-
-      // 更新助手分类
-      agentApi.updateSortOrder(buildSortOrderUpdates(reorderedTargetAgents, targetCategoryId)).then(response => {
-        if (!response.success) {
-          toast.error(t('assistant.agentMoveFailed'))
-          fetchData()
-        }
-      })
-      return
-    }
-
-    // 拖到另一个助手上
-    const overAgent = (over.data.current?.agent as Agent | undefined)
-      || findAgentInGroupedData(groupedData, overId)
-      || assistants.find(a => a.id === overId)
-    if (!overAgent) return
-
-    const targetCategoryId = overAgent.categoryId || null
-
-    // 系统分类不允许拖入
-    if (targetCategoryId === SYSTEM_CATEGORY_ID) {
-      toast.error(t('assistant.systemCategoryCannotAddAgent'))
-      return
-    }
-
-    // 系统助手不允许接收拖拽
-    if (overAgent.agentLevel === 'system') {
-      toast.error(t('assistant.systemAgentCannotDragIn'))
-      return
-    }
-
-    if (currentCategoryId !== targetCategoryId) {
-      const sourceAgents = getAgentsInCategory(groupedData, currentCategoryId)
-      const targetAgents = getAgentsInCategory(groupedData, targetCategoryId)
-      const sourceAgentsWithoutDragged = sourceAgents.filter(agent => agent.id !== activeId)
-      const targetIndex = targetAgents.findIndex(agent => agent.id === overId)
-      const insertIndex = targetIndex === -1 ? targetAgents.length : targetIndex
-      const reorderedTargetAgents = withStableSortOrders([
-        ...targetAgents.slice(0, insertIndex),
-        { ...draggedAgent, categoryId: targetCategoryId },
-        ...targetAgents.slice(insertIndex),
-      ])
-
-      // 跨分类移动
-      setGroupedData(prev => {
-        if (!prev) return prev
-        const newData = JSON.parse(JSON.stringify(prev))
-
-        replaceAgentsInCategory(newData, currentCategoryId, sourceAgentsWithoutDragged)
-        replaceAgentsInCategory(newData, targetCategoryId, reorderedTargetAgents)
-
-        return newData
-      })
-      syncFlatAssistants(reorderedTargetAgents)
-
-      agentApi.updateSortOrder(buildSortOrderUpdates(reorderedTargetAgents, targetCategoryId)).then(response => {
-        if (!response.success) {
-          toast.error(t('assistant.agentMoveFailed'))
-          fetchData()
-        }
-      })
-    } else {
-      // 同组内排序
-      const agentsInCategory = getAgentsInCategory(groupedData, targetCategoryId)
-
-      const targetIndex = agentsInCategory.findIndex(a => a.id === overId)
-      const draggedIndex = agentsInCategory.findIndex(a => a.id === activeId)
-
-      if (targetIndex === -1 || draggedIndex === -1 || targetIndex === draggedIndex) return
-
-      const reorderedAgents = withStableSortOrders(arrayMove(agentsInCategory, draggedIndex, targetIndex))
-
-      // 乐观更新
-      setGroupedData(prev => {
-        if (!prev) return prev
-        const newData = JSON.parse(JSON.stringify(prev))
-        replaceAgentsInCategory(newData, targetCategoryId, reorderedAgents)
-        return newData
-      })
-      syncFlatAssistants(reorderedAgents)
-
-      agentApi.updateSortOrder(buildSortOrderUpdates(reorderedAgents)).then(response => {
-        if (!response.success) {
-          toast.error(t('assistant.agentSortFailed'))
-          fetchData()
-        }
-      })
-    }
+    })
   }
 
-  // Filter helpers for grouped display
-  const displayedGroupedData = groupedData
-
-  // 系统协调助手由后端隐藏；可见系统分类仅展示群助手，并限制为快速对话入口。
-  const { normalCategories, systemCategoryGroup } = displayedGroupedData ? {
-    normalCategories: displayedGroupedData.categories.filter(cg => cg.category.id !== SYSTEM_CATEGORY_ID),
-    systemCategoryGroup: displayedGroupedData.categories.find(cg => cg.category.id === SYSTEM_CATEGORY_ID) || null,
-  } : { normalCategories: [], systemCategoryGroup: null }
-
-  const matchesSearch = (agent: Agent) =>
+  const matchesSearch = useCallback((agent: Agent) =>
     agent.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    agent.description?.toLowerCase().includes(searchQuery.toLowerCase())
+    (agent.description?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false),
+    [searchQuery]
+  )
 
-  const filteredGroupedData = displayedGroupedData ? {
-    categories: normalCategories
-      .map(cg => ({
-        category: cg.category,
-        agents: cg.agents.filter(matchesSearch)
-      })),
-    systemCategory: systemCategoryGroup
-      ? {
-          category: systemCategoryGroup.category,
-          agents: systemCategoryGroup.agents.filter(matchesSearch),
-        }
-      : null,
-    uncategorized: displayedGroupedData.uncategorized.filter(matchesSearch)
-  } : null
+  // 拖拽排序分类 Tab（仅普通分类参与，系统/未分类/搜索固定位置）
+  const handleCategoryTabDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+    if (!over || active.id === over.id || !groupedData) return
+
+    const normalCategories = groupedData.categories.filter(cg => cg.category.id !== SYSTEM_CATEGORY_ID)
+    const oldIndex = normalCategories.findIndex(cg => cg.category.id === active.id)
+    const newIndex = normalCategories.findIndex(cg => cg.category.id === over.id)
+    if (oldIndex === -1 || newIndex === -1) return
+
+    const reordered = arrayMove(normalCategories, oldIndex, newIndex)
+    // 重新分配 sortOrder（升序，与后端 findAll orderBy asc 保持一致）
+    const updates = reordered.map((cg, index) => ({ id: cg.category.id, sortOrder: (index + 1) * SORT_ORDER_STEP }))
+    const sortOrderMap = new Map(updates.map(u => [u.id, u.sortOrder]))
+
+    setGroupedData(prev => {
+      if (!prev) return prev
+      const systemGroups = prev.categories.filter(cg => cg.category.id === SYSTEM_CATEGORY_ID)
+      const newNormals = reordered.map(cg => ({
+        ...cg,
+        category: { ...cg.category, sortOrder: sortOrderMap.get(cg.category.id) ?? cg.category.sortOrder },
+      }))
+      return { ...prev, categories: [...systemGroups, ...newNormals] }
+    })
+
+    categoryApi.updateSortOrder(updates).then(response => {
+      if (!response.success) {
+        toast.error(t('assistant.categorySortFailed', { defaultValue: '分类排序保存失败' }))
+        fetchData()
+      }
+    })
+  }
+
+  // 可参与拖拽排序的普通分类 ID 列表
+  const sortableCategoryIds = useMemo(
+    () => (groupedData?.categories.filter(cg => cg.category.id !== SYSTEM_CATEGORY_ID).map(cg => cg.category.id)) ?? [],
+    [groupedData]
+  )
+
+  // 构建分类 Tab 列表：系统分类（群助手）在最前，随后是普通分类，最后是未分类。
+  const hasSearch = searchQuery.trim() !== ''
+  const tabs = useMemo<AssistantTab[]>(() => {
+    if (!groupedData) return []
+    const result: AssistantTab[] = []
+    // 有搜索条件时，在最前面加一个“搜索结果”Tab
+    if (hasSearch) {
+      const q = searchQuery.toLowerCase()
+      const count = getAllAgents(groupedData).filter(
+        a => a.name.toLowerCase().includes(q) || (a.description?.toLowerCase().includes(q) ?? false)
+      ).length
+      result.push({
+        key: SEARCH_TAB_KEY,
+        categoryId: null,
+        name: `${t('assistant.searchResults', { defaultValue: '搜索结果' })} (${count})`,
+        type: 'search',
+      })
+    }
+    groupedData.categories
+      .filter(cg => cg.category.id !== SYSTEM_CATEGORY_ID)
+      .forEach(cg => {
+        result.push({ key: cg.category.id, categoryId: cg.category.id, name: cg.category.name, type: 'normal', category: cg.category })
+      })
+    const systemGroup = groupedData.categories.find(cg => cg.category.id === SYSTEM_CATEGORY_ID)
+    if (systemGroup) {
+      result.push({ key: systemGroup.category.id, categoryId: systemGroup.category.id, name: systemGroup.category.name, type: 'system' })
+    }
+    if (groupedData.uncategorized.length > 0) {
+      result.push({ key: UNCATEGORIZED_TAB_KEY, categoryId: null, name: t('assistant.uncategorized'), type: 'uncategorized' })
+    }
+    return result
+  }, [groupedData, t, hasSearch, searchQuery])
+
+  // 进入/退出搜索时切换激活 Tab：开始搜索切到“搜索结果”，清空搜索回到第一个分类
+  useEffect(() => {
+    if (hasSearch) {
+      setActiveTabKey(SEARCH_TAB_KEY)
+    } else {
+      setActiveTabKey(prev => (prev === SEARCH_TAB_KEY ? null : prev))
+    }
+  }, [hasSearch])
+
+  // 保证当前激活的 Tab 始终有效
+  useEffect(() => {
+    if (tabs.length === 0) return
+    if (!activeTabKey || !tabs.some(tab => tab.key === activeTabKey)) {
+      setActiveTabKey(tabs[0].key)
+    }
+  }, [tabs, activeTabKey])
+
+  const activeTab = tabs.find(tab => tab.key === activeTabKey) ?? tabs[0] ?? null
+  useEffect(() => {
+    activeTabKeyRef.current = activeTab?.key ?? null
+  }, [activeTab?.key])
+
+  // 当前 Tab 下经过搜索过滤的助手；“搜索结果”Tab 展示跨分类的全部匹配项
+  const activeAgents = activeTab
+    ? (activeTab.type === 'search'
+        ? getAllAgents(groupedData).filter(matchesSearch)
+        : getAgentsInCategory(groupedData, activeTab.categoryId).filter(matchesSearch))
+    : []
 
   return (
     <>
@@ -993,6 +831,16 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
                 placeholder={t('assistant.searchAssistant')}
                 className={cn("bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none", isMobile ? "w-full" : "w-44")}
               />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="flex size-4 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                  title={t('common.clear', { defaultValue: '清除' })}
+                >
+                  <X className="size-3" />
+                </button>
+              )}
             </div>
             {!isMobile && (
               <>
@@ -1044,277 +892,198 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
                 <Bot className="size-12 mb-2" />
                 <p>{t('assistant.noAssistants')}</p>
               </div>
-            ) : filteredGroupedData && (filteredGroupedData.categories.length > 0 || filteredGroupedData.uncategorized.length > 0 || filteredGroupedData.systemCategory) ? (
-              <DndContext
-                sensors={sensors}
-                collisionDetection={assistantCollisionDetection}
-                onDragStart={handleDragStart}
-                onDragOver={handleDragOver}
-                onDragEnd={handleDragEnd}
-                onDragCancel={handleDragCancel}
-              >
-                <>
-                {/* Render system category - 显示在最上面，不支持拖拽 */}
-                {filteredGroupedData.systemCategory && (
-                  <DroppableCategoryArea
-                    categoryId={filteredGroupedData.systemCategory.category.id}
-                    isSystemCategory={true}
-                  >
-                    <div className="mb-6">
-                      <CategoryToggleButton
-                        expanded={expandedCategories.has(filteredGroupedData.systemCategory.category.id)}
-                        label={filteredGroupedData.systemCategory.category.name}
-                        count={filteredGroupedData.systemCategory.agents.length}
-                        onClick={() => toggleCategoryExpansion(filteredGroupedData.systemCategory!.category.id)}
-                        className="mb-3"
-                      />
-                      {expandedCategories.has(filteredGroupedData.systemCategory.category.id) && filteredGroupedData.systemCategory.agents.length > 0 && (
-                        <div className={cn("gap-3", isMobile ? "grid grid-cols-3" : "grid grid-cols-6")}>
-                          {filteredGroupedData.systemCategory.agents.map((assistant) => (
-                            <SortableAgentCard
-                              key={assistant.id}
-                              agent={assistant}
-                              openMenuId={openMenuId}
-                              contextMenuPosition={contextMenuPosition}
-                              onContextMenu={handleContextMenu}
-                              onToggleMenu={(id, pos) => {
-                                if (openMenuId === id) {
-                                  closeMenu()
-                                } else {
-                                  setOpenMenuId(id)
-                                  setContextMenuPosition(pos ? null : null)
-                                }
-                              }}
-                              onEdit={openEditModal}
-                              onCopy={openCopyModal}
-                              onToggleStatus={handleToggleStatus}
-                              onDelete={openDeleteDialog}
-                              onStartQuickChat={openQuickChatDialog}
-                              onInstallSkill={openInstallSkillModal}
-                              onCoordinatorLogs={openCoordinatorLogsDialog}
-                              onClick={handleAgentClick}
-                            />
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </DroppableCategoryArea>
-                )}
+            ) : tabs.length > 0 && activeTab ? (
+              <>
+                {/* 分类 Tab 栏（药丸样式，普通分类支持拖拽排序 + 右键重命名/删除） */}
+                <DndContext
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={handleCategoryTabDragEnd}
+                >
+                  <SortableContext items={sortableCategoryIds} strategy={horizontalListSortingStrategy}>
+                    <div className="mb-5 flex items-center gap-1.5 overflow-x-auto pb-1">
+                      {tabs.map((tab) => {
+                        const isActive = tab.key === activeTab.key
 
-                {/* Render categorized groups */}
-                {filteredGroupedData.categories.map((categoryGroup) => (
-                  <DroppableCategoryArea
-                    key={categoryGroup.category.id}
-                    categoryId={categoryGroup.category.id}
-                    isSystemCategory={categoryGroup.category.id === SYSTEM_CATEGORY_ID}
-                  >
-                    <div className="mb-6">
-                      {/* Category header */}
-                      <div className="group mb-3 flex items-center gap-2">
-                        {/* 分类名称 - 支持编辑 */}
-                        {editingCategoryId === categoryGroup.category.id ? (
-                          <div className="flex items-center gap-1">
-                            <input
-                              type="text"
-                              value={editingCategoryName}
-                              onChange={(e) => setEditingCategoryName(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                  saveCategoryName()
-                                } else if (e.key === 'Escape') {
-                                  cancelEditCategoryName()
-                                }
-                              }}
-                              className="ta-input h-8 w-36 px-2 py-1 text-sm shadow-none"
-                              autoFocus
-                            />
-                            <button
-                              onClick={saveCategoryName}
-                              className="ta-icon-button-compact text-green-600 hover:bg-green-500/10 hover:text-green-600"
-                            >
-                              <Check className="size-3.5" />
-                            </button>
-                            <button
-                              onClick={cancelEditCategoryName}
-                              className="ta-icon-button-compact"
-                            >
-                              <X className="size-3.5" />
-                            </button>
-                          </div>
-                        ) : (
-                          <>
-                            <CategoryToggleButton
-                              expanded={expandedCategories.has(categoryGroup.category.id)}
-                              label={categoryGroup.category.name}
-                              count={categoryGroup.agents.length}
-                              onClick={() => toggleCategoryExpansion(categoryGroup.category.id)}
-                              className="gap-1"
-                            />
-                            {/* 移动端隐藏添加助手按钮 */}
-                            {!isMobile && categoryGroup.category.id !== SYSTEM_CATEGORY_ID && (
-                              <button
-                                onClick={() => openCreateModalWithCategory(categoryGroup.category.id)}
-                                className="ta-icon-button-compact opacity-70 hover:bg-primary/10 hover:text-primary hover:opacity-100"
-                                title={t('assistant.addAssistant')}
-                              >
-                                <Plus className="size-3.5" />
-                              </button>
-                            )}
-                            {/* 操作按钮 - hover 显示（系统分类不显示，移动端隐藏） */}
-                            {!isMobile && categoryGroup.category.id !== SYSTEM_CATEGORY_ID && (
-                              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button
-                                  onClick={() => startEditCategoryName(categoryGroup.category.id, categoryGroup.category.name)}
-                                  className="ta-icon-button-compact hover:bg-primary/10 hover:text-primary"
-                                  title={t('assistant.editCategoryName')}
-                                >
-                                  <Pencil className="size-3.5" />
-                                </button>
-                                <button
-                                  onClick={() => openDeleteCategoryDialog(categoryGroup.category, categoryGroup.agents.length)}
-                                  className="ta-icon-button-compact hover:bg-destructive/10 hover:text-destructive"
-                                  title={t('assistant.deleteCategory')}
-                                >
-                                  <Trash2 className="size-3.5" />
-                                </button>
-                              </div>
-                            )}
-                          </>
-                        )}
-                      </div>
-
-                      {/* Category agents grid */}
-                      {expandedCategories.has(categoryGroup.category.id) && (
-                        <SortableContext
-                          items={categoryGroup.agents.map(a => a.id)}
-                          strategy={rectSortingStrategy}
-                        >
-                          <DroppableAgentGrid
-                            categoryId={categoryGroup.category.id}
-                            isEmpty={categoryGroup.agents.length === 0}
-                            isMobile={isMobile}
-                          >
-                            {categoryGroup.agents.map((assistant) => (
-                              <SortableAgentCard
-                                key={assistant.id}
-                                agent={assistant}
-                                openMenuId={openMenuId}
-                                contextMenuPosition={contextMenuPosition}
-                                onContextMenu={handleContextMenu}
-                                onToggleMenu={(id, pos) => {
-                                  if (openMenuId === id) {
-                                    closeMenu()
-                                  } else {
-                                    setOpenMenuId(id)
-                                    setContextMenuPosition(pos ? null : null)
+                        // 普通分类正在重命名：内联输入框
+                        if (tab.type === 'normal' && editingCategoryId === tab.categoryId) {
+                          return (
+                            <div key={tab.key} className="flex items-center gap-1 px-1">
+                              <input
+                                type="text"
+                                value={editingCategoryName}
+                                onChange={(e) => setEditingCategoryName(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    saveCategoryName()
+                                  } else if (e.key === 'Escape') {
+                                    cancelEditCategoryName()
                                   }
                                 }}
-                                onEdit={openEditModal}
-                                onCopy={openCopyModal}
-                                onToggleStatus={handleToggleStatus}
-                                onDelete={openDeleteDialog}
-                                onStartQuickChat={openQuickChatDialog}
-                                onInstallSkill={openInstallSkillModal}
-                                onClick={handleAgentClick}
+                                className="ta-input h-8 w-28 rounded-full px-3 py-0.5 text-sm shadow-none"
+                                autoFocus
                               />
-                            ))}
-                          </DroppableAgentGrid>
-                        </SortableContext>
-                      )}
-                    </div>
-                  </DroppableCategoryArea>
-                ))}
+                              <button
+                                onClick={saveCategoryName}
+                                className="ta-icon-button-compact text-green-600 hover:bg-green-500/10 hover:text-green-600"
+                              >
+                                <Check className="size-3.5" />
+                              </button>
+                              <button
+                                onClick={cancelEditCategoryName}
+                                className="ta-icon-button-compact"
+                              >
+                                <X className="size-3.5" />
+                              </button>
+                            </div>
+                          )
+                        }
 
-                {/* Render uncategorized agents */}
-                {shouldRenderUncategorizedSection(
-                  filteredGroupedData.uncategorized.length,
-                  activeAgent?.categoryId
-                ) && (
-                  <DroppableCategoryArea
-                    categoryId={null}
-                    isSystemCategory={false}
-                  >
-                    <div className="mb-6">
-                      <div className="flex items-center gap-2 mb-3">
-                        <CategoryToggleButton
-                          expanded={expandedCategories.has('__uncategorized__')}
-                          label={t('assistant.uncategorized')}
-                          count={filteredGroupedData.uncategorized.length}
-                          onClick={() => toggleCategoryExpansion('__uncategorized__')}
-                        />
-                        {/* 移动端隐藏添加助手按钮 */}
-                        {!isMobile && (
+                        // 普通分类：可拖拽排序
+                        if (tab.type === 'normal' && tab.categoryId) {
+                          return (
+                            <SortableCategoryTab
+                              key={tab.key}
+                              tab={tab}
+                              isActive={isActive}
+                              onSelect={() => setActiveTabKey(tab.key)}
+                              onContextMenu={(e) => {
+                                e.preventDefault()
+                                setActiveTabKey(tab.key)
+                                setTabMenu({ categoryId: tab.categoryId!, x: e.clientX, y: e.clientY })
+                              }}
+                            />
+                          )
+                        }
+
+                        // 系统/未分类/搜索：固定位置，不可拖拽
+                        return (
                           <button
-                            onClick={() => openCreateModalWithCategory(null)}
-                            className="ta-icon-button-compact opacity-70 hover:bg-primary/10 hover:text-primary hover:opacity-100"
+                            key={tab.key}
+                            onClick={() => setActiveTabKey(tab.key)}
+                            className={cn(
+                              "whitespace-nowrap rounded-lg px-4 py-2 text-sm transition-colors",
+                              isActive
+                                ? "bg-blue-500/10 font-semibold text-blue-600"
+                                : "font-medium text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                            )}
+                          >
+                            {tab.name}
+                          </button>
+                        )
+                      })}
+
+                      {/* 末尾的添加分类按钮 */}
+                      <button
+                        type="button"
+                        onClick={() => setIsCreateCategoryModalOpen(true)}
+                        title={t('assistant.createCategory')}
+                        className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-blue-500 transition-colors hover:bg-blue-500/20"
+                      >
+                        <Plus className="size-4" />
+                      </button>
+                    </div>
+                  </SortableContext>
+                </DndContext>
+
+                {/* 当前分类下的助手网格 */}
+                {activeAgents.length === 0 && (activeTab.type === 'system' || searchQuery.trim() !== '') ? (
+                  <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+                    {searchQuery.trim() !== '' ? (
+                      <>
+                        <Search className="size-12 mb-2" />
+                        <p>{t('assistant.noMatchingAssistants')}</p>
+                      </>
+                    ) : (
+                      <>
+                        <Bot className="size-12 mb-2" />
+                        <p>{t('assistant.noAssistants')}</p>
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <DndContext
+                    sensors={sensors}
+                    collisionDetection={closestCenter}
+                    onDragStart={handleDragStart}
+                    onDragEnd={handleDragEnd}
+                    onDragCancel={handleDragCancel}
+                  >
+                    <SortableContext
+                      items={activeAgents.map(a => a.id)}
+                      strategy={rectSortingStrategy}
+                    >
+                      <div
+                        className="grid gap-4"
+                        style={
+                          isMobile
+                            ? { gridTemplateColumns: '1fr' }
+                            : { gridTemplateColumns: 'repeat(auto-fill, minmax(max(280px, calc((100% - 4rem) / 5)), 1fr))' }
+                        }
+                      >
+                        {/* 添加助手块 - 系统分类/搜索结果不显示，放在最前面 */}
+                        {activeTab.type !== 'system' && activeTab.type !== 'search' && (
+                          <button
+                            onClick={() => openCreateModalWithCategory(activeTab.categoryId)}
+                            className="group flex h-[180px] w-full max-w-[360px] flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border bg-card/40 p-5 text-muted-foreground transition-all duration-200 hover:border-blue-500 hover:text-blue-500"
                             title={t('assistant.addAssistant')}
                           >
-                            <Plus className="size-3.5" />
+                            <div className="flex size-12 items-center justify-center rounded-full border border-dashed border-border transition-colors group-hover:border-blue-500">
+                              <Plus className="size-6" />
+                            </div>
+                            <span className="text-sm">{t('assistant.addAssistant')}</span>
                           </button>
                         )}
+
+                        {activeAgents.map((assistant) => (
+                          <SortableAgentCard
+                            key={assistant.id}
+                            agent={assistant}
+                            openMenuId={openMenuId}
+                            contextMenuPosition={contextMenuPosition}
+                            onContextMenu={handleContextMenu}
+                            onToggleMenu={(id, pos) => {
+                              if (openMenuId === id) {
+                                closeMenu()
+                              } else {
+                                setOpenMenuId(id)
+                                setContextMenuPosition(pos ? null : null)
+                              }
+                            }}
+                            onEdit={openEditModal}
+                            onCopy={openCopyModal}
+                            onToggleStatus={handleToggleStatus}
+                            onDelete={openDeleteDialog}
+                            onStartQuickChat={openQuickChatDialog}
+                            onInstallSkill={openInstallSkillModal}
+                            onCoordinatorLogs={openCoordinatorLogsDialog}
+                            onClick={handleAgentClick}
+                          />
+                        ))}
                       </div>
-                      {expandedCategories.has('__uncategorized__') && (
-                        <SortableContext
-                          items={filteredGroupedData.uncategorized.map(a => a.id)}
-                          strategy={rectSortingStrategy}
-                        >
-                          <DroppableAgentGrid
-                            categoryId={null}
-                            isEmpty={filteredGroupedData.uncategorized.length === 0}
-                            isMobile={isMobile}
-                          >
-                            {filteredGroupedData.uncategorized.map((assistant) => (
-                              <SortableAgentCard
-                                key={assistant.id}
-                                agent={assistant}
-                                openMenuId={openMenuId}
-                                contextMenuPosition={contextMenuPosition}
-                                onContextMenu={handleContextMenu}
-                                onToggleMenu={(id) => {
-                                  if (openMenuId === id) {
-                                    closeMenu()
-                                  } else {
-                                    setOpenMenuId(id)
-                                    setContextMenuPosition(null)
-                                  }
-                                }}
-                                onEdit={openEditModal}
-                                onCopy={openCopyModal}
-                                onToggleStatus={handleToggleStatus}
-                                onDelete={openDeleteDialog}
-                                onStartQuickChat={openQuickChatDialog}
-                                onInstallSkill={openInstallSkillModal}
-                                onClick={handleAgentClick}
-                              />
-                            ))}
-                          </DroppableAgentGrid>
-                        </SortableContext>
-                      )}
-                    </div>
-                  </DroppableCategoryArea>
+                    </SortableContext>
+
+                    {/* Drag Overlay - 拖拽时显示的预览 */}
+                    <DragOverlay>
+                      {activeAgent ? (
+                        <div className="opacity-80">
+                          <AgentCard
+                            assistant={activeAgent}
+                            openMenuId={null}
+                            contextMenuPosition={null}
+                            onContextMenu={() => {}}
+                            onToggleMenu={() => {}}
+                            onEdit={() => {}}
+                            onCopy={() => {}}
+                            onToggleStatus={() => {}}
+                            onDelete={() => {}}
+                          />
+                        </div>
+                      ) : null}
+                    </DragOverlay>
+                  </DndContext>
                 )}
-
-                </>
-
-                {/* Drag Overlay - 拖拽时显示的预览 */}
-                <DragOverlay>
-                  {activeAgent ? (
-                    <div className="opacity-80">
-                      <AgentCard
-                        assistant={activeAgent}
-                        openMenuId={null}
-                        contextMenuPosition={null}
-                        onContextMenu={() => {}}
-                        onToggleMenu={() => {}}
-                        onEdit={() => {}}
-                        onCopy={() => {}}
-                        onToggleStatus={() => {}}
-                        onDelete={() => {}}
-                      />
-                    </div>
-                  ) : null}
-                </DragOverlay>
-              </DndContext>
+              </>
             ) : (
               <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
                 <Search className="size-12 mb-2" />
@@ -1324,6 +1093,42 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
           </div>
         </div>
       </div>
+
+      {/* 分类 Tab 右键菜单 */}
+      {tabMenu && (() => {
+        const group = groupedData?.categories.find(cg => cg.category.id === tabMenu.categoryId)
+        if (!group) return null
+        return (
+          <FloatingMenu
+            open
+            x={tabMenu.x}
+            y={tabMenu.y}
+            onClose={() => setTabMenu(null)}
+            className="min-w-32 p-1"
+          >
+            <button
+              onClick={() => {
+                startEditCategoryName(group.category.id, group.category.name)
+                setTabMenu(null)
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-accent"
+            >
+              <Pencil className="size-3.5" />
+              {t('assistant.editCategoryName')}
+            </button>
+            <button
+              onClick={() => {
+                openDeleteCategoryDialog(group.category, group.agents.length)
+                setTabMenu(null)
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-destructive hover:bg-destructive/10"
+            >
+              <Trash2 className="size-3.5" />
+              {t('assistant.deleteCategory')}
+            </button>
+          </FloatingMenu>
+        )
+      })()}
 
       <CreateAssistantModal
         isOpen={isCreateModalOpen}

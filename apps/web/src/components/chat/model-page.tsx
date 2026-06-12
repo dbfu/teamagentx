@@ -108,6 +108,24 @@ function isMaskedApiKey(value: string | null | undefined): boolean {
   return value === '****' || /^.{3}\*\*\*.{4}$/.test(value)
 }
 
+// 将 token 数量格式化为带 K / M / B 的紧凑文本，用于实时预览
+function formatTokenCount(value: number | null | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return ''
+  const units: Array<{ limit: number; suffix: string }> = [
+    { limit: 1_000_000_000, suffix: 'B' },
+    { limit: 1_000_000, suffix: 'M' },
+    { limit: 1_000, suffix: 'K' },
+  ]
+  for (const { limit, suffix } of units) {
+    if (value >= limit) {
+      const scaled = value / limit
+      const text = parseFloat(scaled.toFixed(2)).toString()
+      return `${text}${suffix}`
+    }
+  }
+  return String(value)
+}
+
 function getAudioUsageLabel(audioUsage: AudioUsage, t: (key: string) => string): string {
   switch (audioUsage) {
     case 'tts':
@@ -229,6 +247,7 @@ export function ModelPage() {
     apiUrl: '',
     apiKey: '',
     model: '',
+    contextLength: 1000000,
     sttModel: null,
     audioUsage: 'both',
     imageProvider: 'openai',
@@ -400,6 +419,7 @@ export function ModelPage() {
       apiUrl: '',
       apiKey: '',
       model: '',
+      contextLength: 1000000,
       sttModel: null,
       audioUsage: 'both' as AudioUsage,
       imageProvider: 'openai',
@@ -424,6 +444,7 @@ export function ModelPage() {
       apiUrl,
       apiKey: '',
       model: provider.model,
+      contextLength: provider.contextLength ?? 1000000,
       sttModel: provider.sttModel ?? null,
       audioUsage: ((provider as any).audioUsage ?? 'both') as AudioUsage,
       imageProvider,
@@ -1402,6 +1423,47 @@ export function ModelPage() {
                     </div>
                   )}
                 </div>}
+
+                {/* 上下文长度：仅文本模型 */}
+                {formData.modelType === 'text' && (
+                <div className="mb-4">
+                  <label className="mb-1.5 block text-sm font-medium text-foreground">
+                    {t('model.contextLengthLabel')}
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      min={100000}
+                      max={1000000}
+                      step={1000}
+                      value={formData.contextLength ?? 1000000}
+                      onChange={e => {
+                        const next = parseInt(e.target.value, 10)
+                        setFormData(prev => ({
+                          ...prev,
+                          contextLength: Number.isFinite(next) && next > 0 ? next : undefined,
+                        }))
+                      }}
+                      onBlur={() => {
+                        setFormData(prev => ({
+                          ...prev,
+                          contextLength: prev.contextLength && prev.contextLength > 0 ? prev.contextLength : 1000000,
+                        }))
+                      }}
+                      placeholder="1000000"
+                      className="ta-input w-full pr-16 shadow-none"
+                    />
+                    {formatTokenCount(formData.contextLength) && (
+                      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
+                        {formatTokenCount(formData.contextLength)}
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1.5 text-xs text-muted-foreground">
+                    {t('model.contextLengthHint')}
+                  </p>
+                </div>
+                )}
 
                 {/* API 协议 */}
                 {formData.modelType === 'text' && (

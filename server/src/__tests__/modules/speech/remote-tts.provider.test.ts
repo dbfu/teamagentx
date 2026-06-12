@@ -19,6 +19,7 @@ function createOpenAiProvider(overrides: Partial<LlmProvider> = {}): LlmProvider
     apiUrl: 'https://api.example.com/v1',
     apiKey: 'test-key',
     model: 'gpt-4o-mini-tts',
+    contextLength: 1000000,
     modelType: 'audio',
     imageProvider: null,
     imageApiType: null,

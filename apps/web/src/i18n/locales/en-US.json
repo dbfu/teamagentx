@@ -850,7 +850,9 @@
     "systemAgentCannotDragIn": "System assistant cannot have other assistants dragged in",
     "agentMoveFailed": "Move failed",
     "agentSortFailed": "Sort failed",
+    "categorySortFailed": "Failed to save category order",
     "uncategorized": "Uncategorized",
+    "searchResults": "Search results",
     "addAssistant": "Add assistant",
     "editCategoryName": "Edit name",
     "systemCategory": "System Category",
@@ -1017,6 +1019,10 @@
     "thinkingMediumShort": "Medium",
     "thinkingLowShort": "Low",
     "thinkingOffShort": "Off",
+    "systemBadge": "System",
+    "noDescription": "No description",
+    "thinkingModeShort": "Thinking",
+    "defaultModelConfig": "Default model config",
     "thinkingModeHint": "Only native models (Claude / Codex official) support this setting; third-party models (e.g. GLM, DeepSeek using Anthropic/OpenAI-compatible protocols) may ignore it.",
     "fastModeLabel": "Fast Mode",
     "fastModeHint": "Roughly 1.5× faster, but token consumption also speeds up",
@@ -1266,7 +1272,9 @@
     "aiCreateDialogPlaceholder": "Describe your API config...",
     "parseConfig": "Parse Config",
     "parsing": "Parsing...",
-    "modelPlaceholder": "Enter model ID"
+    "modelPlaceholder": "Enter model ID",
+    "contextLengthLabel": "Context Length",
+    "contextLengthHint": "The backend model's real context window (tokens). Claude assistants auto-compact history earlier based on this to avoid overflowing a smaller window and stalling. Effective range 100K–1M, default 1000000 (1M)"
   },
   "skill": {
     "pageTitle": "Skill Management",
@@ -1384,6 +1392,10 @@
   },
   "settings": {
     "pageTitle": "Settings",
+    "navAccount": "Account",
+    "navGeneral": "General",
+    "navSoftware": "System Settings",
+    "navAbout": "Help & Feedback",
     "accountInfo": "Account Info",
     "userInfo": "User Info",
     "username": "Username",

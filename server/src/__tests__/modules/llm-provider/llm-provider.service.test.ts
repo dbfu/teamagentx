@@ -21,6 +21,7 @@ function createAudioProvider(overrides: Partial<LlmProvider> = {}): LlmProvider 
     apiUrl: 'https://api.example.com/v1',
     apiKey: 'test-key',
     model: 'gpt-4o-mini-tts',
+    contextLength: 1000000,
     sttModel: 'whisper-1',
     audioUsage: 'both',
     imageProvider: null,

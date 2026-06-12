@@ -27,6 +27,7 @@ const llmProviderResponseSchema = {
     apiUrl: { type: 'string', nullable: true },
     apiKey: { type: 'string' },
     model: { type: 'string' },
+    contextLength: { type: 'integer' },
     sttModel: { type: 'string', nullable: true },
     audioUsage: { type: 'string', nullable: true },
     imageProvider: { type: 'string', nullable: true },
@@ -50,6 +51,7 @@ const llmProviderWithCountResponseSchema = {
     apiUrl: { type: 'string', nullable: true },
     apiKey: { type: 'string' },
     model: { type: 'string' },
+    contextLength: { type: 'integer' },
     sttModel: { type: 'string', nullable: true },
     audioUsage: { type: 'string', nullable: true },
     imageProvider: { type: 'string', nullable: true },
@@ -79,6 +81,7 @@ const createLlmProviderBodySchema = {
     apiUrl: { type: 'string', description: 'API URL（可选，用于自定义供应商）' },
     apiKey: { type: 'string', description: 'API Key' },
     model: { type: 'string', description: '模型名称（TTS 朗读模型）' },
+    contextLength: { type: 'integer', minimum: 1, description: '模型上下文长度（token），默认 1000000' },
     sttModel: { type: 'string', nullable: true, description: '语音识别模型（留空则与 model 共用）' },
     audioUsage: { type: 'string', nullable: true, description: '语音用途：tts | stt | both' },
     imageProvider: { type: 'string', nullable: true, description: '图片模型供应商类型，例如 openai、apimart、openrouter、gemini' },
@@ -99,6 +102,7 @@ const updateLlmProviderBodySchema = {
     apiUrl: { type: 'string' },
     apiKey: { type: 'string' },
     model: { type: 'string' },
+    contextLength: { type: 'integer', minimum: 1 },
     sttModel: { type: 'string', nullable: true },
     audioUsage: { type: 'string', nullable: true },
     imageProvider: { type: 'string', nullable: true },
@@ -129,6 +133,7 @@ interface CreateLlmProviderBody {
   apiUrl?: string;
   apiKey: string;
   model: string;
+  contextLength?: number;
   sttModel?: string | null;
   audioUsage?: string | null;
   imageProvider?: string | null;
@@ -146,6 +151,7 @@ interface UpdateLlmProviderBody {
   apiUrl?: string;
   apiKey?: string;
   model?: string;
+  contextLength?: number;
   sttModel?: string | null;
   audioUsage?: string | null;
   imageProvider?: string | null;
@@ -402,7 +408,7 @@ export async function llmProviderGateway(app: FastifyInstance) {
     async (request, reply) => {
       const ok = await requireAuth(request, reply);
       if (!ok) return;
-      const { name, type, modelType, apiProtocol, codexWireApi, apiUrl, apiKey, model, sttModel, audioUsage, imageProvider, imageApiType, isActive, isDefault } = request.body;
+      const { name, type, modelType, apiProtocol, codexWireApi, apiUrl, apiKey, model, contextLength, sttModel, audioUsage, imageProvider, imageApiType, isActive, isDefault } = request.body;
 
       // #2: apiUrl 格式校验
       try {
@@ -424,6 +430,7 @@ export async function llmProviderGateway(app: FastifyInstance) {
           apiUrl,
           apiKey,
           model,
+          contextLength,
           sttModel,
           audioUsage,
           imageProvider,

@@ -61,14 +61,16 @@ type NormalizedSlashCommandContent = {
   }
 }
 
-function normalizeSlashCommandContent(content: string): NormalizedSlashCommandContent | null | undefined {
+function normalizeSlashCommandContent(content: string): NormalizedSlashCommandContent | undefined {
   const gitCommitMatch = content.match(/^\/git\s+commit(?:\s+([\s\S]+))?$/i)
   if (gitCommitMatch) {
     const message = gitCommitMatch[1]?.trim()
-    if (!message) return null
-    return {
-      content: `git commit -m ${JSON.stringify(message)}`,
-      gitCommand: { action: 'commit', message },
+    // 没有提交信息时不当作 git 指令，落回自然语言处理
+    if (message) {
+      return {
+        content: `git commit -m ${JSON.stringify(message)}`,
+        gitCommand: { action: 'commit', message },
+      }
     }
   }
 
@@ -2012,11 +2014,8 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
       return
     }
 
+    // 以 / 开头但未匹配到任何指令时，当作普通自然语言消息发送，不再报错
     const normalizedCommandContent = normalizeSlashCommandContent(trimmedInput)
-    if (normalizedCommandContent === null) {
-      toast.warning(i18n.t('chat.gitCommitMessageRequired'))
-      return
-    }
     const messageContent = normalizedCommandContent?.content ?? trimmedInput
 
     const mentionedDispatchableAgentNames = getMentionedDispatchableAgentNames(messageContent, chatRoom, allAgents)

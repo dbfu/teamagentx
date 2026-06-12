@@ -91,4 +91,17 @@ export const categoryService = {
       data: { sortOrder, updatedAt: new Date() },
     });
   },
+
+  // 批量更新分类排序
+  async reorderBatch(items: { id: string; sortOrder: number }[]): Promise<void> {
+    const now = new Date();
+    await prisma.$transaction(
+      items.map((item) =>
+        prisma.agentCategory.update({
+          where: { id: item.id },
+          data: { sortOrder: item.sortOrder, updatedAt: now },
+        })
+      )
+    );
+  },
 };

@@ -17,6 +17,7 @@ export interface LlmProvider {
   apiUrl: string | null
   apiKey: string
   model: string
+  contextLength: number
   sttModel: string | null
   audioUsage: AudioUsage
   imageProvider: string | null
@@ -48,6 +49,7 @@ export interface CreateLlmProviderRequest {
   apiUrl?: string
   apiKey: string
   model: string
+  contextLength?: number
   sttModel?: string | null
   audioUsage?: AudioUsage
   imageProvider?: string | null
@@ -66,6 +68,7 @@ export interface UpdateLlmProviderRequest {
   apiUrl?: string
   apiKey?: string
   model?: string
+  contextLength?: number
   sttModel?: string | null
   audioUsage?: AudioUsage
   imageProvider?: string | null
