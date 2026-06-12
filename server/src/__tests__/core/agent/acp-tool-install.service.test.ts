@@ -25,12 +25,12 @@ afterEach(() => {
 });
 
 describe('ACP Tool Install Service', () => {
-  test('uses official registry first and domestic mirror as fallback by default', () => {
+  test('uses domestic mirror first and official registry as fallback by default', () => {
     delete process.env.ACP_TOOL_INSTALL_REGISTRIES;
 
     assert.deepStrictEqual(getAcpToolInstallRegistries(), [
-      'https://registry.npmjs.org',
       'https://registry.npmmirror.com',
+      'https://registry.npmjs.org',
     ]);
   });
 
