@@ -126,6 +126,7 @@ const chatRoomSchema = {
               avatarColor: { type: 'string', nullable: true },
               description: { type: 'string', nullable: true },
               type: { type: 'string', enum: ['builtin', 'acp'] },
+              acpTool: { type: 'string', nullable: true },
               agentLevel: { type: 'string', enum: ['normal', 'system'] },
               speechConfig: {
                 type: 'object',

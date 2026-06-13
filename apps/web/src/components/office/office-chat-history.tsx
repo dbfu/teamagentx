@@ -65,10 +65,20 @@ export function OfficeChatHistory({
         createdAt: now,
         updatedAt: now,
         user: msg.isHuman
-          ? { id: msg.userId ?? '', socketId: '', username: msg.user ?? '用户', avatar: msg.avatar ?? null }
+          ? {
+              id: msg.userId ?? '',
+              socketId: '',
+              username: typeof msg.user === 'string' ? msg.user : (msg.user?.username ?? '用户'),
+              avatar: (typeof msg.user === 'object' ? msg.user?.avatar : null) ?? msg.avatar ?? null,
+            }
           : null,
-        agent: msg.agentId && msg.agentName
-          ? { id: msg.agentId, name: msg.agentName, avatar: msg.avatar ?? null, avatarColor: msg.avatarColor ?? null }
+        agent: msg.agentId && (msg.agentName || msg.agent?.name)
+          ? {
+              id: msg.agentId,
+              name: msg.agent?.name ?? msg.agentName ?? '',
+              avatar: msg.agent?.avatar ?? msg.avatar ?? null,
+              avatarColor: msg.agent?.avatarColor ?? msg.avatarColor ?? null,
+            }
           : null,
       })
     })

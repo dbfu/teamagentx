@@ -29,7 +29,7 @@ function buildArchiveTitle(messages: Array<{ content: string; time: Date }>) {
 export const messageService = {
   async create(data: {
     id: string;
-    type: 'MESSAGE' | 'REPLY';
+    type: 'MESSAGE' | 'REPLY' | 'SYSTEM';
     content: string;
     time: Date;
     userId?: string | null;
@@ -54,7 +54,7 @@ export const messageService = {
    */
   async createWithAttachments(data: {
     id: string;
-    type: 'MESSAGE' | 'REPLY';
+    type: 'MESSAGE' | 'REPLY' | 'SYSTEM';
     content: string;
     time: Date;
     userId?: string | null;

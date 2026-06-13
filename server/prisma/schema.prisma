@@ -335,19 +335,23 @@ model TaskQueue {
 
 // 快速对话会话
 model QuickChatSession {
-  id         String    @id @default(uuid())
-  agentId    String
-  chatRoomId String
-  sessionId  String    @unique // 随机会话 ID（目录名）
-  workDir    String // 完整工作目录路径
-  status     String    @default("active") // active, archived
-  createdAt  DateTime  @default(now())
-  archivedAt DateTime?
+  id                         String    @id @default(uuid())
+  agentId                    String
+  chatRoomId                 String
+  sessionId                  String    @unique // 随机会话 ID（目录名）
+  workDir                    String // 完整工作目录路径
+  claudeLocalSessionId       String? // 当前绑定的本地 Claude 会话 ID
+  claudeLocalSessionTitle    String? // 当前绑定的本地 Claude 会话标题
+  claudeLocalSessionModified DateTime? // 当前绑定的本地 Claude 会话更新时间
+  status                     String    @default("active") // active, archived
+  createdAt                  DateTime  @default(now())
+  archivedAt                 DateTime?
 
   agent    Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
   chatRoom ChatRoom @relation(fields: [chatRoomId], references: [id], onDelete: Cascade)
 
   @@index([agentId])
+  @@index([claudeLocalSessionId])
   @@index([createdAt])
 }
 

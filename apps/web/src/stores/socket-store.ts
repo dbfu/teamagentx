@@ -43,18 +43,22 @@ export type AgentStatus = 'idle' | 'executing' | 'busy'
 // Socket 事件数据类型
 export interface SocketMessage {
   id: string
-  type: 'message' | 'reply'
+  type: 'message' | 'reply' | 'MESSAGE' | 'SYSTEM'
   content: string
   time: Date | string
-  user?: string
+  // 旧路径推送字符串用户名；导入 Claude 会话等新路径推送完整用户对象
+  user?: string | { id: string; username: string; avatar?: string | null; avatarColor?: string | null }
   userId?: string | null
   agentId?: string
   agentName?: string
+  agent?: { id: string; name: string; avatar?: string | null; avatarColor?: string | null }
   avatar?: string | null
   avatarColor?: string | null
   chatRoomId: string
   replyMessageId?: string | null
   isHuman?: boolean
+  // 批量导入的历史消息：跳过提示音与桌面通知
+  silent?: boolean
   attachments?: SocketAttachment[]
 }
 

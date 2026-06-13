@@ -231,7 +231,7 @@ function findLatestOwnerMentionReplyTarget(params: {
   return candidates[0]
 }
 
-export type SidePanelMode = 'agents' | 'context' | 'history' | 'stream' | 'agent-detail' | 'record-detail' | 'reply-detail' | 'room-settings' | 'execution-detail' | 'cron-tasks' | 'task-queue' | 'task-board' | null
+export type SidePanelMode = 'agents' | 'context' | 'history' | 'stream' | 'agent-detail' | 'record-detail' | 'reply-detail' | 'room-settings' | 'execution-detail' | 'cron-tasks' | 'task-queue' | 'task-board' | 'claude-local-sessions' | null
 
 interface MentionAgent {
   id: string
@@ -1977,9 +1977,17 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
 
   // 处理新消息
   const handleNewMessage = useCallback((msg: any) => {
+    const userPayload = msg.user && typeof msg.user === 'object' ? msg.user : null
+    const agentPayload = msg.agent && typeof msg.agent === 'object' ? msg.agent : null
+    const messageType = msg.type === 'reply'
+      ? 'REPLY'
+      : msg.type === 'SYSTEM'
+        ? 'SYSTEM'
+        : 'MESSAGE'
+
     const newMessage: Message = {
       id: msg.id,
-      type: msg.type === 'reply' ? 'REPLY' : 'MESSAGE',
+      type: messageType,
       content: msg.content,
       time: typeof msg.time === 'string' ? msg.time : new Date(msg.time).toISOString(),
       userId: msg.userId ?? null,
@@ -1996,12 +2004,17 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
       avatarColor: msg.avatarColor ?? null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      user: msg.isHuman ? { id: msg.userId ?? '', socketId: '', username: msg.user ?? '用户', avatar: msg.avatar ?? null } : null,
-      agent: msg.agentId && msg.agentName ? {
-        id: msg.agentId,
-        name: msg.agentName,
-        avatar: msg.avatar ?? null,
-        avatarColor: msg.avatarColor ?? null,
+      user: msg.isHuman ? {
+        id: userPayload?.id ?? msg.userId ?? '',
+        socketId: userPayload?.socketId ?? '',
+        username: userPayload?.username ?? (typeof msg.user === 'string' ? msg.user : '用户'),
+        avatar: userPayload?.avatar ?? msg.avatar ?? null,
+      } : null,
+      agent: msg.agentId && (msg.agentName || agentPayload?.name) ? {
+        id: agentPayload?.id ?? msg.agentId,
+        name: agentPayload?.name ?? msg.agentName,
+        avatar: agentPayload?.avatar ?? msg.avatar ?? null,
+        avatarColor: agentPayload?.avatarColor ?? msg.avatarColor ?? null,
       } : null,
       attachments: msg.attachments ? msg.attachments.map((att: any) => ({
         id: att.id || generateUUID(),

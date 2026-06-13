@@ -10,6 +10,7 @@ export type SystemAgentInfo = {
   avatarColor: string | null;
   description: string | null;
   type: string;
+  acpTool: string | null;
   agentLevel: string;
   workDir: string | null;
   speechConfig: string | null;
@@ -41,6 +42,7 @@ export async function getSystemAgentsCached(): Promise<SystemAgentInfo[]> {
       avatarColor: true,
       description: true,
       type: true,
+      acpTool: true,
       agentLevel: true,
       workDir: true,
       speechConfig: true,

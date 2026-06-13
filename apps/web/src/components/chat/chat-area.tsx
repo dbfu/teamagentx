@@ -267,8 +267,8 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
     } else if (sidePanelMode === 'context' || sidePanelMode === 'history') {
       // context/history 关闭时返回助手详情
       setSidePanelMode('agent-detail')
-    } else if (sidePanelMode === 'reply-detail' || sidePanelMode === 'room-settings' || sidePanelMode === 'execution-detail') {
-      // reply-detail/room-settings/execution-detail 关闭时直接关闭面板
+    } else if (sidePanelMode === 'reply-detail' || sidePanelMode === 'room-settings' || sidePanelMode === 'execution-detail' || sidePanelMode === 'claude-local-sessions') {
+      // reply-detail/room-settings/execution-detail/claude-local-sessions 关闭时直接关闭面板
       setSidePanelMode(null)
     } else {
       setSidePanelMode(null)
@@ -292,6 +292,11 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
 
   const handleOpenMessageArchives = () => {
     setShowMessageArchives(true)
+  }
+
+  const handleOpenClaudeLocalSessions = () => {
+    setSelectedRoomAgent(null)
+    setSidePanelMode('claude-local-sessions')
   }
 
   const handleDeleteChatRoom = () => {
@@ -345,6 +350,7 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
           onOpenEnvVars={() => setShowEnvVars(true)}
           onOpenCustomCommands={() => setShowCustomCommands(true)}
           onScreenshot={() => setShowScreenshot(true)}
+          onOpenClaudeLocalSessions={handleOpenClaudeLocalSessions}
         />
       )}
 

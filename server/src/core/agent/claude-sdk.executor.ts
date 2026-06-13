@@ -21,6 +21,7 @@ import treeKill from 'tree-kill';
 import { z } from 'zod/v4';
 import { agentMemoryService } from '../../modules/agent-memory/agent-memory.service.js';
 import { buildRoomMessageIndexSection } from '../../modules/message/room-message-index.service.js';
+import { quickChatSessionService } from '../../modules/quick-chat-session/quick-chat-session.service.js';
 import { skillInstallService } from '../../modules/skill/skill-install.service.js';
 import type { AttachmentData } from '../../modules/task-queue/task-queue.service.js';
 import { backgroundCommandService } from '../shell/background-command.service.js';
@@ -676,6 +677,29 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
       },
     );
     this.resetSession();
+  }
+
+  private async applyLocalClaudeSessionBinding(): Promise<void> {
+    if (this.stateless || !this.agentId) return;
+
+    const binding = await quickChatSessionService.getClaudeSessionBindingByChatRoom(
+      this.chatRoomId,
+      this.agentId,
+    );
+    if (!binding?.sessionId) return;
+
+    if (this.sessionId === binding.sessionId && this.hasStartedSession) return;
+
+    this.sessionId = binding.sessionId;
+    this.hasStartedSession = true;
+    this.saveSessionId();
+    logClaudeSdkDebug('applied local Claude session binding', {
+      agentName: this.name,
+      agentId: this.agentId,
+      chatRoomId: this.chatRoomId,
+      sessionId: this.sessionId,
+      title: binding.title,
+    });
   }
 
   private loadSessionState(): {
@@ -2044,6 +2068,7 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
         throw new DOMException('执行已被用户中断', 'AbortError');
       }
 
+      await this.applyLocalClaudeSessionBinding();
       this.ensureResumableSessionExists();
       const shouldResume = this.hasStartedSession;
       try {

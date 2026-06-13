@@ -412,6 +412,17 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
     })
   }, [isCurrentlyPlaying, message.agentId, message.chatRoomId, message.content, voiceConfig])
 
+  if (message.type === 'SYSTEM') {
+    return (
+      <div className={cn("flex justify-center py-2", isMobile ? "px-2" : "px-6")}>
+        <div className="max-w-[min(720px,90%)] rounded-full border border-border/60 bg-muted/50 px-3 py-1.5 text-center text-xs text-muted-foreground">
+          <span className="break-words">{message.content}</span>
+          <span className="ml-2 text-muted-foreground/70">{formatDateTime(message.createdAt)}</span>
+        </div>
+      </div>
+    )
+  }
+
   const renderContent = (content: string) => {
     // 用户消息：普通文本展示，但 @助手 需要高亮
     if (message.isHuman) {

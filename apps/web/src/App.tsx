@@ -523,12 +523,21 @@ function AppContent() {
         isHuman: msg.isHuman ?? true,
         userId: msg.userId ?? null,
         agentId: msg.agentId ?? null,
-        user: msg.isHuman && msg.userId ? { id: msg.userId, username: msg.user ?? t('chat.user') } : null,
-        agent: msg.agentId && msg.agentName ? { id: msg.agentId, name: msg.agentName } : null,
+        user: msg.isHuman && msg.userId
+          ? {
+              id: msg.userId,
+              username: typeof msg.user === 'string'
+                ? msg.user
+                : (msg.user?.username ?? t('chat.user')),
+            }
+          : null,
+        agent: msg.agentId && (msg.agentName || msg.agent?.name)
+          ? { id: msg.agentId, name: msg.agent?.name ?? msg.agentName ?? '' }
+          : null,
       })
 
-      // 收到 Agent 回复时播放提示音
-      if (msg.agentId) {
+      // 收到 Agent 回复时播放提示音（导入历史消息为批量推送，跳过）
+      if (msg.agentId && !msg.silent) {
         playMessageSound()
       }
 
@@ -550,8 +559,8 @@ function AppContent() {
           updateUnreadCount(msg.chatRoomId, currentCount + 1)
         }
 
-        // 显示桌面通知：窗口未聚焦时都要发（不管是否在当前群聊）
-        if (isNotFocusedOrNotVisible) {
+        // 显示桌面通知：窗口未聚焦时都要发（不管是否在当前群聊）；导入历史消息跳过
+        if (isNotFocusedOrNotVisible && !msg.silent) {
           const room = chatRooms.find((chatRoom) => chatRoom.id === msg.chatRoomId)
           void showMessageNotification({
             title: room?.name || 'TeamAgentX',

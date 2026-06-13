@@ -5,11 +5,12 @@ import { cn } from '@/lib/utils'
 import { isSystemAssistantDetailBlocked } from '@/lib/system-agents'
 import { useChatStore, useThrottledStreamEvents, type SidePanelMode } from '@/stores/chat-store'
 import type { AgentStatus } from '@/stores/socket-store'
-import { Bot, ClipboardList, Clock, Info, List, Loader2, MessageSquareMore, Settings, Users } from 'lucide-react'
+import { Bot, ClipboardList, Clock, Info, List, Loader2, MessageSquareMore, MessagesSquare, Settings, Users } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AgentDetailPanel } from './agent-detail-panel'
 import { AgentsPanel } from './agents-panel'
+import { ClaudeLocalSessionsPanel } from './claude-local-sessions-panel'
 import { ContextPanel } from './context-panel'
 import { CronTasksPanel } from './cron-tasks-panel'
 import { HistoryPanel } from './history-panel'
@@ -159,6 +160,7 @@ export function ChatSidePanel({
       case 'cron-tasks': return t('chat.cronTasks')
       case 'task-queue': return t('chat.taskQueue')
       case 'task-board': return t('chat.taskBoardTitle')
+      case 'claude-local-sessions': return 'Claude 本地会话'
       default: return t('chat.groupAssistants')
     }
   }
@@ -196,6 +198,10 @@ export function ChatSidePanel({
 
     if (sidePanelMode === 'task-board') {
       return <ClipboardList className="size-4 text-blue-500" />
+    }
+
+    if (sidePanelMode === 'claude-local-sessions') {
+      return <MessagesSquare className="size-4 text-blue-500" />
     }
 
     if (sidePanelMode === 'execution-detail') {
@@ -390,11 +396,11 @@ export function ChatSidePanel({
           ? 'pt-4 pb-4 pl-4 pr-3'
           : sidePanelMode === 'task-board'
             ? 'p-3'
-          : sidePanelMode === 'stream'
-            ? 'p-0'
-          : 'pt-3 pb-3 pl-3 pr-3'
+            : sidePanelMode === 'stream'
+              ? 'p-0'
+              : 'pt-3 pb-3 pl-3 pr-3'
       )}
-      overflow={sidePanelMode === 'room-settings' || sidePanelMode === 'task-board' || sidePanelMode === 'stream' ? 'hidden' : 'auto'}
+      overflow={sidePanelMode === 'room-settings' || sidePanelMode === 'task-board' || sidePanelMode === 'stream' || sidePanelMode === 'claude-local-sessions' ? 'hidden' : 'auto'}
       widthClass={sidePanelMode === 'task-board' ? 'w-full border-l-0' : undefined}
       resizable={sidePanelMode !== 'task-board'}
       defaultWidth={370}
@@ -507,6 +513,17 @@ export function ChatSidePanel({
           onViewStream={handleViewStreamFromTaskQueue}
           onViewExecutionRecord={handleViewExecutionRecordFromTaskBoard}
           onViewTaskQueue={handleViewTaskQueueFromTaskBoard}
+        />
+      )}
+
+      {sidePanelMode === 'claude-local-sessions' && (
+        <ClaudeLocalSessionsPanel
+          chatRoomId={chatRoom.id}
+          onSwitched={() => {
+            onChatRoomChange?.()
+            // 切换完成后自动隐藏面板
+            setSidePanelMode(null)
+          }}
         />
       )}
 

@@ -5,12 +5,13 @@ import { AgentAvatarImage } from '@/lib/agent-avatars';
 import { GroupAvatarImage } from '@/lib/group-avatars';
 import { cn } from '@/lib/utils';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Box, Camera, ClipboardList, Clock, Eraser, History, KeyRound, Loader2, MoreHorizontal, Play, Scroll, Settings, Square, TerminalSquare, UserPlus, Users } from 'lucide-react';
+import { Box, Camera, ClipboardList, Clock, Eraser, History, KeyRound, Loader2, MessagesSquare, MoreHorizontal, Play, Scroll, Settings, Square, TerminalSquare, UserPlus, Users } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useUIStore } from '@/stores';
+import { useChatStore } from '@/stores/chat-store';
 import { ChatRoomOpenMenu } from './chat-room-open-menu';
 
 interface ChatAreaHeaderProps {
@@ -30,6 +31,7 @@ interface ChatAreaHeaderProps {
   onOpenEnvVars?: () => void
   onOpenCustomCommands?: () => void
   onScreenshot?: () => void
+  onOpenClaudeLocalSessions?: () => void
 }
 
 
@@ -49,6 +51,7 @@ export function ChatAreaHeader({
   onOpenEnvVars,
   onOpenCustomCommands,
   onScreenshot,
+  onOpenClaudeLocalSessions,
 }: ChatAreaHeaderProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -57,6 +60,7 @@ export function ChatAreaHeader({
   // 检测是否在移动端
   const isMobile = useIsMobile()
   const terminalOpenTarget = useUIStore((state) => state.terminalOpenTarget)
+  const allAgents = useChatStore((state) => state.allAgents)
   const [packageScripts, setPackageScripts] = useState<PackageScriptsResult | null>(null)
   const [loadingScripts, setLoadingScripts] = useState(false)
   const [runningScript, setRunningScript] = useState<string | null>(null)
@@ -72,6 +76,17 @@ export function ChatAreaHeader({
   const moreTooltipSuppressTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
   const visibleScripts = packageScripts?.scripts ?? []
   const shouldShowPackageScriptsMenu = (packageScripts?.hasScripts ?? packageScripts?.hasPackageJson ?? false) || visibleScripts.length > 0
+  const quickChatRoomAgent = chatRoom.chatRoomAgents?.find((member) => member.agentId === chatRoom.quickChatAgentId)?.agent
+  const quickChatAgent = quickChatRoomAgent?.acpTool
+    ? quickChatRoomAgent
+    : allAgents.find((agent) => agent.id === chatRoom.quickChatAgentId)
+  const shouldShowClaudeLocalSessions =
+    Boolean(chatRoom.isQuickChatRoom)
+    && (
+      (quickChatAgent?.type === 'acp' && quickChatAgent?.acpTool === 'claude')
+      || chatRoom.name.trim().toLowerCase() === 'claude'
+    )
+    && Boolean(onOpenClaudeLocalSessions)
 
   const loadPackageScripts = useCallback(async (options?: { reset?: boolean; showLoading?: boolean }) => {
     const requestId = packageScriptsRequestRef.current + 1
@@ -499,6 +514,15 @@ export function ChatAreaHeader({
                 <TooltipContent side="bottom">{t('chat.more')}</TooltipContent>
               </Tooltip>
               <DropdownMenuContent align="end" className="w-44">
+                {shouldShowClaudeLocalSessions && (
+                  <DropdownMenuItem
+                    className="hover:bg-primary/10 hover:text-primary hover:[&_svg]:text-primary focus:bg-primary/10 focus:text-primary focus:[&_svg]:text-primary"
+                    onClick={onOpenClaudeLocalSessions}
+                  >
+                    <MessagesSquare className="size-4 text-current" />
+                    Claude 本地会话
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem
                   className="hover:bg-primary/10 hover:text-primary hover:[&_svg]:text-primary focus:bg-primary/10 focus:text-primary focus:[&_svg]:text-primary"
                   onClick={onOpenRoomRules}

@@ -268,6 +268,7 @@ export interface ChatRoomAgent {
     avatarColor: string | null
     description: string | null
     type?: 'builtin' | 'acp'
+    acpTool?: string | null
     agentLevel?: 'normal' | 'system'
     workDir?: string | null
     speechConfig?: AgentSpeechConfig | null
@@ -881,7 +882,7 @@ export interface Attachment {
 // 消息相关类型
 export interface Message {
   id: string
-  type: 'MESSAGE' | 'REPLY'
+  type: 'MESSAGE' | 'REPLY' | 'SYSTEM'
   content: string
   time: string
   userId: string | null
@@ -1322,6 +1323,17 @@ export const agentApi = {
     return request<QuickChatSession | null>(`/chatrooms/${chatRoomId}/quick-chat-session`)
   },
 
+  async listLocalClaudeSessions(chatRoomId: string): Promise<ApiResponse<LocalClaudeSessionsResult>> {
+    return request<LocalClaudeSessionsResult>(`/chatrooms/${chatRoomId}/quick-chat-session/claude-local-sessions`)
+  },
+
+  async switchLocalClaudeSession(chatRoomId: string, sessionId: string): Promise<ApiResponse<SwitchLocalClaudeSessionResult>> {
+    return request<SwitchLocalClaudeSessionResult>(`/chatrooms/${chatRoomId}/quick-chat-session/claude-local-session`, {
+      method: 'POST',
+      body: JSON.stringify({ sessionId }),
+    })
+  },
+
   // 获取助手全局长期记忆
   async getMemory(agentId: string): Promise<ApiResponse<{ content: string }>> {
     return request<{ content: string }>(`/agents/${agentId}/memory`)
@@ -1384,6 +1396,9 @@ export interface QuickChatSession {
   chatRoomId: string
   sessionId: string
   workDir: string
+  claudeLocalSessionId?: string | null
+  claudeLocalSessionTitle?: string | null
+  claudeLocalSessionModified?: string | null
   status: 'active' | 'archived'
   createdAt: string
   archivedAt: string | null
@@ -1397,6 +1412,33 @@ export interface QuickChatSession {
       agentId: string | null
     }>
   }
+}
+
+export interface LocalClaudeSession {
+  sessionId: string
+  title: string
+  summary: string
+  customTitle: string | null
+  firstPrompt: string | null
+  cwd: string | null
+  gitBranch: string | null
+  tag: string | null
+  createdAt: string | null
+  lastModified: string
+  fileSize: number | null
+  isCurrent: boolean
+}
+
+export interface LocalClaudeSessionsResult {
+  workDir: string
+  currentSessionId: string | null
+  sessions: LocalClaudeSession[]
+}
+
+export interface SwitchLocalClaudeSessionResult {
+  claudeSession: LocalClaudeSession
+  importedCount: number
+  messages?: Message[]
 }
 
 // 上传结果类型
