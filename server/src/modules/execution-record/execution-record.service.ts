@@ -1,7 +1,7 @@
 import prisma from '../../lib/prisma.js';
 
 // 执行事件类型
-export type ExecutionEventType = 'thinking' | 'tool_call' | 'output';
+export type ExecutionEventType = 'thinking' | 'tool_call' | 'output' | 'model';
 
 // 执行事件接口
 export interface ExecutionEvent {
@@ -19,6 +19,17 @@ export interface ExecutionEvent {
     // output
     type?: string;  // action type
     target?: string;
+    // model fallback
+    role?: 'primary' | 'fallback';
+    attempt?: number;
+    providerId?: string | null;
+    providerName?: string;
+    model?: string;
+    error?: string;
+    sameError?: boolean;
+    willSwitch?: boolean;
+    from?: string;
+    to?: string;
   };
 }
 

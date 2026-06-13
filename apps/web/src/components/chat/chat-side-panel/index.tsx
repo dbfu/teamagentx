@@ -3,8 +3,8 @@ import { AgentContextInfo, ChatRoom, debugApi, ExecutionRecord, Message } from '
 import { AgentAvatarImage } from '@/lib/agent-avatars'
 import { cn } from '@/lib/utils'
 import { isSystemAssistantDetailBlocked } from '@/lib/system-agents'
-import { useChatStore, type SidePanelMode } from '@/stores/chat-store'
-import type { AgentStatus, StreamEvent } from '@/stores/socket-store'
+import { useChatStore, useThrottledStreamEvents, type SidePanelMode } from '@/stores/chat-store'
+import type { AgentStatus } from '@/stores/socket-store'
 import { Bot, ClipboardList, Clock, Info, List, Loader2, MessageSquareMore, Settings, Users } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -38,7 +38,6 @@ interface ChatSidePanelProps {
   streamingViewAgent: { messageId: string; agentId: string; name: string } | null
   streamingMessageStartTime?: number
   completedAgents: Set<string>
-  streamEvents: Map<string, StreamEvent[]>
   agentStatuses?: Map<string, AgentStatus>
   recordsLoading: boolean
   executionRecords: ExecutionRecord[]
@@ -73,7 +72,6 @@ export function ChatSidePanel({
   streamingViewAgent,
   streamingMessageStartTime,
   completedAgents,
-  streamEvents,
   agentStatuses,
   recordsLoading,
   executionRecords,
@@ -96,6 +94,8 @@ export function ChatSidePanel({
   onInsertMention,
 }: ChatSidePanelProps) {
   const { t } = useTranslation()
+  // 仅打开流式面板时读取事件，关闭状态不启动轮询。
+  const streamEvents = useThrottledStreamEvents(80, open && sidePanelMode === 'stream')
   // 记录面板来源，用于返回上一级
   const previousModeRef = useRef<SidePanelMode | null>(null)
   // 任务看板点详情时，定位主聊天区到对应消息
@@ -473,7 +473,7 @@ export function ChatSidePanel({
         </div>
       )}
 
-      {sidePanelMode === 'stream' && (
+      {open && sidePanelMode === 'stream' && (
         <StreamPanel
           streamingViewAgent={streamingViewAgent}
           messageStartTime={streamingMessageStartTime}

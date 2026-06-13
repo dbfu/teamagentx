@@ -2,8 +2,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { cn, coerceThinkingText, truncateToolName } from '@/lib/utils';
 import type { StreamEvent } from '@/stores/socket-store';
 import * as ScrollAreaPrimitive from '@radix-ui/react-scroll-area';
-import { Bot, CheckCircle, ChevronDown, ChevronRight, Clock, Loader2, Square } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { Bot, CheckCircle, ChevronDown, ChevronRight, Clock, Square } from 'lucide-react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { MarkdownContent } from '../markdown-content';
 import { CodeEditToolContent, CodeReadToolOutput, isCodeEditTool, isCodeReadTool, renderToolValue } from './tool-call-content';
@@ -36,7 +36,7 @@ function getTodoStatusIcon(status: string, t: (key: string) => string): { icon: 
     case 'completed':
       return { icon: <CheckCircle className="size-3.5" />, color: 'text-green-500', label: t('chat.taskCompleted') }
     case 'in_progress':
-      return { icon: <Loader2 className="size-3.5 animate-spin" />, color: 'text-blue-500', label: t('chat.taskInProgress') }
+      return { icon: null, color: 'text-blue-500', label: t('chat.taskInProgress') }
     case 'pending':
       return { icon: <div className="size-3.5 rounded-full border-2 border-muted-foreground/40" />, color: 'text-muted-foreground', label: t('chat.taskPending') }
     default:
@@ -153,6 +153,138 @@ interface StreamPanelProps {
   chatRoomId?: string
   onStop?: (agentId: string, messageId?: string) => void
 }
+
+// 单个事件项：抽成 memo 组件，流式高频重渲染时跳过内容未变化的已完成事件，
+// 避免每个 token 都把整段事件列表（含 Markdown 解析）全部重渲染。
+const StreamEventItem = memo(function StreamEventItem({
+  event,
+  t,
+}: {
+  event: StreamEvent
+  t: (key: string) => string
+}) {
+  // 思考过程
+  if (event.type === 'thinking') {
+    return (
+      <Collapsible defaultOpen className="rounded border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 text-xs">
+        <CollapsibleTrigger asChild>
+          <div className="group flex items-center gap-2 p-2 cursor-pointer hover:opacity-80 min-w-0">
+            <CollapsibleStateIcon />
+            <span className="inline-flex items-center px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 font-medium">
+              🧠 {t('chat.thinkingProcess')}
+            </span>
+            <TimeIndicator event={event} />
+          </div>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <MarkdownContent
+            content={coerceThinkingText(event.content)}
+            disableMermaid
+            className="px-3 pb-3 dark:prose-invert [&_pre]:bg-muted/50 [&_pre]:p-2 [&_pre]:rounded [&_code]:text-xs"
+          />
+        </CollapsibleContent>
+      </Collapsible>
+    )
+  }
+
+  // 工具调用
+  if (event.type === 'tool_call' && event.toolCall) {
+    const tool = event.toolCall
+    const isToolCompleted = tool.status === 'completed' || tool.status === 'error'
+
+    // 普通工具调用
+    return (
+      <Collapsible className={cn(
+        'rounded border text-xs',
+        tool.status === 'error' ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800' :
+        tool.status === 'completed' ? 'bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800' :
+        'bg-purple-50 dark:bg-purple-950/30 border-purple-200 dark:border-purple-800'
+      )}>
+        <CollapsibleTrigger asChild>
+          <div className="group flex items-center gap-2 p-2 cursor-pointer hover:opacity-80 min-w-0">
+            <CollapsibleStateIcon className="shrink-0" />
+            <div className="flex-1 w-0 min-w-0">
+              <span
+                className="inline-flex items-center px-2 py-0.5 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 font-medium truncate max-w-full"
+                title={tool.name || t('chat.toolCall')}
+              >
+                🔧 {truncateToolName(tool.name)}
+              </span>
+            </div>
+            {tool.status === 'in_progress' && (
+              <span className="text-purple-600 dark:text-purple-400 whitespace-nowrap shrink-0">
+                <span>{t('chat.executing')}</span>
+              </span>
+            )}
+            {tool.status === 'completed' && (
+              <span className="text-green-600 dark:text-green-400 whitespace-nowrap shrink-0">{t('chat.toolCompleted')}</span>
+            )}
+            {tool.status === 'error' && (
+              <span className="text-red-600 dark:text-red-400 whitespace-nowrap shrink-0">{t('chat.toolError')}</span>
+            )}
+            <TimeIndicator event={event} isCompleted={isToolCompleted} />
+          </div>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="px-2 pb-2 space-y-2">
+            {tool.input && Object.keys(tool.input).length > 0 && (
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">{t('chat.toolInput')}</div>
+                {isCodeEditTool(tool) ? (
+                  <CodeEditToolContent tool={tool} />
+                ) : (
+                  <div className="font-mono text-muted-foreground bg-muted/50 rounded p-2 overflow-hidden">
+                    <pre className="whitespace-pre-wrap text-xs break-all">{JSON.stringify(tool.input, null, 2)}</pre>
+                  </div>
+                )}
+              </div>
+            )}
+            {tool.output && (
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">{t('chat.toolOutput')}</div>
+                {isCodeReadTool(tool) && typeof tool.output === 'string' ? (
+                  <CodeReadToolOutput tool={tool} />
+                ) : (
+                  <div className="font-mono text-muted-foreground bg-muted/50 rounded p-2 overflow-hidden">
+                    <pre className="whitespace-pre-wrap text-xs break-all">
+                      {renderToolValue(tool.output)}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+    )
+  }
+
+  // 输出内容
+  if (event.type === 'output') {
+    return (
+      <Collapsible defaultOpen className="rounded border border-primary/20 bg-primary/5 text-xs">
+          <CollapsibleTrigger asChild>
+            <div className="group flex items-center gap-2 p-2 cursor-pointer hover:opacity-80 min-w-0">
+              <CollapsibleStateIcon />
+              <span className="inline-flex items-center px-2 py-0.5 rounded bg-primary/10 text-primary font-medium">
+              📤 {t('chat.outputContent')}
+            </span>
+            <TimeIndicator event={event} />
+          </div>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <MarkdownContent
+            content={coerceThinkingText(event.content)}
+            disableMermaid
+            className="px-3 pb-3 dark:prose-invert [&_pre]:bg-muted/50 [&_pre]:p-2 [&_pre]:rounded [&_code]:text-xs"
+          />
+        </CollapsibleContent>
+      </Collapsible>
+    )
+  }
+
+  return null
+})
 
 export function StreamPanel({
   streamingViewAgent,
@@ -360,7 +492,6 @@ export function StreamPanel({
         ) : (
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2 text-xs text-primary">
-              <Loader2 className="size-3 animate-spin" />
               <span>{t('common.processing')}</span>
               <TotalTimeIndicator events={events} isRunning={Boolean(isExecuting)} startTime={messageStartTime} />
             </div>
@@ -387,9 +518,6 @@ export function StreamPanel({
               <span className="text-muted-foreground">
                 {t('chat.tasksCompleted', {completed: todos.filter(t => t.status === 'completed').length, total: todos.length})}
               </span>
-              {todosStatus === 'in_progress' && (
-                <Loader2 className="size-3 animate-spin text-blue-500" />
-              )}
               {todosStatus === 'completed' && todos.every(t => t.status === 'completed') && (
                 <CheckCircle className="size-3 text-green-500" />
               )}
@@ -425,136 +553,14 @@ export function StreamPanel({
           if (displayEvents.length === 0 && todos.length === 0) {
             return (
               <div className="flex items-center justify-center py-6 text-muted-foreground">
-                <Loader2 className="size-4 animate-spin mr-2" />
                 <span>{t('chat.executing')}</span>
               </div>
             )
           }
 
-          return displayEvents.map((event) => {
-            // 思考过程
-            if (event.type === 'thinking') {
-              return (
-                <Collapsible key={event.id} defaultOpen className="rounded border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 text-xs">
-                  <CollapsibleTrigger asChild>
-                    <div className="group flex items-center gap-2 p-2 cursor-pointer hover:opacity-80 min-w-0">
-                      <CollapsibleStateIcon />
-                      <span className="inline-flex items-center px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 font-medium">
-                        🧠 {t('chat.thinkingProcess')}
-                      </span>
-                      <TimeIndicator event={event} />
-                    </div>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <MarkdownContent
-                      content={coerceThinkingText(event.content)}
-                      disableMermaid
-                      className="px-3 pb-3 dark:prose-invert [&_pre]:bg-muted/50 [&_pre]:p-2 [&_pre]:rounded [&_code]:text-xs"
-                    />
-                  </CollapsibleContent>
-                </Collapsible>
-              )
-            }
-
-            // 工具调用
-            if (event.type === 'tool_call' && event.toolCall) {
-              const tool = event.toolCall
-              const isToolCompleted = tool.status === 'completed' || tool.status === 'error'
-
-              // 普通工具调用
-              return (
-                <Collapsible key={event.id} className={cn(
-                  'rounded border text-xs',
-                  tool.status === 'error' ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800' :
-                  tool.status === 'completed' ? 'bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800' :
-                  'bg-purple-50 dark:bg-purple-950/30 border-purple-200 dark:border-purple-800'
-                )}>
-                  <CollapsibleTrigger asChild>
-                    <div className="group flex items-center gap-2 p-2 cursor-pointer hover:opacity-80 min-w-0">
-                      <CollapsibleStateIcon className="shrink-0" />
-                      <div className="flex-1 w-0 min-w-0">
-                        <span
-                          className="inline-flex items-center px-2 py-0.5 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 font-medium truncate max-w-full"
-                          title={tool.name || t('chat.toolCall')}
-                        >
-                          🔧 {truncateToolName(tool.name)}
-                        </span>
-                      </div>
-                      {tool.status === 'in_progress' && (
-                        <span className="flex items-center gap-1 text-purple-600 dark:text-purple-400 whitespace-nowrap shrink-0">
-                          <Loader2 className="size-3 animate-spin shrink-0" />
-                          <span>{t('chat.executing')}</span>
-                        </span>
-                      )}
-                      {tool.status === 'completed' && (
-                        <span className="text-green-600 dark:text-green-400 whitespace-nowrap shrink-0">{t('chat.toolCompleted')}</span>
-                      )}
-                      {tool.status === 'error' && (
-                        <span className="text-red-600 dark:text-red-400 whitespace-nowrap shrink-0">{t('chat.toolError')}</span>
-                      )}
-                      <TimeIndicator event={event} isCompleted={isToolCompleted} />
-                    </div>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <div className="px-2 pb-2 space-y-2">
-                      {tool.input && Object.keys(tool.input).length > 0 && (
-                        <div>
-                          <div className="text-xs text-muted-foreground mb-1">{t('chat.toolInput')}</div>
-                          {isCodeEditTool(tool) ? (
-                            <CodeEditToolContent tool={tool} />
-                          ) : (
-                            <div className="font-mono text-muted-foreground bg-muted/50 rounded p-2 overflow-hidden">
-                              <pre className="whitespace-pre-wrap text-xs break-all">{JSON.stringify(tool.input, null, 2)}</pre>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                      {tool.output && (
-                        <div>
-                          <div className="text-xs text-muted-foreground mb-1">{t('chat.toolOutput')}</div>
-                          {isCodeReadTool(tool) && typeof tool.output === 'string' ? (
-                            <CodeReadToolOutput tool={tool} />
-                          ) : (
-                            <div className="font-mono text-muted-foreground bg-muted/50 rounded p-2 overflow-hidden">
-                              <pre className="whitespace-pre-wrap text-xs break-all">
-                                {renderToolValue(tool.output)}
-                              </pre>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </CollapsibleContent>
-                </Collapsible>
-              )
-            }
-
-            // 输出内容
-            if (event.type === 'output') {
-              return (
-                <Collapsible key={event.id} defaultOpen className="rounded border border-primary/20 bg-primary/5 text-xs">
-                    <CollapsibleTrigger asChild>
-                      <div className="group flex items-center gap-2 p-2 cursor-pointer hover:opacity-80 min-w-0">
-                        <CollapsibleStateIcon />
-                        <span className="inline-flex items-center px-2 py-0.5 rounded bg-primary/10 text-primary font-medium">
-                        📤 {t('chat.outputContent')}
-                      </span>
-                      <TimeIndicator event={event} />
-                    </div>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <MarkdownContent
-                      content={coerceThinkingText(event.content)}
-                      disableMermaid
-                      className="px-3 pb-3 dark:prose-invert [&_pre]:bg-muted/50 [&_pre]:p-2 [&_pre]:rounded [&_code]:text-xs"
-                    />
-                  </CollapsibleContent>
-                </Collapsible>
-              )
-            }
-
-            return null
-          })
+          return displayEvents.map((event) => (
+            <StreamEventItem key={event.id} event={event} t={t} />
+          ))
         })()}
         </div>
       </OverlayScrollArea>

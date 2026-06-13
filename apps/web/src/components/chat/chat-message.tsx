@@ -49,6 +49,98 @@ interface TypingAgent {
   startedAt?: number
 }
 
+interface TypingAgentsIndicatorProps {
+  agents?: TypingAgent[]
+  messageId: string
+  onAgentClick?: (messageId: string, agentId: string, agentName: string) => void
+}
+
+const TypingAgentsIndicator = memo(function TypingAgentsIndicator({
+  agents,
+  messageId,
+  onAgentClick,
+}: TypingAgentsIndicatorProps) {
+  const { t } = useTranslation()
+  const [durationNow, setDurationNow] = useState(() => Date.now())
+  const [dotFrame, setDotFrame] = useState(0)
+
+  useEffect(() => {
+    const hasExecutingAgent = agents?.some(
+      (agent) => agent.status !== 'pending' && agent.status !== 'cancelled',
+    )
+    if (!hasExecutingAgent) return
+
+    setDurationNow(Date.now())
+    setDotFrame(0)
+    const durationIntervalId = window.setInterval(() => {
+      setDurationNow(Date.now())
+    }, 1000)
+    const dotsIntervalId = window.setInterval(() => {
+      setDotFrame((frame) => (frame + 1) % 3)
+    }, 500)
+    return () => {
+      window.clearInterval(durationIntervalId)
+      window.clearInterval(dotsIntervalId)
+    }
+  }, [agents])
+
+  if (!agents || agents.length === 0) return null
+
+  return (
+    <div className="flex flex-wrap gap-1">
+      {agents.map((agent) => {
+        if (agent.status === 'cancelled') {
+          return (
+            <div
+              key={agent.agentId}
+              className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+            >
+              <XCircle className="size-3" />
+              <span>{t('chat.agentStopped', { name: agent.agentName })}</span>
+            </div>
+          )
+        }
+
+        const isPending = agent.status === 'pending'
+        const elapsedText = !isPending && agent.startedAt
+          ? formatDuration(durationNow - agent.startedAt)
+          : null
+        const detailBlocked = isSystemAssistantDetailBlocked({
+          id: agent.agentId,
+          name: agent.agentName,
+        })
+
+        return (
+          <div
+            key={agent.agentId}
+            className={cn(
+              'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs leading-none',
+              detailBlocked ? 'cursor-default' : 'cursor-pointer',
+              isPending
+                ? detailBlocked ? 'bg-muted text-muted-foreground' : 'bg-muted text-muted-foreground hover:bg-accent'
+                : detailBlocked ? 'bg-primary/5 text-primary' : 'bg-primary/5 text-primary hover:bg-primary/10',
+            )}
+            onClick={detailBlocked
+              ? undefined
+              : () => onAgentClick?.(messageId, agent.agentId, agent.agentName)}
+          >
+            {isPending && <Clock className="size-3" />}
+            {!isPending && (
+              <span className="flex h-3 w-4 items-center justify-start text-xs font-bold leading-[12px]">
+                {'.'.repeat(dotFrame + 1)}
+              </span>
+            )}
+            <span>
+              {agent.agentName} {isPending ? t('chat.agentPending') : t('chat.agentExecuting')}
+              {elapsedText && ` ${t('chat.elapsedTime', { time: elapsedText })}`}
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+})
+
 interface MentionAgent {
   id: string
   name: string
@@ -134,19 +226,7 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
 
   // 图片查看器状态
   const [viewerImage, setViewerImage] = useState<{ url: string; name: string } | null>(null)
-  const [durationTick, setDurationTick] = useState(0)
-  const durationNow = useMemo(() => Date.now(), [durationTick])
   // isSpeaking = isCurrentlyPlaying（通过 store 统一管理，手动和自动播放图标一致）
-
-  useEffect(() => {
-    const hasExecutingAgent = typingAgents?.some((agent) => agent.status !== 'pending' && agent.status !== 'cancelled')
-    if (!hasExecutingAgent) return
-
-    const intervalId = window.setInterval(() => {
-      setDurationTick((value) => value + 1)
-    }, 1000)
-    return () => window.clearInterval(intervalId)
-  }, [typingAgents])
 
   // 处理右键菜单（桌面端）
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
@@ -504,63 +584,6 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
     )
   }
 
-  // 正在处理的机器人标签
-  const renderTypingAgents = () => {
-    if (!typingAgents || typingAgents.length === 0) return null
-
-    return (
-      <div className="flex flex-wrap gap-1">
-        {typingAgents.map((agent) => {
-          // 新增：取消状态
-          if (agent.status === 'cancelled') {
-            return (
-              <div
-                key={agent.agentId}
-                className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
-              >
-                <XCircle className="size-3" />
-                <span>{t('chat.agentStopped', { name: agent.agentName })}</span>
-              </div>
-            )
-          }
-
-          const isPending = agent.status === 'pending'
-          const elapsedText = !isPending && agent.startedAt
-            ? formatDuration(durationNow - agent.startedAt)
-            : null
-          // 群调度助手等无详情系统助手：typing 标签仅展示，不可点击（点击无对应执行详情）。
-          const detailBlocked = isSystemAssistantDetailBlocked({ id: agent.agentId, name: agent.agentName })
-          return (
-            <div
-              key={agent.agentId}
-              className={cn(
-                "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs leading-none",
-                detailBlocked ? "cursor-default" : "cursor-pointer",
-                isPending
-                  ? detailBlocked ? "bg-muted text-muted-foreground" : "bg-muted text-muted-foreground hover:bg-accent"
-                  : detailBlocked ? "bg-primary/5 text-primary" : "bg-primary/5 text-primary hover:bg-primary/10"
-              )}
-              onClick={detailBlocked ? undefined : () => onTypingAgentClick?.(message.id, agent.agentId, agent.agentName)}
-            >
-              {isPending && <Clock className="size-3" />}
-              {!isPending && (
-                <span className="flex items-center gap-0 h-3 justify-center">
-                  <span className="animate-[dot-appear_1.5s_infinite] text-xs leading-[12px] font-bold">.</span>
-                  <span className="animate-[dot-appear_1.5s_0.3s_infinite] text-xs leading-[12px] font-bold">.</span>
-                  <span className="animate-[dot-appear_1.5s_0.6s_infinite] text-xs leading-[12px] font-bold">.</span>
-                </span>
-              )}
-              <span>
-                {agent.agentName} {isPending ? t('chat.agentPending') : t('chat.agentExecuting')}
-                {elapsedText && ` ${t('chat.elapsedTime', { time: elapsedText })}`}
-              </span>
-            </div>
-          )
-        })}
-      </div>
-    )
-  }
-
   const renderSpeechButton = () => {
     if (message.isHuman || !showSpeechButton) return null
     if (!voiceConfig?.enabled || !normalizedContent || !supportsSpeechPlayback(voiceConfig)) return null
@@ -798,7 +821,11 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
                 {renderMessageBody(isAudioOnly ? "" : "px-4 py-2")}
               </div>
               <div className="flex items-center gap-2">
-                {renderTypingAgents()}
+                <TypingAgentsIndicator
+                  agents={typingAgents}
+                  messageId={message.id}
+                  onAgentClick={onTypingAgentClick}
+                />
                 {renderReplyCount()}
               </div>
             </div>
@@ -892,7 +919,11 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
               {renderMessageBody(isAudioOnly ? "" : "px-4 py-3")}
             </div>
             <div className="flex items-center gap-2 flex-wrap">
-              {renderTypingAgents()}
+              <TypingAgentsIndicator
+                agents={typingAgents}
+                messageId={message.id}
+                onAgentClick={onTypingAgentClick}
+              />
               {renderReplyCount()}
               {renderSpeechButton()}
               {renderExecutionDetailButton()}

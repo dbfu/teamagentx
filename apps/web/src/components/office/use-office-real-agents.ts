@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useChatStore } from '@/stores/chat-store'
+import { useChatStore, useThrottledStreamEvents } from '@/stores/chat-store'
 import type { CharacterAnim } from './office-character'
 import type { ChatRoomAgent } from '@/lib/agent-api'
 import { chatRoomApi } from '@/lib/agent-api'
@@ -450,7 +450,8 @@ const ACTIVITY_DURATION: Record<string, [number, number]> = {
 export function useOfficeRealAgents(chatRoomId: string) {
   const { t } = useTranslation()
   const agentStatuses = useChatStore((state) => state.agentStatuses)
-  const streamEvents = useChatStore((state) => state.streamEvents)
+  // 节流读取，避免流式每 token 驱动 3D 助手动画/气泡重算
+  const streamEvents = useThrottledStreamEvents()
 
   const [chatRoomAgents, setChatRoomAgents] = useState<ChatRoomAgent[]>([])
   const [chatRoomName, setChatRoomName] = useState<string>('')

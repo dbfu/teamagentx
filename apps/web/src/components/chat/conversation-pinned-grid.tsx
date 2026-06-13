@@ -2,7 +2,6 @@ import { ChatRoom } from '@/lib/agent-api'
 import { AgentAvatarImage } from '@/lib/agent-avatars'
 import { GroupAvatarImage } from '@/lib/group-avatars'
 import { cn } from '@/lib/utils'
-import { Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { formatUnreadCount } from './conversation-list-item'
 
@@ -24,7 +23,6 @@ export function ConversationPinnedGrid({
   rooms,
   selectedId,
   unreadCounts,
-  executingChatRooms,
   pendingOwnerMentionRoomIds,
   isMobile,
   onSelect,
@@ -47,7 +45,6 @@ export function ConversationPinnedGrid({
       {pinnedRooms.map((room) => {
         const unreadCount = unreadCounts[room.id] || 0
         const unreadDisplay = formatUnreadCount(unreadCount)
-        const isExecuting = executingChatRooms.has(room.id)
         const hasOwnerMention = unreadCount > 0 && pendingOwnerMentionRoomIds.has(room.id)
 
         return (
@@ -73,12 +70,6 @@ export function ConversationPinnedGrid({
               {unreadDisplay && (
                 <div className={cn("absolute -right-1 -top-1 flex items-center justify-center rounded-full bg-red-500 font-medium text-white", isMobile ? "min-h-5 min-w-5 px-1.5 text-xs" : "min-h-4 min-w-4 px-1 text-[10px]")}>
                   {unreadDisplay}
-                </div>
-              )}
-              {/* 助手执行中标识 */}
-              {isExecuting && (
-                <div className={cn("absolute -bottom-1 -right-1 flex items-center justify-center rounded-full bg-primary", isMobile ? "size-4" : "size-3")}>
-                  <Loader2 className={cn("animate-spin text-white", isMobile ? "size-3" : "size-2.5")} />
                 </div>
               )}
             </div>

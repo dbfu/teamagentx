@@ -1,6 +1,5 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
-import { createElement, useRef, useCallback, useEffect, useMemo } from 'react'
+import { createElement, useRef, useCallback, useEffect, useMemo, useState } from 'react'
 import i18n from '@/i18n'  // i18n 全局实例
 import { Agent, Message, messageApi, agentApi, ExecutionRecord, debugApi, AgentDebugInfo, ChatRoom, chatRoomApi, AgentContextInfo, uploadApi, type GitCommandAction } from '@/lib/agent-api'
 import { useSocketStore } from './socket-store'
@@ -410,6 +409,70 @@ interface ChatStore {
 const MAX_VOICE_IDS_PER_ROOM = 500
 const MAX_INPUT_HISTORY_SIZE = 50
 const EMPTY_MESSAGES: Message[] = []
+const CHAT_UI_STORAGE_KEY = 'chat-ui-storage'
+const CHAT_UI_PERSIST_DELAY = 500
+
+type ChatUiPersistedState = Pick<
+  ChatStore,
+  | 'scrollPositions'
+  | 'scrollAnchors'
+  | 'inputDraftsByRoom'
+  | 'handledVoiceMessageIdsByRoom'
+  | 'playedVoiceMessageIdsByRoom'
+>
+
+const EMPTY_CHAT_UI_PERSISTED_STATE: ChatUiPersistedState = {
+  scrollPositions: {},
+  scrollAnchors: {},
+  inputDraftsByRoom: {},
+  handledVoiceMessageIdsByRoom: {},
+  playedVoiceMessageIdsByRoom: {},
+}
+
+function readChatUiPersistedState(): ChatUiPersistedState {
+  if (typeof window === 'undefined') return EMPTY_CHAT_UI_PERSISTED_STATE
+
+  try {
+    const raw = window.localStorage.getItem(CHAT_UI_STORAGE_KEY)
+    if (!raw) return EMPTY_CHAT_UI_PERSISTED_STATE
+    const parsed = JSON.parse(raw) as Partial<ChatUiPersistedState> & {
+      state?: Partial<ChatUiPersistedState>
+    }
+    const state = 'state' in parsed && parsed.state ? parsed.state : parsed
+    return {
+      scrollPositions: state.scrollPositions ?? {},
+      scrollAnchors: state.scrollAnchors ?? {},
+      inputDraftsByRoom: state.inputDraftsByRoom ?? {},
+      handledVoiceMessageIdsByRoom: state.handledVoiceMessageIdsByRoom ?? {},
+      playedVoiceMessageIdsByRoom: state.playedVoiceMessageIdsByRoom ?? {},
+    }
+  } catch {
+    return EMPTY_CHAT_UI_PERSISTED_STATE
+  }
+}
+
+function selectChatUiPersistedState(state: ChatStore): ChatUiPersistedState {
+  return {
+    scrollPositions: state.scrollPositions,
+    scrollAnchors: state.scrollAnchors,
+    inputDraftsByRoom: state.inputDraftsByRoom,
+    handledVoiceMessageIdsByRoom: state.handledVoiceMessageIdsByRoom,
+    playedVoiceMessageIdsByRoom: state.playedVoiceMessageIdsByRoom,
+  }
+}
+
+function hasChatUiPersistedStateChanged(
+  previous: ChatUiPersistedState,
+  next: ChatUiPersistedState,
+): boolean {
+  return previous.scrollPositions !== next.scrollPositions
+    || previous.scrollAnchors !== next.scrollAnchors
+    || previous.inputDraftsByRoom !== next.inputDraftsByRoom
+    || previous.handledVoiceMessageIdsByRoom !== next.handledVoiceMessageIdsByRoom
+    || previous.playedVoiceMessageIdsByRoom !== next.playedVoiceMessageIdsByRoom
+}
+
+const initialChatUiPersistedState = readChatUiPersistedState()
 
 function findCachedMessage(
   messages: Message[],
@@ -521,8 +584,7 @@ function getNextInputDrafts(
   }
 }
 
-export const useChatStore = create<ChatStore>()(
-  persist((set, get) => ({
+export const useChatStore = create<ChatStore>()((set, get) => ({
   // 消息状态
   messages: [],
   messagesByRoom: {},
@@ -532,7 +594,7 @@ export const useChatStore = create<ChatStore>()(
   loadingOlderMessagesByRoom: {},
   hasOlderMessagesByRoom: {},
   inputValue: '',
-  inputDraftsByRoom: {},
+  inputDraftsByRoom: initialChatUiPersistedState.inputDraftsByRoom,
   lastSentDraftsByRoom: {},
   inputHistory: [],
   inputHistoryCursor: -1,
@@ -552,11 +614,11 @@ export const useChatStore = create<ChatStore>()(
   // 消息定位状态
   scrollToMessageId: null,
   forceScrollToBottom: false,
-  scrollPositions: {},  // 滚动位置记忆
-  scrollAnchors: {},
+  scrollPositions: initialChatUiPersistedState.scrollPositions,
+  scrollAnchors: initialChatUiPersistedState.scrollAnchors,
   playingVoiceMessageId: null,
-  handledVoiceMessageIdsByRoom: {},
-  playedVoiceMessageIdsByRoom: {},
+  handledVoiceMessageIdsByRoom: initialChatUiPersistedState.handledVoiceMessageIdsByRoom,
+  playedVoiceMessageIdsByRoom: initialChatUiPersistedState.playedVoiceMessageIdsByRoom,
   selectedRecord: null,
   selectedRoomAgent: null,
   streamingViewAgent: null,
@@ -1227,20 +1289,121 @@ export const useChatStore = create<ChatStore>()(
       }
     }
   },
-  }),
-  {
-    name: 'chat-ui-storage',
-    partialize: (state) => ({
-      scrollPositions: state.scrollPositions,
-      scrollAnchors: state.scrollAnchors,
-      inputDraftsByRoom: state.inputDraftsByRoom,
-      handledVoiceMessageIdsByRoom: state.handledVoiceMessageIdsByRoom,
-      playedVoiceMessageIdsByRoom: state.playedVoiceMessageIdsByRoom,
-    }),
+}))
+
+if (typeof window !== 'undefined') {
+  let observedState = selectChatUiPersistedState(useChatStore.getState())
+  let pendingState: ChatUiPersistedState | null = null
+  let persistTimer: ReturnType<typeof setTimeout> | null = null
+
+  const flushChatUiState = () => {
+    if (persistTimer !== null) {
+      clearTimeout(persistTimer)
+      persistTimer = null
+    }
+    if (!pendingState) return
+
+    const stateToPersist = pendingState
+    pendingState = null
+    try {
+      window.localStorage.setItem(CHAT_UI_STORAGE_KEY, JSON.stringify({
+        state: stateToPersist,
+        version: 0,
+      }))
+    } catch (error) {
+      console.warn('[chat-ui-storage] Failed to persist chat UI state:', error)
+    }
+  }
+
+  const unsubscribeChatUiPersistence = useChatStore.subscribe((state) => {
+    const nextState = selectChatUiPersistedState(state)
+    if (!hasChatUiPersistedStateChanged(observedState, nextState)) return
+
+    observedState = nextState
+    pendingState = nextState
+    if (persistTimer !== null) clearTimeout(persistTimer)
+    persistTimer = setTimeout(flushChatUiState, CHAT_UI_PERSIST_DELAY)
   })
-)
+
+  const flushOnPageHide = () => flushChatUiState()
+  window.addEventListener('pagehide', flushOnPageHide)
+  window.addEventListener('beforeunload', flushOnPageHide)
+
+  import.meta.hot?.dispose(() => {
+    flushChatUiState()
+    unsubscribeChatUiPersistence()
+    window.removeEventListener('pagehide', flushOnPageHide)
+    window.removeEventListener('beforeunload', flushOnPageHide)
+  })
+}
 
 // 监听 agent 事件（提取为可复用 hook：群聊侧栏与 3D 办公室共用同一套流式事件订阅）
+// ============================================================================
+// 流式增量批处理
+// ----------------------------------------------------------------------------
+// 后端按 token 推送 output/thinking 增量。若每个增量都立即写 store，会每次
+// `new Map(streamEvents)` 并把「已累积的整段内容」重新拼接一遍——累积越长越慢
+// （O(n²)），长回复时持续吃满主线程（与面板开关、渲染无关）。
+// 这里按 streamKey 缓冲增量，~100ms 合并 flush 一次：一次 Map 复制 + 一次批量拼接，
+// 拼接次数下降约 100 倍。
+// 任何会结构化读写 streamEvents 的处理器（typing/done/tool_call 等）在执行前必须先
+// flush，把待写增量落盘，否则它们删除/替换 key 后定时器再 flush 会造出幻影事件。
+// ============================================================================
+type StreamDelta = { type: 'output' | 'thinking'; text: string }
+const pendingStreamDeltas = new Map<string, StreamDelta[]>()
+let streamFlushTimer: ReturnType<typeof setTimeout> | null = null
+const STREAM_FLUSH_INTERVAL = 100
+
+function applyStreamDeltas(events: StreamEvent[], deltas: StreamDelta[]): StreamEvent[] {
+  // 先把连续同类型的增量合并成「段」，避免在一次 flush 内反复拼接长字符串
+  const segments: StreamDelta[] = []
+  for (const d of deltas) {
+    const last = segments[segments.length - 1]
+    if (last && last.type === d.type) last.text += d.text
+    else segments.push({ type: d.type, text: d.text })
+  }
+  let result = events
+  let copied = false
+  segments.forEach((seg, idx) => {
+    const lastEvent = result[result.length - 1]
+    const now = Date.now()
+    if (lastEvent?.type === seg.type) {
+      if (!copied) { result = [...result]; copied = true }
+      result[result.length - 1] = { ...lastEvent, content: (lastEvent.content || '') + seg.text }
+    } else {
+      const withEnd = result.map(e => ({ ...e, endTime: e.endTime ?? now }))
+      result = [...withEnd, { id: `${seg.type}-${now}-${idx}`, type: seg.type, content: seg.text, timestamp: now }]
+      copied = true
+    }
+  })
+  return result
+}
+
+function flushPendingStreamDeltas() {
+  if (streamFlushTimer != null) {
+    clearTimeout(streamFlushTimer)
+    streamFlushTimer = null
+  }
+  if (pendingStreamDeltas.size === 0) return
+  const { streamEvents, setStreamEvents } = useChatStore.getState()
+  const next = new Map(streamEvents)
+  for (const [streamKey, deltas] of pendingStreamDeltas) {
+    const events = next.get(streamKey) || []
+    next.set(streamKey, applyStreamDeltas(events, deltas))
+  }
+  pendingStreamDeltas.clear()
+  setStreamEvents(next)
+}
+
+function enqueueStreamDelta(streamKey: string, delta: StreamDelta) {
+  const list = pendingStreamDeltas.get(streamKey)
+  if (list) list.push(delta)
+  else pendingStreamDeltas.set(streamKey, [delta])
+  if (streamFlushTimer == null) {
+    streamFlushTimer = setTimeout(flushPendingStreamDeltas, STREAM_FLUSH_INTERVAL)
+  }
+}
+
 export function useAgentEventSubscription(chatRoomId: string | null) {
   const {
     isConnected,
@@ -1276,6 +1439,8 @@ export function useAgentEventSubscription(chatRoomId: string | null) {
     if (!isConnected) return
 
     const unsubTyping = onAgentTyping((data) => {
+      // 新任务会删除该 key，先把待写增量落盘，避免之后定时器再 flush 造出幻影事件
+      flushPendingStreamDeltas()
       // agent:typing 表示新任务开始，清空该 messageId_agentId 的历史流式数据
       const state = useChatStore.getState()
       const { typingAgents, completedAgents, toolCalls, streamingThinking, streamingContent, streamEvents } = state
@@ -1334,6 +1499,8 @@ export function useAgentEventSubscription(chatRoomId: string | null) {
     })
 
     const unsubDone = onAgentDone((data) => {
+      // 完成会删除该 key，先把待写增量落盘
+      flushPendingStreamDeltas()
       const state = useChatStore.getState()
       const { completedAgents, typingAgents, streamEvents, streamingViewAgent, sidePanelMode } = state
 
@@ -1402,6 +1569,7 @@ export function useAgentEventSubscription(chatRoomId: string | null) {
 
     // 恢复状态：切回来时恢复 typing 状态，不清理已有数据
     const unsubResume = onAgentResume((data) => {
+      flushPendingStreamDeltas()
       const state = useChatStore.getState()
       const { typingAgents, completedAgents } = state
 
@@ -1442,80 +1610,22 @@ export function useAgentEventSubscription(chatRoomId: string | null) {
     })
 
     const unsubStream = onAgentStream((data) => {
-      const state = useChatStore.getState()
-      const { streamEvents } = state
-
-      // 更新事件流：检查最后一个事件是否是 output（按 messageId_agentId 存储）
-      const streamKey = `${data.messageId}_${data.agentId}`
-      const newStreamEvents = new Map(streamEvents)
-      const events = newStreamEvents.get(streamKey) || []
-      const lastEvent = events[events.length - 1]
-      const now = Date.now()
-
-      if (lastEvent?.type === 'output') {
-        // 在同一个 output 卡片内累加增量片段
-        const updatedEvents = [...events]
-        updatedEvents[updatedEvents.length - 1] = {
-          ...lastEvent,
-          content: (lastEvent.content || '') + data.content,
-        }
-        newStreamEvents.set(streamKey, updatedEvents)
-      } else {
-        // 切换到 output，创建新卡片（不带入历史）
-        const updatedEvents = events.map(e => ({
-          ...e,
-          endTime: e.endTime ?? now,
-        }))
-        newStreamEvents.set(streamKey, [...updatedEvents, {
-          id: `output-${now}`,
-          type: 'output',
-          content: data.content,  // 增量片段作为新卡片开始
-          timestamp: now,
-        }])
-      }
-      setStreamEvents(newStreamEvents)
+      // 仅入队，由 ~100ms 节流 flush 合并写入，避免每个 token 整串重拼（O(n²)）
+      enqueueStreamDelta(`${data.messageId}_${data.agentId}`, { type: 'output', text: data.content })
     })
 
     const unsubThinking = onAgentThinking((data) => {
-      const state = useChatStore.getState()
-      const { streamEvents } = state
-
-      // 更新事件流：检查最后一个事件是否是 thinking（按 messageId_agentId 存储）
-      const streamKey = `${data.messageId}_${data.agentId}`
       // 兜底：确保思考增量为字符串，避免对象被拼接成 "[object Object]"
       const thinkingText = coerceThinkingText(data.thinking)
       // 无有效思考文本时直接跳过，避免生成空的「思考」节点
       if (!thinkingText) return
-      const newStreamEvents = new Map(streamEvents)
-      const events = newStreamEvents.get(streamKey) || []
-      const lastEvent = events[events.length - 1]
-      const now = Date.now()
-
-      if (lastEvent?.type === 'thinking') {
-        // 在同一个 thinking 卡片内累加增量片段
-        const updatedEvents = [...events]
-        updatedEvents[updatedEvents.length - 1] = {
-          ...lastEvent,
-          content: (lastEvent.content || '') + thinkingText,
-        }
-        newStreamEvents.set(streamKey, updatedEvents)
-      } else {
-        // 切换到 thinking，创建新卡片（不带入历史）
-        const updatedEvents = events.map(e => ({
-          ...e,
-          endTime: e.endTime ?? now,
-        }))
-        newStreamEvents.set(streamKey, [...updatedEvents, {
-          id: `thinking-${now}`,
-          type: 'thinking',
-          content: thinkingText,  // 增量片段作为新卡片开始
-          timestamp: now,
-        }])
-      }
-      setStreamEvents(newStreamEvents)
+      // 仅入队，由 ~100ms 节流 flush 合并写入
+      enqueueStreamDelta(`${data.messageId}_${data.agentId}`, { type: 'thinking', text: thinkingText })
     })
 
     const unsubToolCall = onAgentToolCall((data) => {
+      // 工具卡片必须排在已到达文本之后：先 flush 待写文本增量，再追加 tool_call 事件
+      flushPendingStreamDeltas()
       // 不过滤 chatRoom，让所有群聊的流式事件都能更新全局状态
       const state = useChatStore.getState()
       const { toolCalls, streamEvents } = state
@@ -1668,6 +1778,7 @@ export function useAgentEventSubscription(chatRoomId: string | null) {
 
     // 监听 agent:stopped 事件
     const unsubStopped = onAgentStopped((data) => {
+      flushPendingStreamDeltas()
       const state = useChatStore.getState()
       const { completedAgents, typingAgents, streamingViewAgent, sidePanelMode } = state
       const newCompletedAgents = new Set(completedAgents)
@@ -1695,6 +1806,7 @@ export function useAgentEventSubscription(chatRoomId: string | null) {
 
     // 监听 agent:task-cancelled 事件，更新 typingAgents 状态
     const unsubCancelled = onAgentTaskCancelled((data) => {
+      flushPendingStreamDeltas()
       const state = useChatStore.getState()
       const { typingAgents } = state
 
@@ -1728,6 +1840,8 @@ export function useAgentEventSubscription(chatRoomId: string | null) {
     // 监听缓存的流式事件（用于刷新页面后恢复）
     const unsubCachedEvents = onCachedEvents((data) => {
       if (data.chatRoomId !== chatRoomId) return
+      // 用服务端缓存事件覆盖该 key 前，先把待写增量落盘
+      flushPendingStreamDeltas()
 
       const { streamEvents } = useChatStore.getState()
       const streamKey = `${data.messageId}_${data.agentId}`
@@ -1737,6 +1851,8 @@ export function useAgentEventSubscription(chatRoomId: string | null) {
     })
 
     return () => {
+      // 卸载/重订阅前 flush 待写增量并清定时器
+      flushPendingStreamDeltas()
       unsubTyping()
       unsubDone()
       unsubResume()
@@ -1755,6 +1871,31 @@ export function useAgentEventSubscription(chatRoomId: string | null) {
 }
 
 // 导出一个组合 hook，用于 chat-area.tsx
+/**
+ * 以 ~80ms 节流读取 streamEvents。
+ *
+ * streamEvents 在流式过程中每个 token 都会被替换，若用 `useChatStore((s) => s.streamEvents)`
+ * 直接订阅，消费组件会每 token 重渲染一次。改用轮询读取，把重渲染频率限制在 ≤12.5fps。
+ * 空闲时 Map 引用不变，`setState` 传入同值会被 React 跳过，无额外开销；调用方卸载后停止轮询。
+ */
+export function useThrottledStreamEvents(
+  intervalMs = 80,
+  enabled = true,
+): Map<string, StreamEvent[]> {
+  const [streamEvents, setStreamEvents] = useState<Map<string, StreamEvent[]>>(
+    () => useChatStore.getState().streamEvents
+  )
+  useEffect(() => {
+    if (!enabled) return
+    setStreamEvents(useChatStore.getState().streamEvents)
+    const id = window.setInterval(() => {
+      setStreamEvents(useChatStore.getState().streamEvents)
+    }, intervalMs)
+    return () => window.clearInterval(id)
+  }, [enabled, intervalMs])
+  return streamEvents
+}
+
 export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => void) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const prevChatRoomIdRef = useRef<string | null>(null)
@@ -1782,12 +1923,12 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
   const showClearConfirm = useChatStore((s) => s.showClearConfirm)
   const clearing = useChatStore((s) => s.clearing)
   const typingAgents = useChatStore((s) => s.typingAgents)
-  const streamingContent = useChatStore((s) => s.streamingContent)
-  const streamingThinking = useChatStore((s) => s.streamingThinking)
-  const toolCalls = useChatStore((s) => s.toolCalls)
+  // toolCalls / streamingContent / streamingThinking 仅由流式面板按需消费，ChatArea 不使用。
+  // 此前在此订阅会让整个 ChatArea 随工具调用等高频流式事件空转重渲染（工具密集的助手尤甚）。
   const completedAgents = useChatStore((s) => s.completedAgents)
   const selectedReplyMessage = useChatStore((s) => s.selectedReplyMessage)
-  const streamEvents = useChatStore((s) => s.streamEvents)
+  // 注意：streamEvents 在流式过程中每个 token 都会被替换，若在此订阅会导致整个
+  // ChatArea 每 token 重渲染。改由真正消费它的 ChatSidePanel 自行（节流）读取。
   const agentStatuses = useChatStore((s) => s.agentStatuses)
   const executingChatRooms = useChatStore((s) => s.executingChatRooms)
   const executionDetailRecord = useChatStore((s) => s.executionDetailRecord)
@@ -2439,9 +2580,6 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     loadingOlderMessages,
     hasOlderMessages,
     typingAgents,
-    streamingContent,
-    streamingThinking,
-    toolCalls,
     completedAgents,
     mentionAgents,
     sidePanelMode,
@@ -2465,7 +2603,6 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     setShowClearConfirm,
     clearing,
     availableAgents,
-    streamEvents,
     agentStatuses,
     executingChatRooms,
     loadOlderMessages: loadOlderMessagesWrapper,

@@ -75,6 +75,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
   const { user: socketUser } = useSocketStore()
   const { theme, setTheme, brandTheme, setBrandTheme } = useTheme()
   const setSidePanelMode = useChatStore((s) => s.setSidePanelMode)
+  const loadAllAgents = useChatStore((s) => s.loadAllAgents)
   const updateState = useSyncExternalStore(
     updateManager.subscribe,
     updateManager.getSnapshot,
@@ -215,10 +216,12 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
       imageGeneration: data.imageGeneration,
     })
     if (response.success) {
+      await loadAllAgents()
+      onRefreshChatRooms?.()
       setIsCreateAssistantOpen(false)
       return true
     } else {
-      toast.error(t('assistant.createFailed'))
+      toast.error(response.error || t('assistant.createFailed'))
       return false
     }
   }

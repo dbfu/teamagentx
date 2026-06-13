@@ -364,13 +364,16 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
       imageGeneration: data.imageGeneration,
     })
     if (response.success) {
+      const createdCategoryId = response.data?.categoryId ?? data.categoryId ?? null
       await fetchData()
+      setSearchQuery('')
+      setActiveTabKey(createdCategoryId ?? UNCATEGORIZED_TAB_KEY)
       setIsEditModalOpen(false)
       setEditingAssistant(null)
       setIsCreateModalOpen(false)
       return true
     } else {
-      toast.error(t('assistant.createFailed'))
+      toast.error(response.error || t('assistant.createFailed'))
       return false
     }
   }
@@ -1051,7 +1054,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
                                 closeMenu()
                               } else {
                                 setOpenMenuId(id)
-                                setContextMenuPosition(pos ? null : null)
+                                setContextMenuPosition(pos ?? null)
                               }
                             }}
                             onEdit={openEditModal}

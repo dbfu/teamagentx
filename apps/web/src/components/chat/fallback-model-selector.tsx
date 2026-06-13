@@ -42,12 +42,12 @@ export function FallbackModelSelector({
             return (
               <label
                 key={provider.id}
-                className="flex cursor-pointer items-start gap-3 border-b border-border px-3 py-2 last:border-b-0 hover:bg-accent/60"
+                className="flex cursor-pointer items-center gap-3 border-b border-border px-3 py-2 last:border-b-0 hover:bg-accent/60"
               >
                 <Checkbox
                   checked={checked}
                   onCheckedChange={() => toggleProvider(provider.id)}
-                  className="mt-0.5"
+                  className="shrink-0"
                 />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm text-foreground">{provider.name}</span>

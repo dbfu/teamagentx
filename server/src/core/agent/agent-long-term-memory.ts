@@ -63,10 +63,13 @@ export function buildAgentLongTermMemoryInstructions(
   agentId: string | null | undefined,
   agentName: string,
 ): string {
-  ensureAgentLongTermMemoryFile(agentId, agentName);
+  const memoryFile = ensureAgentLongTermMemoryFile(agentId, agentName);
 
   return `[Long-Term Memory Rules]
-You have a configured long-term memory file managed by TeamAgentX. Do not display its local file path to users.
+You have a configured long-term memory file managed by TeamAgentX. Its local path is:
+${memoryFile}
+
+Use this exact file path when reading or editing long-term memory with filesystem tools or shell commands. Do not display or mention this local file path in final replies to users.
 
 Write rules:
 - When the user explicitly asks you to remember long-lived information, preferences, identity details, project habits, or constraints, organize the information and write it to this Markdown file yourself.

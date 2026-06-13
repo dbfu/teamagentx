@@ -42,6 +42,92 @@ interface AuthenticatedSocket extends Socket {
 }
 
 export function setupSocket(io: Server) {
+  type PendingStreamSegment =
+    | { type: 'output'; content: string }
+    | { type: 'thinking'; content: string };
+
+  type PendingStreamBatch = {
+    chatRoomId: string;
+    messageId: string;
+    agentId: string;
+    agentName: string;
+    segments: PendingStreamSegment[];
+    timer: ReturnType<typeof setTimeout>;
+  };
+
+  const STREAM_EMIT_INTERVAL = 50;
+  const pendingStreamBatches = new Map<string, PendingStreamBatch>();
+  const getStreamBatchKey = (chatRoomId: string, messageId: string, agentId: string) =>
+    `${chatRoomId}_${messageId}_${agentId}`;
+
+  const flushStreamBatch = (key: string) => {
+    const batch = pendingStreamBatches.get(key);
+    if (!batch) return;
+
+    clearTimeout(batch.timer);
+    pendingStreamBatches.delete(key);
+    for (const segment of batch.segments) {
+      if (segment.type === 'output') {
+        io.to(batch.chatRoomId).emit('agent:stream', {
+          messageId: batch.messageId,
+          agentId: batch.agentId,
+          agentName: batch.agentName,
+          content: segment.content,
+        });
+      } else {
+        io.to(batch.chatRoomId).emit('agent:thinking', {
+          messageId: batch.messageId,
+          agentId: batch.agentId,
+          agentName: batch.agentName,
+          thinking: segment.content,
+        });
+      }
+    }
+  };
+
+  const flushAgentStreams = (chatRoomId: string, agentId: string, messageId?: string) => {
+    if (messageId) {
+      flushStreamBatch(getStreamBatchKey(chatRoomId, messageId, agentId));
+      return;
+    }
+
+    for (const [key, batch] of pendingStreamBatches) {
+      if (batch.chatRoomId === chatRoomId && batch.agentId === agentId) {
+        flushStreamBatch(key);
+      }
+    }
+  };
+
+  const enqueueStreamSegment = (
+    type: PendingStreamSegment['type'],
+    content: string,
+    data: { messageId: string; agentId: string; agentName: string },
+    chatRoomId: string,
+  ) => {
+    if (!content) return;
+    const key = getStreamBatchKey(chatRoomId, data.messageId, data.agentId);
+    const existing = pendingStreamBatches.get(key);
+    if (existing) {
+      const lastSegment = existing.segments[existing.segments.length - 1];
+      if (lastSegment?.type === type) {
+        lastSegment.content += content;
+      } else {
+        existing.segments.push({ type, content } as PendingStreamSegment);
+      }
+      return;
+    }
+
+    const timer = setTimeout(() => flushStreamBatch(key), STREAM_EMIT_INTERVAL);
+    pendingStreamBatches.set(key, {
+      chatRoomId,
+      messageId: data.messageId,
+      agentId: data.agentId,
+      agentName: data.agentName,
+      segments: [{ type, content } as PendingStreamSegment],
+      timer,
+    });
+  };
+
   const emitMessageToChatRoomMembers = async (msg: Message, chatRoomId: string) => {
     // 发给群聊房间（当前在群聊内的 socket）
     io.to(chatRoomId).emit('message', msg);
@@ -100,6 +186,7 @@ export function setupSocket(io: Server) {
 
   // Emit done indicator when agent finishes working
   const emitDone = (data: { agentId: string; agentName: string; triggerMessageId: string; executionRecordId?: string; messageIds?: string[]; duration?: number | null; totalTokens?: number | null; cacheReadTokens?: number | null; model?: string | null }, chatRoomId: string) => {
+    flushAgentStreams(chatRoomId, data.agentId, data.triggerMessageId);
     stopTypingLoop(chatRoomId);
     io.to(chatRoomId).emit('agent:done', data);
 
@@ -121,16 +208,17 @@ export function setupSocket(io: Server) {
 
   // Emit streaming content
   const emitStream = (data: { messageId: string; agentId: string; agentName: string; content: string }, chatRoomId: string) => {
-    io.to(chatRoomId).emit('agent:stream', data);
+    enqueueStreamSegment('output', data.content, data, chatRoomId);
   };
 
   // Emit thinking content
   const emitThinking = (data: { messageId: string; agentId: string; agentName: string; thinking: string }, chatRoomId: string) => {
-    io.to(chatRoomId).emit('agent:thinking', data);
+    enqueueStreamSegment('thinking', data.thinking, data, chatRoomId);
   };
 
   // Emit tool call events
   const emitToolCall = (data: { messageId: string; agentId: string; agentName: string; toolCall: ToolCall }, chatRoomId: string) => {
+    flushAgentStreams(chatRoomId, data.agentId, data.messageId);
     io.to(chatRoomId).emit('agent:tool_call', data);
   };
 
@@ -636,6 +724,7 @@ export function setupSocket(io: Server) {
         const stopped = stopAgentExecution(chatRoomId, agentId, lang);
 
         if (stopped) {
+          flushAgentStreams(chatRoomId, agentId, messageId);
           // 用户主动停止时无条件取消 watchdog 并标记中断，防止群调度介入。
           // 不能用 getActiveTasks 判断：被停止的任务在 executor 确认前仍处于
           // executing 状态，会导致竞态漏判。其他仍在运行的任务完成后会自行

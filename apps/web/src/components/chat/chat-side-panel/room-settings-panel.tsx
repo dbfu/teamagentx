@@ -60,7 +60,9 @@ export function RoomSettingsPanel({
   const nameInputRef = useRef<HTMLInputElement>(null)
   const descInputRef = useRef<HTMLInputElement>(null)
   const rulesInputRef = useRef<HTMLTextAreaElement>(null)
-  const selectableAgents = (chatRoom.chatRoomAgents || []).filter((roomAgent) => roomAgent.agent)
+  const selectableAgents = (chatRoom.chatRoomAgents || []).filter(
+    (roomAgent) => roomAgent.agent && roomAgent.agent.agentLevel !== 'system'
+  )
   const hasSelectedDefaultAgent = selectableAgents.some((roomAgent) => roomAgent.agent?.id === defaultAgentId)
 
   useEffect(() => {

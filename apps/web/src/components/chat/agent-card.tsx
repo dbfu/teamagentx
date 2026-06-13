@@ -225,7 +225,11 @@ export function AgentCard({
         <button
           onClick={(e) => {
             e.stopPropagation()
-            onToggleMenu(assistant.id, null)
+            const rect = e.currentTarget.getBoundingClientRect()
+            onToggleMenu(assistant.id, {
+              x: rect.right - 128,
+              y: rect.bottom + 6,
+            })
           }}
           className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
         >
@@ -253,22 +257,6 @@ export function AgentCard({
             onCoordinatorLogs={onCoordinatorLogs}
           />
         </FloatingMenu>
-      )}
-
-      {/* Context Menu - Dropdown */}
-      {openMenuId === assistant.id && !contextMenuPosition && (
-        <div className="absolute right-3 top-10 z-10 min-w-32 rounded-lg border border-border bg-popover p-1 shadow-lg">
-          <MenuContent
-            assistant={assistant}
-            onEdit={onEdit}
-            onCopy={onCopy}
-            onToggleStatus={onToggleStatus}
-            onDelete={onDelete}
-            onStartQuickChat={onStartQuickChat}
-            onInstallSkill={onInstallSkill}
-            onCoordinatorLogs={onCoordinatorLogs}
-          />
-        </div>
       )}
 
       {/* Header: avatar + name + subtitle */}

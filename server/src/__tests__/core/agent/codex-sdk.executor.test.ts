@@ -477,8 +477,8 @@ describe('Codex SDK Executor message context', () => {
 
       assert.match(developerInstructions, /You are a careful coding assistant\./);
       assert.match(developerInstructions, /\[Long-Term Memory Rules\]/);
-      assert.doesNotMatch(developerInstructions, /MEMORY\.md/);
-      assert.ok(!developerInstructions.includes(agentMemoryFile));
+      assert.match(developerInstructions, /Use this exact file path/);
+      assert.ok(developerInstructions.includes(agentMemoryFile));
       assert.match(
         developerInstructions,
         /最终回答请使用人类可读的 Markdown。/,

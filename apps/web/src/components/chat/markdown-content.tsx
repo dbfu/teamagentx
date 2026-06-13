@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils'
 import { Check, Copy } from 'lucide-react'
-import { type ComponentProps, isValidElement, useMemo, useRef, useState } from 'react'
+import { type ComponentProps, isValidElement, memo, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { resolveAssetUrl } from '@/lib/asset-url'
 import { MENTION_MARKER_CLASS, remarkMentions } from '@/lib/remark-mentions'
@@ -103,7 +103,7 @@ function CodeBlock({ children }: { children?: React.ReactNode }) {
   )
 }
 
-export function MarkdownContent({
+export const MarkdownContent = memo(function MarkdownContent({
   content,
   className,
   mentionAgents,
@@ -207,4 +207,4 @@ export function MarkdownContent({
       </ReactMarkdown>
     </div>
   )
-}
+})

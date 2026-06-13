@@ -2,7 +2,6 @@ import { ChatRoom } from '@/lib/agent-api'
 import { AgentAvatarImage } from '@/lib/agent-avatars'
 import { GroupAvatarImage } from '@/lib/group-avatars'
 import { cn, formatDateTime } from '@/lib/utils'
-import { Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 interface ConversationListItemProps {
@@ -31,7 +30,6 @@ export function ConversationListItem({
   room,
   selected,
   unreadCount,
-  isExecuting,
   hasOwnerMention,
   isMobile,
   onSelect,
@@ -63,12 +61,6 @@ export function ConversationListItem({
         {unreadDisplay && (
           <div className={cn("absolute -right-1 -top-1 flex items-center justify-center rounded-full bg-red-500 font-medium text-white", isMobile ? "min-h-6 min-w-6 px-2 text-sm" : "min-h-5 min-w-5 px-1.5 text-xs")}>
             {unreadDisplay}
-          </div>
-        )}
-        {/* 助手执行中标识 */}
-        {isExecuting && (
-          <div className={cn("absolute -bottom-1 -right-1 flex items-center justify-center rounded-full bg-primary", isMobile ? "size-5" : "size-4")}>
-            <Loader2 className={cn("animate-spin text-white", isMobile ? "size-4" : "size-3")} />
           </div>
         )}
       </div>

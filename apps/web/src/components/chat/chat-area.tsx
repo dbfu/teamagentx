@@ -48,7 +48,6 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
     loadingOlderMessages,
     hasOlderMessages,
     typingAgents,
-    streamEvents,
     completedAgents,
     mentionAgents,
     agentStatuses,
@@ -425,7 +424,6 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
           streamingViewAgent={streamingViewAgent}
           streamingMessageStartTime={streamingMessageStartTime}
           completedAgents={completedAgents}
-          streamEvents={streamEvents}
           agentStatuses={agentStatuses}
           recordsLoading={recordsLoading}
           executionRecords={executionRecords}

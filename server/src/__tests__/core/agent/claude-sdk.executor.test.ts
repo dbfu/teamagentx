@@ -174,8 +174,8 @@ describe('ClaudeAgentSdkExecutor background idle finish', () => {
 
       assert.match(sdkSystemPrompt, /You are a careful coding assistant\./);
       assert.match(sdkSystemPrompt, /\[Long-Term Memory Rules\]/);
-      assert.doesNotMatch(sdkSystemPrompt, /MEMORY\.md/);
-      assert.ok(!sdkSystemPrompt.includes(agentMemoryFile));
+      assert.match(sdkSystemPrompt, /Use this exact file path/);
+      assert.ok(sdkSystemPrompt.includes(agentMemoryFile));
       assert.match(
         sdkSystemPrompt,
         /最终回答请使用人类可读的 Markdown。/,

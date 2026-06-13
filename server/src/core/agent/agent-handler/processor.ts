@@ -67,6 +67,28 @@ async function resolveFallbackLlmProviders(
   return providers;
 }
 
+function addUniqueModel(models: string[], model: unknown): void {
+  if (typeof model !== 'string') return;
+  const trimmed = model.trim();
+  if (!trimmed || models.includes(trimmed)) return;
+  models.push(trimmed);
+}
+
+function collectExecutionModels(
+  events: ExecutionEvent[],
+  finalModel?: string | null,
+): string | null {
+  const models: string[] = [];
+
+  for (const event of events) {
+    if (event.type !== 'model' || event.data.type === 'switch') continue;
+    addUniqueModel(models, event.data.model);
+  }
+  addUniqueModel(models, finalModel);
+
+  return models.length > 0 ? models.join(' / ') : null;
+}
+
 // 处理队列中的任务
 export async function processQueue(chatRoomId: string, agentId: string) {
   const key = `${chatRoomId}_${agentId}`;
@@ -505,18 +527,12 @@ export async function processQueue(chatRoomId: string, agentId: string) {
           );
 
           const runWithModelFallback = async (): Promise<AgentExecResult> => {
-            if (!shouldUseModelFallback) {
-              const result = await runExecutor(executor);
-              executionDebugExecutor = executor;
-              return result;
-            }
-
             const candidates: Array<{
               provider: LlmProvider | null;
               executor: IAgentExecutor;
             }> = [{ provider: null, executor }];
 
-            for (const provider of fallbackLlmProviders) {
+            for (const provider of shouldUseModelFallback ? fallbackLlmProviders : []) {
               const fallbackExecutor = await getExecutor(
                 chatRoomId,
                 task.agentName,
@@ -531,17 +547,46 @@ export async function processQueue(chatRoomId: string, agentId: string) {
             let lastError: unknown;
             for (let index = 0; index < candidates.length; index += 1) {
               const candidate = candidates[index];
-              const providerLabel = candidate.provider
-                ? `${candidate.provider.name} (${candidate.provider.model})`
-                : 'primary';
+              const provider = candidate.provider ?? candidate.executor.getDebugInfo().llmProvider ?? null;
+              const role = index === 0 ? 'primary' : 'fallback';
+              const providerLabel = provider
+                ? `${provider.name} (${provider.model})`
+                : role === 'primary' ? 'primary' : 'fallback';
+              const pushModelEvent = (
+                status: 'in_progress' | 'completed' | 'error',
+                attempt: number,
+                extra: Record<string, unknown> = {},
+              ) => {
+                executionEvents.push({
+                  type: 'model',
+                  timestamp: Date.now(),
+                  data: {
+                    role,
+                    attempt,
+                    providerId: provider?.id ?? null,
+                    providerName: provider?.name ?? providerLabel,
+                    model: provider?.model,
+                    status,
+                    ...extra,
+                  },
+                });
+              };
 
               try {
+                pushModelEvent('in_progress', 1);
                 const result = await runExecutor(candidate.executor);
+                pushModelEvent('completed', 1, { model: result.model ?? provider?.model });
                 executionDebugExecutor = candidate.executor;
                 return result;
               } catch (firstError) {
                 if (firstError instanceof Error && firstError.name === 'AbortError') throw firstError;
                 lastError = firstError;
+                pushModelEvent('error', 1, {
+                  error: firstError instanceof Error ? firstError.message : String(firstError),
+                });
+                if (!shouldUseModelFallback) {
+                  throw firstError;
+                }
                 debugLog('agentModelAttemptFailed', {
                   chatRoomId,
                   agentId: task.agentId,
@@ -553,12 +598,20 @@ export async function processQueue(chatRoomId: string, agentId: string) {
               }
 
               try {
+                pushModelEvent('in_progress', 2);
                 const result = await runExecutor(candidate.executor);
+                pushModelEvent('completed', 2, { model: result.model ?? provider?.model });
                 executionDebugExecutor = candidate.executor;
                 return result;
               } catch (secondError) {
                 if (secondError instanceof Error && secondError.name === 'AbortError') throw secondError;
                 const sameError = normalizeExecutionError(secondError) === normalizeExecutionError(lastError);
+                const willSwitch = sameError && index < candidates.length - 1;
+                pushModelEvent('error', 2, {
+                  sameError,
+                  willSwitch,
+                  error: secondError instanceof Error ? secondError.message : String(secondError),
+                });
                 debugLog('agentModelAttemptFailed', {
                   chatRoomId,
                   agentId: task.agentId,
@@ -569,10 +622,19 @@ export async function processQueue(chatRoomId: string, agentId: string) {
                   error: secondError instanceof Error ? secondError.message : String(secondError),
                 });
                 lastError = secondError;
-                if (!sameError || index === candidates.length - 1) {
+                if (!willSwitch) {
                   throw secondError;
                 }
                 const nextProvider = candidates[index + 1]?.provider;
+                executionEvents.push({
+                  type: 'model',
+                  timestamp: Date.now(),
+                  data: {
+                    type: 'switch',
+                    from: providerLabel,
+                    to: nextProvider ? `${nextProvider.name} (${nextProvider.model})` : 'unknown',
+                  },
+                });
                 debugLog('agentModelFallbackSwitch', {
                   chatRoomId,
                   agentId: task.agentId,
@@ -636,6 +698,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
 
           // 按时间戳排序事件
           executionEvents.sort((a, b) => a.timestamp - b.timestamp);
+          const executionModels = collectExecutionModels(executionEvents, execResult?.model);
 
           const cancellationLocale = abortLocales.get(key);
           abortLocales.delete(key);
@@ -698,7 +761,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
             cancelledMessage.executionDuration = execRecord.duration ?? null;
             cancelledMessage.totalTokens = execRecord.totalTokens ?? null;
             cancelledMessage.cacheReadTokens = execRecord.cacheReadTokens ?? null;
-            cancelledMessage.model = execResult?.model ?? null;
+            cancelledMessage.model = executionModels;
 
             await messageService.create({
               id: cancelledMessage.id,
@@ -726,7 +789,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
               execRecord.duration ?? undefined,
               execRecord.totalTokens ?? undefined,
               execRecord.cacheReadTokens ?? undefined,
-              execResult?.model ?? null,
+              executionModels,
             );
             debugLog('executionRecordIdBackfilled', {
               chatRoomId,
@@ -753,7 +816,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
                 duration: execRecord.duration ?? undefined,
                 totalTokens: execRecord.totalTokens ?? undefined,
                 cacheReadTokens: execRecord.cacheReadTokens ?? undefined,
-                model: execResult?.model ?? undefined,
+                model: executionModels ?? undefined,
               },
               chatRoomId,
             );

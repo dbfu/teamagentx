@@ -23,7 +23,7 @@ import { StreamPanel } from '@/components/chat/chat-side-panel/stream-panel'
 import { TaskQueuePanel } from '@/components/chat/chat-side-panel/task-queue-panel'
 import { HistoryPanel } from '@/components/chat/chat-side-panel/history-panel'
 import { RecordDetailPanel } from '@/components/chat/chat-side-panel/record-detail-panel'
-import { useAgentEventSubscription } from '@/stores/chat-store'
+import { useAgentEventSubscription, useThrottledStreamEvents } from '@/stores/chat-store'
 import { chatRoomApi, debugApi, type ExecutionRecord, type Message } from '@/lib/agent-api'
 import { toast } from 'sonner'
 import { AgentAvatarImage } from '@/lib/agent-avatars'
@@ -767,7 +767,8 @@ export function OfficePage() {
 
   // 订阅 agent 流式事件（与群聊侧栏共用同一套订阅），用于 3D 模式内查看执行过程
   useAgentEventSubscription(chatRoomId || null)
-  const streamEvents = useChatStore((s) => s.streamEvents)
+  // 节流读取，避免 3D 办公页随流式每 token 整页重渲染
+  const streamEvents = useThrottledStreamEvents()
   const completedAgents = useChatStore((s) => s.completedAgents)
   const typingAgents = useChatStore((s) => s.typingAgents)
   const streamingViewAgent = useChatStore((s) => s.streamingViewAgent)

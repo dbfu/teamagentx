@@ -286,6 +286,76 @@ export function RecordDetailPanel({ selectedRecord }: RecordDetailPanelProps) {
               )
             }
 
+            if (event.type === 'model') {
+              const isSwitch = event.data.type === 'switch'
+              const modelStatus = event.data.status
+              const roleText = event.data.role === 'fallback' ? t('execution.fallbackModel') : t('execution.primaryModel')
+              const modelLabel = [event.data.providerName, event.data.model].filter(Boolean).join(' · ')
+              return (
+                <Collapsible key={`model-${i}`} className={cn(
+                  'rounded border text-xs',
+                  isSwitch ? 'border-blue-500/30 bg-blue-500/10' :
+                    modelStatus === 'error' ? 'border-red-500/30 bg-red-500/10' :
+                      modelStatus === 'completed' ? 'border-green-500/30 bg-green-500/10' :
+                        'border-sky-500/30 bg-sky-500/10'
+                )}>
+                  <CollapsibleTrigger asChild>
+                    <div className="group flex items-center gap-2 p-2 cursor-pointer hover:opacity-80 flex-nowrap">
+                      <CollapsibleStateIcon className="shrink-0" />
+                      <span className="inline-flex max-w-[12rem] shrink-0 items-center truncate rounded bg-sky-500/20 px-2 py-0.5 font-medium text-sky-700 dark:text-sky-400 sm:max-w-[18rem] lg:max-w-[24rem]">
+                        {isSwitch ? t('execution.modelSwitch') : roleText}
+                      </span>
+                      {!isSwitch && event.data.attempt && (
+                        <span className="whitespace-nowrap text-muted-foreground">
+                          {t('execution.attemptNumber', { count: event.data.attempt })}
+                        </span>
+                      )}
+                      {modelStatus === 'completed' && (
+                        <span className="whitespace-nowrap text-green-600 dark:text-green-400">✓ {t('execution.completed')}</span>
+                      )}
+                      {modelStatus === 'in_progress' && (
+                        <span className="whitespace-nowrap text-sky-600 dark:text-sky-400">{t('execution.running')}</span>
+                      )}
+                      {modelStatus === 'error' && (
+                        <span className="whitespace-nowrap text-red-600 dark:text-red-400">✗ {t('common.error')}</span>
+                      )}
+                    </div>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className="space-y-2 px-3 pb-3 text-xs">
+                      {isSwitch ? (
+                        <div className="text-foreground">
+                          <span className="text-muted-foreground">{t('execution.modelSwitchFrom')}</span> {event.data.from || '-'}
+                          <span className="mx-2 text-muted-foreground">-&gt;</span>
+                          <span className="text-muted-foreground">{t('execution.modelSwitchTo')}</span> {event.data.to || '-'}
+                        </div>
+                      ) : (
+                        <>
+                          <div className="text-foreground">
+                            <span className="text-muted-foreground">{t('execution.modelUsed')}</span> {modelLabel || event.data.providerName || '-'}
+                          </div>
+                          {event.data.error && (
+                            <div className="whitespace-pre-wrap break-all rounded bg-red-500/10 p-2 text-red-600 dark:text-red-400">
+                              {event.data.error}
+                            </div>
+                          )}
+                          {event.data.sameError !== undefined && (
+                            <div className="text-muted-foreground">
+                              {event.data.sameError
+                                ? event.data.willSwitch
+                                  ? t('execution.sameErrorRepeated')
+                                  : t('execution.noFallbackModelLeft')
+                                : t('execution.errorChanged')}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              )
+            }
+
             if (event.type === 'output') {
               return (
                 <Collapsible key={`output-${i}`} className="rounded border border-primary/20 bg-primary/5 text-xs">
