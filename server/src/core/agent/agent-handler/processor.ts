@@ -9,6 +9,7 @@ import { stopTypingLoop } from '../../../modules/bridge/typing-loop.js';
 import { messageService } from '../../../modules/message/message.service.js';
 import { roomMessageIndexService } from '../../../modules/message/room-message-index.service.js';
 import { todoService } from '../../../modules/todo/todo.service.js';
+import { config } from '../../../config/index.js';
 import { agentService } from '../agent.service.js';
 import { parseFallbackLlmProviderIds } from '../agent.service.js';
 import { chatRoomService } from '../../../modules/chatroom/chatroom.service.js';
@@ -43,6 +44,13 @@ import { buildAIMessage } from './message-utils.js';
 import { debugLog } from './debug.js';
 import { notifySourceAgentOnFailure } from './task-failure-notification.js';
 import { shouldSuppressInternalCoordinatorMessage } from '../internal-coordinator-agent.js';
+import { GROUP_COORDINATOR_ID } from '../system-assistant.constants.js';
+import {
+  createNoActivityMonitor,
+  NoActivityTimeoutError,
+  sleepForNoActivityRetry,
+  type NoActivityMonitor,
+} from './no-activity-timeout.js';
 
 function normalizeExecutionError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -145,8 +153,12 @@ export async function processQueue(chatRoomId: string, agentId: string) {
 
       try {
         // 创建 AbortController 用于中断执行
-        const abortController = new AbortController();
+        let abortController = new AbortController();
         abortControllers.set(key, abortController);
+        const resetAbortController = () => {
+          abortController = new AbortController();
+          abortControllers.set(key, abortController);
+        };
 
         // 获取执行器；sessionDir 只在显式指定运行目录时传入。
         const executor = await getExecutor(chatRoomId, task.agentName, task.sessionDir ?? undefined);
@@ -205,9 +217,16 @@ export async function processQueue(chatRoomId: string, agentId: string) {
           // Codex 在工具调用后直接结束（无收尾消息）时，最终回答会与已记录的中间段相同，
           // 避免在执行详情里出现两个一模一样的输出节点。
           let lastRecordedSegmentContent: string | null = null;
+          let activeNoActivityMonitor: NoActivityMonitor | null = null;
+          const markExecutionActivity = () => {
+            activeNoActivityMonitor?.markActivity();
+          };
 
           // 创建 emit 回调，在 tool 调用时直接广播消息
           const emitCallback = async (content: string, replyMessageId?: string) => {
+            if (content && content.trim()) {
+              markExecutionActivity();
+            }
             const shouldSuppressGroupMessage = shouldSuppressInternalCoordinatorMessage(
               task.agentId,
               content,
@@ -332,6 +351,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
           // 用于在执行详情里完整保留 agent 在多次工具调用之间产生的每一段文字。
           const recordCallback = (content: string) => {
             if (!content || !content.trim()) return;
+            markExecutionActivity();
             executionEvents.push({
               type: 'output',
               timestamp: Date.now(),
@@ -342,6 +362,9 @@ export async function processQueue(chatRoomId: string, agentId: string) {
 
           // 流式内容回调
           const streamCallback = (content: string) => {
+            if (content && content.trim()) {
+              markExecutionActivity();
+            }
             // 缓存流式事件（按 messageId_agentId 存储）
             const cacheKey = `${chatRoomId}_${task.messageId}_${task.agentId}`;
             let events = streamEventsCache.get(cacheKey) || [];
@@ -377,6 +400,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
             const thinking = coerceThinkingText(rawThinking);
             // 无有效思考文本时直接跳过，避免在执行记录里留下空的「思考」节点
             if (!thinking) return;
+            markExecutionActivity();
             // 合并连续的 thinking 事件
             const lastExecEvent = executionEvents[executionEvents.length - 1];
             if (lastExecEvent && lastExecEvent.type === 'thinking') {
@@ -422,6 +446,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
 
           // 工具调用回调
           const toolCallCallback = (toolCall: ToolCall) => {
+            markExecutionActivity();
             // 合并相同 toolCallId 的工具调用事件
             const execEventIndex = executionEvents.findIndex(
               e => e.type === 'tool_call' && e.data.toolCallId === toolCall.toolCallId
@@ -510,21 +535,105 @@ export async function processQueue(chatRoomId: string, agentId: string) {
           const shouldUseModelFallback = fallbackLlmProviders.length > 0;
           let executionDebugExecutor = executor;
 
-          const runExecutor = (candidateExecutor: IAgentExecutor): Promise<AgentExecResult> => (
-            candidateExecutor.exec(
-              task.messageContent + ruleReminder + bridgeContextSection,
-              emitCallback,
-              task.messageId,
-              history,
-              streamCallback,
-              toolCallCallback,
-              thinkingCallback,
-              abortController.signal,
-              attachments,  // 传递图片附件
-              recordCallback,  // 记录工具调用前的中间文本段到执行详情
-              shouldUseModelFallback ? { suppressFailureMessage: true } : undefined,
-            )
-          );
+          const configuredNoActivityTimeoutMs = Number.isFinite(config.agent.executionNoActivityTimeoutMs)
+            ? config.agent.executionNoActivityTimeoutMs
+            : 0;
+          const configuredNoActivityRetryCount = Number.isFinite(config.agent.executionNoActivityRetryCount)
+            ? config.agent.executionNoActivityRetryCount
+            : 0;
+          const configuredNoActivityRetryDelayMs = Number.isFinite(config.agent.executionNoActivityRetryDelayMs)
+            ? config.agent.executionNoActivityRetryDelayMs
+            : 0;
+          const noActivityTimeoutMs = task.agentId === GROUP_COORDINATOR_ID
+            ? 0
+            : Math.max(0, configuredNoActivityTimeoutMs);
+          const noActivityRetryCount = task.agentId === GROUP_COORDINATOR_ID
+            ? 0
+            : Math.max(0, configuredNoActivityRetryCount);
+          const noActivityRetryDelayMs = Math.max(0, configuredNoActivityRetryDelayMs);
+
+          const runExecutor = async (
+            candidateExecutor: IAgentExecutor,
+            providerLabel: string,
+            attempt: number,
+            noActivityAttempt: number,
+          ): Promise<AgentExecResult> => {
+            const monitor = createNoActivityMonitor(
+              noActivityTimeoutMs,
+              (error) => abortController.abort(error),
+              `${task.agentName} ${providerLabel} attempt ${attempt}.${noActivityAttempt}`,
+            );
+            activeNoActivityMonitor = monitor;
+            monitor.start();
+            try {
+              return await candidateExecutor.exec(
+                task.messageContent + ruleReminder + bridgeContextSection,
+                emitCallback,
+                task.messageId,
+                history,
+                streamCallback,
+                toolCallCallback,
+                thinkingCallback,
+                abortController.signal,
+                attachments,  // 传递图片附件
+                recordCallback,  // 记录工具调用前的中间文本段到执行详情
+                shouldUseModelFallback ? { suppressFailureMessage: true } : undefined,
+              );
+            } catch (error) {
+              if (monitor.didTimeout()) {
+                throw monitor.getError();
+              }
+              throw error;
+            } finally {
+              monitor.stop();
+              if (activeNoActivityMonitor === monitor) {
+                activeNoActivityMonitor = null;
+              }
+            }
+          };
+
+          const runExecutorWithNoActivityRetry = async (
+            candidateExecutor: IAgentExecutor,
+            providerLabel: string,
+            attempt: number,
+          ): Promise<AgentExecResult> => {
+            const maxNoActivityAttempts = noActivityRetryCount + 1;
+            for (let noActivityAttempt = 1; noActivityAttempt <= maxNoActivityAttempts; noActivityAttempt += 1) {
+              try {
+                return await runExecutor(candidateExecutor, providerLabel, attempt, noActivityAttempt);
+              } catch (error) {
+                if (!(error instanceof NoActivityTimeoutError) || noActivityAttempt >= maxNoActivityAttempts) {
+                  throw error;
+                }
+
+                executionEvents.push({
+                  type: 'model',
+                  timestamp: Date.now(),
+                  data: {
+                    type: 'retry',
+                    providerName: providerLabel,
+                    attempt,
+                    error: `no_activity_timeout after ${noActivityTimeoutMs}ms (silent attempt ${noActivityAttempt})`,
+                  },
+                });
+                console.warn('[processor] 助手执行长期无活动，准备重试当前 attempt', {
+                  chatRoomId,
+                  agentId: task.agentId,
+                  agentName: task.agentName,
+                  provider: providerLabel,
+                  attempt,
+                  noActivityAttempt,
+                  timeoutMs: noActivityTimeoutMs,
+                  retryDelayMs: noActivityRetryDelayMs,
+                });
+
+                resetAbortController();
+                await sleepForNoActivityRetry(noActivityRetryDelayMs, abortController.signal);
+              }
+            }
+
+            throw new NoActivityTimeoutError(`${task.agentName} no-activity retry loop exhausted`);
+          };
 
           const runWithModelFallback = async (): Promise<AgentExecResult> => {
             const candidates: Array<{
@@ -574,7 +683,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
 
               try {
                 pushModelEvent('in_progress', 1);
-                const result = await runExecutor(candidate.executor);
+                const result = await runExecutorWithNoActivityRetry(candidate.executor, providerLabel, 1);
                 pushModelEvent('completed', 1, { model: result.model ?? provider?.model });
                 executionDebugExecutor = candidate.executor;
                 return result;
@@ -599,7 +708,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
 
               try {
                 pushModelEvent('in_progress', 2);
-                const result = await runExecutor(candidate.executor);
+                const result = await runExecutorWithNoActivityRetry(candidate.executor, providerLabel, 2);
                 pushModelEvent('completed', 2, { model: result.model ?? provider?.model });
                 executionDebugExecutor = candidate.executor;
                 return result;
