@@ -1,4 +1,4 @@
-import { CheckCircle2, Download, FolderOpen, Loader2, RefreshCw, X } from 'lucide-react'
+import { CheckCircle2, Download, Loader2, RefreshCw, X } from 'lucide-react'
 import { useEffect, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import { updateManager } from '@/lib/update-manager'
@@ -76,12 +76,6 @@ export function UpdateNotification() {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
       updateManager.setError(t('settings.installFailedWithMsg', { message: msg }))
-    }
-  }
-
-  const handleShowInFolder = () => {
-    if (filePath) {
-      window.electronAPI?.showUpdateInFolder?.(filePath)
     }
   }
 
@@ -168,22 +162,12 @@ export function UpdateNotification() {
           </>
         )}
         {status === 'downloaded' && (
-          <>
-            <button
-              onClick={handleShowInFolder}
-              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
-              title={t('settings.openLocationHint')}
-            >
-              <FolderOpen className="size-4" />
-              {t('settings.openLocation')}
-            </button>
-            <button
-              onClick={handleInstall}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-500 px-3 py-2 text-sm text-white hover:bg-blue-600"
-            >
-              {t('settings.updateNow')}
-            </button>
-          </>
+          <button
+            onClick={handleInstall}
+            className="inline-flex items-center gap-2 rounded-lg bg-blue-500 px-3 py-2 text-sm text-white hover:bg-blue-600"
+          >
+            {t('settings.updateNow')}
+          </button>
         )}
         {status === 'installing' && (
           <button disabled className="inline-flex items-center gap-2 rounded-lg bg-blue-500 px-3 py-2 text-sm text-white opacity-80">

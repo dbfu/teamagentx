@@ -64,6 +64,7 @@ function formatRuntimeBytes(bytes: number): string {
 // 移动端群聊列表页面
 function MobileChatListPage({
   chatRooms,
+  chatRoomsLoading,
   unreadCounts,
   executingChatRooms,
   onRefresh,
@@ -71,6 +72,7 @@ function MobileChatListPage({
   onSelectRoom,
 }: {
   chatRooms: ChatRoom[]
+  chatRoomsLoading: boolean
   unreadCounts: Record<string, number>
   executingChatRooms: Set<string>
   onRefresh: () => void
@@ -111,6 +113,7 @@ function MobileChatListPage({
           executingChatRooms={executingChatRooms}
           onRefresh={onRefresh}
           isRefreshing={isRefreshing}
+          isLoading={chatRoomsLoading}
           isMobile={true}
         />
       </div>
@@ -328,6 +331,7 @@ function MobileChatDetailPage({
 // 桌面端消息页面
 function DesktopMessagePage({
   chatRooms,
+  chatRoomsLoading,
   selectedRoomId,
   onSelectRoom,
   onChatRoomChange,
@@ -339,6 +343,7 @@ function DesktopMessagePage({
   onCreateChatRoom,
 }: {
   chatRooms: ChatRoom[]
+  chatRoomsLoading: boolean
   selectedRoomId: string | null
   onSelectRoom: (id: string) => void
   onChatRoomChange: () => void
@@ -362,6 +367,7 @@ function DesktopMessagePage({
         executingChatRooms={executingChatRooms}
         onRefresh={onRefresh}
         isRefreshing={isRefreshing}
+        isLoading={chatRoomsLoading}
         onDeleteChatRoom={onDeleteChatRoom}
         onCreateChatRoom={onCreateChatRoom}
       />
@@ -384,6 +390,7 @@ function AppContent() {
   const isMobile = useIsMobile()
   const { t } = useTranslation()
   const chatRooms = useChatRoomStore((s) => s.chatRooms)
+  const chatRoomsLoading = useChatRoomStore((s) => s.chatRoomsLoading)
   const selectedRoomId = useChatRoomStore((s) => s.selectedRoomId)
   const loadChatRooms = useChatRoomStore((s) => s.loadChatRooms)
   const selectRoom = useChatRoomStore((s) => s.selectRoom)
@@ -857,6 +864,7 @@ function AppContent() {
           isMobile ? (
             <MobileChatListPage
               chatRooms={chatRooms}
+              chatRoomsLoading={chatRoomsLoading}
               unreadCounts={unreadCounts}
               executingChatRooms={executingChatRooms}
               onRefresh={handleRefreshChatRooms}
@@ -866,6 +874,7 @@ function AppContent() {
           ) : (
             <DesktopMessagePage
               chatRooms={chatRooms}
+              chatRoomsLoading={chatRoomsLoading}
               selectedRoomId={selectedRoomId}
               onSelectRoom={selectRoomAndClearUnread}
               onChatRoomChange={loadChatRooms}

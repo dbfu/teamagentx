@@ -43,6 +43,7 @@ interface LastMessage {
 
 interface ChatRoomStore {
   chatRooms: ChatRoom[]
+  chatRoomsLoading: boolean
   selectedRoomId: string | null
   chatRoomsCacheUserId: string | null
   setChatRooms: (rooms: ChatRoom[]) => void
@@ -57,12 +58,14 @@ export const useChatRoomStore = create<ChatRoomStore>()(
   persist(
     (set, get) => ({
       chatRooms: [],
+      chatRoomsLoading: true,
       selectedRoomId: localStorage.getItem(STORAGE_KEY),
       chatRoomsCacheUserId: getCurrentUserIdFromStorage(),
 
       setChatRooms: (rooms: ChatRoom[]) => {
         set({
           chatRooms: rooms,
+          chatRoomsLoading: false,
           chatRoomsCacheUserId: getCurrentUserIdFromStorage(),
         })
       },
@@ -102,17 +105,23 @@ export const useChatRoomStore = create<ChatRoomStore>()(
           localStorage.removeItem(STORAGE_KEY)
           set({
             chatRooms: [],
+            chatRoomsLoading: true,
             selectedRoomId: null,
             chatRoomsCacheUserId: currentUserId,
           })
         }
 
-        const response = await chatRoomApi.getAll()
-        if (response.success && response.data) {
-          set({
-            chatRooms: response.data,
-            chatRoomsCacheUserId: currentUserId,
-          })
+        set({ chatRoomsLoading: true })
+        try {
+          const response = await chatRoomApi.getAll()
+          if (response.success && response.data) {
+            set({
+              chatRooms: response.data,
+              chatRoomsCacheUserId: currentUserId,
+            })
+          }
+        } finally {
+          set({ chatRoomsLoading: false })
         }
       },
 

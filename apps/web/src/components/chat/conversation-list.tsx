@@ -19,12 +19,13 @@ interface ConversationListProps {
   executingChatRooms?: Set<string>  // 有助手正在执行的群聊 ID
   onRefresh?: () => void  // 刷新回调
   isRefreshing?: boolean  // 是否正在刷新
+  isLoading?: boolean  // 是否正在加载群聊列表
   onDeleteChatRoom?: (chatRoomId: string) => void  // 删除群聊回调
   onCreateChatRoom?: () => void  // 创建群聊回调
   isMobile?: boolean  // 是否移动端
 }
 
-export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts = {}, executingChatRooms = new Set(), onRefresh, isRefreshing, onDeleteChatRoom, onCreateChatRoom, isMobile }: ConversationListProps) {
+export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts = {}, executingChatRooms = new Set(), onRefresh, isRefreshing, isLoading = false, onDeleteChatRoom, onCreateChatRoom, isMobile }: ConversationListProps) {
   const { t } = useTranslation()
   // 检测是否在 Electron 环境中
   const isElectron = window.electronAPI?.isElectron ?? false
@@ -338,7 +339,12 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
 
       {/* Conversation list - 不支持拖动 */}
       <div ref={scrollContainerRef} className="scrollbar-hover flex-1 overflow-y-auto pb-3">
-        {chatRooms.length === 0 ? (
+        {isLoading && chatRooms.length === 0 ? (
+          <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" />
+            {t('common.loading')}
+          </div>
+        ) : chatRooms.length === 0 ? (
           <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
             {t('chat.noChatRooms')}
           </div>

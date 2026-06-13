@@ -2041,7 +2041,10 @@ async function installDownloadedUpdate(filePath?: string): Promise<{ success: bo
         `# 这里多等 1.5s，否则 NSIS 仍可能命中残留句柄报"程序正在运行"。`,
         `Start-Sleep -Milliseconds 1500`,
         ``,
-        `Start-Process -FilePath $installerPath -ArgumentList '/S' -Wait`,
+        `$installProcess = Start-Process -FilePath $installerPath -ArgumentList '/S' -Wait -PassThru`,
+        `if ($installProcess -and $installProcess.ExitCode -eq 0) {`,
+        `  Remove-Item -LiteralPath $installerPath -Force`,
+        `}`,
       ];
 
       const scriptPath = path.join(app.getPath('temp'), 'teamagentx-update.ps1');
@@ -2138,6 +2141,9 @@ async function installDownloadedUpdate(filePath?: string): Promise<{ success: bo
         ``,
         `# 启动新版本`,
         `/usr/bin/open "$APP_DEST"`,
+        ``,
+        `# 更新完成后删除已下载的安装包`,
+        `rm -f ${shellQuote(installerPath)}`,
       ];
 
       const scriptPath = path.join(app.getPath('temp'), 'teamagentx-update.sh');
