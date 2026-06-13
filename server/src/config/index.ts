@@ -102,6 +102,8 @@ export const config = {
     stallWatchdogDelayMs: parseInt(process.env.AGENT_STALL_WATCHDOG_DELAY_MS || '180000', 10),
     // 连续救援上限：两次人类发言之间，watchdog 最多自动唤醒调度助手的次数，防止死循环。
     stallWatchdogMaxConsecutive: parseInt(process.env.AGENT_STALL_WATCHDOG_MAX_CONSECUTIVE || '5', 10),
+    // 群调度助手 LLM 决策调用超时。设为 0 可禁用本地超时。
+    coordinatorLlmTimeoutMs: parseInt(process.env.AGENT_COORDINATOR_LLM_TIMEOUT_MS || '120000', 10),
     // 协作预算（智能协作模式）：两次人类发言之间，助手快路径接力的最大跳数。
     // 默认 20：兼顾游戏/长流水线等轮辐式长链路（一局「谁是卧底」≈24 跳，主要靠
     // 环路检测兜病态环路，跳数只做绝对保险）；可经环境变量调整。
