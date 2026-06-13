@@ -1508,6 +1508,21 @@ export function useAgentEventSubscription(chatRoomId: string | null) {
       const completedKey = `${data.triggerMessageId}_${data.agentId}`
       const newCompletedAgents = new Set(completedAgents)
       newCompletedAgents.add(completedKey)
+      const beforeTypingAgents = typingAgents.get(data.triggerMessageId) ?? []
+      const hadTypingAgent = beforeTypingAgents.some(a => a.agentId === data.agentId)
+      console.log('[chat-store] received agent:done', {
+        chatRoomId,
+        agentId: data.agentId,
+        agentName: data.agentName,
+        triggerMessageId: data.triggerMessageId,
+        hadTypingAgent,
+        typingAgentsForMessage: beforeTypingAgents.map(a => ({
+          agentId: a.agentId,
+          agentName: a.agentName,
+          status: a.status,
+          startedAt: a.startedAt,
+        })),
+      })
 
       // 只移除 triggerMessageId 对应的 typingAgent，不影响其他消息的 typing
       const newTypingAgents = new Map(typingAgents)
@@ -1530,6 +1545,12 @@ export function useAgentEventSubscription(chatRoomId: string | null) {
       setCompletedAgents(newCompletedAgents)
       setTypingAgents(newTypingAgents)
       setStreamEvents(newStreamEvents)
+      console.log('[chat-store] cleared agent:done typing', {
+        chatRoomId,
+        agentId: data.agentId,
+        triggerMessageId: data.triggerMessageId,
+        stillHasTypingAgent: (newTypingAgents.get(data.triggerMessageId) ?? []).some(a => a.agentId === data.agentId),
+      })
 
       // 如果当前正在查看该 messageId_agentId 的流式面板，自动关闭
       if (sidePanelMode === 'stream' && streamingViewAgent?.messageId === data.triggerMessageId && streamingViewAgent?.agentId === data.agentId) {

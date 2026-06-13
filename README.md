@@ -150,6 +150,8 @@ flutter test
 | `AGENT_MEMORY_COMPACT_MESSAGES` | `40` | 触发记忆压缩的消息数 |
 | `AGENT_MEMORY_SUMMARY_TARGET_TOKENS` | `2000` | 记忆摘要目标 token 数 |
 | `AGENT_COORDINATOR_LLM_TIMEOUT_MS` | `120000` | 群调度助手单次 LLM 决策调用超时，设为 `0` 禁用 |
+| `AGENT_COORDINATOR_LLM_RETRY_COUNT` | `1` | 群调度助手 LLM 超时后的重试次数 |
+| `AGENT_COORDINATOR_LLM_RETRY_DELAY_MS` | `1000` | 群调度助手 LLM 超时重试间隔 |
 | `VITE_SHOW_EXECUTION_CONTEXT` | `true` | 前端构建变量，设为 `false` 时隐藏执行详情里的上下文 |
 | `OPENCLAW_GATEWAY_TOKEN` | 无 | OpenClaw ACP 网关 token，`start.sh` 可从 `~/.openclaw/openclaw.json` 自动读取 |
 

@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import type { LlmProvider } from '@prisma/client';
+import { config } from '../../config/index.js';
 import type { AgentWithRelations } from './agent.service.js';
 import { chatRoomService } from '../../modules/chatroom/chatroom.service.js';
 import { messageService } from '../../modules/message/message.service.js';
@@ -140,6 +141,121 @@ async function findCoordinatorProvider(coordinatorAgent: AgentWithRelations): Pr
   }
   const active = await llmProviderService.findActive();
   return active.find((p) => ((p as any).apiProtocol ?? 'anthropic') === requiredProtocol) ?? null;
+}
+
+function createCoordinatorAttemptSignal(
+  parentSignal: AbortSignal | undefined,
+  timeoutMs: number,
+  label: string,
+  attempt: number,
+): { signal?: AbortSignal; cleanup: () => void; timedOut: () => boolean } {
+  if (!parentSignal && timeoutMs <= 0) {
+    return { signal: undefined, cleanup: () => {}, timedOut: () => false };
+  }
+
+  const controller = new AbortController();
+  let didTimeout = false;
+  let timer: NodeJS.Timeout | null = null;
+
+  const abortFromParent = () => {
+    controller.abort(parentSignal?.reason ?? new Error('Coordinator LLM call aborted'));
+  };
+
+  if (parentSignal?.aborted) {
+    abortFromParent();
+  } else if (parentSignal) {
+    parentSignal.addEventListener('abort', abortFromParent, { once: true });
+  }
+
+  if (timeoutMs > 0) {
+    timer = setTimeout(() => {
+      didTimeout = true;
+      controller.abort(new Error(`${label} timed out after ${timeoutMs}ms on attempt ${attempt}`));
+    }, timeoutMs);
+    if (typeof timer.unref === 'function') timer.unref();
+  }
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      if (timer) clearTimeout(timer);
+      if (parentSignal) parentSignal.removeEventListener('abort', abortFromParent);
+    },
+    timedOut: () => didTimeout,
+  };
+}
+
+async function sleepForCoordinatorRetry(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0) return;
+  if (signal?.aborted) throw signal.reason ?? new Error('Coordinator LLM retry aborted');
+
+  await new Promise<void>((resolve, reject) => {
+    const abort = () => {
+      clearTimeout(timer);
+      if (signal) signal.removeEventListener('abort', abort);
+      reject(signal?.reason ?? new Error('Coordinator LLM retry aborted'));
+    };
+    const done = () => {
+      if (signal) signal.removeEventListener('abort', abort);
+      resolve();
+    };
+
+    const timer = setTimeout(done, ms);
+    if (typeof timer.unref === 'function') timer.unref();
+
+    if (signal) {
+      signal.addEventListener('abort', abort, { once: true });
+    }
+  });
+}
+
+async function callCoordinatorLlmWithRetry<T>(
+  label: string,
+  signal: AbortSignal | undefined,
+  operation: (signal?: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const timeoutMs = Number.isFinite(config.agent.coordinatorLlmTimeoutMs)
+    ? Math.max(0, config.agent.coordinatorLlmTimeoutMs)
+    : 60_000;
+  const retryCount = Number.isFinite(config.agent.coordinatorLlmRetryCount)
+    ? Math.max(0, config.agent.coordinatorLlmRetryCount)
+    : 1;
+  const retryDelayMs = Number.isFinite(config.agent.coordinatorLlmRetryDelayMs)
+    ? Math.max(0, config.agent.coordinatorLlmRetryDelayMs)
+    : 1_000;
+  const maxAttempts = retryCount + 1;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    if (signal?.aborted) {
+      throw signal.reason ?? new Error('Coordinator LLM call aborted');
+    }
+
+    const attemptSignal = createCoordinatorAttemptSignal(signal, timeoutMs, label, attempt);
+    try {
+      return await operation(attemptSignal.signal);
+    } catch (error) {
+      if (signal?.aborted) throw error;
+
+      const timedOut = attemptSignal.timedOut();
+      if (timedOut && attempt < maxAttempts) {
+        console.warn('[coordinator-dispatch] LLM 调用超时，准备重试', {
+          label,
+          attempt,
+          maxAttempts,
+          timeoutMs,
+          retryDelayMs,
+        });
+        await sleepForCoordinatorRetry(retryDelayMs, signal);
+        continue;
+      }
+
+      throw error;
+    } finally {
+      attemptSignal.cleanup();
+    }
+  }
+
+  throw new Error('Coordinator LLM retry loop exhausted');
 }
 
 function buildMemberSection(
@@ -566,9 +682,13 @@ export async function runCoordinatorDispatch(
 
   let decision: DispatchDecision | null;
   try {
-    decision = protocol === 'openai'
-      ? await callOpenAICoordinator(provider, systemPrompt, memberSection, userContent, locale, signal)
-      : await callAnthropicCoordinator(provider, systemPrompt, memberSection, userContent, locale, signal);
+    decision = await callCoordinatorLlmWithRetry(
+      `coordinator-${protocol}`,
+      signal,
+      (attemptSignal) => protocol === 'openai'
+        ? callOpenAICoordinator(provider, systemPrompt, memberSection, userContent, locale, attemptSignal)
+        : callAnthropicCoordinator(provider, systemPrompt, memberSection, userContent, locale, attemptSignal),
+    );
   } catch (error) {
     // 被用户发言打断（abort）属预期路径，不当作错误。
     if (signal?.aborted) {
@@ -604,9 +724,42 @@ export async function runCoordinatorDispatch(
 
   console.log('[coordinator-dispatch] 调度决策:', JSON.stringify(decision, null, 2));
 
-  await executeDecision(chatRoomId, message, decision, coordinatorAgent, options);
+  try {
+    console.log('[coordinator-dispatch] executeDecision start', {
+      chatRoomId,
+      triggerMessageId: message.id,
+      decision: decision.decision,
+    });
+    await executeDecision(chatRoomId, message, decision, coordinatorAgent, options);
+    console.log('[coordinator-dispatch] executeDecision success', {
+      chatRoomId,
+      triggerMessageId: message.id,
+      decision: decision.decision,
+    });
+  } catch (error) {
+    console.error('[coordinator-dispatch] executeDecision failed before agent:done', {
+      chatRoomId,
+      triggerMessageId: message.id,
+      decision: decision.decision,
+      error,
+    });
+    throw error;
+  } finally {
+    console.log('[coordinator-dispatch] executeDecision finally', {
+      chatRoomId,
+      triggerMessageId: message.id,
+      decision: decision.decision,
+      willEmitDone: !!globalEmitDone,
+    });
+  }
 
   if (globalEmitDone) {
+    console.log('[coordinator-dispatch] emitDone', {
+      chatRoomId,
+      triggerMessageId: message.id,
+      agentId: GROUP_COORDINATOR_ID,
+      agentName: INTERNAL_COORDINATOR_AGENT_NAME,
+    });
     globalEmitDone(
       { agentId: GROUP_COORDINATOR_ID, agentName: INTERNAL_COORDINATOR_AGENT_NAME, triggerMessageId: message.id },
       chatRoomId,

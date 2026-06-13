@@ -188,6 +188,13 @@ export function setupSocket(io: Server) {
   const emitDone = (data: { agentId: string; agentName: string; triggerMessageId: string; executionRecordId?: string; messageIds?: string[]; duration?: number | null; totalTokens?: number | null; cacheReadTokens?: number | null; model?: string | null }, chatRoomId: string) => {
     flushAgentStreams(chatRoomId, data.agentId, data.triggerMessageId);
     stopTypingLoop(chatRoomId);
+    console.log('[socket] emit agent:done', {
+      chatRoomId,
+      agentId: data.agentId,
+      agentName: data.agentName,
+      triggerMessageId: data.triggerMessageId,
+      messageIds: data.messageIds,
+    });
     io.to(chatRoomId).emit('agent:done', data);
 
     // 将 Agent 响应回传到外部平台（顺序发送保证消息顺序）
