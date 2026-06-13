@@ -1334,6 +1334,17 @@ export const agentApi = {
     })
   },
 
+  async listLocalCodexSessions(chatRoomId: string): Promise<ApiResponse<LocalClaudeSessionsResult>> {
+    return request<LocalClaudeSessionsResult>(`/chatrooms/${chatRoomId}/quick-chat-session/codex-local-sessions`)
+  },
+
+  async switchLocalCodexSession(chatRoomId: string, sessionId: string): Promise<ApiResponse<SwitchLocalClaudeSessionResult>> {
+    return request<SwitchLocalClaudeSessionResult>(`/chatrooms/${chatRoomId}/quick-chat-session/codex-local-session`, {
+      method: 'POST',
+      body: JSON.stringify({ sessionId }),
+    })
+  },
+
   // 获取助手全局长期记忆
   async getMemory(agentId: string): Promise<ApiResponse<{ content: string }>> {
     return request<{ content: string }>(`/agents/${agentId}/memory`)

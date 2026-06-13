@@ -343,6 +343,9 @@ model QuickChatSession {
   claudeLocalSessionId       String? // 当前绑定的本地 Claude 会话 ID
   claudeLocalSessionTitle    String? // 当前绑定的本地 Claude 会话标题
   claudeLocalSessionModified DateTime? // 当前绑定的本地 Claude 会话更新时间
+  codexLocalSessionId        String? // 当前绑定的本地 Codex 会话 ID（threadId）
+  codexLocalSessionTitle     String? // 当前绑定的本地 Codex 会话标题
+  codexLocalSessionModified  DateTime? // 当前绑定的本地 Codex 会话更新时间
   status                     String    @default("active") // active, archived
   createdAt                  DateTime  @default(now())
   archivedAt                 DateTime?
@@ -352,6 +355,7 @@ model QuickChatSession {
 
   @@index([agentId])
   @@index([claudeLocalSessionId])
+  @@index([codexLocalSessionId])
   @@index([createdAt])
 }
 

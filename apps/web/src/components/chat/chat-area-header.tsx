@@ -32,6 +32,7 @@ interface ChatAreaHeaderProps {
   onOpenCustomCommands?: () => void
   onScreenshot?: () => void
   onOpenClaudeLocalSessions?: () => void
+  onOpenCodexLocalSessions?: () => void
 }
 
 
@@ -52,6 +53,7 @@ export function ChatAreaHeader({
   onOpenCustomCommands,
   onScreenshot,
   onOpenClaudeLocalSessions,
+  onOpenCodexLocalSessions,
 }: ChatAreaHeaderProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -87,6 +89,13 @@ export function ChatAreaHeader({
       || chatRoom.name.trim().toLowerCase() === 'claude'
     )
     && Boolean(onOpenClaudeLocalSessions)
+  const shouldShowCodexLocalSessions =
+    Boolean(chatRoom.isQuickChatRoom)
+    && (
+      (quickChatAgent?.type === 'acp' && quickChatAgent?.acpTool === 'codex')
+      || chatRoom.name.trim().toLowerCase() === 'codex'
+    )
+    && Boolean(onOpenCodexLocalSessions)
 
   const loadPackageScripts = useCallback(async (options?: { reset?: boolean; showLoading?: boolean }) => {
     const requestId = packageScriptsRequestRef.current + 1
@@ -521,6 +530,15 @@ export function ChatAreaHeader({
                   >
                     <MessagesSquare className="size-4 text-current" />
                     Claude 本地会话
+                  </DropdownMenuItem>
+                )}
+                {shouldShowCodexLocalSessions && (
+                  <DropdownMenuItem
+                    className="hover:bg-primary/10 hover:text-primary hover:[&_svg]:text-primary focus:bg-primary/10 focus:text-primary focus:[&_svg]:text-primary"
+                    onClick={onOpenCodexLocalSessions}
+                  >
+                    <MessagesSquare className="size-4 text-current" />
+                    Codex 本地会话
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem

@@ -14,7 +14,8 @@ import { MessageArchivesModal } from './message-archives-modal'
 import { CustomCommandModal } from './dialogs/custom-command-modal'
 import { useSocketStore, useChatRoomStore } from '@/stores'
 import { useChatStore } from '@/stores/chat-store'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useQuickChatLocalSessionHint } from './hooks/use-quick-chat-local-session-hint'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { AtSign } from 'lucide-react'
@@ -252,6 +253,19 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
     }
   }
 
+  const handleShowLocalSessions = useCallback((tool: 'claude' | 'codex') => {
+    setSelectedRoomAgent(null)
+    setSidePanelMode(tool === 'codex' ? 'codex-local-sessions' : 'claude-local-sessions')
+  }, [setSelectedRoomAgent, setSidePanelMode])
+
+  // 首次进入空白快速对话时，检测当前项目是否存在 Claude / Codex 本地会话并提示
+  useQuickChatLocalSessionHint({
+    chatRoom,
+    messagesEmpty: messages.length === 0,
+    loading,
+    onShowSessions: handleShowLocalSessions,
+  })
+
   if (!chatRoom) {
     return (
       <div className="flex flex-1 items-center justify-center bg-[var(--surface)] text-muted-foreground">
@@ -267,8 +281,8 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
     } else if (sidePanelMode === 'context' || sidePanelMode === 'history') {
       // context/history 关闭时返回助手详情
       setSidePanelMode('agent-detail')
-    } else if (sidePanelMode === 'reply-detail' || sidePanelMode === 'room-settings' || sidePanelMode === 'execution-detail' || sidePanelMode === 'claude-local-sessions') {
-      // reply-detail/room-settings/execution-detail/claude-local-sessions 关闭时直接关闭面板
+    } else if (sidePanelMode === 'reply-detail' || sidePanelMode === 'room-settings' || sidePanelMode === 'execution-detail' || sidePanelMode === 'claude-local-sessions' || sidePanelMode === 'codex-local-sessions') {
+      // reply-detail/room-settings/execution-detail/claude/codex-local-sessions 关闭时直接关闭面板
       setSidePanelMode(null)
     } else {
       setSidePanelMode(null)
@@ -297,6 +311,11 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
   const handleOpenClaudeLocalSessions = () => {
     setSelectedRoomAgent(null)
     setSidePanelMode('claude-local-sessions')
+  }
+
+  const handleOpenCodexLocalSessions = () => {
+    setSelectedRoomAgent(null)
+    setSidePanelMode('codex-local-sessions')
   }
 
   const handleDeleteChatRoom = () => {
@@ -351,6 +370,7 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
           onOpenCustomCommands={() => setShowCustomCommands(true)}
           onScreenshot={() => setShowScreenshot(true)}
           onOpenClaudeLocalSessions={handleOpenClaudeLocalSessions}
+          onOpenCodexLocalSessions={handleOpenCodexLocalSessions}
         />
       )}
 

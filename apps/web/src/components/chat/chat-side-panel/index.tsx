@@ -161,6 +161,7 @@ export function ChatSidePanel({
       case 'task-queue': return t('chat.taskQueue')
       case 'task-board': return t('chat.taskBoardTitle')
       case 'claude-local-sessions': return 'Claude 本地会话'
+      case 'codex-local-sessions': return 'Codex 本地会话'
       default: return t('chat.groupAssistants')
     }
   }
@@ -200,7 +201,7 @@ export function ChatSidePanel({
       return <ClipboardList className="size-4 text-blue-500" />
     }
 
-    if (sidePanelMode === 'claude-local-sessions') {
+    if (sidePanelMode === 'claude-local-sessions' || sidePanelMode === 'codex-local-sessions') {
       return <MessagesSquare className="size-4 text-blue-500" />
     }
 
@@ -400,7 +401,7 @@ export function ChatSidePanel({
               ? 'p-0'
               : 'pt-3 pb-3 pl-3 pr-3'
       )}
-      overflow={sidePanelMode === 'room-settings' || sidePanelMode === 'task-board' || sidePanelMode === 'stream' || sidePanelMode === 'claude-local-sessions' ? 'hidden' : 'auto'}
+      overflow={sidePanelMode === 'room-settings' || sidePanelMode === 'task-board' || sidePanelMode === 'stream' || sidePanelMode === 'claude-local-sessions' || sidePanelMode === 'codex-local-sessions' ? 'hidden' : 'auto'}
       widthClass={sidePanelMode === 'task-board' ? 'w-full border-l-0' : undefined}
       resizable={sidePanelMode !== 'task-board'}
       defaultWidth={370}
@@ -516,9 +517,10 @@ export function ChatSidePanel({
         />
       )}
 
-      {sidePanelMode === 'claude-local-sessions' && (
+      {(sidePanelMode === 'claude-local-sessions' || sidePanelMode === 'codex-local-sessions') && (
         <ClaudeLocalSessionsPanel
           chatRoomId={chatRoom.id}
+          tool={sidePanelMode === 'codex-local-sessions' ? 'codex' : 'claude'}
           onSwitched={() => {
             onChatRoomChange?.()
             // 切换完成后自动隐藏面板

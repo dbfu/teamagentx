@@ -5,9 +5,17 @@ import { CheckCircle2, Clock, Loader2, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
+type LocalSessionTool = 'claude' | 'codex'
+
 interface ClaudeLocalSessionsPanelProps {
   chatRoomId: string
+  tool?: LocalSessionTool
   onSwitched?: () => void
+}
+
+const TOOL_LABELS: Record<LocalSessionTool, string> = {
+  claude: 'Claude',
+  codex: 'Codex',
 }
 
 function formatSessionTime(value: string): string {
@@ -27,8 +35,10 @@ function shortSessionId(sessionId: string): string {
 
 export function ClaudeLocalSessionsPanel({
   chatRoomId,
+  tool = 'claude',
   onSwitched,
 }: ClaudeLocalSessionsPanelProps) {
+  const toolLabel = TOOL_LABELS[tool]
   const [workDir, setWorkDir] = useState('')
   const [sessions, setSessions] = useState<LocalClaudeSession[]>([])
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
@@ -46,23 +56,25 @@ export function ClaudeLocalSessionsPanel({
     setLoading(true)
     setError(null)
     try {
-      const response = await agentApi.listLocalClaudeSessions(chatRoomId)
+      const response = tool === 'codex'
+        ? await agentApi.listLocalCodexSessions(chatRoomId)
+        : await agentApi.listLocalClaudeSessions(chatRoomId)
       if (!response.success || !response.data) {
-        throw new Error(response.error || '扫描 Claude 本地会话失败')
+        throw new Error(response.error || `扫描 ${toolLabel} 本地会话失败`)
       }
       setWorkDir(response.data.workDir)
       setCurrentSessionId(response.data.currentSessionId)
       setSessions(response.data.sessions)
       setSelectedSessionId(response.data.currentSessionId || response.data.sessions[0]?.sessionId || null)
     } catch (err) {
-      const message = err instanceof Error ? err.message : '扫描 Claude 本地会话失败'
+      const message = err instanceof Error ? err.message : `扫描 ${toolLabel} 本地会话失败`
       setError(message)
       setSessions([])
       setSelectedSessionId(null)
     } finally {
       setLoading(false)
     }
-  }, [chatRoomId])
+  }, [chatRoomId, tool, toolLabel])
 
   useEffect(() => {
     void loadSessions()
@@ -72,9 +84,11 @@ export function ClaudeLocalSessionsPanel({
     if (!selectedSessionId) return
     setSwitching(true)
     try {
-      const response = await agentApi.switchLocalClaudeSession(chatRoomId, selectedSessionId)
+      const response = tool === 'codex'
+        ? await agentApi.switchLocalCodexSession(chatRoomId, selectedSessionId)
+        : await agentApi.switchLocalClaudeSession(chatRoomId, selectedSessionId)
       if (!response.success || !response.data) {
-        throw new Error(response.error || '切换 Claude 会话失败')
+        throw new Error(response.error || `切换 ${toolLabel} 会话失败`)
       }
       setCurrentSessionId(response.data.claudeSession.sessionId)
       setSessions((previous) =>
@@ -86,7 +100,7 @@ export function ClaudeLocalSessionsPanel({
       toast.success(`已切换到「${response.data.claudeSession.title}」，导入 ${response.data.importedCount} 条历史消息`)
       onSwitched?.()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '切换 Claude 会话失败')
+      toast.error(err instanceof Error ? err.message : `切换 ${toolLabel} 会话失败`)
     } finally {
       setSwitching(false)
     }
@@ -96,7 +110,7 @@ export function ClaudeLocalSessionsPanel({
     <div className="flex h-full min-h-0 flex-col">
       <div className="border-b border-border/70 px-1 pb-3">
         <div className="line-clamp-2 break-all text-xs text-muted-foreground">
-          {workDir || '扫描当前快速对话工作目录下的 Claude CLI 历史会话'}
+          {workDir || `扫描当前快速对话工作目录下的 ${toolLabel} CLI 历史会话`}
         </div>
       </div>
 
@@ -127,7 +141,7 @@ export function ClaudeLocalSessionsPanel({
 
           {!loading && !error && sessions.length === 0 && (
             <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
-              未找到该目录下的 Claude 本地会话
+              未找到该目录下的 {toolLabel} 本地会话
             </div>
           )}
 

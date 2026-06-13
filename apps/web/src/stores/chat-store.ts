@@ -231,7 +231,7 @@ function findLatestOwnerMentionReplyTarget(params: {
   return candidates[0]
 }
 
-export type SidePanelMode = 'agents' | 'context' | 'history' | 'stream' | 'agent-detail' | 'record-detail' | 'reply-detail' | 'room-settings' | 'execution-detail' | 'cron-tasks' | 'task-queue' | 'task-board' | 'claude-local-sessions' | null
+export type SidePanelMode = 'agents' | 'context' | 'history' | 'stream' | 'agent-detail' | 'record-detail' | 'reply-detail' | 'room-settings' | 'execution-detail' | 'cron-tasks' | 'task-queue' | 'task-board' | 'claude-local-sessions' | 'codex-local-sessions' | null
 
 interface MentionAgent {
   id: string

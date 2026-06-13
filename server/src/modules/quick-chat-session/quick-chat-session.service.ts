@@ -10,6 +10,10 @@ import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import {
+  bindCodexLocalThread,
+  getCodexExecutorSessionsDir,
+} from '../../core/agent/codex-session-state.js';
 
 export interface QuickChatSessionCreateData {
   agentId: string;
@@ -225,6 +229,214 @@ function extractImportedClaudeMessages(messages: SessionMessage[]): ImportedClau
   return imported;
 }
 
+// ===== Codex 本地会话（rollout）支持 =====
+
+interface CodexRolloutSummary {
+  sessionId: string;
+  cwd: string | null;
+  gitBranch: string | null;
+  createdAt: string | null;
+  title: string;
+}
+
+function getLocalCodexSessionsDir(): string {
+  return path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'sessions');
+}
+
+function collectCodexRolloutFiles(dir: string): string[] {
+  const out: string[] = [];
+  if (!fs.existsSync(dir)) return out;
+  const stack = [dir];
+  while (stack.length) {
+    const cur = stack.pop()!;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(cur, {withFileTypes: true});
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const full = path.join(cur, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(full);
+      } else if (entry.isFile() && entry.name.startsWith('rollout-') && entry.name.endsWith('.jsonl')) {
+        out.push(full);
+      }
+    }
+  }
+  return out;
+}
+
+function collectCodexText(content: unknown): string {
+  if (typeof content === 'string') return content.trim();
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((block: any) => (typeof block?.text === 'string' ? block.text : ''))
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+}
+
+// Codex 会在每个会话开头注入 AGENTS.md、环境上下文、本地命令等非真实用户输入，导入时跳过
+function isCodexInjectedUserText(text: string): boolean {
+  if (isLocalCommandText(text)) return true;
+  if (/^#\s*AGENTS\.md/i.test(text)) return true;
+  return (
+    text.startsWith('<INSTRUCTIONS>') ||
+    text.includes('<user_instructions>') ||
+    text.includes('<environment_context>')
+  );
+}
+
+function readCodexRolloutLines(filePath: string): string[] {
+  try {
+    const stat = fs.statSync(filePath);
+    // 超大会话文件只读取头部，避免一次性加载数 MB
+    if (stat.size > 4 * 1024 * 1024) {
+      const fd = fs.openSync(filePath, 'r');
+      try {
+        const buf = Buffer.alloc(512 * 1024);
+        const read = fs.readSync(fd, buf, 0, buf.length, 0);
+        return buf.subarray(0, read).toString('utf-8').split('\n');
+      } finally {
+        fs.closeSync(fd);
+      }
+    }
+    return fs.readFileSync(filePath, 'utf-8').split('\n');
+  } catch {
+    return [];
+  }
+}
+
+function parseCodexRolloutHead(filePath: string): CodexRolloutSummary | null {
+  let meta: any = null;
+  let title = '';
+
+  for (const line of readCodexRolloutLines(filePath)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let parsed: any;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    if (!meta && parsed.type === 'session_meta' && parsed.payload) {
+      meta = parsed.payload;
+    }
+    if (
+      !title &&
+      parsed.type === 'response_item' &&
+      parsed.payload?.type === 'message' &&
+      parsed.payload.role === 'user'
+    ) {
+      const text = collectCodexText(parsed.payload.content);
+      if (text && !isCodexInjectedUserText(text)) {
+        title = text.split('\n')[0]!.trim().slice(0, 80);
+      }
+    }
+    if (meta && title) break;
+  }
+
+  if (!meta?.id) return null;
+  return {
+    sessionId: meta.id,
+    cwd: typeof meta.cwd === 'string' ? meta.cwd : null,
+    gitBranch:
+      meta.git?.branch ?? meta.git?.current_branch ?? meta.git?.head_branch ?? null,
+    createdAt: typeof meta.timestamp === 'string' ? meta.timestamp : null,
+    title: title || '未命名会话',
+  };
+}
+
+function extractImportedCodexMessages(filePath: string): ImportedClaudeSessionMessage[] {
+  const imported: ImportedClaudeSessionMessage[] = [];
+  let pendingAssistant: string | null = null;
+
+  const flushAssistant = () => {
+    if (pendingAssistant) {
+      imported.push({role: 'assistant', content: pendingAssistant});
+      pendingAssistant = null;
+    }
+  };
+
+  let lines: string[];
+  try {
+    lines = fs.readFileSync(filePath, 'utf-8').split('\n');
+  } catch {
+    return imported;
+  }
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let parsed: any;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    if (parsed.type !== 'response_item' || parsed.payload?.type !== 'message') continue;
+
+    const role = parsed.payload.role;
+    const text = collectCodexText(parsed.payload.content);
+    if (!text) continue;
+
+    if (role === 'user') {
+      if (isCodexInjectedUserText(text)) continue;
+      flushAssistant();
+      imported.push({role: 'user', content: text});
+    } else if (role === 'assistant') {
+      // 覆盖式保留：当轮只显示 assistant 最后一条文本消息
+      pendingAssistant = text;
+    }
+  }
+
+  flushAssistant();
+  return imported;
+}
+
+function toLocalCodexSessionInfo(
+  head: CodexRolloutSummary,
+  mtimeMs: number,
+  currentSessionId?: string | null,
+): LocalClaudeSessionInfo {
+  const lastModified = mtimeMs
+    ? new Date(mtimeMs)
+    : head.createdAt
+      ? new Date(head.createdAt)
+      : new Date();
+  return {
+    sessionId: head.sessionId,
+    title: head.title,
+    summary: '',
+    customTitle: null,
+    firstPrompt: head.title,
+    cwd: head.cwd,
+    gitBranch: head.gitBranch,
+    tag: null,
+    createdAt: head.createdAt,
+    lastModified: lastModified.toISOString(),
+    fileSize: null,
+    isCurrent: head.sessionId === currentSessionId,
+  };
+}
+
+// 将选中的本地 Codex rollout 复制进 executor 专属 sessions 目录，保留相对结构供 resume 查找
+function copyCodexRolloutToExecutorHome(params: {
+  sourceFile: string;
+  sourceRoot: string;
+  agentId: string;
+}): void {
+  const targetRoot = getCodexExecutorSessionsDir(params.agentId);
+  const relative = path.relative(params.sourceRoot, params.sourceFile);
+  const dest = relative.startsWith('..')
+    ? path.join(targetRoot, path.basename(params.sourceFile))
+    : path.join(targetRoot, relative);
+  fs.mkdirSync(path.dirname(dest), {recursive: true});
+  fs.copyFileSync(params.sourceFile, dest);
+}
+
 async function getOrCreateQuickChatSessionRuntime(chatRoomId: string): Promise<QuickChatSessionRuntime | null> {
   const existing = await prisma.quickChatSession.findFirst({
     where: {chatRoomId},
@@ -411,6 +623,118 @@ export const quickChatSessionService = {
       quickChatSession: updated,
       claudeSession: toLocalClaudeSessionInfo(target, target.sessionId),
       importedMessages: extractImportedClaudeMessages(sessionMessages),
+    };
+  },
+
+  async listLocalCodexSessions(chatRoomId: string): Promise<{
+    workDir: string;
+    currentSessionId: string | null;
+    sessions: LocalClaudeSessionInfo[];
+  }> {
+    const quickSession = await getOrCreateQuickChatSessionRuntime(chatRoomId);
+
+    if (!quickSession || !quickSession.chatRoom.isQuickChatRoom) {
+      throw new Error('仅快速对话支持切换 Codex 本地会话');
+    }
+    if (quickSession.agent.type !== 'acp' || quickSession.agent.acpTool !== 'codex') {
+      throw new Error('仅 Codex 助手支持本地会话');
+    }
+    if (!quickSession.workDir?.trim()) {
+      throw new Error('当前快速对话没有工作目录');
+    }
+
+    const targetCwd = path.resolve(quickSession.workDir);
+    const files = collectCodexRolloutFiles(getLocalCodexSessionsDir())
+      .map((file) => {
+        let mtimeMs = 0;
+        try {
+          mtimeMs = fs.statSync(file).mtimeMs;
+        } catch {
+          mtimeMs = 0;
+        }
+        return {file, mtimeMs};
+      })
+      .sort((a, b) => b.mtimeMs - a.mtimeMs)
+      .slice(0, 200);
+
+    const sessions: LocalClaudeSessionInfo[] = [];
+    for (const {file, mtimeMs} of files) {
+      const head = parseCodexRolloutHead(file);
+      if (!head?.cwd) continue;
+      if (path.resolve(head.cwd) !== targetCwd) continue;
+      sessions.push(toLocalCodexSessionInfo(head, mtimeMs, quickSession.codexLocalSessionId));
+    }
+    sessions.sort(
+      (a, b) => new Date(b.lastModified).getTime() - new Date(a.lastModified).getTime(),
+    );
+
+    return {
+      workDir: quickSession.workDir,
+      currentSessionId: quickSession.codexLocalSessionId,
+      sessions,
+    };
+  },
+
+  async switchLocalCodexSession(chatRoomId: string, codexSessionId: string): Promise<{
+    quickChatSession: QuickChatSession;
+    codexSession: LocalClaudeSessionInfo;
+    importedMessages: ImportedClaudeSessionMessage[];
+  }> {
+    const quickSession = await getOrCreateQuickChatSessionRuntime(chatRoomId);
+
+    if (!quickSession || !quickSession.chatRoom.isQuickChatRoom) {
+      throw new Error('仅快速对话支持切换 Codex 本地会话');
+    }
+    if (quickSession.agent.type !== 'acp' || quickSession.agent.acpTool !== 'codex') {
+      throw new Error('仅 Codex 助手支持本地会话');
+    }
+
+    const sessionsRoot = getLocalCodexSessionsDir();
+    const files = collectCodexRolloutFiles(sessionsRoot);
+    const targetFile =
+      files.find((file) => path.basename(file).includes(codexSessionId)) ??
+      files.find((file) => parseCodexRolloutHead(file)?.sessionId === codexSessionId);
+    if (!targetFile) {
+      throw new Error('未找到该 Codex 本地会话');
+    }
+    const head = parseCodexRolloutHead(targetFile);
+    if (!head) {
+      throw new Error('解析 Codex 本地会话失败');
+    }
+
+    // 复制 rollout 供 executor resume，并写入 threadId 状态文件
+    copyCodexRolloutToExecutorHome({
+      sourceFile: targetFile,
+      sourceRoot: sessionsRoot,
+      agentId: quickSession.agentId,
+    });
+    bindCodexLocalThread({
+      agentId: quickSession.agentId,
+      chatRoomId,
+      workDir: quickSession.workDir,
+      threadId: head.sessionId,
+    });
+
+    let mtimeMs = 0;
+    try {
+      mtimeMs = fs.statSync(targetFile).mtimeMs;
+    } catch {
+      mtimeMs = 0;
+    }
+
+    const updated = await prisma.quickChatSession.update({
+      where: {id: quickSession.id},
+      data: {
+        codexLocalSessionId: head.sessionId,
+        codexLocalSessionTitle: head.title,
+        codexLocalSessionModified: mtimeMs ? new Date(mtimeMs) : new Date(),
+      },
+    });
+
+    return {
+      quickChatSession: updated,
+      codexSession: toLocalCodexSessionInfo(head, mtimeMs, head.sessionId),
+      importedMessages: extractImportedCodexMessages(targetFile),
     };
   },
 

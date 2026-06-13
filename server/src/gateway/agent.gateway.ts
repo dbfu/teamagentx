@@ -394,6 +394,89 @@ interface AgentParams {
   id: string;
 }
 
+/**
+ * 将导入的本地会话历史落库并推送到房间（Claude / Codex 共用）。
+ * 导入消息标记 silent，前端据此跳过提示音与桌面通知。
+ */
+async function importLocalSessionMessagesToRoom(
+  app: FastifyInstance,
+  params: {
+    chatRoomId: string;
+    user?: {id: string; username: string; avatar: string | null} | null;
+    agentId: string;
+    importedMessages: Array<{role: 'user' | 'assistant'; content: string}>;
+    noticeContent: string;
+  },
+): Promise<any[]> {
+  const {chatRoomId, user} = params;
+  const agent = await agentService.findById(params.agentId);
+  const io = (app as any).io as Server | undefined;
+  const createdMessages: any[] = [];
+  const baseTime = Date.now();
+
+  const createAndCollectMessage = async (msg: {
+    type: 'MESSAGE' | 'SYSTEM';
+    content: string;
+    index: number;
+    isHuman: boolean;
+    userId?: string | null;
+    agentId?: string | null;
+  }) => {
+    const time = new Date(baseTime + msg.index);
+    const saved = await messageService.create({
+      id: randomUUID(),
+      type: msg.type,
+      content: msg.content,
+      time,
+      userId: msg.userId ?? null,
+      agentId: msg.agentId ?? null,
+      chatRoomId,
+      replyMessageId: null,
+      isHuman: msg.isHuman,
+    });
+
+    createdMessages.push({
+      ...saved,
+      time: saved.time.toISOString(),
+      createdAt: saved.createdAt.toISOString(),
+      updatedAt: saved.updatedAt.toISOString(),
+      silent: true,
+      user: msg.userId && user
+        ? {id: user.id, username: user.username, avatar: user.avatar, avatarColor: null}
+        : null,
+      agent: msg.agentId && agent
+        ? {id: agent.id, name: agent.name, avatar: agent.avatar, avatarColor: agent.avatarColor}
+        : null,
+      attachments: [],
+    });
+  };
+
+  await createAndCollectMessage({
+    type: 'SYSTEM',
+    content: params.noticeContent,
+    index: 0,
+    isHuman: false,
+  });
+
+  for (const [index, imported] of params.importedMessages.entries()) {
+    await createAndCollectMessage({
+      type: 'MESSAGE',
+      content: imported.content,
+      index: index + 1,
+      isHuman: imported.role === 'user',
+      userId: imported.role === 'user' ? user?.id ?? null : null,
+      agentId: imported.role === 'assistant' ? params.agentId : null,
+    });
+  }
+
+  clearExecutorCache(undefined, chatRoomId);
+  for (const message of createdMessages) {
+    io?.to(chatRoomId).emit('message', message);
+  }
+
+  return createdMessages;
+}
+
 export async function agentGateway(app: FastifyInstance) {
   // 获取所有 Agent 列表
   app.get(
@@ -1322,83 +1405,13 @@ export async function agentGateway(app: FastifyInstance) {
           chatRoomId,
           sessionId,
         );
-        const user = request.user;
-        const agent = await agentService.findById(result.quickChatSession.agentId);
-        const io = (app as any).io as Server | undefined;
-        const createdMessages: any[] = [];
-        const baseTime = Date.now();
-        const noticeContent = `已切换到 Claude 会话「${result.claudeSession.title}」，已导入 ${result.importedMessages.length} 条历史消息`;
-
-        const createAndCollectMessage = async (params: {
-          type: 'MESSAGE' | 'SYSTEM';
-          content: string;
-          index: number;
-          isHuman: boolean;
-          userId?: string | null;
-          agentId?: string | null;
-        }) => {
-          const time = new Date(baseTime + params.index);
-          const saved = await messageService.create({
-            id: randomUUID(),
-            type: params.type,
-            content: params.content,
-            time,
-            userId: params.userId ?? null,
-            agentId: params.agentId ?? null,
-            chatRoomId,
-            replyMessageId: null,
-            isHuman: params.isHuman,
-          });
-
-          createdMessages.push({
-            ...saved,
-            time: saved.time.toISOString(),
-            createdAt: saved.createdAt.toISOString(),
-            updatedAt: saved.updatedAt.toISOString(),
-            // 导入历史消息为批量推送，前端据此跳过提示音与桌面通知
-            silent: true,
-            user: params.userId && user
-              ? {
-                  id: user.id,
-                  username: user.username,
-                  avatar: user.avatar,
-                  avatarColor: null,
-                }
-              : null,
-            agent: params.agentId && agent
-              ? {
-                  id: agent.id,
-                  name: agent.name,
-                  avatar: agent.avatar,
-                  avatarColor: agent.avatarColor,
-                }
-              : null,
-            attachments: [],
-          });
-        };
-
-        await createAndCollectMessage({
-          type: 'SYSTEM',
-          content: noticeContent,
-          index: 0,
-          isHuman: false,
+        const createdMessages = await importLocalSessionMessagesToRoom(app, {
+          chatRoomId,
+          user: request.user,
+          agentId: result.quickChatSession.agentId,
+          importedMessages: result.importedMessages,
+          noticeContent: `已切换到 Claude 会话「${result.claudeSession.title}」，已导入 ${result.importedMessages.length} 条历史消息`,
         });
-
-        for (const [index, imported] of result.importedMessages.entries()) {
-          await createAndCollectMessage({
-            type: 'MESSAGE',
-            content: imported.content,
-            index: index + 1,
-            isHuman: imported.role === 'user',
-            userId: imported.role === 'user' ? user?.id ?? null : null,
-            agentId: imported.role === 'assistant' ? result.quickChatSession.agentId : null,
-          });
-        }
-
-        clearExecutorCache(undefined, chatRoomId);
-        for (const message of createdMessages) {
-          io?.to(chatRoomId).emit('message', message);
-        }
 
         return reply.send({
           success: true,
@@ -1410,6 +1423,125 @@ export async function agentGateway(app: FastifyInstance) {
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : '切换 Claude 本地会话失败';
+        return reply.code(400).send({success: false, error: message});
+      }
+    },
+  );
+
+  app.get<{Params: {chatRoomId: string}}>(
+    '/chatrooms/:chatRoomId/quick-chat-session/codex-local-sessions',
+    {
+      schema: {
+        description: '获取快速对话可切换的 Codex 本地会话列表',
+        tags: ['ChatRooms'],
+        params: {
+          type: 'object',
+          properties: { chatRoomId: { type: 'string' } },
+        },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              data: {
+                type: 'object',
+                properties: {
+                  workDir: { type: 'string' },
+                  currentSessionId: { type: 'string', nullable: true },
+                  sessions: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      additionalProperties: true,
+                      properties: {
+                        sessionId: { type: 'string' },
+                        title: { type: 'string' },
+                        summary: { type: 'string' },
+                        lastModified: { type: 'string' },
+                        isCurrent: { type: 'boolean' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      try {
+        const result = await quickChatSessionService.listLocalCodexSessions(
+          request.params.chatRoomId,
+        );
+        return reply.send({success: true, data: result});
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '获取 Codex 本地会话失败';
+        return reply.code(400).send({success: false, error: message});
+      }
+    },
+  );
+
+  app.post<{Params: {chatRoomId: string}; Body: {sessionId: string}}>(
+    '/chatrooms/:chatRoomId/quick-chat-session/codex-local-session',
+    {
+      schema: {
+        description: '切换快速对话当前 Codex 本地会话并导入可读历史',
+        tags: ['ChatRooms'],
+        params: {
+          type: 'object',
+          properties: { chatRoomId: { type: 'string' } },
+        },
+        body: {
+          type: 'object',
+          required: ['sessionId'],
+          properties: { sessionId: { type: 'string' } },
+        },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              data: {
+                type: 'object',
+                additionalProperties: true,
+                properties: {
+                  claudeSession: { type: 'object', additionalProperties: true },
+                  importedCount: { type: 'integer' },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const {chatRoomId} = request.params;
+      const {sessionId} = request.body;
+
+      try {
+        const result = await quickChatSessionService.switchLocalCodexSession(
+          chatRoomId,
+          sessionId,
+        );
+        const createdMessages = await importLocalSessionMessagesToRoom(app, {
+          chatRoomId,
+          user: request.user,
+          agentId: result.quickChatSession.agentId,
+          importedMessages: result.importedMessages,
+          noticeContent: `已切换到 Codex 会话「${result.codexSession.title}」，已导入 ${result.importedMessages.length} 条历史消息`,
+        });
+
+        return reply.send({
+          success: true,
+          data: {
+            claudeSession: result.codexSession,
+            importedCount: result.importedMessages.length,
+            messages: createdMessages,
+          },
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '切换 Codex 本地会话失败';
         return reply.code(400).send({success: false, error: message});
       }
     },
