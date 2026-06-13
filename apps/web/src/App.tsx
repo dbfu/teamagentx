@@ -388,6 +388,7 @@ function AppContent() {
   const loadChatRooms = useChatRoomStore((s) => s.loadChatRooms)
   const selectRoom = useChatRoomStore((s) => s.selectRoom)
   const addRoom = useChatRoomStore((s) => s.addRoom)
+  const removeRoom = useChatRoomStore((s) => s.removeRoom)
   const updateRoomLastMessage = useChatRoomStore((s) => s.updateRoomLastMessage)
   const unreadCounts = useChatStore((s) => s.unreadCounts)
   const totalUnreadCount = getTotalUnreadForNotifications(unreadCounts)
@@ -439,9 +440,12 @@ function AppContent() {
   }
 
   // 删除群聊后的处理
-  const handleDeleteChatRoom = (_chatRoomId: string) => {
-    // 刷新群聊列表（选中状态已在 ConversationList 中处理）
-    loadChatRooms()
+  const handleDeleteChatRoom = (chatRoomId: string) => {
+    removeRoom(chatRoomId)
+    if (location.pathname === `/chat/${chatRoomId}`) {
+      navigate('/')
+    }
+    void loadChatRooms()
   }
 
   // 创建群聊状态
@@ -453,11 +457,21 @@ function AppContent() {
   }
 
   // 导航到群聊
-  const handleNavigateToChatRoom = async (roomId: string) => {
-    // 先刷新群聊列表，确保新创建的群聊已加载
-    await loadChatRooms()
+  const handleNavigateToChatRoom = async (roomId: string, room?: ChatRoom) => {
+    if (room) {
+      addRoom(room)
+    }
+    try {
+      // 先刷新群聊列表，确保新创建的群聊已加载
+      await loadChatRooms()
+      if (room) {
+        addRoom(room)
+      }
+    } catch (error) {
+      console.error('Failed to refresh chat rooms before navigation:', error)
+    }
     selectRoomAndClearUnread(roomId)
-    navigate('/')
+    navigate(isMobile ? `/chat/${roomId}` : '/')
   }
 
   const openChatRoomFromNotification = useCallback(async (roomId: string) => {

@@ -7,6 +7,7 @@ import { useAuthStore, useSocketStore, useChatRoomStore } from '@/stores'
 import { useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { useTranslation } from 'react-i18next'
+import { useIsMobile } from '@/hooks/use-mobile'
 
 interface InstallSkillModalProps {
   isOpen: boolean
@@ -36,9 +37,11 @@ export function InstallSkillModal({
   const isComposingRef = useRef(false)  // 追踪中文输入状态
   const { user } = useAuthStore()
   const navigate = useNavigate()
+  const isMobile = useIsMobile()
   const { sendMessage } = useSocketStore()
   const loadChatRooms = useChatRoomStore((s) => s.loadChatRooms)
   const selectRoom = useChatRoomStore((s) => s.selectRoom)
+  const addRoom = useChatRoomStore((s) => s.addRoom)
 
   // 选择模式状态
   const [sharedSkills, setSharedSkills] = useState<SharedSkill[]>([])
@@ -173,12 +176,18 @@ export function InstallSkillModal({
       // 创建与群助手的快速对话
       const res = await agentApi.createQuickChat(GROUP_ASSISTANT_ID, user.id)
       if (res.success && res.data) {
-        // 刷新聊天室列表，确保新会话已加载
-        await loadChatRooms()
+        addRoom(res.data)
+        try {
+          // 刷新聊天室列表，确保新会话已加载
+          await loadChatRooms()
+          addRoom(res.data)
+        } catch (error) {
+          console.error('Failed to refresh chat rooms before navigation:', error)
+        }
         // 选择新创建的房间
         selectRoom(res.data.id)
         // 跳转到消息页面
-        navigate('/')
+        navigate(isMobile ? `/chat/${res.data.id}` : '/')
         // 发送初始消息（包含目标助手 ID 和名称）
         sendMessage({ chatRoomId: res.data.id, content: `[目标助手: ${agentName} (ID: ${agentId})] ${query.trim()}` })
         // 关闭模态框

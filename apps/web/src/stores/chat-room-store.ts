@@ -68,13 +68,21 @@ export const useChatRoomStore = create<ChatRoomStore>()(
       },
 
       selectRoom: (id: string) => {
-        localStorage.setItem(STORAGE_KEY, id)
-        set({ selectedRoomId: id })
+        if (id) {
+          localStorage.setItem(STORAGE_KEY, id)
+          set({ selectedRoomId: id })
+          return
+        }
+
+        localStorage.removeItem(STORAGE_KEY)
+        set({ selectedRoomId: null })
       },
 
       addRoom: (room: ChatRoom) => {
         set((state) => ({
-          chatRooms: [...state.chatRooms, room],
+          chatRooms: state.chatRooms.some((item) => item.id === room.id)
+            ? state.chatRooms.map((item) => item.id === room.id ? room : item)
+            : [...state.chatRooms, room],
         }))
       },
 
@@ -83,6 +91,9 @@ export const useChatRoomStore = create<ChatRoomStore>()(
           chatRooms: state.chatRooms.filter((room) => room.id !== id),
           selectedRoomId: state.selectedRoomId === id ? null : state.selectedRoomId,
         }))
+        if (get().selectedRoomId === null) {
+          localStorage.removeItem(STORAGE_KEY)
+        }
       },
 
       loadChatRooms: async () => {
@@ -124,21 +135,27 @@ export const useChatRoomStore = create<ChatRoomStore>()(
     }),
     {
       name: 'chat-room-storage',
+      version: 1,
+      migrate: (persistedState) => {
+        const persisted = persistedState as Partial<ChatRoomStore> | undefined
+        return {
+          selectedRoomId: persisted?.selectedRoomId,
+          chatRoomsCacheUserId: persisted?.chatRoomsCacheUserId,
+        }
+      },
       merge: (persistedState, currentState) => {
         const persisted = persistedState as Partial<ChatRoomStore> | undefined
         const currentUserId = getCurrentUserIdFromStorage()
-        const shouldRestoreChatRooms = !!currentUserId && persisted?.chatRoomsCacheUserId === currentUserId
 
         return {
           ...currentState,
           ...persisted,
-          chatRooms: shouldRestoreChatRooms ? persisted?.chatRooms ?? [] : [],
+          chatRooms: [],
           chatRoomsCacheUserId: currentUserId,
         }
       },
       partialize: (state) => ({
         selectedRoomId: state.selectedRoomId,
-        chatRooms: state.chatRooms,
         chatRoomsCacheUserId: state.chatRoomsCacheUserId,
       }),
     }

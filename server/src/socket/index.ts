@@ -386,6 +386,12 @@ export function setupSocket(io: Server) {
           return;
         }
 
+        const chatRoom = await chatRoomService.findById(chatRoomId);
+        if (!chatRoom) {
+          socket.emit('chatroom:not-found', { chatRoomId });
+          return;
+        }
+
         // Check if user is an agent
         const isAgent = await chatRoomService.isAgent(
           chatRoomId,
@@ -403,9 +409,6 @@ export function setupSocket(io: Server) {
         // Join the socket room
         socket.join(chatRoomId);
         socketChatRooms.get(socket.id)?.add(chatRoomId);
-
-        // Get chatRoom details with messages
-        const chatRoom = await chatRoomService.findById(chatRoomId);
 
         socket.emit('chatroom:joined', {
           chatRoom,

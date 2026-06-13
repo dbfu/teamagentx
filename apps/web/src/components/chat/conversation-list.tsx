@@ -214,20 +214,38 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
     const room = roomToDelete
     setDeleting(true)
     try {
-      const response = await chatRoomApi.delete(room.id)
-      if (response.success) {
-        toast.success(t('toast.roomDeleted'))
-        // 如果删除的是当前选中的群聊，清除选中状态
-        if (selectedId === room.id) {
-          onSelect('')  // 传入空字符串清除选中
-        }
-        onRefresh?.()
-        onDeleteChatRoom?.(room.id)
-      } else {
+      let response: Awaited<ReturnType<typeof chatRoomApi.delete>>
+      try {
+        response = await chatRoomApi.delete(room.id)
+      } catch (error) {
         toast.error(t('common.deleteFailed'))
+        return
       }
-    } catch (error) {
-      toast.error(t('common.deleteFailed'))
+
+      if (!response.success) {
+        toast.error(t('common.deleteFailed'))
+        return
+      }
+
+      toast.success(t('toast.roomDeleted'))
+      // 如果删除的是当前选中的群聊，清除选中状态
+      if (selectedId === room.id) {
+        try {
+          onSelect('')  // 传入空字符串清除选中
+        } catch (error) {
+          console.error('Failed to clear selected chat room after delete:', error)
+        }
+      }
+
+      void Promise.resolve(onRefresh?.()).catch((error) => {
+        console.error('Failed to refresh chat rooms after delete:', error)
+      })
+
+      try {
+        onDeleteChatRoom?.(room.id)
+      } catch (error) {
+        console.error('Failed to update chat room state after delete:', error)
+      }
     } finally {
       setDeleting(false)
       setShowDeleteConfirm(false)

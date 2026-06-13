@@ -33,7 +33,7 @@ import {
   Check,
   X,
 } from 'lucide-react'
-import { agentApi, categoryApi, Agent, AgentCategory, AgentSpeechConfig, AgentsGrouped, type AgentThinkingMode } from '@/lib/agent-api'
+import { agentApi, categoryApi, Agent, AgentCategory, AgentSpeechConfig, AgentsGrouped, type AgentThinkingMode, type ChatRoom } from '@/lib/agent-api'
 import { cn } from '@/lib/utils'
 import { isSystemAssistantDetailBlocked } from '@/lib/system-agents'
 import { CreateAssistantModal } from './create-assistant-modal'
@@ -218,7 +218,7 @@ function SortableCategoryTab({
 
 // 导航到群聊的回调类型（由父组件提供）
 interface AssistantPageProps {
-  onNavigateToChatRoom?: (roomId: string) => void
+  onNavigateToChatRoom?: (roomId: string, room?: ChatRoom) => void | Promise<void>
   isMobile?: boolean
 }
 
@@ -605,7 +605,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
         setQuickChatDialogOpen(false)
         setQuickChatAgent(null)
         // 导航到新创建的群聊
-        onNavigateToChatRoom?.(response.data.id)
+        await onNavigateToChatRoom?.(response.data.id, response.data)
       } else {
         toast.error(t('assistant.quickChatCreateFailed'))
       }
@@ -734,7 +734,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
         ...cg,
         category: { ...cg.category, sortOrder: sortOrderMap.get(cg.category.id) ?? cg.category.sortOrder },
       }))
-      return { ...prev, categories: [...systemGroups, ...newNormals] }
+      return { ...prev, categories: [...newNormals, ...systemGroups] }
     })
 
     categoryApi.updateSortOrder(updates).then(response => {
@@ -751,7 +751,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     [groupedData]
   )
 
-  // 构建分类 Tab 列表：系统分类（群助手）在最前，随后是普通分类，最后是未分类。
+  // 构建分类 Tab 列表：普通分类在前，未分类随后，系统分类固定最后。
   const hasSearch = searchQuery.trim() !== ''
   const tabs = useMemo<AssistantTab[]>(() => {
     if (!groupedData) return []
@@ -774,12 +774,12 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
       .forEach(cg => {
         result.push({ key: cg.category.id, categoryId: cg.category.id, name: cg.category.name, type: 'normal', category: cg.category })
       })
+    if (groupedData.uncategorized.length > 0) {
+      result.push({ key: UNCATEGORIZED_TAB_KEY, categoryId: null, name: t('assistant.uncategorized'), type: 'uncategorized' })
+    }
     const systemGroup = groupedData.categories.find(cg => cg.category.id === SYSTEM_CATEGORY_ID)
     if (systemGroup) {
       result.push({ key: systemGroup.category.id, categoryId: systemGroup.category.id, name: systemGroup.category.name, type: 'system' })
-    }
-    if (groupedData.uncategorized.length > 0) {
-      result.push({ key: UNCATEGORIZED_TAB_KEY, categoryId: null, name: t('assistant.uncategorized'), type: 'uncategorized' })
     }
     return result
   }, [groupedData, t, hasSearch, searchQuery])

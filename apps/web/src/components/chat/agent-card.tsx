@@ -167,12 +167,15 @@ function getAgentSubtitle(assistant: Agent, t: (key: string) => string): string 
 
 // 使用的模型
 function getAgentModel(assistant: Agent): string | null {
+  if (assistant.llmProvider?.model) {
+    return assistant.llmProvider.model
+  }
   if (assistant.type === 'acp') {
     if (assistant.acpTool === 'claude') return assistant.claudeModel
     if (assistant.acpTool === 'codex') return assistant.codexModel
     return null
   }
-  return assistant.llmProvider?.model || null
+  return null
 }
 
 export function AgentCard({

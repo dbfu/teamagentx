@@ -6,6 +6,7 @@ import { Agent, AgentSpeechConfig, agentApi, type AgentThinkingMode } from '@/li
 import { cn } from '@/lib/utils'
 import { isSystemAssistantDetailBlocked } from '@/lib/system-agents'
 import { useAuthStore, useChatRoomStore } from '@/stores'
+import { useIsMobile } from '@/hooks/use-mobile'
 import {
   ArrowLeft,
   BookOpen,
@@ -230,9 +231,11 @@ export function AssistantDetailPage() {
   const { t } = useTranslation()
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const isMobile = useIsMobile()
   const { user: currentUser } = useAuthStore()
   const loadChatRooms = useChatRoomStore((s) => s.loadChatRooms)
   const selectRoom = useChatRoomStore((s) => s.selectRoom)
+  const addRoom = useChatRoomStore((s) => s.addRoom)
   const [isInstallModalOpen, setIsInstallModalOpen] = useState(false)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [isToggling, setIsToggling] = useState(false)
@@ -272,12 +275,18 @@ export function AssistantDetailPage() {
       const response = await agentApi.createQuickChat(agent.id, currentUser.id, workDir)
       if (response.success && response.data) {
         setQuickChatDialogOpen(false)
-        // 先刷新群聊列表，确保新创建的群聊已加载
-        await loadChatRooms()
+        addRoom(response.data)
+        try {
+          // 先刷新群聊列表，确保新创建的群聊已加载
+          await loadChatRooms()
+          addRoom(response.data)
+        } catch (error) {
+          console.error('Failed to refresh chat rooms before navigation:', error)
+        }
         // 选中该群聊
         selectRoom(response.data.id)
         // 导航到消息页
-        navigate('/')
+        navigate(isMobile ? `/chat/${response.data.id}` : '/')
       } else {
         toast.error(t('assistant.quickChatCreateFailed'))
       }
