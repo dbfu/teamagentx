@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   getOpenAtLoginSettings: () => ipcRenderer.invoke('app:get-open-at-login-settings'),
   setOpenAtLogin: (enabled: boolean) => ipcRenderer.invoke('app:set-open-at-login', enabled),
+  getDebugLogSettings: () => ipcRenderer.invoke('app:get-debug-log-settings'),
+  setDebugLogEnabled: (enabled: boolean) => ipcRenderer.invoke('app:set-debug-log-enabled', enabled),
   getNotificationOnboardingState: () => ipcRenderer.invoke('app:get-notification-onboarding-state'),
   setNotificationOnboardingState: (input: { welcomeNotificationSentAt: number | null }) =>
     ipcRenderer.invoke('app:set-notification-onboarding-state', input),

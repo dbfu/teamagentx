@@ -18,6 +18,16 @@ declare global {
       data?: OpenAtLoginSettings;
       error?: string;
     }>;
+    getDebugLogSettings?: () => Promise<{
+      success: boolean;
+      data?: DebugLogSettings;
+      error?: string;
+    }>;
+    setDebugLogEnabled?: (enabled: boolean) => Promise<{
+      success: boolean;
+      data?: DebugLogSettings;
+      error?: string;
+    }>;
     getNotificationOnboardingState: () => Promise<{
       success: boolean;
       data?: { welcomeNotificationSentAt: number | null };
@@ -108,6 +118,11 @@ declare global {
     wasOpenedAsHidden: boolean;
     executableWillLaunchAtLogin?: boolean;
     status?: 'not-registered' | 'enabled' | 'requires-approval' | 'not-found';
+  }
+
+  interface DebugLogSettings {
+    enabled: boolean;
+    lastCleanedDate?: string;
   }
 
   interface UpdateInfo {

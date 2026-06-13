@@ -16,16 +16,93 @@ import { isLanzouShareUrl, resolveLanzouDownloadUrl } from './update-download';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const DEBUG_LOG_SETTINGS_FILE = 'debug-log-settings.json';
+
+type DebugLogSettings = {
+  enabled: boolean;
+  lastCleanedDate?: string;
+};
+
+let debugLogSettingsCache: DebugLogSettings | null = null;
+
+function getDebugLogSettingsPath(): string {
+  return path.join(app.getPath('userData'), DEBUG_LOG_SETTINGS_FILE);
+}
+
+function readDebugLogSettings(): DebugLogSettings {
+  if (debugLogSettingsCache) {
+    return debugLogSettingsCache;
+  }
+
+  try {
+    const filePath = getDebugLogSettingsPath();
+    if (!fs.existsSync(filePath)) {
+      debugLogSettingsCache = { enabled: false };
+      return debugLogSettingsCache;
+    }
+
+    const raw = fs.readFileSync(filePath, 'utf-8');
+    const parsed = JSON.parse(raw) as Partial<DebugLogSettings>;
+    debugLogSettingsCache = {
+      enabled: parsed.enabled === true,
+      lastCleanedDate: typeof parsed.lastCleanedDate === 'string' ? parsed.lastCleanedDate : undefined,
+    };
+  } catch {
+    debugLogSettingsCache = { enabled: false };
+  }
+
+  return debugLogSettingsCache;
+}
+
+function writeDebugLogSettings(settings: DebugLogSettings): DebugLogSettings {
+  const normalized: DebugLogSettings = {
+    enabled: settings.enabled === true,
+    lastCleanedDate: typeof settings.lastCleanedDate === 'string' ? settings.lastCleanedDate : undefined,
+  };
+  const filePath = getDebugLogSettingsPath();
+  fs.writeFileSync(filePath, `${JSON.stringify(normalized, null, 2)}\n`, 'utf-8');
+  debugLogSettingsCache = normalized;
+  return normalized;
+}
+
 // 日志文件路径 - 用于调试 Windows 启动问题
 function getLogPath(): string {
   return path.join(app.getPath('userData'), 'electron-debug.log');
 }
 
+function getLocalDateKey(date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function cleanupDebugLogOncePerDay(settings: DebugLogSettings): void {
+  const today = getLocalDateKey();
+  if (settings.lastCleanedDate === today) {
+    return;
+  }
+
+  try {
+    fs.truncateSync(getLogPath(), 0);
+  } catch {
+    // 日志文件不存在或无法清理时不阻塞应用启动。
+  }
+
+  writeDebugLogSettings({ ...settings, lastCleanedDate: today });
+}
+
 function writeLog(message: string): void {
+  const settings = readDebugLogSettings();
+  if (!settings.enabled) {
+    return;
+  }
+
   const logPath = getLogPath();
   const timestamp = new Date().toISOString();
   const logMessage = `[${timestamp}] ${message}\n`;
   try {
+    cleanupDebugLogOncePerDay(settings);
     fs.appendFileSync(logPath, logMessage);
   } catch {
     // 忽略日志写入错误
@@ -35,6 +112,34 @@ function writeLog(message: string): void {
 function appendRendererDebugLog(message: string, payload?: unknown): void {
   const suffix = payload === undefined ? '' : ` ${JSON.stringify(payload)}`
   writeLog(`[renderer] ${message}${suffix}`)
+}
+
+function shouldSkipServerDebugLogLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
+    return false;
+  }
+
+  try {
+    const payload = JSON.parse(trimmed) as { msg?: unknown; req?: unknown; res?: unknown; responseTime?: unknown };
+    const msg = typeof payload.msg === 'string' ? payload.msg : '';
+    return msg === 'incoming request' || msg === 'request completed';
+  } catch {
+    return false;
+  }
+}
+
+function writeServerDebugLog(prefix: 'stdout' | 'stderr', text: string): void {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !shouldSkipServerDebugLogLine(line));
+
+  if (lines.length === 0) {
+    return;
+  }
+
+  writeLog(`Server ${prefix}: ${lines.join('\n')}`);
 }
 
 type PdfExportPayload = {
@@ -2278,7 +2383,7 @@ async function startServer(): Promise<number> {
 
     serverProcess.stdout?.on('data', (data) => {
       const text = data.toString();
-      writeLog(`Server stdout: ${text.trim()}`);
+      writeServerDebugLog('stdout', text);
 
       // Parse port from output: __ELECTRON_PORT__:XXXX
       const match = text.match(/__ELECTRON_PORT__:(\d+)/);
@@ -2295,7 +2400,7 @@ async function startServer(): Promise<number> {
     serverProcess.stderr?.on('data', (data) => {
       const text = data.toString();
       lastServerStderr = `${lastServerStderr}${text}`.slice(-8000);
-      writeLog(`Server stderr: ${text.trim()}`);
+      writeServerDebugLog('stderr', text);
       process.stderr.write(data);
     });
 
@@ -2653,6 +2758,22 @@ app.whenReady().then(async () => {
   ipcMain.handle('app:set-open-at-login', (_event, enabled: boolean) => {
     try {
       return { success: true, data: setOpenAtLogin(Boolean(enabled)) };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('app:get-debug-log-settings', () => {
+    try {
+      return { success: true, data: readDebugLogSettings() };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('app:set-debug-log-enabled', (_event, enabled: boolean) => {
+    try {
+      return { success: true, data: writeDebugLogSettings({ enabled: Boolean(enabled) }) };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }

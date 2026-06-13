@@ -12,7 +12,7 @@ import {
 import { openExternalUrl } from '@/lib/site-links'
 import { cn } from '@/lib/utils'
 import { useAuthStore, useUIStore } from '@/stores'
-import { BookOpenText, Check, ExternalLink, GitBranch, Globe2, Loader2, Monitor, Moon, Palette, Power, Sun, Volume2, VolumeX } from 'lucide-react'
+import { BookOpenText, Check, ExternalLink, FileText, GitBranch, Globe2, Loader2, Monitor, Moon, Palette, Power, Sun, Volume2, VolumeX } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
@@ -32,6 +32,8 @@ export function GeneralSection() {
   const [openAtLogin, setOpenAtLogin] = useState(false)
   const [openAtLoginSupported, setOpenAtLoginSupported] = useState(true)
   const [savingOpenAtLogin, setSavingOpenAtLogin] = useState(false)
+  const [debugLogEnabled, setDebugLogEnabled] = useState(false)
+  const [savingDebugLog, setSavingDebugLog] = useState(false)
 
   // 读取助手日记全局开关
   useEffect(() => {
@@ -56,6 +58,18 @@ export function GeneralSection() {
       .catch(() => {
         setOpenAtLoginSupported(false)
       })
+  }, [])
+
+  useEffect(() => {
+    if (!window.electronAPI?.isElectron || !window.electronAPI.getDebugLogSettings) return
+
+    window.electronAPI.getDebugLogSettings()
+      .then((result) => {
+        if (result.success && result.data) {
+          setDebugLogEnabled(result.data.enabled)
+        }
+      })
+      .catch(() => {})
   }, [])
 
   const handleOpenAtLoginChange = async (checked: boolean) => {
@@ -84,6 +98,34 @@ export function GeneralSection() {
       toast.error(error?.message || t('settings.openAtLoginError'))
     } finally {
       setSavingOpenAtLogin(false)
+    }
+  }
+
+  const handleDebugLogChange = async (checked: boolean) => {
+    const api = window.electronAPI
+    if (!api?.isElectron || !api.setDebugLogEnabled) {
+      toast.error(t('settings.debugLogSupportOnlyDesktop'))
+      return
+    }
+
+    const previous = debugLogEnabled
+    setDebugLogEnabled(checked)
+    setSavingDebugLog(true)
+    try {
+      const result = await api.setDebugLogEnabled(checked)
+      if (!result.success || !result.data) {
+        setDebugLogEnabled(previous)
+        toast.error(t('settings.debugLogSaveFailed'))
+        return
+      }
+
+      setDebugLogEnabled(result.data.enabled)
+      toast.success(result.data.enabled ? t('settings.debugLogEnabled') : t('settings.debugLogDisabled'))
+    } catch (error: any) {
+      setDebugLogEnabled(previous)
+      toast.error(error?.message || t('settings.debugLogSaveFailed'))
+    } finally {
+      setSavingDebugLog(false)
     }
   }
 
@@ -335,6 +377,27 @@ export function GeneralSection() {
                 disabled={!openAtLoginSupported || savingOpenAtLogin}
                 onCheckedChange={handleOpenAtLoginChange}
                 aria-label={t('settings.openAtLogin')}
+              />
+            </div>
+          </div>
+
+          <div className="mt-3 flex items-center justify-between gap-4 rounded-lg border border-border bg-background px-3 py-3">
+            <div className="flex items-center gap-2">
+              <FileText className="size-4 text-primary" />
+              <div>
+                <div className="text-sm font-medium text-foreground">{t('settings.debugLog')}</div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {t('settings.debugLogHint')}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {savingDebugLog && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
+              <Switch
+                checked={debugLogEnabled}
+                disabled={savingDebugLog}
+                onCheckedChange={handleDebugLogChange}
+                aria-label={t('settings.debugLog')}
               />
             </div>
           </div>
