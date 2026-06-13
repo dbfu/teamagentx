@@ -174,14 +174,9 @@ export function ChatSidePanel({
     if (sidePanelMode === 'stream') {
       const completedKey = streamingViewAgent ? `${streamingViewAgent.messageId}_${streamingViewAgent.agentId}` : ''
       return streamingViewAgent && completedAgents.has(completedKey) ? (
-        <>
-          <Bot className="size-4 text-green-500" />
-        </>
+        <Bot className="size-4 text-green-500" />
       ) : (
-        <>
-          <Bot className="size-4 text-primary" />
-          <Loader2 className="size-3 animate-spin text-primary/80" />
-        </>
+        <Bot className="size-4 text-primary" />
       )
     }
 

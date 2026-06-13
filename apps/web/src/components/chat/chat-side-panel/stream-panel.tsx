@@ -105,6 +105,26 @@ function TotalTimeIndicator({ events, isRunning, startTime }: { events: StreamEv
   )
 }
 
+function ProcessingIndicator({ label }: { label: string }) {
+  const [dotCount, setDotCount] = useState(3)
+  const baseLabel = label.replace(/[.\u2026。]+$/u, '')
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setDotCount((count) => count % 3 + 1)
+    }, 500)
+
+    return () => clearInterval(timer)
+  }, [])
+
+  return (
+    <span className="text-primary">
+      {baseLabel}
+      <span className="inline-block w-3 text-left">{'.'.repeat(dotCount)}</span>
+    </span>
+  )
+}
+
 function CollapsibleStateIcon({ className }: { className?: string }) {
   return (
     <>
@@ -492,8 +512,8 @@ export function StreamPanel({
         ) : (
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2 text-xs text-primary">
-              <span>{t('common.processing')}</span>
               <TotalTimeIndicator events={events} isRunning={Boolean(isExecuting)} startTime={messageStartTime} />
+              <ProcessingIndicator label={t('common.processing')} />
             </div>
             {isExecuting && onStop && chatRoomId && (
               <button
