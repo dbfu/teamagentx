@@ -2,7 +2,7 @@ import { SidePanel } from '@/components/ui/side-panel'
 import { AgentContextInfo, ChatRoom, debugApi, ExecutionRecord, Message } from '@/lib/agent-api'
 import { AgentAvatarImage } from '@/lib/agent-avatars'
 import { cn } from '@/lib/utils'
-import { isSystemAssistantDetailBlocked } from '@/lib/system-agents'
+import { isStreamViewBlocked } from '@/lib/system-agents'
 import { useChatStore, useThrottledStreamEvents, type SidePanelMode } from '@/stores/chat-store'
 import type { AgentStatus } from '@/stores/socket-store'
 import { Bot, ClipboardList, Clock, Info, List, Loader2, MessageSquareMore, MessagesSquare, Settings, Users } from 'lucide-react'
@@ -237,7 +237,7 @@ export function ChatSidePanel({
   }
 
   const handleSelectAgent = (agent: { id: string; name: string; avatar?: string | null; avatarColor?: string | null; description?: string | null; chatRoomAgentId?: string; agentType?: string; agentLevel?: string; chatRoomId?: string; injectGroupHistory?: boolean }) => {
-    if (isSystemAssistantDetailBlocked(agent)) return
+    if (isStreamViewBlocked(agent)) return
     setSelectedRoomAgent(agent)
     setSidePanelMode('agent-detail')
   }

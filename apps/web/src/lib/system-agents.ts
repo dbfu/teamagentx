@@ -14,3 +14,20 @@ export function isSystemAssistantDetailBlocked(agent?: {
   if (agent.name && NON_DETAIL_SYSTEM_AGENT_NAMES.has(agent.name)) return true
   return agent.agentLevel === 'system' && agent.name ? NON_DETAIL_SYSTEM_AGENT_NAMES.has(agent.name) : false
 }
+
+// 仅群调度助手不开放"执行检查器/流式输出面板"——群助手需要可观察其流式输出。
+// 与 isSystemAssistantDetailBlocked（隐藏完整助手配置页）区分开：
+// 群助手可以打开侧边检查器查看流式输出/历史/任务队列，但配置页仍保持锁定。
+const STREAM_BLOCKED_SYSTEM_AGENT_NAMES = new Set(['群调度助手'])
+const STREAM_BLOCKED_SYSTEM_AGENT_IDS = new Set([GROUP_COORDINATOR_ID])
+
+export function isStreamViewBlocked(agent?: {
+  id?: string | null
+  name?: string | null
+  agentLevel?: string | null
+} | null): boolean {
+  if (!agent) return false
+  if (agent.id && STREAM_BLOCKED_SYSTEM_AGENT_IDS.has(agent.id)) return true
+  if (agent.name && STREAM_BLOCKED_SYSTEM_AGENT_NAMES.has(agent.name)) return true
+  return agent.agentLevel === 'system' && agent.name ? STREAM_BLOCKED_SYSTEM_AGENT_NAMES.has(agent.name) : false
+}

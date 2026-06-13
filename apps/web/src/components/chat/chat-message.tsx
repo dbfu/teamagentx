@@ -18,7 +18,7 @@ import { toVoicePanelConfig } from '@/lib/agent-speech'
 import { normalizeSpeechText, prewarmTts, speakText, stopSpeechPlayback, supportsSpeechPlayback } from '@/lib/browser-speech'
 import { resolveAssetUrl } from '@/lib/asset-url'
 import { MarkdownContent } from './markdown-content'
-import { isSystemAssistantDetailBlocked } from '@/lib/system-agents'
+import { isStreamViewBlocked } from '@/lib/system-agents'
 
 function logManualVoice(event: string, details: Record<string, unknown>): void {
   console.debug(`[voice-manual] ${event}`, details)
@@ -105,7 +105,7 @@ const TypingAgentsIndicator = memo(function TypingAgentsIndicator({
         const elapsedText = !isPending && agent.startedAt
           ? formatDuration(durationNow - agent.startedAt)
           : null
-        const detailBlocked = isSystemAssistantDetailBlocked({
+        const detailBlocked = isStreamViewBlocked({
           id: agent.agentId,
           name: agent.agentName,
         })
@@ -450,7 +450,7 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
         }
 
         if (matchedAgent) {
-          const blocksDetail = isSystemAssistantDetailBlocked(matchedAgent)
+          const blocksDetail = isStreamViewBlocked(matchedAgent)
           // 渲染高亮的 @助手名
           parts.push(
             <span

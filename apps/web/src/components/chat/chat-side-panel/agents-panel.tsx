@@ -8,7 +8,7 @@ import { toast } from 'sonner'
 import type { AgentStatus } from '@/stores/socket-store'
 import { AgentAvatar } from '../agent-avatar'
 import { UserAvatar } from '../user-avatar'
-import { isSystemAssistantDetailBlocked } from '@/lib/system-agents'
+import { isStreamViewBlocked } from '@/lib/system-agents'
 import { useTranslation } from 'react-i18next'
 
 interface AgentsPanelProps {
@@ -109,7 +109,7 @@ function AgentItem({
   onInsertMention?: (agentId: string, agentName: string) => void
   t: (key: string) => string
 }) {
-  const blocksDetail = info.type === 'agent' && isSystemAssistantDetailBlocked(info)
+  const blocksDetail = info.type === 'agent' && isStreamViewBlocked(info)
 
   return (
     <div

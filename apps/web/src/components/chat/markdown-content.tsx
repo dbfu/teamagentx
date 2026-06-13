@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { resolveAssetUrl } from '@/lib/asset-url'
 import { MENTION_MARKER_CLASS, remarkMentions } from '@/lib/remark-mentions'
 import { remarkTrimUrlPunctuation } from '@/lib/remark-trim-url-punctuation'
-import { isSystemAssistantDetailBlocked } from '@/lib/system-agents'
+import { isStreamViewBlocked } from '@/lib/system-agents'
 import { MermaidDiagram } from './mermaid-diagram'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import rehypeRaw from 'rehype-raw'
@@ -166,7 +166,7 @@ export const MarkdownContent = memo(function MarkdownContent({
           const agentName = (props as any).agentName || (props as any)['data-agent-name']
 
           if (agentId && agentName) {
-            const blocksDetail = isSystemAssistantDetailBlocked({ id: agentId, name: agentName })
+            const blocksDetail = isStreamViewBlocked({ id: agentId, name: agentName })
             return (
               <span
                 className={cn(

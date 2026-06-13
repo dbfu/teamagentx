@@ -9,7 +9,7 @@ import { PendingImage } from '@/components/chat/image-preview-list'
 import { compressImage, fileToBase64, createPreviewUrl, revokePreviewUrl, getImageDimensions, isValidImageType, isValidImageSize } from '@/lib/image-utils'
 import { isActivelyViewingChatRoom } from '@/lib/chat-room-presence'
 import { coerceThinkingText } from '@/lib/utils'
-import { isSystemAssistantDetailBlocked } from '@/lib/system-agents'
+import { isStreamViewBlocked } from '@/lib/system-agents'
 import { toast } from 'sonner'
 import { useIsMobile } from '@/hooks/use-mobile'
 
@@ -2423,7 +2423,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
 
   const handleAgentAvatarClick = useCallback((agentId: string, agentName: string) => {
     const found = allAgents.find(a => a.id === agentId || a.name === agentName)
-    if (isSystemAssistantDetailBlocked(found ?? { id: agentId, name: agentName })) return
+    if (isStreamViewBlocked(found ?? { id: agentId, name: agentName })) return
     if (found) {
       // 从 chatRoom.chatRoomAgents 中查找 chatRoomAgentId 和 agentType
       const roomAgent = chatRoom?.chatRoomAgents?.find(
