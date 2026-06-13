@@ -167,6 +167,34 @@ describe('Agent Gateway API', () => {
       assert.ok(systemAgents.some((agent: any) => agent.id === GROUP_COORDINATOR_ID));
     });
 
+    test('分组列表应该按分类 sortOrder 升序返回', async () => {
+      const suffix = Date.now();
+      const first = await prisma.agentCategory.create({
+        data: {
+          name: `Grouped Sort First ${suffix}`,
+          sortOrder: 1000,
+        },
+      });
+      const second = await prisma.agentCategory.create({
+        data: {
+          name: `Grouped Sort Second ${suffix}`,
+          sortOrder: 2000,
+        },
+      });
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/agents/grouped',
+      });
+
+      assert.strictEqual(response.statusCode, 200);
+      const body = response.json();
+      assert.strictEqual(body.success, true);
+
+      const categoryIds = body.data.categories.map((group: any) => group.category.id);
+      assert.ok(categoryIds.indexOf(first.id) < categoryIds.indexOf(second.id));
+    });
+
     test('应该创建包含所有字段的 Agent', async () => {
       const response = await app.inject({
         method: 'POST',

@@ -520,7 +520,7 @@ export const agentService = {
   }> {
     // 先获取所有分类
     const allCategories = await prisma.agentCategory.findMany({
-      orderBy: { sortOrder: 'desc' },
+      orderBy: { sortOrder: 'asc' },
     });
 
     // 获取所有助手
@@ -576,14 +576,13 @@ export const agentService = {
       return b.createdAt.getTime() - a.createdAt.getTime();
     });
 
-    // 对分类按 sortOrder 排序，系统分类（sortOrder = -1000）放最后
+    // 对分类按 sortOrder 排序，与分类管理接口和前端拖拽保存方向保持一致
     const sortedCategorized = new Map<string, { category: any; agents: Agent[] }>();
     const entries = Array.from(categorized.entries());
     entries.sort((a, b) => {
       const sortOrderA = a[1].category.sortOrder ?? 0;
       const sortOrderB = b[1].category.sortOrder ?? 0;
-      // sortOrder 越大越靠前，系统分类 -1000 放最后
-      return sortOrderB - sortOrderA;
+      return sortOrderA - sortOrderB;
     });
     for (const [key, value] of entries) {
       sortedCategorized.set(key, value);
