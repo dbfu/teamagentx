@@ -41,6 +41,7 @@ export interface UpdateChatRoomData {
   avatarColor?: string;
   description?: string;
   rules?: string;
+  dispatchRules?: string | null;
   workDir?: string | null;
   envVars?: string | null;
   defaultAgentId?: string | null;
@@ -383,6 +384,7 @@ export const chatRoomService = {
           avatarColor: source.avatarColor,
           description: source.description,
           rules: source.rules,
+          dispatchRules: (source as any).dispatchRules,
           workDir: copiedWorkDir,
           ownerId: source.ownerId,
           isQuickChatRoom: source.isQuickChatRoom,
@@ -498,6 +500,7 @@ export const chatRoomService = {
           avatarColor: source.avatarColor,
           description: source.description,
           rules: source.rules,
+          dispatchRules: (source as any).dispatchRules,
           workDir: copiedWorkDir,
           envVars: source.envVars,
           ownerId: source.ownerId,

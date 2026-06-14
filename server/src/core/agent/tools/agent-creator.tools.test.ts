@@ -11,6 +11,7 @@ import {
   clearBrowserLocalVoiceSnapshots,
   upsertBrowserLocalVoiceSnapshot,
 } from '../../../modules/speech/voice-catalog.js';
+import { executorCache } from '../agent-handler/cache.js';
 
 function getTool(name: string): { name: string; invoke: (input: Record<string, unknown>) => Promise<unknown> } {
   const tool = agentCreatorTools.find((item) => item.name === name);
@@ -58,6 +59,7 @@ test.beforeEach(async () => {
     },
   });
   clearBrowserLocalVoiceSnapshots();
+  executorCache.clear();
 });
 
 test('list_agents returns category name and categoryId', async () => {
@@ -150,6 +152,56 @@ test('room-aware update_agent updates current room group history access', async 
   });
 
   assert.equal(roomAgent?.injectGroupHistory, true);
+});
+
+test('update_agent clears cached executors after prompt update', async () => {
+  const agent = await prisma.agent.create({
+    data: {
+      name: 'Agent Creator Tool Test Prompt Cache',
+      prompt: 'old prompt',
+    },
+  });
+  executorCache.set(`room-a_${agent.name}`, {} as never);
+  executorCache.set(`room-b_${agent.name}_session`, {} as never);
+
+  const result = await getTool('update_agent').invoke({
+    agentId: agent.id,
+    prompt: 'new prompt',
+  });
+  const parsed = JSON.parse(String(result));
+
+  assert.equal(parsed.success, true);
+  assert.equal(executorCache.size, 0);
+  const updatedAgent = await prisma.agent.findUnique({ where: { id: agent.id } });
+  assert.equal(updatedAgent?.prompt, 'new prompt');
+});
+
+test('update_agents clears cached executors after prompt updates', async () => {
+  const firstAgent = await prisma.agent.create({
+    data: {
+      name: 'Agent Creator Tool Test Batch Prompt Cache A',
+      prompt: 'old prompt A',
+    },
+  });
+  const secondAgent = await prisma.agent.create({
+    data: {
+      name: 'Agent Creator Tool Test Batch Prompt Cache B',
+      prompt: 'old prompt B',
+    },
+  });
+  executorCache.set(`room-a_${firstAgent.name}`, {} as never);
+  executorCache.set(`room-b_${secondAgent.name}`, {} as never);
+
+  const result = await getTool('update_agents').invoke({
+    agents: [
+      { agentId: firstAgent.id, prompt: 'new prompt A' },
+      { agentId: secondAgent.id, prompt: 'new prompt B' },
+    ],
+  });
+  const parsed = JSON.parse(String(result));
+
+  assert.equal(parsed.success, true);
+  assert.equal(executorCache.size, 0);
 });
 
 test('room-aware create_agent adds new agent to current room with group history access', async () => {

@@ -17,7 +17,9 @@ import {
   broadcastAgentJoinedMessage,
   broadcastAgentsUpdated,
   broadcastChatRoomRulesUpdatedMessage,
+  broadcastChatRoomDispatchRulesUpdatedMessage,
 } from '../core/agent/agent-handler/index.js';
+import { parseDispatchRulesYaml } from '../core/agent/dispatch-rules/schema.js';
 import { agentService } from '../core/agent/agent.service.js';
 import {
   parseRoomEnvVars,
@@ -71,6 +73,7 @@ const chatRoomSchema = {
     avatarColor: { type: 'string', nullable: true },
     description: { type: 'string', nullable: true },
     rules: { type: 'string', nullable: true },
+    dispatchRules: { type: 'string', nullable: true },
     workDir: { type: 'string', nullable: true },
     envVars: { type: 'string', nullable: true },
     ownerId: { type: 'string', nullable: true },
@@ -238,6 +241,7 @@ interface UpdateChatRoomBody {
   avatarColor?: string;
   description?: string;
   rules?: string;
+  dispatchRules?: string | null;
   workDir?: string | null;
   envVars?: string | null;
   defaultAgentId?: string | null;
@@ -1556,6 +1560,7 @@ export async function chatRoomGateway(app: FastifyInstance) {
           avatarColor: { type: 'string' },
           description: { type: 'string' },
           rules: { type: 'string' },
+          dispatchRules: { type: 'string', nullable: true },
           workDir: { type: 'string', nullable: true },
           envVars: { type: 'string', nullable: true },
           defaultAgentId: { type: 'string', nullable: true },
@@ -1597,14 +1602,28 @@ export async function chatRoomGateway(app: FastifyInstance) {
       }
     }
 
+    // 群调度规则保存校验：非空内容必须是合法的调度规则 YAML，否则拒绝保存
+    if (data.dispatchRules !== undefined) {
+      if (data.dispatchRules === null || data.dispatchRules.trim() === '') {
+        data.dispatchRules = null;
+      } else {
+        const parsed = parseDispatchRulesYaml(data.dispatchRules);
+        if (!parsed.ok) {
+          return reply.code(400).send({ success: false, error: `群调度规则格式不正确：${parsed.error}` });
+        }
+      }
+    }
+
     try {
-      const previousChatRoom = data.rules !== undefined
-        ? await chatRoomService.findById(id)
-        : null;
+      const previousChatRoom =
+        data.rules !== undefined || data.dispatchRules !== undefined
+          ? await chatRoomService.findById(id)
+          : null;
       const chatRoom = await chatRoomService.update(id, data);
       if (
         data.workDir !== undefined ||
         data.rules !== undefined ||
+        data.dispatchRules !== undefined ||
         data.envVars !== undefined ||
         data.agentTriggerMode !== undefined
       ) {
@@ -1615,6 +1634,12 @@ export async function chatRoomGateway(app: FastifyInstance) {
         (previousChatRoom?.rules ?? '') !== (chatRoom.rules ?? '')
       ) {
         await broadcastChatRoomRulesUpdatedMessage(id, chatRoom.rules);
+      }
+      if (
+        data.dispatchRules !== undefined &&
+        ((previousChatRoom as any)?.dispatchRules ?? '') !== ((chatRoom as any).dispatchRules ?? '')
+      ) {
+        await broadcastChatRoomDispatchRulesUpdatedMessage(id, (chatRoom as any).dispatchRules);
       }
       const io = (app as any).io as Server | undefined;
       io?.emit('chatroom:updated', {

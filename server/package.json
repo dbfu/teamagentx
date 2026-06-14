@@ -63,6 +63,7 @@
     "unist-util-visit": "^5.1.0",
     "uuid": "^13.0.0",
     "ws": "^8.18.3",
+    "yaml": "^2.8.4",
     "zod": "^4.3.6"
   },
   "devDependencies": {

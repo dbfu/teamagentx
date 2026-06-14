@@ -7,6 +7,7 @@ import { ChatSidePanel } from './chat-side-panel'
 import { AddAgentDialog } from './dialogs/add-agent-dialog'
 import { ClearMessagesDialog } from './dialogs/clear-messages-dialog'
 import { RoomRulesDialog } from './dialogs/room-rules-dialog'
+import { RoomDispatchRulesDialog } from './dialogs/room-dispatch-rules-dialog'
 import { RoomEnvVarsDialog } from './dialogs/room-env-vars-dialog'
 import { StopAllTasksDialog } from './dialogs/stop-all-tasks-dialog'
 import { ScreenshotModal } from './screenshot-modal'
@@ -34,6 +35,7 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
   const setScrollToMessageId = useChatStore((s) => s.setScrollToMessageId)
   const selectRoom = useChatRoomStore((s) => s.selectRoom)
   const [showRoomRules, setShowRoomRules] = useState(false)
+  const [showDispatchRules, setShowDispatchRules] = useState(false)
   const [showEnvVars, setShowEnvVars] = useState(false)
   const [showScreenshot, setShowScreenshot] = useState(false)
   const [showCustomCommands, setShowCustomCommands] = useState(false)
@@ -366,6 +368,7 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
           hasActiveTasks={activeTaskAgentIds.length > 0}
           onStopAllTasks={handleStopAllTasks}
           onOpenRoomRules={() => setShowRoomRules(true)}
+          onOpenDispatchRules={() => setShowDispatchRules(true)}
           onOpenEnvVars={() => setShowEnvVars(true)}
           onOpenCustomCommands={() => setShowCustomCommands(true)}
           onScreenshot={() => setShowScreenshot(true)}
@@ -509,6 +512,14 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
       <RoomRulesDialog
         isOpen={showRoomRules}
         onClose={() => setShowRoomRules(false)}
+        chatRoom={chatRoom}
+        onChatRoomChange={onChatRoomChange || (() => {})}
+      />
+
+      {/* Room Dispatch Rules Dialog */}
+      <RoomDispatchRulesDialog
+        isOpen={showDispatchRules}
+        onClose={() => setShowDispatchRules(false)}
         chatRoom={chatRoom}
         onChatRoomChange={onChatRoomChange || (() => {})}
       />

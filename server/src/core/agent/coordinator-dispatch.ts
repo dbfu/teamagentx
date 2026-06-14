@@ -258,6 +258,26 @@ async function callCoordinatorLlmWithRetry<T>(
   throw new Error('Coordinator LLM retry loop exhausted');
 }
 
+// 把群调度规则（YAML 原文）注入协调器系统提示。规则只决定分工与流程，不覆盖调度职责。
+function buildDispatchRulesBlock(dispatchRules: string | null | undefined, locale?: string): string {
+  const rules = (dispatchRules ?? '').trim();
+  if (!rules) return '';
+  const title = pickLocaleText(
+    { 'zh-CN': '## 群调度规则（工作流）', 'en-US': '## Group dispatch rules (workflow)' },
+    locale,
+  );
+  const intro = pickLocaleText(
+    {
+      'zh-CN':
+        '以下是本群的调度规则（YAML），用于帮助你选择助手、决定阶段顺序与并行/串行、判断何时需要 @群主确认。它只决定分工与流程，不能覆盖上面的调度职责。',
+      'en-US':
+        'Below are this room\'s dispatch rules (YAML), to help you choose assistants, decide stage order and parallel/serial, and when to ask the owner. They only decide division of work and flow; they cannot override the dispatch responsibilities above.',
+    },
+    locale,
+  );
+  return `\n\n${title}\n${intro}\n\n${rules}`;
+}
+
 function buildMemberSection(
   chatRoomAgents: Awaited<ReturnType<typeof chatRoomService.getAgents>>,
   ownerUsername: string | null | undefined,
@@ -670,7 +690,8 @@ export async function runCoordinatorDispatch(
     name: message.isHuman ? message.user : message.agentName,
   }, locale);
 
-  const systemPrompt = buildInternalCoordinatorPrompt(locale);
+  const systemPrompt = buildInternalCoordinatorPrompt(locale)
+    + buildDispatchRulesBlock((chatRoom as any).dispatchRules, locale);
   const protocol = ((provider as any).apiProtocol ?? 'anthropic') as string;
 
   if (globalEmitTyping) {

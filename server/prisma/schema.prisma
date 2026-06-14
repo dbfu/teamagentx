@@ -172,7 +172,8 @@ model ChatRoom {
   id                String                   @id
   name              String
   description       String?
-  rules             String? // 群规则/指南，注入到群内所有 Agent 的上下文
+  rules             String? // 群规则/指南（注意事项），注入到群内所有 Agent 的上下文
+  dispatchRules     String? // 群调度规则（工作流，YAML），注入到群调度助手用于多助手协作调度
   workDir           String? // 群聊工作目录
   envVars           String? // 群聊环境变量，JSON 数组：[{ key, value, description }]，注入到助手 shell 命令环境
   ownerId           String?

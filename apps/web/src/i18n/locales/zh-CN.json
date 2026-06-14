@@ -251,6 +251,18 @@
     "groupName": "群名称",
     "groupDescription": "群描述",
     "groupRules": "群规则",
+    "groupDispatchRules": "群调度规则",
+    "dispatchRules": {
+      "hint": "群调度规则定义群内多助手协作的工作流，注入给群调度助手用于决定任务分工与执行顺序。可 @群助手 自动生成或优化。",
+      "viewFlow": "流程图",
+      "viewSource": "YAML 源码",
+      "placeholder": "在此粘贴或编辑调度规则 YAML，保存时会校验格式。",
+      "empty": "尚未设置群调度规则",
+      "emptyTip": "可在群聊中 @群助手 让它根据群内助手自动生成调度规则，或切换到「YAML 源码」手动编写。",
+      "parseFailed": "当前内容无法解析为调度规则",
+      "invalidFormat": "群调度规则格式不正确",
+      "saved": "群调度规则已保存"
+    },
     "groupSettings": "群设置",
     "defaultAssistant": "默认助手",
     "triggerMode": "触发模式",

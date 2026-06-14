@@ -5,7 +5,7 @@ import { AgentAvatarImage } from '@/lib/agent-avatars';
 import { GroupAvatarImage } from '@/lib/group-avatars';
 import { cn } from '@/lib/utils';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Box, Camera, ClipboardList, Clock, Eraser, History, KeyRound, Loader2, MessagesSquare, MoreHorizontal, Play, Scroll, Settings, Square, TerminalSquare, UserPlus, Users } from 'lucide-react';
+import { Box, Camera, ClipboardList, Clock, Eraser, History, KeyRound, Loader2, MessagesSquare, MoreHorizontal, Play, Scroll, Settings, Square, TerminalSquare, UserPlus, Users, Workflow } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -28,6 +28,7 @@ interface ChatAreaHeaderProps {
   hasActiveTasks?: boolean
   onStopAllTasks?: () => void
   onOpenRoomRules?: () => void
+  onOpenDispatchRules?: () => void
   onOpenEnvVars?: () => void
   onOpenCustomCommands?: () => void
   onScreenshot?: () => void
@@ -49,6 +50,7 @@ export function ChatAreaHeader({
   hasActiveTasks,
   onStopAllTasks,
   onOpenRoomRules,
+  onOpenDispatchRules,
   onOpenEnvVars,
   onOpenCustomCommands,
   onScreenshot,
@@ -548,6 +550,15 @@ export function ChatAreaHeader({
                   <Scroll className="size-4 text-current" />
                   {t('chat.groupRules')}
                 </DropdownMenuItem>
+                {chatRoom?.agentTriggerMode !== 'manual' && (
+                  <DropdownMenuItem
+                    className="hover:bg-primary/10 hover:text-primary hover:[&_svg]:text-primary focus:bg-primary/10 focus:text-primary focus:[&_svg]:text-primary"
+                    onClick={onOpenDispatchRules}
+                  >
+                    <Workflow className="size-4 text-current" />
+                    {t('chat.groupDispatchRules')}
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem
                   className="hover:bg-primary/10 hover:text-primary hover:[&_svg]:text-primary focus:bg-primary/10 focus:text-primary focus:[&_svg]:text-primary"
                   onClick={onOpenEnvVars}

@@ -139,6 +139,7 @@ export const templatePackageService = {
         name: room.name,
         description: room.description,
         rules: room.rules,
+        dispatchRules: (room as any).dispatchRules ?? null,
         workDir: room.workDir,
         defaultAgentId:
           room.defaultAgentId && exportedAgentIds.has(room.defaultAgentId)
@@ -267,6 +268,7 @@ export const templatePackageService = {
         name: string;
         description: string | null;
         rules: string | null;
+        dispatchRules?: string | null;
         defaultAgentId: string | null;
         agentTriggerMode: 'auto' | 'manual' | 'coordinator';
         avatar?: string | null;
@@ -351,6 +353,7 @@ export const templatePackageService = {
           name: plan.finalGroupName,
           description: input.snapshot.room.description,
           rules: input.snapshot.room.rules,
+          dispatchRules: input.snapshot.room.dispatchRules ?? null,
           workDir: null,
           defaultAgentId: null,
           // 老模板的 auto（自由协作）已并入智能协作，导入时映射为 coordinator

@@ -261,7 +261,8 @@ const CHATROOM_HELPER_PROMPT = `You are the chatroom management module for TeamA
 2. List chatrooms and show their information.
 3. Add or remove assistants from chatrooms.
 4. Configure group rules injected into all assistants in a chatroom.
-5. Delete chatrooms.
+5. Generate or update group dispatch rules (the multi-assistant collaboration workflow).
+6. Delete chatrooms.
 
 ## Intent Routing
 
@@ -270,6 +271,7 @@ const CHATROOM_HELPER_PROMPT = `You are the chatroom management module for TeamA
 - Add assistants: list_agents if needed, then add_agents_to_chatroom.
 - Remove assistant: remove_agent_from_chatroom.
 - Configure or clear rules: update_chatroom_rules.
+- Generate or optimize group dispatch rules (workflow): generate_dispatch_rules (defaults to the current chatroom; pass instructions to optimize, omit to auto-generate from the room's assistants).
 - Delete chatroom: delete_chatroom.
 
 ## Confirmation Rules
@@ -385,7 +387,7 @@ function buildGroupAssistantPrompt(): string {
 - Create/list model configurations or add text/image/audio/video model providers: use the Assistant Management module's model configuration tools.
 - Generate/list/install Skills: use the Skill Management module.
 - Create/list/enable/disable/update/delete scheduled chatroom tasks: use the Scheduled Task module.
-- Create/list/delete chatrooms, add/remove assistants, or configure group rules: use the Chatroom Management module.
+- Create/list/delete chatrooms, add/remove assistants, configure group rules, or generate/optimize group dispatch rules (workflow): use the Chatroom Management module.
 - Connect or manage Telegram, Feishu/Lark, DingTalk, WeCom, QQ, or other external platform bindings: use the External Platform Integration module.
 
 ## Assistant Management Module

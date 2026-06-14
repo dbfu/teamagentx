@@ -82,6 +82,34 @@ test('parseKnownMentions keeps inline mentions as plain text by default', () => 
   assert.deepStrictEqual(mentions, []);
 });
 
+test('parseKnownMentions ignores mentions inside fenced code blocks', () => {
+  const content = [
+    '已为群聊生成群调度规则，结果如下：',
+    '```yaml',
+    'constraints:',
+    '  - 涉及项目立项、签约决策等关键节点，必须 @admin 确认',
+    '```',
+    '如需调整请告诉我。',
+  ].join('\n');
+
+  const mentions = parseKnownMentions(content, ['admin'], { allowInline: true });
+
+  assert.deepStrictEqual(mentions, []);
+});
+
+test('parseKnownMentions still matches real mentions outside code blocks', () => {
+  const content = [
+    '@admin 请确认下面的配置：',
+    '```yaml',
+    'owner: @admin',
+    '```',
+  ].join('\n');
+
+  const mentions = parseKnownMentions(content, ['admin'], { allowInline: true });
+
+  assert.deepStrictEqual(mentions, ['admin']);
+});
+
 test('buildChatRoomRulesUpdatedMessageContent includes updated rules', () => {
   const content = buildChatRoomRulesUpdatedMessageContent('所有回复使用中文');
 

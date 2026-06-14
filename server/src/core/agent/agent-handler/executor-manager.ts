@@ -104,6 +104,8 @@ export async function getExecutor(
   const humanMentionInstruction = roomOwnerUsername
     ? `When you need a human user to answer a question or confirm something, mention the chatroom owner in your final reply as @${roomOwnerUsername}. Do not mention other human members for questions or confirmations unless the user explicitly asked you to contact a different person. Mentionable human users in this chatroom: ${[...roomHumanNames].join(', ')}. A mentioned user will receive a todo reminder.`
     : '';
+  // 注意：业务助手的「调度方案/任务流转」不再放进系统提示词，改为每棒执行时注入到
+  // query（见 processor.ts），离当前任务更近、注意力更集中，也避免长会话里被稀释。
   const chatRoomRules = [chatRoom?.rules?.trim(), humanMentionInstruction]
     .filter((rule): rule is string => Boolean(rule))
     .join('\n\n') || undefined;

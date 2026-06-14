@@ -10,8 +10,19 @@ import { broadcastChatRoomCreated, broadcastAgentsUpdated } from '../agent-handl
 import {
   broadcastAgentJoinedMessage,
   broadcastChatRoomRulesUpdatedMessage,
+  broadcastChatRoomDispatchRulesUpdatedMessage,
 } from '../agent-handler/message-utils.js';
 import { clearExecutorCacheEntries } from '../agent-handler/cache.js';
+import { llmProviderService } from '../../../modules/llm-provider/llm-provider.service.js';
+import { createLlmClient } from '../../../lib/llm-client.js';
+import {
+  parseDispatchRulesYaml,
+  stringifyDispatchRules,
+  collectReferencedAgentNames,
+} from '../dispatch-rules/schema.js';
+import {
+  buildDispatchRulesGenerationMessages,
+} from '../dispatch-rules/generation.js';
 
 // 群聊管理助手的专用 ID
 export const CHATROOM_HELPER_AGENT_ID = 'c3d4e5f6-7890-abcd-ef12-345678901234';
@@ -381,6 +392,111 @@ export const deleteChatRoomTool = tool(
   },
 );
 
+// 生成 / 优化群调度规则（工作流）工具
+export function generateDispatchRulesToolForSource(sourceChatRoomId?: string) {
+  return tool(
+    async ({
+      chatRoomId,
+      instructions,
+    }: {
+      chatRoomId?: string;
+      instructions?: string;
+    }) => {
+      try {
+        const roomId = chatRoomId?.trim() || sourceChatRoomId;
+        if (!roomId) {
+          return JSON.stringify({ success: false, error: '未指定群聊，且无法确定当前群聊' });
+        }
+
+        const chatRoom = await chatRoomService.findById(roomId);
+        if (!chatRoom) {
+          return JSON.stringify({ success: false, error: `群聊不存在: ${roomId}` });
+        }
+
+        // 只把业务助手（非系统级、激活中）作为可调度对象
+        const members = await chatRoomService.getAgents(roomId);
+        const businessAgents = members
+          .map((m) => m.agent)
+          .filter(
+            (a): a is NonNullable<typeof a> =>
+              !!a && (a as any).agentLevel !== 'system' && (a as any).isActive !== false,
+          )
+          .map((a) => ({ name: a.name, description: (a as any).description ?? '' }));
+
+        if (businessAgents.length === 0) {
+          return JSON.stringify({
+            success: false,
+            error: '当前群聊没有可调度的业务助手，请先添加助手再生成调度规则',
+          });
+        }
+
+        const provider = await llmProviderService.findDefault();
+        if (!provider) {
+          return JSON.stringify({ success: false, error: '没有可用的默认模型配置，无法生成' });
+        }
+
+        const messages = buildDispatchRulesGenerationMessages({
+          roomName: chatRoom.name,
+          agents: businessAgents,
+          ownerUsername: (chatRoom.owner as any)?.username,
+          instructions,
+        });
+
+        const client = createLlmClient(provider, { temperature: 0, maxTokens: 4096 });
+        const raw = await client.invoke(messages);
+        // 去掉模型可能误加的代码围栏
+        const yamlText = raw.replace(/^```[a-zA-Z]*\s*/m, '').replace(/```\s*$/m, '').trim();
+
+        const parsed = parseDispatchRulesYaml(yamlText);
+        if (!parsed.ok || !parsed.data) {
+          return JSON.stringify({
+            success: false,
+            error: `生成结果不符合格式，请重试。原因：${parsed.error}`,
+          });
+        }
+
+        // 校验引用的助手名都真实存在
+        const validNames = new Set(businessAgents.map((a) => a.name));
+        const unknown = collectReferencedAgentNames(parsed.data).filter((n) => !validNames.has(n));
+        if (unknown.length > 0) {
+          return JSON.stringify({
+            success: false,
+            error: `生成的规则引用了群里不存在的助手：${unknown.join(', ')}，请重试`,
+          });
+        }
+
+        const finalYaml = stringifyDispatchRules(parsed.data);
+        await chatRoomService.update(roomId, { dispatchRules: finalYaml });
+        clearExecutorCacheEntries(undefined, roomId);
+        await broadcastChatRoomDispatchRulesUpdatedMessage(roomId, finalYaml);
+
+        return JSON.stringify({
+          success: true,
+          message: `✅ 已为群聊"${chatRoom.name}"生成群调度规则（工作流），可在群设置中查看可视化流程图`,
+          dispatchRules: finalYaml,
+        });
+      } catch (error) {
+        return JSON.stringify({
+          success: false,
+          error: error instanceof Error ? error.message : '生成群调度规则失败',
+        });
+      }
+    },
+    {
+      name: 'generate_dispatch_rules',
+      description:
+        '生成或优化群聊的「群调度规则（工作流）」。不指定 chatRoomId 时默认当前群聊。提供 instructions 时按用户要求优化，不提供时根据群内助手名称与描述自动生成。结果为结构化 YAML，注入给群调度助手并可在群设置中可视化。',
+      schema: z.object({
+        chatRoomId: z.string().optional().describe('群聊ID，不传则使用当前群聊'),
+        instructions: z
+          .string()
+          .optional()
+          .describe('用户对调度规则的要求或草稿（自然语言）；为空则根据群内助手自动生成'),
+      }),
+    },
+  );
+}
+
 // 群聊管理助手的工具列表
 export function createChatRoomHelperTools(sourceChatRoomId?: string) {
   return [
@@ -390,6 +506,7 @@ export function createChatRoomHelperTools(sourceChatRoomId?: string) {
     addAgentToChatRoomTool,
     removeAgentFromChatRoomTool,
     updateChatRoomRulesTool,
+    generateDispatchRulesToolForSource(sourceChatRoomId),
     deleteChatRoomTool,
   ];
 }

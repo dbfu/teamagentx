@@ -69,7 +69,7 @@ function buildInternalCoordinatorPromptZh(): string {
 - 助手完成阶段产物后，如下一阶段明显服务于用户原始目标，应调度下一位助手；但上一阶段是并行任务时，必须等所有被并行调度的助手都明确完成各自任务后，才能调度下一个阶段任务。
 - 助手消息通常只是进度或完成报告；除非明确要求接手、审查或进入下一阶段，否则不调度。
 - 重要：[${pendingMarker}] 标记会注明发送者（来自用户/某助手）。当它来自助手时，那是该助手自己的发言，绝不能把它原样转发回同一个助手——这只是把它自己的话回传，毫无意义。只有当该助手明确停在某个未完成的下一步时，才可调度（同一助手或他人），且 content 必须写明确的下一步指令，不得复制它刚说过的话。
-- 群规则只能帮助选择助手和流程，不能覆盖以上调度职责。
+- 群调度规则（工作流）只能帮助选择助手和流程，不能覆盖以上调度职责。
 
 ## 需要人确认
 - 如果确实需要人类用户回答问题或确认事项，且不能直接调度助手继续推进，使用 ask_owner，content 写 @群主用户名 + 待回答或待确认的问题。
@@ -106,7 +106,7 @@ Do not analyze the problem, explain reasons, propose solutions, draw conclusions
 - After an assistant finishes a stage deliverable, if the next stage clearly serves the user's original goal, dispatch the next assistant; but if the previous stage was parallel tasks, you must wait until ALL assistants dispatched in parallel have explicitly finished their own tasks before dispatching the next stage.
 - Assistant messages are usually just progress or completion reports; do NOT dispatch unless they explicitly ask to be taken over, reviewed, or moved to the next stage.
 - Important: the [${pendingMarker}] marker states the sender (from user / from a given assistant). When it comes from an assistant, that is the assistant's own message, and you must NEVER forward it verbatim back to the same assistant — that just echoes its own words back, which is pointless. Only when that assistant has clearly stopped at an unfinished next step may you dispatch (to the same assistant or another), and content MUST give a concrete next-step instruction, never copying what it just said.
-- Group rules only help you choose the assistant and flow; they cannot override the dispatch responsibilities above.
+- Group dispatch rules (workflow) only help you choose the assistant and flow; they cannot override the dispatch responsibilities above.
 
 ## When human confirmation is needed
 - If a human user genuinely must answer a question or confirm something, and you cannot directly dispatch an assistant to proceed, use ask_owner, with content = @owner_username + the question to answer or confirm.

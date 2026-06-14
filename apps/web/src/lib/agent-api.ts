@@ -178,6 +178,7 @@ export interface ChatRoom {
   avatarColor: string | null
   description: string | null
   rules: string | null
+  dispatchRules: string | null // 群调度规则（工作流 YAML），注入给群调度助手
   workDir: string | null
   envVars: string | null       // 群聊环境变量，JSON 数组：[{ key, value, description }]
   ownerId: string | null
@@ -635,7 +636,7 @@ export const chatRoomApi = {
   },
 
   // 更新群组
-  async update(id: string, data: { name?: string; avatar?: string; avatarColor?: string; description?: string; rules?: string; workDir?: string | null; envVars?: string | null; defaultAgentId?: string | null; agentTriggerMode?: AgentTriggerMode }): Promise<ApiResponse<ChatRoom> & { skippedReservedKeys?: string[] }> {
+  async update(id: string, data: { name?: string; avatar?: string; avatarColor?: string; description?: string; rules?: string; dispatchRules?: string | null; workDir?: string | null; envVars?: string | null; defaultAgentId?: string | null; agentTriggerMode?: AgentTriggerMode }): Promise<ApiResponse<ChatRoom> & { skippedReservedKeys?: string[] }> {
     return request<ChatRoom>(`/chatrooms/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),

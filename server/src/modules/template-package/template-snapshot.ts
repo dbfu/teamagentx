@@ -5,6 +5,7 @@ interface SnapshotRoomInput {
   name: string;
   description: string | null;
   rules: string | null;
+  dispatchRules?: string | null;
   workDir: string | null;
   defaultAgentId: string | null;
   agentTriggerMode: 'auto' | 'manual' | 'coordinator';

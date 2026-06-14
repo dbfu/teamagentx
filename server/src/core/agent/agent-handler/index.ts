@@ -55,6 +55,7 @@ export {
   broadcastCronTriggerMessage,
   broadcastAgentJoinedMessage,
   broadcastChatRoomRulesUpdatedMessage,
+  broadcastChatRoomDispatchRulesUpdatedMessage,
   parseMentions,
 } from './message-utils.js';
 

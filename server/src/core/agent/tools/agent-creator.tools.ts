@@ -784,6 +784,10 @@ export function createUpdateAgentTool(defaultChatRoomId?: string) {
             }),
           }),
         });
+        clearExecutorCacheEntries(currentAgent.name);
+        if (agent.name !== currentAgent.name) {
+          clearExecutorCacheEntries(agent.name);
+        }
         const roomSettings = await updateAgentRoomHistoryAccess({
           agentId,
           agentName: agent.name,
@@ -879,6 +883,10 @@ export function createUpdateAgentsTool(defaultChatRoomId?: string) {
               }),
             }),
           });
+          clearExecutorCacheEntries(currentAgent.name);
+          if (agent.name !== currentAgent.name) {
+            clearExecutorCacheEntries(agent.name);
+          }
           const roomSettings = await updateAgentRoomHistoryAccess({
             agentId: config.agentId,
             agentName: agent.name,

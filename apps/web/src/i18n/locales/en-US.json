@@ -251,6 +251,18 @@
     "groupName": "Group Name",
     "groupDescription": "Group Description",
     "groupRules": "Group Rules",
+    "groupDispatchRules": "Dispatch Rules",
+    "dispatchRules": {
+      "hint": "Dispatch rules define the multi-assistant collaboration workflow, injected into the group coordinator to decide task division and order. Ask @group assistant to auto-generate or optimize.",
+      "viewFlow": "Flow",
+      "viewSource": "YAML",
+      "placeholder": "Paste or edit the dispatch rules YAML here; the format is validated on save.",
+      "empty": "No dispatch rules set yet",
+      "emptyTip": "Ask the @group assistant in chat to auto-generate dispatch rules from the room's assistants, or switch to the YAML view to write them manually.",
+      "parseFailed": "The current content cannot be parsed as dispatch rules",
+      "invalidFormat": "Invalid dispatch rules format",
+      "saved": "Dispatch rules saved"
+    },
     "groupSettings": "Group Settings",
     "defaultAssistant": "Default Assistant",
     "triggerMode": "Trigger Mode",

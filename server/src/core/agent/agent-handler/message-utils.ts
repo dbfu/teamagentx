@@ -261,8 +261,69 @@ export async function broadcastChatRoomRulesUpdatedMessage(
   return messageId;
 }
 
+export function buildChatRoomDispatchRulesUpdatedMessageContent(rules?: string | null): string {
+  const trimmed = rules?.trim();
+  if (!trimmed) {
+    return '群调度规则已清空。';
+  }
+  return '群调度规则（工作流）已更新，群调度助手将按新规则进行任务调度。';
+}
+
+export async function broadcastChatRoomDispatchRulesUpdatedMessage(
+  chatRoomId: string,
+  dispatchRules?: string | null,
+): Promise<string> {
+  const messageId = randomUUID();
+  const content = buildChatRoomDispatchRulesUpdatedMessageContent(dispatchRules);
+  const time = new Date();
+  const message: Message = {
+    id: messageId,
+    type: 'message',
+    content,
+    time,
+    user: '系统',
+    agentId: undefined,
+    agentName: undefined,
+    avatar: undefined,
+    avatarColor: undefined,
+    chatRoomId,
+    replyMessageId: undefined,
+    isHuman: true,
+  };
+
+  await messageService.create({
+    id: messageId,
+    type: 'MESSAGE',
+    content,
+    time,
+    userId: null,
+    agentId: null,
+    chatRoomId,
+    replyMessageId: null,
+    isHuman: true,
+  });
+
+  // 仅用于 UI / 未读同步，不发 receivedMessage，避免触发协调器。
+  if (globalBroadcastMessage) {
+    await globalBroadcastMessage(message, chatRoomId);
+  }
+
+  return messageId;
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\\/]/g, '\\$&');
+}
+
+// 把 Markdown 代码块（``` 围栏 / ` 行内）中的内容替换为等长空白，使 @mention 解析忽略
+// 代码/配置示例里的字面 "@xxx"。典型场景：群助手生成的调度规则 YAML 里有 "必须 @admin 确认"，
+// 这种代码块内的 @ 不应被当成真实提及（否则会误触发「直达回复」把消息派回群助手）。
+// 用等长空白替换并保留换行，确保其它位置的下标与行首/空格边界判定不受影响。
+function maskCodeSpans(content: string): string {
+  const blank = (segment: string): string => segment.replace(/[^\n\r]/g, ' ');
+  return content
+    .replace(/```[\s\S]*?```/g, blank)
+    .replace(/`[^`\n]*`/g, blank);
 }
 
 export function parseKnownMentions(
@@ -276,6 +337,9 @@ export function parseKnownMentions(
     .sort((a, b) => b.length - a.length)
     .map(escapeRegExp);
   if (escapedNames.length === 0) return mentions;
+
+  // 在掩码后的副本上匹配：代码块里的 @ 已被空白替换，不会被识别为提及。
+  content = maskCodeSpans(content);
 
   const endBoundaryChars = '*_>#`!?.,:;！？。，；：';
   const regex = new RegExp(

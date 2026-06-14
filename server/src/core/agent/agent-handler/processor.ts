@@ -40,6 +40,7 @@ import {
   broadcastAgentTaskQueue,
 } from './status.js';
 import { getExecutor } from './executor-manager.js';
+import { buildAgentDispatchPlan } from '../dispatch-rules/agent-dispatch-plan.js';
 import { buildAIMessage } from './message-utils.js';
 import { debugLog } from './debug.js';
 import { notifySourceAgentOnFailure } from './task-failure-notification.js';
@@ -192,7 +193,8 @@ export async function processQueue(chatRoomId: string, agentId: string) {
           // - 其余棒只追加一句很短的提醒，做长对话里的轻量强化，避免规则被「读着读着忘了」。
           // - 规则被清空时，注入一次「忽略旧规则」的提醒。
           // 提醒只进模型输入、不写库。
-          const roomRulesForReminder = (await chatRoomService.findById(chatRoomId))?.rules?.trim() || '';
+          const roomForReminder = await chatRoomService.findById(chatRoomId);
+          const roomRulesForReminder = roomForReminder?.rules?.trim() || '';
           const ruleReminderKey = `${chatRoomId}_${task.agentName}`;
           const lastInjectedRoomRules = injectedRoomRulesCache.get(ruleReminderKey) ?? '';
           const roomRulesChanged = roomRulesForReminder !== lastInjectedRoomRules;
@@ -204,6 +206,22 @@ export async function processQueue(chatRoomId: string, agentId: string) {
           } else if (roomRulesChanged) {
             // 规则刚被清空：提醒一次忽略旧规则。
             ruleReminder = '\n\n---\n[群规则提醒] 本群当前未设置群规则，请忽略此前可能记住的任何旧群规则。';
+          }
+
+          // 调度方案（任务流转/交接）：从群调度规则中抽取本助手相关的环节与「下一棒」，
+          // 每棒执行时注入到 query（紧跟任务，注意力更集中），仅业务助手有内容。
+          // 没有配置群调度规则时直接跳过，不做解析、不注入。
+          let dispatchPlanReminder = '';
+          const dispatchRulesYaml = (roomForReminder as any)?.dispatchRules?.trim();
+          if (dispatchRulesYaml) {
+            const dispatchPlanText = buildAgentDispatchPlan(
+              dispatchRulesYaml,
+              task.agentName,
+              (roomForReminder?.owner as any)?.preferredLanguage,
+            );
+            if (dispatchPlanText) {
+              dispatchPlanReminder = `\n\n---\n${dispatchPlanText}`;
+            }
           }
           // 注意：注入记录在本棒成功执行后才提交（见下方 exec 之后），
           // 避免规则变更棒中途中断/报错时丢失「下一棒补注全文」的机会。
@@ -567,7 +585,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
             monitor.start();
             try {
               return await candidateExecutor.exec(
-                task.messageContent + ruleReminder + bridgeContextSection,
+                task.messageContent + ruleReminder + dispatchPlanReminder + bridgeContextSection,
                 emitCallback,
                 task.messageId,
                 history,
