@@ -64,6 +64,7 @@ import type {
 import { coerceThinkingText } from './executor.interface.js';
 import { generateImageForAgent } from './image-generation.service.js';
 import { buildInstalledSkillNames } from './skill-instructions.js';
+import { getContextResetCommand } from './context-reset-command.js';
 import {
   syncGlobalClaudeLocalConfig,
   stripProviderConflictingClaudeSettings,
@@ -81,12 +82,6 @@ function shortHash(input: string): string {
 
 function sanitizeClaudeProjectPath(projectPath: string): string {
   return projectPath.replace(/[^a-zA-Z0-9_-]/g, '-');
-}
-
-function getMessageWithoutMentions(message: string): string {
-  const mentionRegex =
-    /(?:^|\s|[*_>#`\-])@([\u4e00-\u9fa5a-zA-Z0-9_]+)(?=\s|$)/g;
-  return message.trim().replace(mentionRegex, '').trim();
 }
 
 function extractTextFromContent(content: unknown): string {
@@ -2033,20 +2028,13 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
     this.ensureSkillsSymlink();
     this.resetCollectors();
 
-    const messageWithoutMentions = getMessageWithoutMentions(message);
-    if (messageWithoutMentions.startsWith('/')) {
-      const command = messageWithoutMentions.toLowerCase().trim();
-      if (command === '/clear' || command === '/new') {
-        const resultMessage = await this.handleClearContext(
-          emit,
-          originalMessageId,
-        );
-        return {actions: [{type: 'message', content: resultMessage}]};
-      }
-
-      const unsupportedMessage = `暂不支持当前指令: ${command}`;
-      await emit(unsupportedMessage, originalMessageId);
-      return {actions: [{type: 'message', content: unsupportedMessage}]};
+    const contextResetCommand = getContextResetCommand(message);
+    if (contextResetCommand) {
+      const resultMessage = await this.handleClearContext(
+        emit,
+        originalMessageId,
+      );
+      return {actions: [{type: 'message', content: resultMessage}]};
     }
 
     const fullMessage = this.buildFullMessage(message, history);

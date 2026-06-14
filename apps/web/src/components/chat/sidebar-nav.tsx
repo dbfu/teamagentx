@@ -40,6 +40,7 @@ import { useTranslation } from 'react-i18next'
 interface SidebarNavProps {
   messageBadge?: number
   onRefreshChatRooms?: () => void
+  onChatRoomCreated?: (chatRoomId: string) => void | Promise<void>
 }
 
 type MainNavTab = 'message' | 'workbench' | 'assistant' | 'skill' | 'model' | 'integration'
@@ -62,7 +63,7 @@ const areSameTabs = (a: OptionalNavTab[], b: OptionalNavTab[]) => (
   a.length === b.length && a.every((tab, index) => tab === b[index])
 )
 
-export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps) {
+export function SidebarNav({ messageBadge, onRefreshChatRooms, onChatRoomCreated }: SidebarNavProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const location = useLocation()
@@ -574,9 +575,8 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms }: SidebarNavProps
     <CreateGroupModal
       isOpen={isCreateGroupOpen}
       onClose={() => setIsCreateGroupOpen(false)}
-      onSuccess={(chatRoomId) => {
-        onRefreshChatRooms?.()
-        navigate(`/?room=${chatRoomId}`)
+      onSuccess={async (chatRoomId) => {
+        await onChatRoomCreated?.(chatRoomId)
       }}
       ownerId={currentUser?.id}
     />

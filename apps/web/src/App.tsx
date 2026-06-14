@@ -854,7 +854,11 @@ function AppContent() {
     <div className={cn("flex flex-1 h-full w-full bg-[var(--surface)] text-foreground", isMobile ? "overflow-x-hidden" : "overflow-hidden")}>
       {/* 桌面端 Sidebar navigation（3D 办公室页面全屏，隐藏左侧侧边栏） */}
       {!isMobile && !location.pathname.startsWith('/office/') && (
-        <SidebarNav messageBadge={totalUnreadCount} onRefreshChatRooms={loadChatRooms} />
+        <SidebarNav
+          messageBadge={totalUnreadCount}
+          onRefreshChatRooms={loadChatRooms}
+          onChatRoomCreated={handleNavigateToChatRoom}
+        />
       )}
 
       {/* Content based on route */}
@@ -936,10 +940,7 @@ function AppContent() {
       <CreateGroupModal
         isOpen={isCreateGroupOpen}
         onClose={() => setIsCreateGroupOpen(false)}
-        onSuccess={(chatRoomId) => {
-          loadChatRooms()
-          selectRoom(chatRoomId)
-        }}
+        onSuccess={handleNavigateToChatRoom}
         ownerId={user?.id || socketUser?.id}
       />
     </div>

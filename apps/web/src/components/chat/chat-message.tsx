@@ -777,7 +777,7 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
           {!shouldHideContent && (
             <div
               className={cn(
-                isCollapsed && (isMobile ? "max-h-[300px] overflow-hidden" : "max-h-[420px] overflow-hidden")
+                isCollapsed && (isMobile ? "max-h-[300px] overflow-hidden" : "max-h-[520px] overflow-hidden")
               )}
             >
               {renderContent(visibleContent)}
