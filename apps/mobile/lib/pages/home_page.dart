@@ -20,7 +20,7 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   String? _webUrl;
   String? _token;
   bool _isLoading = true;
@@ -28,9 +28,15 @@ class _HomePageState extends State<HomePage> {
   String _draftUrl = '';
   WebViewController? _controller;
 
+  // 连接失败时自动重试；超过上限跳到扫码页重新配置/登录
+  static const int _maxAutoRetries = 3;
+  int _retryCount = 0;
+  bool _isRetrying = false;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     MobileNotificationService.setOpenChatRoomHandler(_openChatRoomFromNotification);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _init();
@@ -39,10 +45,90 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     MobileNotificationService.setOpenChatRoomHandler(null);
     // 清理 WebView 控制器
     _controller = null;
     super.dispose();
+  }
+
+  /// App 从后台回到前台时，WebView 内容可能已被系统回收（iOS WebContent
+  /// 进程被回收 / Android surface 丢失），表现为白屏。这里检测页面是否变空，
+  /// 变空则重新加载。token 存在 localStorage、当前路由在 URL 中，reload 可
+  /// 恢复到原页面。
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      _recoverWebViewIfBlank();
+    }
+  }
+
+  Future<void> _recoverWebViewIfBlank() async {
+    final controller = _controller;
+    if (controller == null) return;
+    if (_webUrl == null || _webUrl!.isEmpty) return;
+    // 处于错误状态时由错误 UI 处理，正在加载时无需干预
+    if (_hasError || _isLoading) return;
+
+    try {
+      final result = await controller.runJavaScriptReturningResult(
+        'document.getElementById("root") ? document.getElementById("root").childElementCount : 0',
+      );
+      if (_parseJsInt(result) <= 0) {
+        controller.reload();
+      }
+    } catch (_) {
+      // JS 上下文已失效（WebContent 进程被回收），直接重载
+      controller.reload();
+    }
+  }
+
+  int _parseJsInt(Object? result) {
+    if (result is int) return result;
+    if (result is num) return result.toInt();
+    if (result is String) return int.tryParse(result) ?? 0;
+    return 0;
+  }
+
+  /// WebView 主框架加载失败：先自动重试，超过上限则跳到扫码页重新配置/登录。
+  void _handleWebViewError() {
+    if (!mounted || _isRetrying) return;
+
+    if (_retryCount >= _maxAutoRetries) {
+      _goToScanPage();
+      return;
+    }
+
+    _retryCount++;
+    _isRetrying = true;
+    setState(() {
+      _isLoading = true;
+      _hasError = false;
+    });
+
+    // 间隔随次数递增，缓解瞬时网络问题导致的连续失败
+    Future.delayed(Duration(milliseconds: 800 * _retryCount), () {
+      if (!mounted) return;
+      _isRetrying = false;
+      _controller?.reload();
+    });
+  }
+
+  /// 自动重试多次仍失败，跳回扫码页（即登录页），让用户重新扫码配置服务器。
+  Future<void> _goToScanPage() async {
+    _retryCount = 0;
+    _isRetrying = false;
+    _controller = null;
+    _webUrl = null;
+    _token = null;
+
+    await StorageService.deleteToken();
+
+    if (!mounted) return;
+    // 置为未认证后，build() 会自动导航到 /login（扫码页）
+    final authStore = context.read<AuthStore>();
+    await authStore.logout();
   }
 
   Future<void> _init() async {
@@ -94,6 +180,9 @@ class _HomePageState extends State<HomePage> {
             }
           },
           onPageFinished: (url) {
+            // 加载成功，重置重试状态
+            _retryCount = 0;
+            _isRetrying = false;
             setState(() {
               _isLoading = false;
               _hasError = false;
@@ -103,10 +192,9 @@ class _HomePageState extends State<HomePage> {
             _injectExternalLinkHandler();
           },
           onWebResourceError: (error) {
-            setState(() {
-              _hasError = true;
-              _isLoading = false;
-            });
+            // 只处理主框架加载失败，忽略图片/favicon 等子资源错误
+            if (error.isForMainFrame == false) return;
+            _handleWebViewError();
           },
         ),
       )
