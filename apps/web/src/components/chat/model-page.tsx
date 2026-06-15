@@ -1433,22 +1433,32 @@ export function ModelPage() {
                   <div className="relative">
                     <input
                       type="number"
-                      min={100000}
-                      max={1000000}
                       step={1000}
-                      value={formData.contextLength ?? 1000000}
+                      value={formData.contextLength ?? ''}
                       onChange={e => {
-                        const next = parseInt(e.target.value, 10)
+                        const raw = e.target.value
+                        if (raw === '') {
+                          setFormData(prev => ({ ...prev, contextLength: undefined }))
+                          return
+                        }
+                        const next = parseInt(raw, 10)
                         setFormData(prev => ({
                           ...prev,
-                          contextLength: Number.isFinite(next) && next > 0 ? next : undefined,
+                          contextLength: Number.isFinite(next) ? next : prev.contextLength,
                         }))
                       }}
                       onBlur={() => {
-                        setFormData(prev => ({
-                          ...prev,
-                          contextLength: prev.contextLength && prev.contextLength > 0 ? prev.contextLength : 1000000,
-                        }))
+                        // 失去焦点后校验范围：钳制到 10万~100万，空值回退默认 1000000
+                        setFormData(prev => {
+                          const value = prev.contextLength
+                          let clamped: number
+                          if (!value || !Number.isFinite(value) || value <= 0) {
+                            clamped = 1000000
+                          } else {
+                            clamped = Math.min(1000000, Math.max(100000, value))
+                          }
+                          return { ...prev, contextLength: clamped }
+                        })
                       }}
                       placeholder="1000000"
                       className="ta-input w-full pr-16 shadow-none"

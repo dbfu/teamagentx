@@ -22,6 +22,7 @@ import {
   buildAgentBaseSystemPrompt,
   buildGroupChatMemberInfoSection,
   buildHandoffTurnReminder,
+  buildNoAssistantHandoffTurnReminder,
   getCodexBackgroundCommandsSection,
   getResponseStyleInstruction,
 } from './agent-system-prompt.js';
@@ -48,6 +49,7 @@ import {
 import { getContextResetCommand } from './context-reset-command.js';
 import type {
   AgentDebugInfo,
+  AgentExecOptions,
   AgentExecResult,
   AgentTriggerMode,
   ChatRoomAgentInfo,
@@ -928,6 +930,7 @@ export class CodexSdkExecutor implements IAgentExecutor {
 
   private _lastInjectedMessageId?: string;
   private systemPrompt: string;
+  private systemPromptWithoutAssistantHandoff: string;
   private agentTriggerMode?: AgentTriggerMode;
   private locale: Locale = 'zh-CN';
   private agentId: string | null = null;
@@ -936,6 +939,7 @@ export class CodexSdkExecutor implements IAgentExecutor {
   private acpProviderInfo?: AcpProviderInfo;
   private currentAbortController: AbortController | null = null;
   private thread: TeamAgentXCodexThread | null = null;
+  private threadSuppressAssistantHandoff: boolean | null = null;
   /** 事件流里最后一条被吞掉的瞬时错误信息，用于进程异常退出时还原真实失败原因。 */
   private lastStreamErrorMessage: string | null = null;
 
@@ -1013,6 +1017,18 @@ export class CodexSdkExecutor implements IAgentExecutor {
       commandSection: getCodexBackgroundCommandsSection(this.locale),
       roomEnvVars: this.roomEnvVars,
       locale: this.locale,
+    });
+    this.systemPromptWithoutAssistantHandoff = buildAgentBaseSystemPrompt({
+      agentPrompt: systemPrompt,
+      llmProvider: this.llmProvider,
+      imageGenerationProvider: this.imageGenerationProvider,
+      chatRoomRules,
+      workDir: this.workDir,
+      agentTriggerMode,
+      commandSection: getCodexBackgroundCommandsSection(this.locale),
+      roomEnvVars: this.roomEnvVars,
+      locale: this.locale,
+      includeAssistantHandoffRules: false,
     });
 
     this.ensureWorkDirectory();
@@ -1760,7 +1776,11 @@ Output the summary only.`;
     return env;
   }
 
-  private buildFullMessage(message: string, history?: HistoryMessage[]): string {
+  private buildFullMessage(
+    message: string,
+    history?: HistoryMessage[],
+    suppressAssistantHandoff = false,
+  ): string {
     let fullMessage = '';
 
     const longTermMemorySection = buildAgentLongTermMemoryContentSection(this.agentId, this.name);
@@ -1796,7 +1816,9 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
     );
     fullMessage += `${currentMessageLabel}\n${message}`;
 
-    const handoffReminder = buildHandoffTurnReminder(this.agentTriggerMode, this.locale);
+    const handoffReminder = suppressAssistantHandoff
+      ? buildNoAssistantHandoffTurnReminder(this.locale)
+      : buildHandoffTurnReminder(this.agentTriggerMode, this.locale);
     if (handoffReminder) {
       fullMessage += `\n\n${handoffReminder}`;
     }
@@ -1804,9 +1826,11 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
     return fullMessage;
   }
 
-  private buildDeveloperInstructions(): string {
+  private buildDeveloperInstructions(suppressAssistantHandoff = false): string {
     return [
-      this.systemPrompt,
+      suppressAssistantHandoff
+        ? this.systemPromptWithoutAssistantHandoff
+        : this.systemPrompt,
       buildAgentLongTermMemoryInstructions(
         this.agentId,
         this.name,
@@ -1815,6 +1839,7 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
         chatRoomAgents: this.chatRoomAgents,
         agentName: this.name,
         workDir: this.workDir,
+        includeAssistantHandoffGuidance: !suppressAssistantHandoff,
         locale: this.locale,
       }),
       getResponseStyleInstruction(this.locale),
@@ -1849,7 +1874,9 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     this.toolCalledSinceContent = false;
   }
 
-  private getCodexRunner(): TeamAgentXCodexRunner {
+  private getCodexRunner(
+    suppressAssistantHandoff = false,
+  ): TeamAgentXCodexRunner {
     const env = this.buildEnv();
     const mcpServerPath = this.ensureTeamAgentXMcpServerFile();
     const generateImageEndpoint = this.imageGenerationProvider
@@ -1878,7 +1905,9 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       roomHistoryToolsEnabled: this.injectGroupHistory,
     });
     const config = {
-      developer_instructions: this.buildDeveloperInstructions(),
+      developer_instructions: this.buildDeveloperInstructions(
+        suppressAssistantHandoff,
+      ),
       hide_agent_reasoning: this.thinkingMode === 'off',
       show_raw_agent_reasoning: this.thinkingMode !== 'off',
       model_reasoning_effort: getCodexReasoningEffort(this.thinkingMode),
@@ -1906,10 +1935,18 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     );
   }
 
-  private getThread(): TeamAgentXCodexThread {
-    if (this.thread) return this.thread;
+  private getThread(
+    suppressAssistantHandoff = false,
+  ): TeamAgentXCodexThread {
+    if (
+      this.thread &&
+      this.threadSuppressAssistantHandoff === suppressAssistantHandoff
+    ) {
+      return this.thread;
+    }
+    this.thread = null;
 
-    const runner = this.getCodexRunner();
+    const runner = this.getCodexRunner(suppressAssistantHandoff);
     const options = {
       model: this.llmProvider?.model || this.codexModel || undefined,
       workingDirectory: this.workDir,
@@ -1922,6 +1959,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     this.thread = this.threadId
       ? new TeamAgentXCodexThread(runner, this.llmProvider?.apiKey, options, this.threadId)
       : new TeamAgentXCodexThread(runner, this.llmProvider?.apiKey, options);
+    this.threadSuppressAssistantHandoff = suppressAssistantHandoff;
     return this.thread;
   }
 
@@ -2166,13 +2204,14 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     signal: AbortSignal | undefined,
     originalMessageId: string,
     execStartTime: number,
+    suppressAssistantHandoff = false,
   ): Promise<TokenUsage | undefined> {
     let tokenUsage: TokenUsage | undefined;
     let firstEventLogged = false;
     let firstVisibleOutputLogged = false;
     this.lastStreamErrorMessage = null;
 
-    const thread = this.getThread();
+    const thread = this.getThread(suppressAssistantHandoff);
     const { events } = await thread.runStreamed(input, { signal: abortController.signal });
 
     for await (const event of events) {
@@ -2227,7 +2266,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     signal?: AbortSignal,
     attachments?: AttachmentData[],
     emitRecord?: RecordEmitCallback,
-    options?: { suppressFailureMessage?: boolean },
+    options?: AgentExecOptions,
   ): Promise<AgentExecResult> {
     this.emitStream = emitStream || null;
     this.emitToolCall = emitToolCall || null;
@@ -2248,7 +2287,13 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     } else {
       this.resetOvergrownThreadIfNeeded();
     }
-    this.lastContext = this.buildFullMessage(message, history);
+    const suppressAssistantHandoff =
+      options?.suppressAssistantHandoff === true;
+    this.lastContext = this.buildFullMessage(
+      message,
+      history,
+      suppressAssistantHandoff,
+    );
     const abortController = new AbortController();
     this.currentAbortController = abortController;
     const abort = () => abortController.abort();
@@ -2284,6 +2329,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
             signal,
             originalMessageId,
             execStartTime,
+            suppressAssistantHandoff,
           );
           break;
         } catch (runError) {

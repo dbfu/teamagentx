@@ -20,6 +20,7 @@ import {
 } from '../../../../core/agent/agent-handler/parallel-batch-tracker.js';
 import {
   cancelStallWatchdog,
+  clearStallWatchdogTimer,
   checkAndClearInterrupted,
   scheduleStallWatchdog,
 } from '../../../../core/agent/agent-handler/stall-watchdog.js';
@@ -289,4 +290,26 @@ test('smart-mode stall watchdog skips when the latest assistant message mentions
   await new Promise((resolve) => setTimeout(resolve, 25));
 
   assert.equal(coordinatorLookups, 0);
+});
+
+test('clearing a stall watchdog timer prevents a duplicate coordinator wake-up', async () => {
+  const roomId = 'room-watchdog-clear-test';
+  const originalDelay = config.agent.stallWatchdogDelayMs;
+  let roomLookupCount = 0;
+  config.agent.stallWatchdogDelayMs = 10;
+  chatRoomService.findById = (async () => {
+    roomLookupCount += 1;
+    return null;
+  }) as typeof chatRoomService.findById;
+
+  try {
+    scheduleStallWatchdog(roomId);
+    assert.equal(clearStallWatchdogTimer(roomId), true);
+    assert.equal(clearStallWatchdogTimer(roomId), false);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(roomLookupCount, 0);
+  } finally {
+    config.agent.stallWatchdogDelayMs = originalDelay;
+    clearStallWatchdogTimer(roomId);
+  }
 });

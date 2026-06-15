@@ -491,7 +491,7 @@ describe('Codex SDK Executor message context', () => {
       assert.match(developerInstructions, /其他助手：HelperAgent/);
       assert.match(
         developerInstructions,
-        /当你需要给另一个助手发消息时/,
+        /当你需要给一个或多个助手发消息时/,
       );
       assert.doesNotMatch(developerInstructions, /Global memory applies\./);
       assert.doesNotMatch(fullMessage, /\[System Instructions\]/);
@@ -505,6 +505,55 @@ describe('Codex SDK Executor message context', () => {
     } finally {
       fs.rmSync(workDir, { recursive: true, force: true });
       fs.rmSync(agentMemoryFile, { force: true });
+    }
+  });
+
+  test('omits assistant handoff rules for coordinated tasks', () => {
+    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-codex-no-handoff-'));
+    const executor = new CodexSdkExecutor(
+      'CodexAgent',
+      'You are a careful coding assistant.',
+      'room-codex-no-handoff-test',
+      workDir,
+      false,
+      'agent-codex-no-handoff-test',
+      undefined,
+      undefined,
+      undefined,
+      [
+        { name: 'CodexAgent', agentId: 'agent-codex-no-handoff-test' },
+        { name: 'HelperAgent', agentId: 'helper-agent' },
+      ],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      false,
+      'coordinator',
+    );
+
+    try {
+      const normalInstructions = (executor as any).buildDeveloperInstructions();
+      const restrictedInstructions = (executor as any).buildDeveloperInstructions(true);
+      const restrictedMessage = (executor as any).buildFullMessage(
+        'Do the assigned task',
+        undefined,
+        true,
+      );
+
+      assert.match(normalInstructions, /## 助手提及/);
+      assert.match(normalInstructions, /收尾交接协议（强制）/);
+      assert.doesNotMatch(restrictedInstructions, /## 助手提及/);
+      assert.doesNotMatch(restrictedInstructions, /收尾交接协议（强制）/);
+      assert.doesNotMatch(restrictedInstructions, /\[提示\]/);
+      assert.doesNotMatch(restrictedMessage, /\[交接提醒\]/);
+      assert.match(restrictedMessage, /\[群调度任务提醒\]/);
+      assert.match(restrictedMessage, /不得 @任何其他助手/);
+    } finally {
+      fs.rmSync(workDir, { recursive: true, force: true });
     }
   });
 

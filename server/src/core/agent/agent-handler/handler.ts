@@ -13,7 +13,12 @@ import { debugLog } from './debug.js';
 import { enqueueAgentTask } from './agent-dispatch.service.js';
 import { GROUP_COORDINATOR_ID } from '../system-assistant.constants.js';
 import { workbenchTaskService } from '../../../modules/workbench/workbench.service.js';
-import { scheduleStallWatchdog, resetStallWatchdog, abortWatchdogDispatch } from './stall-watchdog.js';
+import {
+  scheduleStallWatchdog,
+  clearStallWatchdogTimer,
+  resetStallWatchdog,
+  abortWatchdogDispatch,
+} from './stall-watchdog.js';
 import { runCoordinatorDispatch, tryAdvanceSerialChain } from '../coordinator-dispatch.js';
 import { messageMentionsRoomUser, findDirectReplyAgentId } from './user-mention-utils.js';
 import { checkAndClearInterrupted } from './stall-watchdog.js';
@@ -75,9 +80,17 @@ async function triggerCoordinatorAgentDispatch(
   message: Message,
   reason: string,
 ): Promise<void> {
+  const isParallelBatchJoin = reason === 'parallelBatchJoin';
+  if (isParallelBatchJoin) {
+    clearStallWatchdogTimer(chatRoomId);
+  }
+
   const coordinatorAgent = await agentService.findById(GROUP_COORDINATOR_ID);
   if (!coordinatorAgent || !coordinatorAgent.isActive) {
     console.warn(`[coordinatorAgentTrigger] 内置协调助手不存在或未启用: ${GROUP_COORDINATOR_ID}`);
+    if (isParallelBatchJoin) {
+      scheduleStallWatchdog(chatRoomId);
+    }
     return;
   }
   debugLog('coordinatorAgentTrigger', {
@@ -91,6 +104,16 @@ async function triggerCoordinatorAgentDispatch(
   });
   await runCoordinatorDispatch(chatRoomId, message, coordinatorAgent, {
     routingReason: reason,
+    onFailure: isParallelBatchJoin
+      ? (failureReason) => {
+          debugLog('parallelBatchJoinCoordinatorFailed', {
+            chatRoomId,
+            triggerMessageId: message.id,
+            reason: failureReason,
+          });
+          scheduleStallWatchdog(chatRoomId);
+        }
+      : undefined,
   });
 }
 

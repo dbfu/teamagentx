@@ -4,6 +4,10 @@ import {
   buildDispatchPlanContent,
   buildUnroutedUserConstraintBlock,
 } from '../../../core/agent/coordinator-dispatch.js';
+import {
+  markTaskWithoutAssistantHandoff,
+  parseTaskPromptPolicy,
+} from '../../../core/agent/task-prompt-policy.js';
 
 const task = (name: string, content: string) => ({
   agent: { name } as any,
@@ -51,6 +55,22 @@ test('single dispatch message omits the title and prefix', () => {
   );
 
   assert.equal(content, '@开发助手 修复登录问题');
+});
+
+test('coordinated task policy is internal and reversible', () => {
+  const marked = markTaskWithoutAssistantHandoff('@开发助手 修复登录问题');
+  const policy = parseTaskPromptPolicy(marked);
+
+  assert.equal(policy.suppressAssistantHandoff, true);
+  assert.equal(policy.content, '@开发助手 修复登录问题');
+  assert.doesNotMatch(policy.content, /teamagentx:coordinated-task/);
+});
+
+test('ordinary task keeps assistant handoff enabled', () => {
+  const policy = parseTaskPromptPolicy('@开发助手 修复登录问题');
+
+  assert.equal(policy.suppressAssistantHandoff, false);
+  assert.equal(policy.content, '@开发助手 修复登录问题');
 });
 
 test('unrouted user task requires the most relevant single assistant', () => {

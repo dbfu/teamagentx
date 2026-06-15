@@ -57,6 +57,7 @@ import {
   type AgentTaskOutcome,
 } from './task-lifecycle.js';
 import type { Message } from '../../../types/message.js';
+import { parseTaskPromptPolicy } from '../task-prompt-policy.js';
 
 function normalizeExecutionError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -160,6 +161,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
       let taskOutcome: AgentTaskOutcome = 'failed';
       let taskFinalMessage: Message | undefined;
       try {
+        const taskPromptPolicy = parseTaskPromptPolicy(task.messageContent);
         // 创建 AbortController 用于中断执行
         let abortController = new AbortController();
         abortControllers.set(key, abortController);
@@ -594,7 +596,12 @@ export async function processQueue(chatRoomId: string, agentId: string) {
             monitor.start();
             try {
               return await candidateExecutor.exec(
-                task.messageContent + ruleReminder + dispatchPlanReminder + bridgeContextSection,
+                taskPromptPolicy.content +
+                  ruleReminder +
+                  (taskPromptPolicy.suppressAssistantHandoff
+                    ? ''
+                    : dispatchPlanReminder) +
+                  bridgeContextSection,
                 emitCallback,
                 task.messageId,
                 history,
@@ -604,7 +611,13 @@ export async function processQueue(chatRoomId: string, agentId: string) {
                 abortController.signal,
                 attachments,  // 传递图片附件
                 recordCallback,  // 记录工具调用前的中间文本段到执行详情
-                shouldUseModelFallback ? { suppressFailureMessage: true } : undefined,
+                shouldUseModelFallback || taskPromptPolicy.suppressAssistantHandoff
+                  ? {
+                      suppressFailureMessage: shouldUseModelFallback,
+                      suppressAssistantHandoff:
+                        taskPromptPolicy.suppressAssistantHandoff,
+                    }
+                  : undefined,
               );
             } catch (error) {
               if (monitor.didTimeout()) {

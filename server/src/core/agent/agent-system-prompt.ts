@@ -64,6 +64,7 @@ interface BuildAgentBaseSystemPromptOptions {
   commandSection: string;
   roomEnvVars?: RoomEnvVar[];
   locale?: string;
+  includeAssistantHandoffRules?: boolean;
 }
 
 /**
@@ -102,6 +103,7 @@ export function buildAgentBaseSystemPrompt({
   commandSection,
   roomEnvVars,
   locale,
+  includeAssistantHandoffRules = true,
 }: BuildAgentBaseSystemPromptOptions): string {
   const modelInfo = llmProvider
     ? pickLocaleText(
@@ -139,28 +141,30 @@ ${chatRoomRules.trim()}`,
         {
           'zh-CN': `### 收尾交接协议（强制）
 每条回复必须恰好以下面两种方式之一结束。发送前你必须刻意判断适用哪一种：
-1. 交接 —— 任务尚未完成，需要另一个助手继续、验证、补充或接手。你回复的最后一行必须是如下格式的可触发提及：
+1. 交接 —— 任务尚未完成，需要一个或多个助手继续、验证、补充或接手。你回复的末尾必须包含如下格式的可触发提及，每个目标助手单独一行：
 @目标助手 <他们接下来要做的具体事项>
-这一行的格式规则（否则不会触发，任务会无声停滞）：
-- "@" 必须位于这最后一行的最开头。
-- 整条回复必须恰好包含一个可触发的 @提及。
-- 它不能位于代码块、引用块或示例中。
+这些交接行的格式规则（否则不会触发，任务会无声停滞）：
+- "@" 必须位于对应交接行的最开头。
+- 可以提及一个或多个目标助手；提及多个助手时，系统会交给群调度助手判断并行或串行执行。
+- 每个助手的交接内容必须是分配给该助手的独立、具体任务。
+- 交接行不能位于代码块、引用块或示例中。
 - 目标助手必须是本群已存在的助手。
 如果确实无法确定正确的助手，不要乱猜——改为请用户选择来结束。
 2. 结束 —— 任务已完成，或现在需要用户介入（更多输入、决策或确认）。不要提及任何助手。如果你在向用户提问或等待其确认/决策，回复必须 @ 该用户（如 @username），以便系统把回答直接路由回你；否则只给出结果。
-禁止在暗示仍有后续工作（例如"接下来应该…""然后需要测试/构建/审查/由…处理"）时不带交接行就结束回复。发送前重读最后一行：如果你的回复暗示别人还得行动，确认那一行以 "@" 开头并紧跟一个已存在的助手名称。`,
+禁止在暗示仍有后续工作（例如"接下来应该…""然后需要测试/构建/审查/由…处理"）时不带交接行就结束回复。发送前重读回复末尾：如果你的回复暗示一个或多个助手还得行动，确认每个目标都有一行以 "@" 开头的明确交接。`,
           'en-US': `### End-of-Turn Handoff Protocol (MANDATORY)
 Every reply MUST end in exactly ONE of these two ways. You must decide deliberately which one applies before sending:
-1. HAND OFF — the task is NOT finished and another assistant must continue, validate, supplement, or take over. The LAST line of your reply MUST be a triggerable mention in this exact form:
+1. HAND OFF — the task is NOT finished and one or more assistants must continue, validate, supplement, or take over. The end of your reply MUST contain triggerable mentions in this exact form, one target assistant per line:
 @target_assistant <the specific thing they must do next>
-Format rules for this line (otherwise it will NOT trigger and the task silently stalls):
-- The "@" must be at the very start of that last line.
-- The whole reply must contain exactly ONE triggerable @mention.
-- It must NOT be inside a code block, blockquote, or example.
-- target_assistant must be an existing assistant in this chatroom.
+Format rules for these handoff lines (otherwise they will NOT trigger and the task silently stalls):
+- The "@" must be at the very start of each handoff line.
+- You may mention one or multiple target assistants; when multiple assistants are mentioned, the group coordinator decides whether to run them in parallel or serially.
+- Each handoff must contain a standalone, specific task for that assistant.
+- Handoff lines must NOT be inside a code block, blockquote, or example.
+- Every target assistant must be an existing assistant in this chatroom.
 If the correct assistant is genuinely unclear, do NOT guess — end by asking the user to choose instead.
 2. FINISH — the task is complete, or it now needs the user (more input, a decision, or confirmation). Do NOT mention any assistant. If you are asking the user a question or waiting for their confirmation/decision, the reply MUST @ that user (e.g. @username) so the system can route their answer straight back to you; otherwise just give the result.
-It is FORBIDDEN to end a reply that implies further work is still needed (e.g. "next we should…", "then it needs to be tested / built / reviewed / handled by …") WITHOUT a HAND OFF line. Before sending, re-read your last line: if your reply implies someone else must act, confirm that last line starts with "@" followed by an existing assistant name.`,
+It is FORBIDDEN to end a reply that implies further work is still needed (e.g. "next we should…", "then it needs to be tested / built / reviewed / handled by …") WITHOUT HAND OFF lines. Before sending, re-read the end of the reply: if one or more assistants must act, confirm every target has a clear line starting with "@".`,
         },
         locale,
       )
@@ -168,7 +172,9 @@ It is FORBIDDEN to end a reply that implies further work is still needed (e.g. "
 
   // 手动模式的语义是「助手 @ 不触发」，不能注入「必须用 @ 交接」的协议，
   // 否则提示词与系统行为冲突；改为明确告知 @ 仅作展示、交接交由用户决定。
-  const assistantMentionsSection = agentTriggerMode === 'manual'
+  const assistantMentionsSection = !includeAssistantHandoffRules
+    ? ''
+    : agentTriggerMode === 'manual'
     ? pickLocaleText(
         {
           'zh-CN': `## 助手提及（手动模式）
@@ -181,12 +187,12 @@ This chatroom is in manual mode: @assistant mentions in assistant messages do NO
     : pickLocaleText(
         {
           'zh-CN': `## 助手提及
-在 TeamAgentX 中，一个 @助手 提及可以触发另一个助手任务。单条消息最多包含一个可触发的 @助手 提及。交接或询问其他助手时，选定一个目标助手并只提及它。如果有多个助手都能帮忙，选最合适的下一个助手，或请用户选择；其他助手按名称提到即可，不要加 @。
-每当你在回复结尾请用户确认、决策或回答某事后才能继续时，回复中必须 @ 该用户（如 @username）。这能让系统把用户的回答直接路由回你。提及用户不计入「一个可触发 @助手」的限额。对于只是给出最终结果、无需回应的消息，不要 @ 用户。
+在 TeamAgentX 中，@助手 提及可以触发助手任务。单条消息可以提及一个或多个助手；提及多个助手时，系统会交给群调度助手判断并行或串行执行。请为每个被提及的助手写清独立、具体的任务，不要让多个助手共用一段含糊指令。
+每当你在回复结尾请用户确认、决策或回答某事后才能继续时，回复中必须 @ 该用户（如 @username）。这能让系统把用户的回答直接路由回你。对于只是给出最终结果、无需回应的消息，不要 @ 用户。
 ${collaborationTriggerCheckSection}`,
           'en-US': `## Assistant Mentions
-In TeamAgentX, an @assistant mention can trigger another assistant task. A single message may contain at most one triggerable @assistant mention. When handing off or asking another assistant, choose one target assistant and mention only that assistant. If multiple assistants could help, choose the best next assistant or ask the user to choose; refer to any additional assistants by name without @.
-Whenever you end a reply by asking the user to confirm, decide, or answer something before you can continue, you MUST @ that user (e.g. @username) in the reply. This lets the system route the user's reply directly back to you. Mentioning a user does NOT count toward the one-triggerable-@assistant limit. Do not @ the user for messages that are just a final result and need no response.
+In TeamAgentX, @assistant mentions can trigger assistant tasks. A single message may mention one or multiple assistants; when multiple assistants are mentioned, the group coordinator decides whether to run them in parallel or serially. Give every mentioned assistant a standalone, specific task instead of sharing one ambiguous instruction across targets.
+Whenever you end a reply by asking the user to confirm, decide, or answer something before you can continue, you MUST @ that user (e.g. @username) in the reply. This lets the system route the user's reply directly back to you. Do not @ the user for messages that are just a final result and need no response.
 ${collaborationTriggerCheckSection}`,
         },
         locale,
@@ -228,8 +234,20 @@ export function buildHandoffTurnReminder(
   if (agentTriggerMode !== 'auto' && agentTriggerMode !== 'coordinator') return '';
   return pickLocaleText(
     {
-      'zh-CN': `[交接提醒] 本条回复必须恰好以以下之一结束：(a) 若另一个助手必须继续，把最后一行写成 "@助手名 接下来要做什么" —— @ 位于该行开头，整条回复只有这一个此类提及，且不在代码块内；(b) 若任务已完成或现在需要用户，不要提及任何助手 —— 但如果你在请用户确认、决策或回答后才能继续，则 @ 该用户（@username），以便其回答路由回你。绝不要在暗示仍有后续工作时不带交接行就结束回复。`,
-      'en-US': `[Handoff Reminder] End this reply with exactly ONE of: (a) if another assistant must continue, make the LAST line "@assistant_name what to do next" — @ at the start of that line, only one such mention in the whole reply, not inside a code block; (b) if the task is done or now needs the user, do not mention any assistant — but if you are asking the user to confirm, decide, or answer before you can continue, @ that user (@username) so their reply routes back to you. Never end a reply that implies further work is still needed without a handoff line.`,
+      'zh-CN': `[交接提醒] 本条回复必须恰好以以下之一结束：(a) 若一个或多个助手必须继续，在回复末尾为每个目标单独写一行 "@助手名 接下来要做什么"；@ 位于行首，任务具体且不在代码块内。多个 @ 会由群调度助手判断并行或串行；(b) 若任务已完成或现在需要用户，不要提及任何助手——但如果你在请用户确认、决策或回答后才能继续，则 @ 该用户（@username），以便其回答路由回你。绝不要在暗示仍有后续工作时不带交接行就结束回复。`,
+      'en-US': `[Handoff Reminder] End this reply with exactly ONE of: (a) if one or more assistants must continue, add one line per target at the end in the form "@assistant_name what to do next"; put @ at the start of each line, give each assistant a specific task, and keep the lines outside code blocks. Multiple @mentions are routed to the group coordinator to decide parallel or serial execution; (b) if the task is done or now needs the user, do not mention any assistant—but if you are asking the user to confirm, decide, or answer before you can continue, @ that user (@username) so their reply routes back to you. Never end a reply that implies further work is still needed without handoff lines.`,
+    },
+    locale,
+  );
+}
+
+export function buildNoAssistantHandoffTurnReminder(locale?: string): string {
+  return pickLocaleText(
+    {
+      'zh-CN':
+        '[群调度任务提醒] 当前任务属于群调度助手下发的并行或串行计划。只执行并汇报当前分配的任务，不得 @任何其他助手，不得向其他助手交接或触发其任务；后续步骤由群调度助手统一推进。',
+      'en-US':
+        '[Coordinated Task Reminder] This task is part of a parallel or serial plan dispatched by the group coordinator. Execute and report only the assigned task. Do not @mention, hand off to, or trigger any other assistant; the group coordinator will advance subsequent steps.',
     },
     locale,
   );
@@ -240,6 +258,7 @@ interface BuildGroupChatMemberInfoSectionOptions {
   agentName: string;
   workDir: string;
   includeAssistantTriggerNecessityReminder?: boolean;
+  includeAssistantHandoffGuidance?: boolean;
   locale?: string;
 }
 
@@ -248,6 +267,7 @@ export function buildGroupChatMemberInfoSection({
   agentName,
   workDir,
   includeAssistantTriggerNecessityReminder = false,
+  includeAssistantHandoffGuidance = true,
   locale,
 }: BuildGroupChatMemberInfoSectionOptions): string {
   if (chatRoomAgents.length === 0) {
@@ -270,18 +290,18 @@ export function buildGroupChatMemberInfoSection({
       )
     : '';
 
-  const mentionTip = otherAgents.length > 0
+  const mentionTip = includeAssistantHandoffGuidance && otherAgents.length > 0
     ? pickLocaleText(
         {
-          'zh-CN': `\n[提示]\n当你需要给另一个助手发消息时，在最终回复里直接写 "@助手名 消息内容"。你也可以在正文中提及助手，只要 @ 前面有一个空格。只有当 @ 位于行首，或其前一个字符是空格时，目标助手才会被触发；紧跟在标点后面的 @ 不会触发。单条消息最多包含一个可触发的 @助手 提及。如需提到更多助手，写出名字但不加 @。如果用户只是让你给另一个助手发条消息，最终回复里只输出那条 @助手 消息，不要任何解释、寒暄、总结或扩展的协作邀请。${triggerNecessityReminder}`,
-          'en-US': `\n[Tip]\nWhen you need to message another assistant, write "@assistant_name message content" directly in your final reply. You may also mention an assistant in body text when the @ is preceded by a space. A target assistant is triggered only when @ is at the start of a line or the previous character is a space; @ immediately after punctuation will not trigger. A single message may contain at most one triggerable @assistant mention. If you need to refer to additional assistants, write their names without @. If the user only asks you to send a message to another assistant, output only that @assistant message in the final reply, with no explanation, pleasantries, summary, or expanded collaboration invitation.${triggerNecessityReminder}`,
+          'zh-CN': `\n[提示]\n当你需要给一个或多个助手发消息时，在最终回复里为每个目标单独写一行 "@助手名 消息内容"。你也可以在正文中提及助手，只要 @ 前面有一个空格。只有当 @ 位于行首，或其前一个字符是空格时，目标助手才会被触发；紧跟在标点后面的 @ 不会触发。提及多个助手时，系统会交给群调度助手判断并行或串行执行；请为每个助手写清独立任务。如果用户只是让你给助手发消息，最终回复里只输出对应的 @助手 消息，不要任何解释、寒暄、总结或扩展的协作邀请。${triggerNecessityReminder}`,
+          'en-US': `\n[Tip]\nWhen you need to message one or more assistants, write one line per target in your final reply: "@assistant_name message content". You may also mention an assistant in body text when the @ is preceded by a space. A target assistant is triggered only when @ is at the start of a line or the previous character is a space; @ immediately after punctuation will not trigger. When multiple assistants are mentioned, the group coordinator decides whether to run them in parallel or serially; give each assistant a standalone task. If the user only asks you to send messages to assistants, output only the corresponding @assistant messages in the final reply, with no explanation, pleasantries, summary, or expanded collaboration invitation.${triggerNecessityReminder}`,
         },
         locale,
       )
     : '';
 
   const groupAssistant = chatRoomAgents.find((a) => a.agentId === GROUP_ASSISTANT_ID);
-  const groupAssistantHint = groupAssistant
+  const groupAssistantHint = includeAssistantHandoffGuidance && groupAssistant
     ? pickLocaleText(
         {
           'zh-CN': `\n[群助手（${groupAssistant.name}）可以做的事]

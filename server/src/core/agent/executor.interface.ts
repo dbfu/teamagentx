@@ -92,6 +92,7 @@ export interface AgentExecResult {
 
 export interface AgentExecOptions {
   suppressFailureMessage?: boolean;
+  suppressAssistantHandoff?: boolean;
 }
 
 // 群聊助手信息（包含工作目录）

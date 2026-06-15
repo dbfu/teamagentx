@@ -4,6 +4,10 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { createExecutor } from '../../../core/agent/executor.factory.js';
+import {
+  buildGroupChatMemberInfoSection,
+  buildHandoffTurnReminder,
+} from '../../../core/agent/agent-system-prompt.js';
 
 function testAgent(overrides: Record<string, unknown> = {}) {
   return {
@@ -40,7 +44,9 @@ describe('createExecutor', () => {
       assert.match(debugInfo.systemPrompt, /## 群规则/);
       assert.match(debugInfo.systemPrompt, /所有回复必须使用中文。/);
       assert.match(debugInfo.systemPrompt, /## 助手提及/);
-      assert.match(debugInfo.systemPrompt, /最多包含一个可触发的 @助手 提及/);
+      assert.match(debugInfo.systemPrompt, /单条消息可以提及一个或多个助手/);
+      assert.match(debugInfo.systemPrompt, /群调度助手判断并行或串行/);
+      assert.doesNotMatch(debugInfo.systemPrompt, /最多包含一个可触发的 @助手 提及/);
       assert.match(debugInfo.systemPrompt, /收尾交接协议（强制）/);
       assert.match(debugInfo.systemPrompt, /每条回复必须恰好以下面两种方式之一结束/);
     } finally {
@@ -71,12 +77,35 @@ describe('createExecutor', () => {
       assert.match(debugInfo.systemPrompt, /## 群规则/);
       assert.match(debugInfo.systemPrompt, /输出前先检查群规则。/);
       assert.match(debugInfo.systemPrompt, /## 助手提及/);
-      assert.match(debugInfo.systemPrompt, /最多包含一个可触发的 @助手 提及/);
+      assert.match(debugInfo.systemPrompt, /单条消息可以提及一个或多个助手/);
+      assert.match(debugInfo.systemPrompt, /群调度助手判断并行或串行/);
+      assert.doesNotMatch(debugInfo.systemPrompt, /最多包含一个可触发的 @助手 提及/);
       assert.match(debugInfo.systemPrompt, /收尾交接协议（强制）/);
       assert.match(debugInfo.systemPrompt, /每条回复必须恰好以下面两种方式之一结束/);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
+  });
+
+  test('多助手交接提示允许多个 @ 并交给群调度助手裁决', () => {
+    const reminder = buildHandoffTurnReminder('coordinator', 'zh-CN');
+    assert.match(reminder, /一个或多个助手/);
+    assert.match(reminder, /多个 @ 会由群调度助手判断并行或串行/);
+    assert.doesNotMatch(reminder, /整条回复只有这一个此类提及/);
+
+    const memberInfo = buildGroupChatMemberInfoSection({
+      chatRoomAgents: [
+        { agentId: 'agent-a', name: '架构师' },
+        { agentId: 'agent-b', name: 'UI设计' },
+        { agentId: 'agent-c', name: '测试' },
+      ],
+      agentName: '产品经理',
+      workDir: '/tmp/teamagentx',
+      locale: 'zh-CN',
+    });
+    assert.match(memberInfo, /给一个或多个助手发消息/);
+    assert.match(memberInfo, /群调度助手判断并行或串行/);
+    assert.doesNotMatch(memberInfo, /最多包含一个可触发的 @助手 提及/);
   });
 
   test('非自由协作模式不注入交接意图自检提示', () => {

@@ -46,14 +46,23 @@ export function resetStallWatchdog(chatRoomId: string): void {
 }
 
 /**
+ * 仅清除房间当前的 watchdog 定时器，不标记用户中断、不重置救援计数。
+ * 用于协调器已经主动接管裁决时，避免旧定时器在慢请求期间并发启动第二次裁决。
+ */
+export function clearStallWatchdogTimer(chatRoomId: string): boolean {
+  const timer = watchdogTimers.get(chatRoomId);
+  if (!timer) return false;
+  clearTimeout(timer);
+  watchdogTimers.delete(chatRoomId);
+  return true;
+}
+
+/**
  * 用户手动停止任务时调用：取消房间防抖定时器，防止群调度助手介入。
  * 用户主动停止意味着用户已介入，不需要自动唤醒群调度。
  */
 export function cancelStallWatchdog(chatRoomId: string): void {
-  const timer = watchdogTimers.get(chatRoomId);
-  if (timer) {
-    clearTimeout(timer);
-    watchdogTimers.delete(chatRoomId);
+  if (clearStallWatchdogTimer(chatRoomId)) {
     console.log(`[stall-watchdog] ${chatRoomId} 用户手动停止，取消防抖定时器`);
   }
   // 同时清零连续救援计数
@@ -210,6 +219,14 @@ async function runStallWatchdog(chatRoomId: string): Promise<void> {
         const set = watchdogDispatchedAgents.get(chatRoomId) ?? new Set<string>();
         for (const id of ids) set.add(id);
         watchdogDispatchedAgents.set(chatRoomId, set);
+      },
+      onFailure: (reason) => {
+        debugLog('stallWatchdogCoordinatorFailed', {
+          chatRoomId,
+          triggerMessageId: last.id,
+          reason,
+        });
+        scheduleStallWatchdog(chatRoomId);
       },
     });
   } finally {

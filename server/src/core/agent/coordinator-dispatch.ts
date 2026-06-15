@@ -42,6 +42,10 @@ import {
 import { buildAIMessage } from './agent-handler/message-utils.js';
 import type { Message } from '../../types/message.js';
 import { debugLog } from './agent-handler/debug.js';
+import {
+  markTaskWithoutAssistantHandoff,
+  parseTaskPromptPolicy,
+} from './task-prompt-policy.js';
 
 export interface DispatchAssignment {
   targetAgentName: string;
@@ -70,6 +74,11 @@ export interface CoordinatorDispatchOptions {
   onAgentsDispatched?: (agentIds: string[]) => void;
   /** 协调器介入原因；用于对特定入口施加更严格的路由约束。 */
   routingReason?: string;
+  /** 协调器未能产出或执行决策时回调，供调用方重新安排恢复。用户主动中止不触发。 */
+  onFailure?: (
+    reason: 'provider_unavailable' | 'llm_error' | 'empty_decision' | 'execution_error',
+    error?: unknown,
+  ) => void;
 }
 
 const DISPATCH_TOOL_NAME = 'dispatch_decision';
@@ -797,6 +806,7 @@ async function executeDecision(
       // 其余按 targetAgents 顺序登记到串行链，由 handler 在每个助手完成后逐个推进。
       const serialMode = decision.dispatchMode === 'serial' && resolvedAssignments.length > 1;
       const dispatchMode = serialMode ? 'serial' : 'parallel';
+      const suppressAssistantHandoff = resolvedAssignments.length > 1;
       const assignmentsToEnqueue = serialMode
         ? resolvedAssignments.slice(0, 1)
         : resolvedAssignments;
@@ -832,10 +842,13 @@ async function executeDecision(
       const anchorMessageId = dispatchMsg.id;
       const dispatchedIds: string[] = [];
       for (const assignment of assignmentsToEnqueue) {
+        const executionContent = suppressAssistantHandoff
+          ? markTaskWithoutAssistantHandoff(assignment.content)
+          : assignment.content;
         const agentTriggerMessage: Message = {
           ...dispatchMsg,
           id: anchorMessageId,
-          content: `@${assignment.agent.name} ${assignment.content}`,
+          content: `@${assignment.agent.name} ${executionContent}`,
         };
         await enqueueAgentTask(chatRoomId, agentTriggerMessage, assignment.agent, null, {
           onTaskEnqueued: serialMode
@@ -844,7 +857,7 @@ async function executeDecision(
                   chatRoomId,
                   resolvedAssignments.map(({ agent, content }) => ({
                     agentId: agent.id,
-                    content,
+                    content: markTaskWithoutAssistantHandoff(content),
                   })),
                   { triggerMessageId: anchorMessageId },
                   task.id,
@@ -894,7 +907,8 @@ async function dispatchCoordinatorMessageToAgent(
     onTaskEnqueueFailed?: (taskId: string) => void;
   },
 ): Promise<void> {
-  const visibleContent = `@${agent.name} ${dispatchContent}`;
+  const taskPromptPolicy = parseTaskPromptPolicy(dispatchContent);
+  const visibleContent = `@${agent.name} ${taskPromptPolicy.content}`;
   const dispatchMsg = await buildAIMessage(
     visibleContent,
     replyToMessageId,
@@ -923,8 +937,15 @@ async function dispatchCoordinatorMessageToAgent(
   // 让本步的「xxx 执行中」继续显示在最开始那条消息下面；
   // 历史边界则用「上一个助手的回复」（含其本身），保证本助手能看到前驱产出。
   const taskTriggerMessage: Message = options?.silent
-    ? { ...dispatchMsg, id: replyToMessageId }
-    : dispatchMsg;
+    ? {
+        ...dispatchMsg,
+        id: replyToMessageId,
+        content: `@${agent.name} ${dispatchContent}`,
+      }
+    : {
+        ...dispatchMsg,
+        content: `@${agent.name} ${dispatchContent}`,
+      };
   await enqueueAgentTask(chatRoomId, taskTriggerMessage, agent, null, {
     historyAnchorMessageId: options?.historyAnchorMessageId,
     historyInclusive: options?.silent ? true : undefined,
@@ -1034,6 +1055,7 @@ export async function runCoordinatorDispatch(
   const provider = await findCoordinatorProvider(coordinatorAgent);
   if (!provider) {
     console.warn('[coordinator-dispatch] 找不到 LLM Provider，跳过协调');
+    options?.onFailure?.('provider_unavailable');
     return;
   }
 
@@ -1121,6 +1143,7 @@ export async function runCoordinatorDispatch(
       return;
     }
     console.error('[coordinator-dispatch] LLM 调用失败:', error);
+    options?.onFailure?.('llm_error', error);
     if (globalEmitDone) {
       globalEmitDone(
         { agentId: GROUP_COORDINATOR_ID, agentName: INTERNAL_COORDINATOR_AGENT_NAME, triggerMessageId: message.id },
@@ -1132,6 +1155,7 @@ export async function runCoordinatorDispatch(
 
   if (!decision) {
     console.error('[coordinator-dispatch] 结构化调用未返回决策，跳过');
+    options?.onFailure?.('empty_decision');
     if (globalEmitDone) {
       globalEmitDone(
         { agentId: GROUP_COORDINATOR_ID, agentName: INTERNAL_COORDINATOR_AGENT_NAME, triggerMessageId: message.id },
@@ -1162,6 +1186,7 @@ export async function runCoordinatorDispatch(
       decision: decision.decision,
       error,
     });
+    options?.onFailure?.('execution_error', error);
     throw error;
   } finally {
     console.log('[coordinator-dispatch] executeDecision finally', {

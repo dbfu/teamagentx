@@ -33,6 +33,7 @@ import {
   buildAgentBaseSystemPrompt,
   buildGroupChatMemberInfoSection,
   buildHandoffTurnReminder,
+  buildNoAssistantHandoffTurnReminder,
   getClaudeShellCommandsSection,
   getResponseStyleInstruction,
 } from './agent-system-prompt.js';
@@ -48,6 +49,7 @@ import {
 } from './agent-long-term-memory.js';
 import type {
     AgentDebugInfo,
+    AgentExecOptions,
     AgentExecResult,
     AgentTriggerMode,
     ChatRoomAgentInfo,
@@ -530,6 +532,7 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
 
   private _lastInjectedMessageId?: string;
   private systemPrompt: string;
+  private systemPromptWithoutAssistantHandoff: string;
   private agentTriggerMode?: AgentTriggerMode;
   private locale: Locale = 'zh-CN';
   private agentId: string | null = null;
@@ -618,6 +621,18 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
       commandSection: getClaudeShellCommandsSection(this.locale),
       roomEnvVars: this.roomEnvVars,
       locale: this.locale,
+    });
+    this.systemPromptWithoutAssistantHandoff = buildAgentBaseSystemPrompt({
+      agentPrompt: systemPrompt,
+      llmProvider: this.llmProvider,
+      imageGenerationProvider: this.imageGenerationProvider,
+      chatRoomRules,
+      workDir: this.workDir,
+      agentTriggerMode,
+      commandSection: getClaudeShellCommandsSection(this.locale),
+      roomEnvVars: this.roomEnvVars,
+      locale: this.locale,
+      includeAssistantHandoffRules: false,
     });
 
     this.ensureWorkDirectory();
@@ -987,26 +1002,31 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
     return {};
   }
 
-  private buildSdkSystemPrompt(): string {
+  private buildSdkSystemPrompt(suppressAssistantHandoff = false): string {
     return [
-      this.systemPrompt,
+      suppressAssistantHandoff
+        ? this.systemPromptWithoutAssistantHandoff
+        : this.systemPrompt,
       buildAgentLongTermMemoryInstructions(
         this.agentId,
         this.name,
       ),
-      this.buildGroupChatMemberInfoSection(),
+      this.buildGroupChatMemberInfoSection(suppressAssistantHandoff),
       getResponseStyleInstruction(this.locale),
     ]
       .filter((section) => section.trim().length > 0)
       .join('\n\n');
   }
 
-  private buildGroupChatMemberInfoSection(): string {
+  private buildGroupChatMemberInfoSection(
+    suppressAssistantHandoff = false,
+  ): string {
     return buildGroupChatMemberInfoSection({
       chatRoomAgents: this.chatRoomAgents,
       agentName: this.name,
       workDir: this.workDir,
       includeAssistantTriggerNecessityReminder: true,
+      includeAssistantHandoffGuidance: !suppressAssistantHandoff,
       locale: this.locale,
     });
   }
@@ -1014,6 +1034,7 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
   private buildFullMessage(
     message: string,
     history?: HistoryMessage[],
+    suppressAssistantHandoff = false,
   ): string {
     let fullMessage = '';
 
@@ -1048,7 +1069,9 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
     );
     fullMessage += `${currentMessageLabel}\n${message}`;
 
-    const handoffReminder = buildHandoffTurnReminder(this.agentTriggerMode, this.locale);
+    const handoffReminder = suppressAssistantHandoff
+      ? buildNoAssistantHandoffTurnReminder(this.locale)
+      : buildHandoffTurnReminder(this.agentTriggerMode, this.locale);
     if (handoffReminder) {
       fullMessage += `\n\n${handoffReminder}`;
     }
@@ -1898,6 +1921,7 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
     attachments: AttachmentData[] | undefined,
     signal: AbortSignal | undefined,
     abortController: AbortController,
+    suppressAssistantHandoff = false,
   ): Promise<TokenUsage | undefined> {
     const env = this.buildEnv();
     const maxTurns = getClaudeMaxTurns();
@@ -1914,7 +1938,7 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
         cwd: this.workDir,
         env,
         ...(autoCompactWindow ? { settings: { autoCompactEnabled: true, autoCompactWindow } } : {}),
-        systemPrompt: this.buildSdkSystemPrompt(),
+        systemPrompt: this.buildSdkSystemPrompt(suppressAssistantHandoff),
         model: this.llmProvider?.model,
         includePartialMessages: true,
         maxTurns,
@@ -1922,19 +1946,25 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
         skills,
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
+        // 始终禁用 plan 计划模式工具：ExitPlanMode（进入/退出 plan 计划模式）
+        disallowedTools: [
+          'ExitPlanMode',
+          ...(allowedTaxTools.length > 0
+            ? [
+                'Bash',
+                'TaskOutput',
+                'ScheduleWakeup',
+                'AskUserQuestion',
+                'CronCreate',
+              ]
+            : []),
+        ],
         ...(allowedTaxTools.length > 0
           ? {
               mcpServers: {
                 tax: this.buildTeamAgentXMcpServer(),
               },
               allowedTools: allowedTaxTools,
-              disallowedTools: [
-                'Bash',
-                'TaskOutput',
-                'ScheduleWakeup',
-                'AskUserQuestion',
-                'CronCreate',
-              ],
             }
           : {}),
         settingSources,
@@ -2022,7 +2052,7 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
     signal?: AbortSignal,
     attachments?: AttachmentData[],
     emitRecord?: RecordEmitCallback,
-    options?: { suppressFailureMessage?: boolean },
+    options?: AgentExecOptions,
   ): Promise<AgentExecResult> {
     this.emitStream = emitStream || null;
     this.emitToolCall = emitToolCall || null;
@@ -2040,7 +2070,13 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
       return {actions: [{type: 'message', content: resultMessage}]};
     }
 
-    const fullMessage = this.buildFullMessage(message, history);
+    const suppressAssistantHandoff =
+      options?.suppressAssistantHandoff === true;
+    const fullMessage = this.buildFullMessage(
+      message,
+      history,
+      suppressAssistantHandoff,
+    );
     this.lastContext = fullMessage;
     if (this.stateless) {
       this.sessionId = randomUUID();
@@ -2068,6 +2104,7 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
           attachments,
           signal,
           abortController,
+          suppressAssistantHandoff,
         );
       } catch (error) {
         const message = error instanceof Error ? error.message : '';
@@ -2104,6 +2141,7 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
           attachments,
           signal,
           abortController,
+          suppressAssistantHandoff,
         );
       }
 

@@ -188,7 +188,7 @@ describe('ClaudeAgentSdkExecutor background idle finish', () => {
       assert.match(sdkSystemPrompt, /其他助手：HelperAgent/);
       assert.match(
         sdkSystemPrompt,
-        /当你需要给另一个助手发消息时/,
+        /当你需要给一个或多个助手发消息时/,
       );
       assert.doesNotMatch(sdkSystemPrompt, /Global memory applies\./);
       assert.doesNotMatch(fullMessage, /\[System Instructions\]/);
@@ -196,7 +196,7 @@ describe('ClaudeAgentSdkExecutor background idle finish', () => {
       assert.doesNotMatch(fullMessage, /\[群聊成员信息\]/);
       assert.doesNotMatch(
         fullMessage,
-        /当你需要给另一个助手发消息时/,
+        /当你需要给一个或多个助手发消息时/,
       );
       assert.doesNotMatch(fullMessage, /You are a careful coding assistant\./);
       assert.match(fullMessage, /\[Global Assistant Long-Term Memory\]/);
@@ -206,6 +206,52 @@ describe('ClaudeAgentSdkExecutor background idle finish', () => {
     } finally {
       fs.rmSync(workDir, {recursive: true, force: true});
       fs.rmSync(agentMemoryFile, {force: true});
+    }
+  });
+
+  test('omits assistant handoff rules for coordinated tasks', () => {
+    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-claude-no-handoff-'));
+    const executor = new ClaudeAgentSdkExecutor(
+      'ClaudeAgent',
+      'You are a careful coding assistant.',
+      'room-no-handoff-test',
+      workDir,
+      false,
+      'agent-no-handoff-test',
+      undefined,
+      undefined,
+      undefined,
+      [
+        {name: 'ClaudeAgent', agentId: 'agent-no-handoff-test'},
+        {name: 'HelperAgent', agentId: 'helper-agent'},
+      ],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      false,
+      'coordinator',
+    );
+
+    try {
+      const normalSystemPrompt = (executor as any).buildSdkSystemPrompt();
+      const restrictedSystemPrompt = (executor as any).buildSdkSystemPrompt(true);
+      const restrictedMessage = (executor as any).buildFullMessage(
+        'Do the assigned task',
+        undefined,
+        true,
+      );
+
+      assert.match(normalSystemPrompt, /## 助手提及/);
+      assert.match(normalSystemPrompt, /收尾交接协议（强制）/);
+      assert.doesNotMatch(restrictedSystemPrompt, /## 助手提及/);
+      assert.doesNotMatch(restrictedSystemPrompt, /收尾交接协议（强制）/);
+      assert.doesNotMatch(restrictedSystemPrompt, /\[提示\]/);
+      assert.doesNotMatch(restrictedMessage, /\[交接提醒\]/);
+      assert.match(restrictedMessage, /\[群调度任务提醒\]/);
+      assert.match(restrictedMessage, /不得 @任何其他助手/);
+    } finally {
+      fs.rmSync(workDir, {recursive: true, force: true});
     }
   });
 
