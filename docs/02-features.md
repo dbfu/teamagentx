@@ -1,14 +1,14 @@
-# 02 · 现有功能详细清单（TeamAgentX v0.1.0）
+# 02 · 现有功能详细清单（TeamAgentX v0.1.x）
 
 [English](02-features_EN.md) | 中文
 
-> 基于 `/Applications/TeamAgentX.app` v0.1.0 实际产物（asar 解包 + UI 字符串）盘点。
+> 基于实际产物（asar 解包 + UI 字符串）与 `server/src` 源码盘点。
 > 标注约定：✅ 已实现；🟡 实现但需打磨；🔵 已有概念但未完全落地。
-> 截至日期：2026-05-09。
+> 初版日期：2026-05-09 · 最近更新：2026-06-15（补回智能协作模式、群调度规则、工作台、调度日志等新增能力）。
 
 ## 总览
 
-平台分为 **11 个功能域**：
+平台分为 **12 个功能域**：
 
 1. [模型供应商管理](#1-模型供应商管理-llm-provider)
 2. [助手管理](#2-助手管理-agent)
@@ -21,6 +21,7 @@
 9. [系统能力](#9-系统能力-system)
 10. [Bridge 外部平台集成](#10-bridge-外部平台集成)
 11. [语音（Speech）](#11-语音-speech)
+12. [协作编排与可观测（新增）](#12-协作编排与可观测新增)
 
 ---
 
@@ -43,6 +44,12 @@
 | OpenAI 兼容协议 | ✅ | 覆盖 OpenAI、DeepSeek、Kimi、阿里云百炼等 |
 | 自定义 endpoint | ✅ | `api_url` + `api_key` 自由配置 |
 | 本地 Agent | ✅ | "使用本地 Agent 配置" —— 复用本机 Claude Code / Codex 配置 |
+
+补充字段：
+- `contextLength` —— 模型上下文长度（token），默认 1M，用于历史压缩判断（2026-06 新增，可在设置页配置）
+- `codexWireApi` —— OpenAI 协议下 Codex 走的 wire API（`responses` / `chat`）
+- `supportsThinking` —— 是否支持思考模式（自动检测）
+- `modelType = audio` 时可配 `sttModel` 与 `audioUsage`（tts / stt / both），见 §11
 
 ### 1.3 智能配置（亮点）
 
@@ -74,8 +81,10 @@
 
 | `agent_level` | 含义 | 行为 |
 |---------------|------|------|
-| `system` | 系统预置助手（如"技能管理"、默认总控/工程师/质检模板） | 不允许修改、不允许其他助手拖入、自动出现在所有群成员选择器 |
+| `system` | 系统预置助手（统一的"**群助手**"，以及隐藏的"群调度助手"） | 不允许修改、不允许其他助手拖入、自动出现在所有群成员选择器 |
 | `normal` | 用户自建助手 | 完整可编辑 |
+
+> 2026-06 起，旧版 5 个独立系统助手（助手管理 / 技能管理 / 定时任务 / 群聊管理 / 外部平台接入）已合并为**唯一可见的"群助手"**，它一身兼任全部系统工具；另有一个**隐藏的"群调度助手"**负责智能协作裁决（用户不可直接管理）。详见 [08-server-architecture.md §8](08-server-architecture.md)。
 
 UI 反馈：
 - "系统助手不允许修改"
@@ -112,6 +121,17 @@ UI 反馈：
 - 快速对话本质是一个"特殊群聊"：`isQuickChat: true`，"这是一个快速对话群聊，消息会直接发送给助手，无需 @ 提及"
 - 快速对话支持自定义 workDir："留空时，每次对话将创建独立的会话目录"
 
+**导入/切换本地 CLI 会话（2026-06 新增）**：快速对话可绑定本机 Claude Code / Codex 的历史会话，在 TeamAgentX 里接着聊。
+
+| 能力 | 端点 |
+|------|------|
+| 列出本地 Claude 会话 | `GET /chatrooms/:id/quick-chat-session/claude-local-sessions` |
+| 绑定/切换 Claude 会话 | `POST /chatrooms/:id/quick-chat-session/claude-local-session` |
+| 列出本地 Codex 会话 | `GET /chatrooms/:id/quick-chat-session/codex-local-sessions` |
+| 绑定/切换 Codex 会话 | `POST /chatrooms/:id/quick-chat-session/codex-local-session` |
+
+绑定信息存于 `QuickChatSession.claudeLocalSession*` / `codexLocalSession*` 字段（会话 ID、标题、更新时间）。
+
 ### 2.7 助手默认目录
 
 - 助手级 `workDir` 默认值，被群引用时可覆盖
@@ -145,8 +165,7 @@ UI 提示：
 
 ### 3.3 通过聊天创建 Skill（亮点）
 
-- 系统预置助手"**技能管理**"——通过群聊对话生成 skill
-- UI 提示："在群聊中 @技能管理 创建技能"、"在群聊中 @技能管理 创建新技能"
+- 统一的"**群助手**"——通过群聊对话生成 skill（旧版独立"技能管理"助手的能力已并入群助手）
 - "如：帮我找一个写代码的技能、分析数据的技能、处理图片的技能..."
 - 端点：`POST /skills/create`
 
@@ -199,28 +218,61 @@ UI 提示：
 - "开启后获取群聊上下文"
 - "已清空对话上下文"
 
-### 4.4 触发模式（重要设计）
+### 4.4 触发模式（重要设计，2026-06 已合并为两种）
+
+原「协调模式」与「自动模式」已合并为单一的 **智能协作模式**，对外只暴露两种：
 
 | 模式 | 行为 | 适用场景 |
 |------|------|---------|
-| **协调模式（默认）** | 用户消息无 @ 时先触发内置"群调度助手"，由它决定派给哪个业务助手；普通助手的 @ 也先交调度助手判断 | 多角色协作群，系统自动判断下一步找谁 |
-| **自动模式** | 助手消息中的 @ 直接触发其他助手 | 固定接力流程、显式工作流编排 |
+| **智能协作（默认）** | 助手回复里写恰好一个合法 @ 走快路径直接接力（零协调成本）；只有用户路由落空 / @ 异常 / 并行批次汇合 / 卡住兜底 / 熔断这 5 个点才唤起内置「群调度助手」裁决；用户多 @ 可并行触发 | 绝大多数多角色协作群 |
 | **手动模式** | 助手消息中的 @ 不触发其他助手，仅作提及 | 用户手动调度，助手不串台 |
 
-详细触发规则见 [11-agent-trigger-system.md](11-agent-trigger-system.md)。
+- 存储层 `agentTriggerMode` 仍存 `coordinator`（智能协作）/`manual`；历史值 `auto` 作为别名等同智能协作
+- 内置三重熔断（跳数 20 / 连续环路 3 来回 / 并发 3）+ 卡住检测，防扇出风暴与死循环
+- 协调器每次决策写入 `CoordinatorLog`，可在「调度日志」查看
+
+详细触发规则见 [11-agent-trigger-system.md](11-agent-trigger-system.md)，合并设计见 [13-unified-collaboration-mode-design.md](13-unified-collaboration-mode-design.md)。
 
 ### 4.5 默认接收助手
 
 - "群主发送未 @ 助手的消息时，会自动触发该助手。"
 - 解决问题 C（@ 触发歧义）的现有方案——用户随手一句没 @ 的消息，由默认助手兜底
 
-### 4.6 群规则
+### 4.6 群规则 + 群调度规则（2026-06 拆分）
 
-- "群规则会注入到群内所有助手的上下文中，指导助手的行为。"
-- 单条 rule 添加 / 编辑（"暂无规则，点击添加"）
-- 保存时整体下发（"群规则已保存"）
+群现在区分两类规则，存于不同字段：
 
-### 4.7 快速对话子会话
+| 规则 | 字段 | 作用 |
+|------|------|------|
+| **群规则** | `ChatRoom.rules` | 角色行为约束/注意事项，注入到群内**所有**助手上下文 |
+| **群调度规则（工作流）** | `ChatRoom.dispatchRules`（YAML） | 多助手协作的编排流程，注入到**群调度助手**用于裁决「下一棒交给谁」 |
+
+- 群规则：单条添加/编辑，保存时整体下发（"群规则已保存"）
+- 群调度规则：由群助手 `generate_dispatch_rules` 工具生成（有指令优化、无指令按助手名册自动生成），保存做 zod 结构化校验；前端独立弹框支持只读流程图 + YAML 源码编辑 + 多工作流 tab
+- 业务助手按棒在 query 注入「任务流转/交接（下一棒）」提示，无规则不注入
+
+### 4.7 群聊环境变量（envVars，2026-06 新增）
+
+- `ChatRoom.envVars`（JSON 数组 `[{ key, value, description }]`）注入到该群助手执行 shell 命令时的环境
+- 适合放项目级 API base、路径、token 等供命令复用
+
+### 4.8 群历史归档 + Fork
+
+- 群消息可归档为 `ChatRoomMessageArchive`，保留标题/起止时间/条数
+- 从某段归档历史 **Fork 出新群聊接着聊**（`POST /chatrooms/:id/fork`），原群保持干净
+- 复制群聊（`POST /chatrooms/:id/duplicate`）会带上成员、规则、`dispatchRules` 等配置
+
+### 4.9 群聊 Git / 脚本集成（桌面端）
+
+- 在群工作目录上查看 git 状态、创建分支、执行受限 git 命令（`/chatrooms/:id/git-status`、`/git-branch`、`/git-command`）
+- 读取并运行 `package.json` 脚本（`/chatrooms/:id/package-scripts`、`/package-scripts/run`）
+
+### 4.10 群聊自定义指令（/commands，2026-06 新增）
+
+- 用户在群内定义 `/指令`（`ChatRoomCommand`：name + content + sortOrder），输入框输入 `/` 时弹出选择，选中后把 content 填入输入框
+- 端点：`GET/POST /chatrooms/:chatRoomId/commands`、`PUT/DELETE /commands/:commandId`
+
+### 4.11 快速对话子会话
 
 - `POST /chatrooms/:id/quick-chat-session` —— 在群下挂一个快速会话
 - "通过快速对话功能创建的会话记录"
@@ -406,10 +458,10 @@ UI 提示：
 - Electron 客户端：可读写本地文件、打开本地目录
 - Web 版功能受限
 
-### 9.6 国际化
+### 9.6 国际化与用户偏好语言
 
-- 多语言资源：af / am / ar / bg / bn / ca / cs / da / de / el / en / en_GB / es / es_419 / et / fa / fi / fil / fr / gu / he / hi / hr / hu / id / it / ja / ... （40+ 语言）
-- 来自 Electron 默认资源，UI 文案目前主要中文
+- Web 端 i18n 资源现以 `zh-CN` / `en-US` 为主（`apps/web/src/i18n/locales/`）
+- 用户级 `preferredLanguage`（`zh-CN` / `en-US`，默认 `zh-CN`）：不仅切 UI 语言，还决定 **Agent 系统提示词的语种**（交接协议、群调度助手提示等按用户偏好生成）
 
 ---
 
@@ -454,19 +506,34 @@ UI 提示：
 4. **助手分级（system / normal）**
 5. **助手分类（用户自建 + 系统）**
 6. **技能 symlink 模式（兼容 Claude Code）**
-7. **通过聊天创建 skill（"技能管理"系统助手）**
+7. **通过聊天创建 skill（统一"群助手"系统助手）**
 8. **群级 Cron 定时任务**
-9. **群级触发模式（自动/手动）**
+9. **智能协作 / 手动两种触发模式**
 10. **每个助手在每个群独立的上下文 / 历史注入开关**
 11. **三层 workDir 策略**
 12. **流式思考链可视化**
 13. **执行记录与上下文检视**
+14. **工作台今日任务与调度日志**
 14. **任务看板（6 状态列）**
 15. **截图导出**
 16. **移动端扫码连接**
 17. **本地 Agent 复用（接 Claude Code）**
 
-→ **结论**：产品已经搭起了相当完整的脚手架，重大问题点不在"功能缺"，而在"机制硬不硬"——即第 [04 章](04-problems-and-solutions.md) 要重点解决的"边界、状态、防循环、客观验收"。
+2026-06 之后新增（部分原 04 章问题点已被硬化）：
+
+18. **智能协作模式**（合并 auto/coordinator）+ 三重熔断防扇出/死循环（对应 A1/A2/H）
+19. **群调度规则（工作流 YAML）+ 流程图可视化**
+20. **并行批次（fork-join）派发**
+21. **工作台「今日任务」与派发**
+22. **调度日志（CoordinatorLog）可观测**
+23. **群聊自定义指令 `/commands`**
+24. **群聊环境变量（envVars）**
+25. **群历史归档 + Fork 新群、复制群聊**
+26. **快速对话导入/切换本地 Claude/Codex 会话**
+27. **用户偏好语言驱动 Agent 提示词语种**
+28. **助手日记 / 长期记忆按日沉淀**
+
+→ **结论**：产品已经搭起了相当完整的脚手架，重大问题点不在"功能缺"，而在"机制硬不硬"——即第 [04 章](04-problems-and-solutions.md) 要重点解决的"边界、状态、防循环、客观验收"，其中防循环/扇出已由智能协作的协作预算落地。
 
 ---
 
@@ -497,3 +564,56 @@ UI 提示：
 | 浏览器本地语音 | ✅ | `browser-local` 模式，零延迟 |
 | 音色目录 | ✅ | `buildSpeechVoiceCatalog()` 聚合所有可用音色 |
 | Provider 配置 | ✅ | LlmProvider 设 `modelType = audio`，`audioUsage = tts\|stt\|both` |
+
+---
+
+## 12. 协作编排与可观测（新增）
+
+2026-06 起新增的一组围绕「多助手协作怎么编排、怎么看得见」的能力。
+
+### 12.1 智能协作模式
+
+见 §4.4 与 [11-agent-trigger-system.md](11-agent-trigger-system.md)：快路径接力 + 协调器 5 点兜底 + 三重熔断 + 并行批次（fork-join）。
+
+### 12.2 群调度规则 / 工作流可视化
+
+| 能力 | 状态 | 说明 |
+|------|------|------|
+| YAML 调度规则 | ✅ | `ChatRoom.dispatchRules`，注入群调度助手 |
+| 自动生成 / 优化 | ✅ | 群助手 `generate_dispatch_rules` 工具 |
+| 结构化校验 | ✅ | 保存时 zod 校验，非法拒绝 |
+| 流程图可视化 | ✅ | 只读流程图 + YAML 源码编辑 + 多工作流 tab |
+
+### 12.3 工作台「今日任务」（Workbench）
+
+| 能力 | 状态 | 端点 |
+|------|------|------|
+| 创建/编辑/删除今日任务 | ✅ | `GET/POST /workbench/tasks`、`PUT/DELETE /workbench/tasks/:id` |
+| 派发到群聊执行 | ✅ | `POST /workbench/tasks/:id/dispatch`、`/dispatch-batch` |
+| 推荐目标群 | ✅ | `POST /workbench/recommend-room` |
+| 状态流转 | ✅ | `draft → dispatched → in_progress → waiting_review → needs_input → completed / blocked`，可手动切换 |
+
+`WorkbenchTask` 由用户在工作台创建，派发到已有群聊后由群调度助手组织执行；状态更新通过 socket `workbench:task-updated` 推送。
+
+### 12.4 调度日志（Coordinator Log）
+
+- 群调度助手每次决策（dispatch / no_dispatch / ask_owner / cannot_dispatch）写入 `CoordinatorLog`
+- 前端「调度日志」面板/弹框查看：决策类型、目标助手、是否原文转发、来源（用户/助手）、原因
+- 端点：`GET /coordinator-logs`、`GET /coordinator-logs/:chatRoomId`
+
+### 12.5 助手日记 / 长期记忆沉淀
+
+- `AgentRoomMemory` 长期摘要 + 候选记忆「日记」机制：信息在多个不同日期复现才晋升为长期记忆（`AGENT_MEMORY_PROMOTE_MIN_DAYS`），错误/教训类一次即沉淀
+- 助手日记按日生成（`GET /agents/:agentId/diary`、`/diary/generate`），由日记调度器每日触发；功能受全局开关控制
+
+### 12.6 模板包导出 / 导入
+
+- 群聊配置（成员、规则、`dispatchRules`、Cron 等）可导出为模板包（`TemplatePackage`）并在其他环境导入（`TemplateImportRecord` 记录导入审计）
+
+### 12.7 执行健壮性
+
+- 群调度助手 LLM 决策超时与重试（`AGENT_COORDINATOR_LLM_TIMEOUT_MS` / `_RETRY_COUNT`）
+- 普通助手「无活动」重试：启动后长期无任何输出/流/思考/工具事件即判卡住并重试（`AGENT_EXECUTION_NO_ACTIVITY_TIMEOUT_MS`）
+- 服务重启时任务恢复：executing/pending 任务标记 interrupted，可手动恢复
+
+详见 [08-server-architecture.md](08-server-architecture.md) 与 [09-api-reference.md](09-api-reference.md)。

@@ -3,8 +3,8 @@
 [English](README_EN.md) | 中文
 
 > AI 团队开发平台 · 完整设计与分析文档
-> 版本 v3 · 拆分版（2026-05-09）
-> 对应产品：TeamAgentX v0.1.0
+> 版本 v3.1 · 拆分版（2026-06-15 更新）
+> 对应产品：TeamAgentX v0.1.x（以当前 monorepo 源码为准）
 
 ## 这套文档讲什么
 
@@ -46,19 +46,20 @@
 |------|---------|---------|---------|
 | [README.md](README.md) | 索引 + 阅读路径 | - | 约 1k |
 | [01-overview.md](01-overview.md) | 产品定位 + 核心架构 | ⭐⭐⭐ | 约 3k |
-| [02-features.md](02-features.md) | v0.1.0 功能详细分类（11 大功能域，含 Bridge 集成与语音）| ⭐⭐⭐ | 约 6k |
+| [02-features.md](02-features.md) | v0.1.x 功能详细分类（12 大功能域，含智能协作、工作台、Bridge 与语音）| ⭐⭐⭐ | 约 9k |
 | [03-workflows.md](03-workflows.md) | 工作流程 + 状态机 + 消息流转 | ⭐⭐ | 约 4k |
 | [04-problems-and-solutions.md](04-problems-and-solutions.md) | **13 个重大问题 + 解决方案**（核心章）| ⭐⭐⭐⭐ | 约 13k |
 | [05-competitors.md](05-competitors.md) | 5 赛道竞品 + 横向对比 + 借鉴 | ⭐⭐⭐ | 约 7k |
 | [06-roadmap.md](06-roadmap.md) | 三阶段路线图 + 风险管理 | ⭐⭐⭐ | 约 5k |
 | [07-appendix.md](07-appendix.md) | 术语表 + schema + API 速查 + 已知小坑 | ⭐⭐ | 约 6k |
 | [08-server-architecture.md](08-server-architecture.md) | 服务端代码架构 · Agent 执行系统 · Socket 事件 | ⭐⭐⭐ | 约 4k |
-| [09-api-reference.md](09-api-reference.md) | 完整 REST API 速查（所有路由） | ⭐⭐⭐ | 约 3k |
+| [09-api-reference.md](09-api-reference.md) | 完整 REST API 速查（主网关路由） | ⭐⭐⭐ | 约 5k |
 | [10-frontend-architecture.md](10-frontend-architecture.md) | 前端目录 · Stores · 面板系统 · Electron 集成 | ⭐⭐ | 约 3k |
-| [11-agent-trigger-system.md](11-agent-trigger-system.md) | 助手触发系统 · coordinator/auto/manual 模式 · @解析规则 · 提示词建议 | ⭐⭐⭐ | 约 3k |
+| [11-agent-trigger-system.md](11-agent-trigger-system.md) | 助手触发系统 · **智能协作 + 手动**两模式 · 协作预算/熔断 · @解析规则 · 提示词建议 | ⭐⭐⭐⭐ | 约 4k |
 | [12-user-guide.md](12-user-guide.md) | 新手使用说明 · 初始化 · 模型/助手/技能 · 群聊协作 | ⭐⭐⭐ | 约 7k |
+| [13-unified-collaboration-mode-design.md](13-unified-collaboration-mode-design.md) | 智能协作模式合并设计（已实现）· 协调器介入点 · 收敛性 | ⭐⭐⭐ | 约 5k |
 
-总计约 62k 字。
+> 2026-06 重大更新：`auto`/`coordinator` 合并为**智能协作**模式；新增**群调度规则（工作流）**、**工作台今日任务**、**调度日志**、群聊指令/环境变量、快速对话导入本地 Claude/Codex 会话等。详见 02 / 08 / 11 / 13。
 
 ## 一图速览
 
@@ -71,7 +72,7 @@
 │        │                                                    │
 │   01 产品概览       ← 定位 / 隐喻 / 团队配置 / 架构          │
 │        │                                                    │
-│        ├── 02 功能清单     ← v0.1.0 9 大功能域 实测盘点      │
+│        ├── 02 功能清单     ← v0.1.x 12 大功能域源码盘点      │
 │        ├── 03 工作流程     ← 生命周期 / 状态机 / 消息流转    │
 │        │                                                    │
 │        ▼                                                    │
@@ -102,19 +103,24 @@
 2. **任务卡 + 群即项目**——让乱聊变协作，文件/任务/记忆三层隔离
 3. **可观测的多 Agent 协作**——流式 thinking + 执行记录 + 上下文检视
 
-### 3. v0.1.0 已落地（远超用户最初描述）
-11 大功能域、约 60+ API 端点、若干独有亮点：
+### 3. v0.1.x 已落地（远超用户最初描述）
+12 大功能域、约 90+ API 端点、若干独有亮点：
+- ⭐ **智能协作模式**（合并 auto/coordinator）：快路径接力 + 协调器 5 点兜底 + 协作预算三重熔断（2026-06）
+- ⭐ **群调度规则（工作流 YAML）+ 流程图可视化**（2026-06）
+- ⭐ **工作台「今日任务」**：创建并派发到群聊，协调器组织执行（2026-06）
+- ⭐ **调度日志（CoordinatorLog）**：协调器决策可观测（2026-06）
 - ⭐ **群级 Cron 定时任务**（独有）
 - ⭐ **粘贴文本一键解析模型配置**（UX 亮点）
 - ⭐ **流式提示词优化**
-- ⭐ **通过聊天创建 Skill**（"@技能管理"系统助手）
+- ⭐ **统一「群助手」**：一身兼任建助手/技能/Cron/群信息/外部平台/调度规则
 - ⭐ **Skill symlink 模式**（兼容 Claude Code）
-- ⭐ **三层 workDir 策略**
+- ⭐ **三层 workDir 策略** + **群聊环境变量（envVars）** + **群聊自定义指令 `/commands`**
 - ⭐ **每个助手在每个群独立的上下文 / 历史注入开关**
-- ⭐ **本地 Agent 复用**（接 Claude Code key）
+- ⭐ **本地 Agent 复用**（接 Claude Code key）+ **快速对话导入本地 Claude/Codex 会话**
 - ⭐ **移动端扫码连接**
 - ⭐ **Bridge 外部平台**（Telegram / 飞书 / 钉钉 / 企业微信 接入同一群聊）
 - ⭐ **思考模式（thinkingMode）**：off/low/medium/high 控制 Claude 推理预算
+- ⭐ **用户偏好语言**驱动 Agent 提示词语种
 
 详见 [02-features.md](02-features.md)。
 
@@ -129,13 +135,13 @@
 
 完整方案见 [04-problems-and-solutions.md](04-problems-and-solutions.md)。
 
-### 5. 阶段一关键 Milestone：硬化任务卡协作
+### 5. 下一阶段关键 Milestone：任务卡与文件协作硬化
 
 5 项 P0 任务联动做（**联动 1**），一鱼多吃同时解决 4 个问题：
 
 ```
 T1 任务卡 schema 定稿  →  所有改造的地基
-T2 扇出风暴防御       →  解决 A2（用户重点提）+ A1
+T2 扇出风暴防御       →  A1/A2 已有智能协作兜底，继续补任务卡事件聚合
 T3 任务卡 ↔ git 分支  ┐
 T4 文件变更事件总线   ├ 联动 1：解决 D / E / G / I 四个问题
 T5 客观验收钩子       ┘
@@ -157,9 +163,10 @@ T5 客观验收钩子       ┘
 |------|------|------|------|
 | v1 | 2026-05-09 | `ai-team-platform-design.md` | 头脑风暴稿，**保留作存档** |
 | v2 | 2026-05-09 | `ai-team-platform-master.md` | 单体主文档，**已被 v3 拆分版取代** |
-| **v3** | **2026-05-09** | **本套 `README + 01-07.md`** | **当前主文档** |
+| **v3** | **2026-05-09** | **本套 `README + 01-07.md`** | 拆分版主文档 |
+| **v3.1** | **2026-06-15** | **`docs/` 全量文档** | **当前主文档；补齐 08-13、智能协作、工作台、调度日志与 API** |
 
-后续维护以 v3 拆分版为准。v1 / v2 仅作历史归档。
+后续维护以 v3.1 拆分版为准。v1 / v2 仅作历史归档。
 
 ## 维护约定
 
@@ -167,7 +174,7 @@ T5 客观验收钩子       ┘
 - **交叉引用**：使用相对路径链接（如 `[04 问题与解决方案](04-problems-and-solutions.md)`）
 - **状态标记**：✅ 已实现 / 🟡 实现但需打磨 / 🔵 已有概念但未完全落地 / 🔴 未实现
 - **优先级**：🔴 高（P0）/ 🟡 中（P1）/ 🟢 低（P2）
-- **更新触发**：v0.1.x 新功能上线时回填到 02-features.md；阶段一/二/三 Milestone 完成时更新 06-roadmap.md
+- **更新触发**：v0.1.x 新功能上线时回填到 02-features.md / 09-api-reference.md；阶段一/二/三 Milestone 完成时更新 06-roadmap.md
 
 ---
 

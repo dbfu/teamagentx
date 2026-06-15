@@ -3,8 +3,8 @@
 English | [中文](README.md)
 
 > AI Team Development Platform · Complete Design and Analysis Documentation
-> Version v3 · Split Edition (2026-05-09)
-> Corresponding Product: TeamAgentX v0.1.0
+> Version v3.1 · Split Edition (updated 2026-06-15)
+> Corresponding Product: TeamAgentX v0.1.x (based on the current monorepo source)
 
 ## What This Documentation Covers
 
@@ -46,19 +46,20 @@ Jump directly to [04 Problems and Solutions](04-problems-and-solutions_EN.md), e
 |----------|---------|------------|------------|
 | [README.md](README.md) | Index + Reading Paths | - | ~1k |
 | [01-overview.md](01-overview_EN.md) | Product positioning + Core architecture | ⭐⭐⭐ | ~3k |
-| [02-features.md](02-features_EN.md) | v0.1.0 detailed feature classification (11 major domains, including Bridge integration & voice) | ⭐⭐⭐ | ~6k |
+| [02-features.md](02-features_EN.md) | v0.1.x detailed feature classification (12 domains, including Smart Collaboration, Workbench, Bridge, and speech) | ⭐⭐⭐ | ~9k |
 | [03-workflows.md](03-workflows_EN.md) | Workflows + State machines + Message flow | ⭐⭐ | ~4k |
 | [04-problems-and-solutions.md](04-problems-and-solutions_EN.md) | **13 major problems + solutions** (Core Chapter) | ⭐⭐⭐⭐ | ~13k |
 | [05-competitors.md](05-competitors_EN.md) | 5-track competitors + Cross-comparison + Learnings | ⭐⭐⭐ | ~7k |
 | [06-roadmap.md](06-roadmap_EN.md) | Three-phase roadmap + Risk management | ⭐⭐⭐ | ~5k |
 | [07-appendix.md](07-appendix_EN.md) | Glossary + Schemas + API quick reference + Known minor issues | ⭐⭐ | ~6k |
 | [08-server-architecture.md](08-server-architecture_EN.md) | Server code architecture · Agent execution system · Socket events | ⭐⭐⭐ | ~4k |
-| [09-api-reference.md](09-api-reference_EN.md) | Complete REST API quick reference (all routes) | ⭐⭐⭐ | ~3k |
+| [09-api-reference.md](09-api-reference_EN.md) | Complete REST API quick reference (main gateway routes) | ⭐⭐⭐ | ~5k |
 | [10-frontend-architecture.md](10-frontend-architecture_EN.md) | Frontend directory · Stores · Panel system · Electron integration | ⭐⭐ | ~3k |
-| [11-agent-trigger-system.md](11-agent-trigger-system_EN.md) | Agent trigger system · coordinator/auto/manual modes · @ parsing rules · Prompt suggestions | ⭐⭐⭐ | ~3k |
+| [11-agent-trigger-system.md](11-agent-trigger-system_EN.md) | Agent trigger system · **Smart Collaboration + Manual** modes · collaboration budget/breakers · @ parsing · Prompt suggestions | ⭐⭐⭐⭐ | ~4k |
 | [12-user-guide.md](12-user-guide_EN.md) | Beginner user guide · Initialization · Models/Agents/Skills · Group collaboration | ⭐⭐⭐ | ~7k |
+| [13-unified-collaboration-mode-design_EN.md](13-unified-collaboration-mode-design_EN.md) | Smart Collaboration merge design (shipped) · coordinator intervention points · convergence | ⭐⭐⭐ | ~5k |
 
-Total approximately 62k words.
+> Major 2026-06 update: `auto`/`coordinator` merged into **Smart Collaboration**; added **dispatch rules (workflows)**, **workbench today-tasks**, **dispatch log**, group commands/env vars, quick-chat import of local Claude/Codex sessions, etc. See 02 / 08 / 11 / 13.
 
 ## Quick Overview Diagram
 
@@ -71,7 +72,7 @@ Total approximately 62k words.
 │        │                                                    │
 │   01 Product Overview ← Positioning / Metaphor / Team config / Architecture │
 │        │                                                    │
-│        ├── 02 Feature List     ← v0.1.0 9 major domains actual review      │
+│        ├── 02 Feature List     ← v0.1.x 12-domain source review            │
 │        ├── 03 Workflows        ← Lifecycle / State machines / Message flow │
 │        │                                                    │
 │        ▼                                                    │
@@ -102,19 +103,24 @@ Total approximately 62k words.
 2. **Task Cards + Group-as-Project** — Transforming chaotic chat into productive collaboration with file/task/memory three-layer isolation
 3. **Observable Multi-Agent Collaboration** — Streaming thinking + execution records + context inspection
 
-### 3. v0.1.0 Delivered (Far Beyond Initial User Description)
-11 major feature domains, ~60+ API endpoints, several unique highlights:
+### 3. v0.1.x Delivered (Far Beyond Initial User Description)
+12 major feature domains, ~90+ API endpoints, several unique highlights:
+- ⭐ **Smart Collaboration mode** (merged auto/coordinator): fast-path relay + 5-point coordinator fallback + triple collaboration-budget breaker (2026-06)
+- ⭐ **Dispatch rules (workflow YAML) + flowchart visualization** (2026-06)
+- ⭐ **Workbench "today tasks"**: create and dispatch to a room, coordinator organizes execution (2026-06)
+- ⭐ **Dispatch log (CoordinatorLog)**: coordinator decisions are observable (2026-06)
 - ⭐ **Group-level Cron Scheduled Tasks** (unique)
 - ⭐ **Paste Text One-Click Parse Model Config** (UX highlight)
 - ⭐ **Streaming Prompt Optimization**
-- ⭐ **Create Skills via Chat** ("@Skill Manager" system agent)
+- ⭐ **Unified "Group Assistant"**: all-in-one for agents/skills/Cron/room info/external platform/dispatch rules
 - ⭐ **Skill Symlink Mode** (Claude Code compatible)
-- ⭐ **Three-layer workDir Strategy**
+- ⭐ **Three-layer workDir Strategy** + **group env vars (envVars)** + **group custom commands `/commands`**
 - ⭐ **Per-Agent Per-Group Independent Context / History Injection Toggle**
-- ⭐ **Local Agent Reuse** (connect Claude Code key)
+- ⭐ **Local Agent Reuse** (connect Claude Code key) + **quick-chat import of local Claude/Codex sessions**
 - ⭐ **Mobile QR Code Connection**
 - ⭐ **Bridge External Platforms** (Telegram / Feishu / DingTalk / WeCom connected to same group chat)
 - ⭐ **Thinking Mode (thinkingMode)**: off/low/medium/high controlling Claude reasoning budget
+- ⭐ **User preferred language** drives Agent prompt language
 
 See [02-features_EN.md](02-features_EN.md) for details.
 
@@ -129,13 +135,13 @@ Organized into 4 themes, sorted by priority:
 
 Complete solutions in [04-problems-and-solutions_EN.md](04-problems-and-solutions_EN.md).
 
-### 5. Phase 1 Key Milestone: Hardening Task Card Collaboration
+### 5. Next Key Milestone: Hardening Task Cards and File Collaboration
 
 5 P0 tasks linked together (**Linkage 1**), solving 4 problems simultaneously:
 
 ```
 T1 Task Card Schema Finalization → Foundation for all changes
-T2 Fan-out Storm Defense        → Solves A2 (user emphasized) + A1
+T2 Fan-out Storm Defense        → A1/A2 now have Smart Collaboration fallback; continue with task-event aggregation
 T3 Task Card ↔ Git Branch       ┐
 T4 File Change Event Bus        ├ Linkage 1: Solves D / E / G / I four problems
 T5 Objective Acceptance Hooks   ┘
@@ -157,9 +163,10 @@ See Section 5 in [05-competitors_EN.md](05-competitors_EN.md) for details.
 |---------|------|------|--------|
 | v1 | 2026-05-09 | `ai-team-platform-design.md` | Brainstorm draft, **kept as archive** |
 | v2 | 2026-05-09 | `ai-team-platform-master.md` | Monolithic master doc, **replaced by v3 split edition** |
-| **v3** | **2026-05-09** | **This set of `README + 01-07.md`** | **Current main documentation** |
+| **v3** | **2026-05-09** | **This set of `README + 01-07.md`** | Split-edition main documentation |
+| **v3.1** | **2026-06-15** | **All `docs/` documents** | **Current main documentation; adds 08-13, Smart Collaboration, Workbench, dispatch log, and API updates** |
 
-Future maintenance based on v3 split edition. v1/v2 only for historical archive.
+Future maintenance is based on the v3.1 split edition. v1/v2 are kept only as historical archives.
 
 ## Maintenance Conventions
 
@@ -167,7 +174,7 @@ Future maintenance based on v3 split edition. v1/v2 only for historical archive.
 - **Cross References**: Use relative path links (e.g., `[04 Problems and Solutions](04-problems-and-solutions_EN.md)`)
 - **Status Markers**: ✅ Implemented / 🟡 Implemented but needs refinement / 🔵 Concept exists but not fully landed / 🔴 Not implemented
 - **Priority**: 🔴 High (P0) / 🟡 Medium (P1) / 🟢 Low (P2)
-- **Update Triggers**: Backfill new v0.1.x features into 02-features.md; Update 06-roadmap.md when Phase 1/2/3 Milestones complete
+- **Update Triggers**: Backfill new v0.1.x features into 02-features.md / 09-api-reference.md; update 06-roadmap.md when Phase 1/2/3 milestones complete
 
 ---
 

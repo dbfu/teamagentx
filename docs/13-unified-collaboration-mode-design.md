@@ -1,8 +1,26 @@
 # 群聊调度模式合并设计：自由协作 + 协调模式 →「智能协作」
 
-> 状态：方案设计（未实现）
-> 日期：2026-06-12
-> 关联文档：[11-agent-trigger-system.md](./11-agent-trigger-system.md)（现状触发系统）
+[English](13-unified-collaboration-mode-design_EN.md) | 中文
+
+> 状态：**已实现**（2026-06；本文保留为设计依据）
+> 日期：2026-06-12 提案 · 2026-06 落地
+> 关联文档：[11-agent-trigger-system.md](./11-agent-trigger-system.md)（当前触发系统，已按本方案更新）
+
+## 0. 实现状态（2026-06 更新）
+
+本方案已落地，群聊对外模式收敛为 **智能协作 + 手动** 两种。关键实现位置：
+
+- 模式归一：`server/src/core/agent/agent-handler/trigger-mode.ts`（`auto`/`coordinator` → 归一为 `coordinator`，即智能协作；`manual` 不变）
+- 协作预算与三重熔断：`collaboration-budget.ts`（跳数 `AGENT_MAX_HANDOFF_HOPS`=20 / 环路 `AGENT_HANDOFF_CYCLE_REPEAT_LIMIT`=3 / 并发 `AGENT_MAX_PARALLEL_DISPATCH`=3，见 `config/index.ts`）
+- 并行批次 fork-join：`parallel-batch-tracker.ts`（含批次期间用户介入 `markBatchUserIntervention`）
+- 卡住兜底：`stall-watchdog.ts`；协调器派发：`coordinator-dispatch.ts`、`internal-coordinator-agent.ts`
+- 统一消息流转入口：`agent-handler/handler.ts`（5 个协调器介入点）；交接协议系统提示：`agent-system-prompt.ts`
+- 决策审计：`CoordinatorLog` 表 + 前端「调度日志」面板
+- 存储兼容：`agentTriggerMode` 仍存 `coordinator`/`manual`；`auto` 作为历史别名等同智能协作；模板导入按此映射
+
+下文「方案设计」描述与现状基本一致，仅个别措辞（如「未实现」标注）以本节为准。
+
+---
 
 ## 1. 背景与动机
 

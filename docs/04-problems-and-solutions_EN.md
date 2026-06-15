@@ -5,6 +5,12 @@ English | [中文](04-problems-and-solutions.md)
 > This is the **Core Chapter** of the documentation. It categorizes 13 real pitfalls of group-chat orchestrated multi-AI agents into 4 themes, each problem expanded using the same **7-section format**: Symptom / Root Cause / Current Handling / **Recommended Solution (with implementation steps)** / **Alternative/Supplementary Solutions** (multiple paths listed) / Priority / Work Effort Estimate.
 > Priority legend: 🔴 High (P0, must do next phase) / 🟡 Medium (P1, 3-6 months) / 🟢 Low (P2, long-term).
 
+> **2026-06 progress (some problems hardened)**: after Smart Collaboration (merged auto/coordinator) landed, the following are now covered by "collaboration budget + triple breaker + parallel batch fork-join + 5-point coordinator fallback":
+> - **A1 loop prevention / A2 fan-out storm**: triple breaker on hops (20) / consecutive cycle (3 round-trips) / concurrency (3); on a trip it stops and `@`s the owner; user multi-`@` over the cap is truncated visibly.
+> - **C @ trigger ambiguity**: an agent `@` anomaly (typo/multi-`@`) escalates to the coordinator for correction; the default agent fallback is kept.
+> - **H deadlock**: cycle detection + stall watchdog fallback; a human message takes over at any time.
+> See [11-agent-trigger-system_EN.md](11-agent-trigger-system_EN.md) and [13-unified-collaboration-mode-design_EN.md](13-unified-collaboration-mode-design_EN.md). The solutions below remain as design rationale and as reference for the parts not yet covered (objective acceptance, file concurrency, hard state-machine constraints, etc.).
+
 ## How to Read "Alternative/Supplementary Solutions"
 
 Each problem's "Alternative/Supplementary Solutions" table uses the same fields:
@@ -24,10 +30,10 @@ Each problem ends with a **Recommended Combination** —拼接 recommended solut
 
 | Theme | Problem | Priority | Keywords |
 |-------|---------|----------|----------|
-| **Flow Control** | A1 Agents endlessly @ each other | 🔴 | Coordinator exclusive completion right |
-| | **A2 Fan-out-Fan-in Storm** | 🔴 | Aggregation window + reply禁@ |
-| | C @ trigger ambiguity | 🟡 | Role group @ + default receiver |
-| | H Deadlock/Stalemate | 🟡 | Heartbeat output + silent alert |
+| **Flow Control** | A1 Agents endlessly @ each other | 🔴 | Collaboration budget + cycle breaker (shipped); completion authority can still be hardened |
+| | **A2 Fan-out-Fan-in Storm** | 🔴 | Concurrency cap + fork-join (shipped); task-event aggregation still pending |
+| | C @ trigger ambiguity | 🟡 | Smart Collaboration anomaly escalation + default recipient |
+| | H Deadlock/Stalemate | 🟡 | Stall watchdog + human takeover |
 | | K Human intervention timing | 🟡 | Risk level + permission mode |
 | **Context & State** | B Context explosion | 🟡 | Message tiered subscription |
 | | E Info sync blind spot | 🔴 | File change event bus |
@@ -56,11 +62,13 @@ Tokens burned out, user feels "group一直在吵".
 2. No one has "I shouldn't speak" restraint — whenever @mentioned, respond.
 3. Missing explicit "completion condition".
 
-#### Current Handling (v0.1.0)
+#### Current Handling (v0.1.x)
 
-- ✅ **Auto/Manual trigger modes** — Manual mode中agent消息中@不触发其他agents (implemented).
-- ✅ Group rule mechanism exists (though软约束).
-- 🔵 v1 design proposed "Coordinator exclusive completion right" concept,未hard-coded到平台层.
+- ✅ **Smart Collaboration / Manual trigger modes** — Manual blocks agent-message `@` triggers; Smart Collaboration uses the single-`@` fast path and escalates anomalies to the coordinator.
+- ✅ **Triple collaboration-budget breaker** — hop, consecutive-cycle, and concurrency caps stop auto-dispatch and `@` the owner.
+- ✅ **Stall watchdog** — when collaboration stalls, the coordinator adjudicates the fallback.
+- ✅ Group rules exist (still a soft constraint).
+- 🔵 The v1 "exclusive completion right" concept is not yet a hard platform state.
 
 #### Recommended Solution
 
@@ -149,10 +157,12 @@ Three layers叠加:
 2. **Reply必带@**: Agents misuse "state change" through "dialogue" channel —本来只该说 "I delivered",结果变成 @Coordinator来一次对话.
 3. **No aggregation window**: Coordinator没有 "wait all then summarize" concept,每收到一条就独立处理一次.
 
-#### Current Handling (v0.1.0)
+#### Current Handling (v0.1.x)
 
-- 🟡 **Manual trigger mode** can缓解: Agent消息中@不触发其他agents. But缺点是失去自动协作.
-- 🔵暂无aggregation mechanism.
+- ✅ **Concurrency cap**: user multi-`@` or coordinator parallel dispatch triggers at most 3 targets; truncated targets are shown visibly.
+- ✅ **Parallel batch fork-join**: batch members complete and join before the coordinator adjudicates the next step.
+- ✅ **Collaboration-budget breaker**: repeated fan-out/cycles stop auto-dispatch and `@` the owner.
+- 🔵 **Task-card event aggregation** is still not fully implemented; the "state-change channel + aggregation window" below remains a recommended next step.
 
 #### Recommended Solution
 

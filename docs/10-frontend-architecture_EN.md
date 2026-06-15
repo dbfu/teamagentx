@@ -23,38 +23,56 @@ apps/web/src/
 │   │   ├── chat-message.tsx       # Single message bubble
 │   │   ├── chat-input-area.tsx    # Bottom input area (@mention + images)
 │   │   ├── mention-input.tsx      # react-mentions @mention input
+│   │   ├── conversation-list-item.tsx # Chatroom list item (with "running" badge)
 │   │   ├── assistant-page.tsx     # Assistant management page
 │   │   ├── skill-page.tsx         # Skill management page
 │   │   ├── model-page.tsx         # Model configuration page
-│   │   ├── settings-page.tsx      # Settings page
+│   │   ├── settings-page.tsx      # Settings page (split into settings/ sub-sections)
+│   │   ├── settings/             # Settings sub-sections (after the split)
+│   │   │   ├── account-section.tsx / general-section.tsx / about-section.tsx
+│   │   │   ├── software-section.tsx / sdk-tools-card.tsx
+│   │   │   └── mobile-connect-card.tsx / qr-code-display.tsx
 │   │   ├── chat-side-panel/       # Right side panel (multi-panel switching)
 │   │   │   ├── agents-panel.tsx       # Room member list
+│   │   │   ├── agent-detail-panel.tsx # Assistant details
 │   │   │   ├── context-panel.tsx      # Assistant context inspection
 │   │   │   ├── history-panel.tsx      # Execution history
 │   │   │   ├── stream-panel.tsx       # Stream output panel
-│   │   │   ├── record-detail-panel.tsx # Execution record details
+│   │   │   ├── record-detail-panel.tsx / reply-detail-panel.tsx
 │   │   │   ├── room-settings-panel.tsx # Room settings
+│   │   │   ├── room-env-vars-editor.tsx # Group env vars
 │   │   │   ├── cron-tasks-panel.tsx   # Scheduled tasks
-│   │   │   └── task-queue-panel.tsx   # Task queue
+│   │   │   ├── task-queue-panel.tsx / task-board-panel.tsx
+│   │   │   ├── claude-local-sessions-panel.tsx # Import local Claude sessions
+│   │   │   └── work-dir-card.tsx
 │   │   └── dialogs/               # Various modals
+│   │       ├── room-rules-dialog.tsx          # Group rules
+│   │       ├── room-dispatch-rules-dialog.tsx # Dispatch rules (workflow)
+│   │       ├── dispatch-rules-flow/           # Dispatch-rule flowchart visualization
+│   │       ├── room-env-vars-dialog.tsx       # Group env vars
+│   │       ├── custom-command-modal.tsx       # Custom commands
+│   │       ├── create-cron-task-modal.tsx / select-agents-dialog.tsx
+│   │       └── add-agent-dialog.tsx / clear-messages-dialog.tsx / stop-all-tasks-dialog.tsx
+│   ├── coordinator-log-panel.tsx  # Dispatch log panel
+│   ├── coordinator-log-modal.tsx  # Dispatch log modal
+│   ├── workbench/                 # Workbench "today tasks"
 │   └── ui/                   # shadcn/ui components (new-york style)
 ├── stores/                   # Zustand state management
 │   ├── auth-store.ts         # User authentication state
 │   ├── chat-store.ts         # Chat core state (messages/panels/Socket state)
 │   ├── chat-room-store.ts    # Chatroom list state
 │   ├── socket-store.ts       # Socket.io connection and events
+│   ├── custom-command-store.ts # Group custom-command state
 │   └── ui-store.ts           # Global UI state
 ├── lib/                      # API clients and utilities
-│   ├── agent-api.ts          # All REST API calls
-│   ├── auth-api.ts
-│   ├── llm-provider-api.ts
-│   ├── skill-api.ts
-│   ├── cron-task-api.ts
-│   ├── token-usage-api.ts
-│   ├── prompt-optimize-api.ts
+│   ├── agent-api.ts          # All REST API calls (incl. AgentTriggerMode type)
+│   ├── dispatch-rules/       # Dispatch-rules schema (front-end validation)
+│   ├── auth-api.ts / llm-provider-api.ts / skill-api.ts / cron-task-api.ts
+│   ├── token-usage-api.ts / prompt-optimize-api.ts
 │   ├── config.ts             # getApiBaseUrl() (dynamic Electron/Dev/Prod detection)
 │   ├── image-utils.ts        # Image compression/Base64
 │   └── message-sound.ts      # Message notification sound
+├── i18n/locales/             # zh-CN.json / en-US.json
 └── hooks/
     ├── use-dark-mode.ts
     └── use-mobile.ts
@@ -95,6 +113,9 @@ The largest store, manages:
 
 ### 2.5 `ui-store.ts`
 Sidebar collapse, theme, and other global UI state.
+
+### 2.6 `custom-command-store.ts`
+Group custom command (`/commands`) state: fetch/cache a room's command list, offered when typing `/` in the input.
 
 ---
 
@@ -162,10 +183,18 @@ Packaged Web   → window.location.origin (reverse proxy)
 | `history` | Click "History" on assistant card | Execution record list |
 | `stream` | Click stream output area | Complete stream event sequence |
 | `record-detail` | Click execution record | Event details (thinking/tool_call/stream) |
-| `room-settings` | Click settings icon | Room name/rules/workDir/trigger mode |
+| `room-settings` | Click settings icon | Room name/rules/workDir/trigger mode (Smart Collaboration vs Manual) |
 | `cron-tasks` | Click scheduled task icon | Room scheduled task list |
 | `task-queue` | Click task queue icon | Assistant task queue |
 | `task-board` | Click task board icon | All assistant tasks summary |
+| `agent-detail` / `reply-detail` | Click assistant card / quoted message | Assistant details / quoted-message details |
+
+In addition, these are triggered as standalone dialogs/panels (not via `sidePanelMode`):
+- **Dispatch rules** (`room-dispatch-rules-dialog` + `dispatch-rules-flow`): read-only flowchart + YAML source editing + multi-workflow tabs, re-fetched on open
+- **Group env vars** (`room-env-vars-dialog`), **custom commands** (`custom-command-modal`)
+- **Dispatch log** (`coordinator-log-panel` / `coordinator-log-modal`): view Group Coordinator decisions
+- **Local session import** (`claude-local-sessions-panel`): bind local Claude/Codex sessions to a quick chat
+- **Workbench "today tasks"** (`components/workbench/`)
 
 ---
 

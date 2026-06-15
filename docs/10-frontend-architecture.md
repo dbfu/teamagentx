@@ -23,38 +23,56 @@ apps/web/src/
 │   │   ├── chat-message.tsx       # 单条消息气泡
 │   │   ├── chat-input-area.tsx    # 底部输入区（@mention + 图片）
 │   │   ├── mention-input.tsx      # react-mentions @提及输入
+│   │   ├── conversation-list-item.tsx # 群聊列表项（含「执行中」标记）
 │   │   ├── assistant-page.tsx     # 助手管理页
 │   │   ├── skill-page.tsx         # 技能管理页
 │   │   ├── model-page.tsx         # 模型配置页
-│   │   ├── settings-page.tsx      # 设置页
+│   │   ├── settings-page.tsx      # 设置页（拆分为 settings/ 子区块）
+│   │   ├── settings/             # 设置子区块（拆分后）
+│   │   │   ├── account-section.tsx / general-section.tsx / about-section.tsx
+│   │   │   ├── software-section.tsx / sdk-tools-card.tsx
+│   │   │   └── mobile-connect-card.tsx / qr-code-display.tsx
 │   │   ├── chat-side-panel/       # 右侧面板（多面板切换）
 │   │   │   ├── agents-panel.tsx       # 群成员列表
+│   │   │   ├── agent-detail-panel.tsx # 助手详情
 │   │   │   ├── context-panel.tsx      # 助手上下文检视
 │   │   │   ├── history-panel.tsx      # 执行历史
 │   │   │   ├── stream-panel.tsx       # 流式输出面板
-│   │   │   ├── record-detail-panel.tsx # 执行记录详情
+│   │   │   ├── record-detail-panel.tsx / reply-detail-panel.tsx
 │   │   │   ├── room-settings-panel.tsx # 群设置
+│   │   │   ├── room-env-vars-editor.tsx # 群环境变量
 │   │   │   ├── cron-tasks-panel.tsx   # 定时任务
-│   │   │   └── task-queue-panel.tsx   # 任务队列
+│   │   │   ├── task-queue-panel.tsx / task-board-panel.tsx
+│   │   │   ├── claude-local-sessions-panel.tsx # 导入本地 Claude 会话
+│   │   │   └── work-dir-card.tsx
 │   │   └── dialogs/               # 各类弹框
+│   │       ├── room-rules-dialog.tsx          # 群规则
+│   │       ├── room-dispatch-rules-dialog.tsx # 群调度规则（工作流）
+│   │       ├── dispatch-rules-flow/           # 调度规则流程图可视化
+│   │       ├── room-env-vars-dialog.tsx       # 群环境变量
+│   │       ├── custom-command-modal.tsx       # 自定义指令
+│   │       ├── create-cron-task-modal.tsx / select-agents-dialog.tsx
+│   │       └── add-agent-dialog.tsx / clear-messages-dialog.tsx / stop-all-tasks-dialog.tsx
+│   ├── coordinator-log-panel.tsx  # 调度日志面板
+│   ├── coordinator-log-modal.tsx  # 调度日志弹框
+│   ├── workbench/                 # 工作台「今日任务」
 │   └── ui/                   # shadcn/ui 组件（new-york style）
 ├── stores/                   # Zustand 状态管理
 │   ├── auth-store.ts         # 用户认证状态
 │   ├── chat-store.ts         # 聊天核心状态（消息/面板/Socket 状态）
 │   ├── chat-room-store.ts    # 群聊列表状态
 │   ├── socket-store.ts       # Socket.io 连接与事件
+│   ├── custom-command-store.ts # 群聊自定义指令状态
 │   └── ui-store.ts           # 全局 UI 状态
 ├── lib/                      # API 客户端与工具
-│   ├── agent-api.ts          # 所有 REST API 调用
-│   ├── auth-api.ts
-│   ├── llm-provider-api.ts
-│   ├── skill-api.ts
-│   ├── cron-task-api.ts
-│   ├── token-usage-api.ts
-│   ├── prompt-optimize-api.ts
+│   ├── agent-api.ts          # 所有 REST API 调用（含 AgentTriggerMode 类型）
+│   ├── dispatch-rules/       # 群调度规则 schema（前端校验）
+│   ├── auth-api.ts / llm-provider-api.ts / skill-api.ts / cron-task-api.ts
+│   ├── token-usage-api.ts / prompt-optimize-api.ts
 │   ├── config.ts             # getApiBaseUrl()（动态感知 Electron/Dev/Prod）
 │   ├── image-utils.ts        # 图片压缩/Base64
 │   └── message-sound.ts      # 消息提示音
+├── i18n/locales/             # zh-CN.json / en-US.json
 └── hooks/
     ├── use-dark-mode.ts
     └── use-mobile.ts
@@ -95,6 +113,9 @@ type StreamEvent = { type: 'stream'|'thinking'|'tool_call'; content?: string; to
 
 ### 2.5 `ui-store.ts`
 侧边栏折叠、主题等全局 UI 状态。
+
+### 2.6 `custom-command-store.ts`
+群聊自定义指令（`/commands`）状态：拉取/缓存某群的指令列表，输入框输入 `/` 时供选择。
 
 ---
 
@@ -162,10 +183,18 @@ Dev 模式       → http://{hostname}:3001
 | `history` | 点击助手卡片的「历史」 | 执行记录列表 |
 | `stream` | 点击流式输出区域 | 完整的流式事件序列 |
 | `record-detail` | 点击执行记录 | 事件详情（thinking/tool_call/stream） |
-| `room-settings` | 点击设置图标 | 群名/规则/workDir/触发模式 |
+| `room-settings` | 点击设置图标 | 群名/规则/workDir/触发模式（智能协作 vs 手动）|
 | `cron-tasks` | 点击定时任务图标 | 群定时任务列表 |
 | `task-queue` | 点击任务队列图标 | 助手任务队列 |
 | `task-board` | 点击任务看板图标 | 所有助手任务汇总 |
+| `agent-detail` / `reply-detail` | 点击助手卡片 / 引用消息 | 助手详情 / 被引用消息详情 |
+
+此外，以下不走 `sidePanelMode` 而是独立弹框/面板触发：
+- **群调度规则**（`room-dispatch-rules-dialog` + `dispatch-rules-flow`）：只读流程图 + YAML 源码编辑 + 多工作流 tab，每次打开拉最新群聊
+- **群环境变量**（`room-env-vars-dialog`）、**自定义指令**（`custom-command-modal`）
+- **调度日志**（`coordinator-log-panel` / `coordinator-log-modal`）：查看群调度助手决策
+- **本地会话导入**（`claude-local-sessions-panel`）：快速对话绑定本机 Claude/Codex 会话
+- **工作台「今日任务」**（`components/workbench/`）
 
 ---
 

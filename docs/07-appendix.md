@@ -9,23 +9,30 @@
 | **群（ChatRoom / Group）** | 一个项目容器，含工作目录、任务卡、成员、群规则 |
 | **助手（Agent / Assistant）** | 一个角色配置：模型 + 系统提示 + 装载 skill |
 | **助手模板 vs 助手实例** | 模板是配置（跨群复用），实例是模板在某群内的具体记忆切片 |
-| **agent_level** | `system` 为预置模板（如总控/工程师/质检默认配置、技能管理），`normal` 为用户自建 |
+| **agent_level** | `system` 为系统预置助手（当前可见的是统一「群助手」，隐藏的是「群调度助手」），`normal` 为用户自建 |
 | **agent 分类（Category）** | 用户自定义的助手分组方式；系统分类只读 |
 | **技能（Skill）** | 提示片段 + 工具白名单 + 触发器的能力包，兼容 Claude Code skill 格式 |
 | **Skill 安装方式** | 完全复制 / symlink（外部更新自动同步）/ 导入外部 |
 | **模型 / LLM Provider** | 一组 API 配置：provider/model/api_key/api_url/api_protocol |
 | **任务卡（Task Card）** | 结构化任务定义，含 owner/reviewer/steps/expected_output/out_of_scope/status |
 | **群规则** | 群级别的助手行为约束，分自律层（提示词）和 he 律层（钩子） |
-| **总控 / OWNER** | 群里负责调度的角色，独占讨论结束权；OWNER 也可指人类用户 |
+| **群调度助手 / OWNER** | 群调度助手是平台内置隐藏路由器；OWNER 通常指人类群主，熔断/阻塞时由系统 `@` OWNER 接管 |
 | **质检** | 验收任务卡输出的角色，是 `done` 状态的唯一合法切换者 |
 | **阻塞上报（blocked）** | 助手主动声明"我做不下去了"的机制，触发总控接管或人类介入 |
 | **群即项目** | 一个群对应一个项目工作目录，文件/任务卡/助手记忆三层隔离 |
 | **injectGroupHistory** | 加助手到群时是否把历史群消息注入其上下文（控制上下文污染） |
-| **触发模式（agentTriggerMode）** | `coordinator`（默认）：内置调度助手控制派发；`auto`：助手 @ 直接触发其他助手；`manual`：助手 @ 仅作提及不触发 |
-| **默认接收助手** | 群主发送未 @ 任何人的消息时，自动 @ 该助手（兜底）|
-| **聚合窗口** | 总控派单后，在一定窗口内收齐所有交付再一次性汇总，防扇出风暴 |
-| **客观验收 / verifications** | 不依赖 LLM 判断，跑脚本/测试/校验文件 hash 确认任务真完成 |
-| **自律层 / he 律层** | 自律层：写提示词的鼓励性规则；he 律层：消息总线钩子的强制规则 |
+| **触发模式（agentTriggerMode）** | 2026-06 合并为两种：`coordinator`（智能协作，默认）+ `manual`（手动）；`auto` 为历史别名等同智能协作。详见 [11](11-agent-trigger-system.md) |
+| **智能协作** | 快路径接力（助手单 @ 直接触发）+ 协调器 5 点兜底 + 协作预算熔断 + 并行批次 |
+| **群调度助手 / 协调器** | 内置隐藏系统助手（`GROUP_COORDINATOR_ID`），只在智能协作模式做路由裁决，决策写入 `CoordinatorLog` |
+| **群调度规则（dispatchRules）** | 群级工作流 YAML，注入协调器编排「下一棒交给谁」，由群助手 `generate_dispatch_rules` 生成 |
+| **协作预算 / 熔断** | 跳数（20）/ 连续环路（3 来回）/ 并发（3）三重熔断，计数窗口为两次人类发言之间 |
+| **并行批次（fork-join）** | 用户多 @ 或协调器并行派发时开批次，批次内 @ 挂起到汇合点统一裁决 |
+| **工作台任务（WorkbenchTask）** | 用户在工作台创建的「今日任务」，派发到群聊后由协调器组织执行 |
+| **模板包（TemplatePackage）** | 群配置导出/导入格式，包含成员、规则、`dispatchRules`、Cron、技能引用与导入审计 |
+| **群聊指令（ChatRoomCommand）** | 群内自定义 `/指令`，选中后把内容填入输入框 |
+| **默认接收助手** | 群主发送未 @ 任何人的消息时，自动触发该助手（兜底，智能协作模式保留）|
+| **客观验收 / verifications** | 不依赖 LLM 判断，跑脚本/测试/校验文件 hash 确认任务真完成（设计概念）|
+| **自律层 / 他律层** | 自律层：写提示词的鼓励性规则；他律层：消息总线钩子的强制规则（部分为设计概念）|
 | **风险等级** | 动作分 low / medium / high，决定是否需要人类前置确认 |
 | **权限模式** | 群级别开关：plan / normal / acceptEdits / bypass，控制自动化程度 |
 | **快速对话（Quick Chat）** | 跳过建群直接 1v1 与某助手聊，本质是 isQuickChat=true 的特殊群 |
@@ -39,6 +46,8 @@
 
 ## B. 关键 Schema
 
+> ⚠️ 本节是**设计视角的概念 schema**（含大量「计划增强」字段，如任务卡 verifications、he 律层 hook、权限模式等，尚未全部落地）。**实际数据库结构以 `server/prisma/schema.prisma` 为准**（含 `ChatRoom.dispatchRules`/`envVars`、`CoordinatorLog`、`ChatRoomCommand`、`WorkbenchTask`、`QuickChatSession.*LocalSession*`、`User.preferredLanguage` 等已落地字段）。下方 YAML 仅作产品语义参考。
+
 ### B.1 LLM Provider
 
 ```yaml
@@ -50,6 +59,7 @@ provider:
   api_url: https://api.anthropic.com
   api_key: sk-ant-...
   model: claude-sonnet-4-6
+  context_length: 1000000       # 上下文长度（token），默认 1M（实际字段 contextLength）
   is_active: true
   is_default: false
   stats:                        # 使用统计
@@ -146,9 +156,13 @@ chat_room:
           action: reject
           hint: "完成型回复请走任务卡状态变更，不要 @ 总控"
 
-  # 触发模式
-  trigger_mode: coordinator      # coordinator（默认）| auto | manual
-  default_recipient: agt-002     # 用户无 @ 时的默认接收助手（coordinator 模式下无效）
+  # 触发模式（2026-06 合并为两种）
+  trigger_mode: coordinator      # coordinator（智能协作，默认）| manual；auto 为历史别名
+  dispatch_rules: |              # 群调度规则 YAML（实际字段 dispatchRules），注入协调器
+    workflows: [...]
+  env_vars:                      # 群聊环境变量（实际字段 envVars，注入助手 shell 环境）
+    - { key: API_BASE, value: "https://...", description: "" }
+  default_recipient: agt-002     # 用户无 @ 时的默认接收助手（智能协作模式仍生效）
 
   # 权限模式（计划增强 T7）
   permission_mode: normal        # plan | normal | acceptEdits | bypass
@@ -521,31 +535,86 @@ POST   /cron-tasks/:taskId/test
 
 ### C.7 Token Usage
 ```
-GET    /token-usage/summary
-GET    /token-usage/timeline
-GET    /token-usage/providers/:providerId
+GET    /token-usage/by-provider
+GET    /token-usage/daily
+GET    /token-usage/by-agent
+GET    /token-usage/provider/:id/detail
+```
 
+### C.7.1 Categories / Upload
+```
 GET    /categories
+PUT    /categories/sort-order
 POST   /categories
 PUT    /categories/:id
 DELETE /categories/:id
 
 POST   /upload/image
+POST   /upload/images
+POST   /upload/audio
 ```
 
-### C.8 Bridge（外部平台机器人）
+### C.8 Bridge（外部平台机器人，前缀 `/api/bridge`）
 ```
-GET    /bridge/platforms                          # 列出支持的平台
-GET    /bridge/bots                               # 列出所有机器人绑定
-POST   /bridge/bots                               # 创建机器人绑定
-GET    /bridge/bots/:botId
-PUT    /bridge/bots/:botId
-DELETE /bridge/bots/:botId
-POST   /bridge/bind-code                          # 生成绑定码
-POST   /bridge/webhook/:platform/:botId           # Webhook 入口（各平台回调）
+GET    /api/bridge/platforms                      # 列出支持的平台
+GET    /api/bridge/playbooks/:platform            # 平台配置向导
+GET    /api/bridge/bots                           # 列出所有机器人绑定
+POST   /api/bridge/bots                           # 创建机器人绑定
+GET/PATCH/DELETE /api/bridge/bots/:id             # 详情/更新/删除
+POST   /api/bridge/bots/:id/bind | /bind-code | /unbind   # 绑定/绑定码/解绑
+GET    /api/bridge/events                         # 桥接事件日志
+GET/PUT /api/bridge/system-config                 # 全局桥接配置
+GET    /api/bridge/webhook-url                    # 当前 Webhook 基础地址
+POST   /api/bridge/message                        # 外部消息统一入口
+POST   /api/bridge/webhook/wecom/:botId           # Webhook 入口（公开）
 ```
 
-### C.9 Speech（语音）
+### C.9 Setup / 应用设置 / OpenAPI
+```
+GET    /health
+GET    /network-info
+GET    /openapi.json
+GET    /setup/status
+POST   /setup/complete
+POST   /setup/install-tool
+GET/PUT /settings/:key
+```
+
+### C.10 协作编排与可观测（2026-06 新增）
+```
+# 工作台今日任务
+GET/POST        /workbench/tasks
+PUT/DELETE      /workbench/tasks/:id
+POST            /workbench/tasks/:id/dispatch | /workbench/tasks/dispatch-batch
+POST            /workbench/recommend-room
+
+# 调度日志（CoordinatorLog）
+GET    /coordinator-logs | /coordinator-logs/:chatRoomId
+
+# 模板包
+POST   /template-packages/export
+POST   /template-packages/preview
+POST   /template-packages/import
+
+# 群聊自定义指令
+GET/POST        /chatrooms/:chatRoomId/commands
+PUT/DELETE      /commands/:commandId
+
+# 群聊 Fork/复制/折叠/归档/Git
+POST   /chatrooms/:id/fork | /duplicate
+PATCH  /chatrooms/:id/collapse | /uncollapse
+GET    /chatrooms/:chatRoomId/message-archives
+GET    /chatrooms/:id/git-status ; POST /chatrooms/:id/git-branch | /git-command
+GET    /chatrooms/:id/package-scripts ; POST /chatrooms/:id/package-scripts/run
+
+# 快速对话导入本地 CLI 会话
+GET/POST /chatrooms/:chatRoomId/quick-chat-session/claude-local-session(s)
+GET/POST /chatrooms/:chatRoomId/quick-chat-session/codex-local-session(s)
+```
+
+> 注：`dispatchRules`（群调度规则）与 `envVars`（群环境变量）通过 `PUT /chatrooms/:id` 保存，无独立端点。完整列表见 [09-api-reference.md](09-api-reference.md)。
+
+### C.11 Speech（语音）
 ```
 GET    /speech/voice-catalog                      # 查询可用音色列表
 POST   /speech/tts                                # 文字转语音

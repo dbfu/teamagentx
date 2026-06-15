@@ -110,7 +110,7 @@ Common operations:
 - "Create Symbolic Link": Suitable for reusing external skill directories; external updates will sync.
 - "Full Copy": Suitable for keeping a fixed copy of a skill, unaffected by external directories.
 - "Install to Assistant": Assign a skill to one or more assistants.
-- Type `@Skill Management` in group chat: Let the system assistant help create new skills.
+- Type `@Group Assistant` in group chat: Let the system assistant help create new skills (the Group Assistant now covers agent/skill/cron/room-info system capabilities all in one).
 
 Recommendations:
 
@@ -150,15 +150,14 @@ You can use this template directly:
 
 ## 10. Choosing Assistant Trigger Mode
 
-In group settings, there's an "Assistant Trigger Mode":
+In group settings, there's an "Assistant Trigger Mode" — now only two:
 
 | Mode | Behavior | Suitable For |
 |------|----------|--------------|
-| Coordinator Mode | Built-in coordinator assistant receives messages without `@` and dispatches to assistants | Recommended for beginners, suitable for most groups |
-| Free Collaboration | `@` in assistant messages triggers other assistants | Use after becoming familiar, suitable for multi-assistant automatic handoff |
+| Smart Collaboration (default) | A single `@` relays directly (fast path); on ambiguity/join/stall the system "Group Coordinator" steps in; `@`-ing multiple assistants at once runs them in parallel | Recommended for beginners, fits the vast majority of groups |
 | Manual Mode | `@` in assistant messages only shows mention, doesn't trigger execution | Use when you want full control over dispatching |
 
-For beginners, we recommend "Coordinator Mode". If you find assistants triggering each other too much, switch to "Manual Mode".
+Beginners can just use "Smart Collaboration" — it has a built-in collaboration budget (hop/cycle/concurrency breakers) against loops/fan-out, and on a trip it `@`s the owner instead of looping forever. You can also orchestrate multi-assistant order via "Dispatch Rules".
 
 ## 11. Initiating a Group Collaboration
 
@@ -329,7 +328,7 @@ Minimum viable combination:
 | Model | Configure one stable text model and set as default |
 | Assistants | Coordinator + Engineer + QA |
 | Groups | One project per group |
-| Trigger Mode | Coordinator Mode |
+| Trigger Mode | Smart Collaboration (default) |
 | Group Rules | Use the template from Section 9 |
 | Working Directory | Project root directory |
 

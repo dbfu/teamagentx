@@ -1,14 +1,14 @@
-# 02 · Feature List (TeamAgentX v0.1.0)
+# 02 · Feature List (TeamAgentX v0.1.x)
 
 English | [中文](02-features.md)
 
-> Based on `/Applications/TeamAgentX.app` v0.1.0 actual product (asar unpacked + UI strings review).
+> Based on the actual product (asar unpacked + UI strings) and `server/src` source review.
 > Marking convention: ✅ Implemented; 🟡 Implemented but needs refinement; 🔵 Concept exists but not fully landed.
-> Last updated: 2026-05-09.
+> First version: 2026-05-09 · Last updated: 2026-06-15 (added Smart Collaboration mode, dispatch rules, workbench, dispatch log, etc.).
 
 ## Overview
 
-Platform divided into **11 feature domains**:
+Platform divided into **12 feature domains**:
 
 1. [LLM Provider Management](#1-llm-provider-management)
 2. [Agent Management](#2-agent-management)
@@ -21,6 +21,7 @@ Platform divided into **11 feature domains**:
 9. [System Capabilities](#9-system-capabilities)
 10. [Bridge External Platform Integration](#10-bridge-external-platform-integration)
 11. [Speech](#11-speech)
+12. [Collaboration Orchestration & Observability (New)](#12-collaboration-orchestration--observability-new)
 
 ---
 
@@ -43,6 +44,12 @@ Platform divided into **11 feature domains**:
 | OpenAI Compatible Protocol | ✅ | Covers OpenAI, DeepSeek, Kimi, Alibaba Bailian etc. |
 | Custom Endpoint | ✅ | `api_url` + `api_key` free configuration |
 | Local Agent | ✅ | "Use local Agent config" — reuse local Claude Code/Codex config |
+
+Additional fields:
+- `contextLength` — model context length (tokens), default 1M, used for history-compaction decisions (added 2026-06, configurable in Settings)
+- `codexWireApi` — the wire API Codex uses under the OpenAI protocol (`responses` / `chat`)
+- `supportsThinking` — whether thinking mode is supported (auto-detected)
+- When `modelType = audio`, configure `sttModel` and `audioUsage` (tts / stt / both), see §11
 
 ### 1.3 Smart Configuration (Highlight)
 
@@ -74,8 +81,10 @@ Platform divided into **11 feature domains**:
 
 | `agent_level` | Meaning | Behavior |
 |---------------|---------|----------|
-| `system` | System preset agents (e.g., "Skill Manager", default coordinator/engineer/QA templates) | Not allowed to modify, not allowed to drag other agents into, auto appears in all group member selectors |
+| `system` | System preset agents (the unified "**Group Assistant**", plus the hidden "Group Coordinator") | Not allowed to modify, not allowed to drag other agents into, auto appears in all group member selectors |
 | `normal` | User-created agents | Fully editable |
+
+> Since 2026-06, the old 5 separate system agents (Agent Manager / Skill Manager / Cron / Chatroom Helper / External Platform) have been merged into a **single visible "Group Assistant"** that carries all the system tools; a separate **hidden "Group Coordinator"** handles Smart Collaboration adjudication (not directly user-manageable). See [08-server-architecture_EN.md §8](08-server-architecture_EN.md).
 
 UI feedback:
 - "System agent not allowed to modify"
@@ -112,6 +121,17 @@ UI feedback:
 - Quick chat is essentially a "special chatroom": `isQuickChat: true`, "This is a quick chat room, messages directly sent to agent, no @ mention needed"
 - Quick chat supports custom workDir: "When empty, each conversation creates independent session directory"
 
+**Import/switch local CLI sessions (added 2026-06)**: a quick chat can bind a local Claude Code / Codex history session and continue it inside TeamAgentX.
+
+| Capability | Endpoint |
+|------------|----------|
+| List local Claude sessions | `GET /chatrooms/:id/quick-chat-session/claude-local-sessions` |
+| Bind/switch Claude session | `POST /chatrooms/:id/quick-chat-session/claude-local-session` |
+| List local Codex sessions | `GET /chatrooms/:id/quick-chat-session/codex-local-sessions` |
+| Bind/switch Codex session | `POST /chatrooms/:id/quick-chat-session/codex-local-session` |
+
+Binding info is stored in `QuickChatSession.claudeLocalSession*` / `codexLocalSession*` (session id, title, modified time).
+
 ### 2.7 Agent Default Directory
 
 - Agent-level `workDir` default value, can be overridden when referenced by group
@@ -145,8 +165,7 @@ UI hints:
 
 ### 3.3 Create Skill via Chat (Highlight)
 
-- System preset agent "**Skill Manager**" — generate skill through group chat dialogue
-- UI hint: "@Skill Manager in group chat to create skill", "@Skill Manager in group chat to create new skill"
+- The unified "**Group Assistant**" — generate skills through group chat dialogue (the old standalone "Skill Manager" capability has been merged into the Group Assistant)
 - "E.g.: Help me find a coding skill, data analysis skill, image processing skill..."
 - Endpoint: `POST /skills/create`
 
@@ -199,28 +218,61 @@ UI hints:
 - "Enable to get group chat context"
 - "Conversation context cleared"
 
-### 4.4 Trigger Mode (Important Design)
+### 4.4 Trigger Mode (Important Design — merged into two in 2026-06)
+
+The former "Coordinator" and "Auto" modes are merged into a single **Smart Collaboration** mode. Only two are exposed:
 
 | Mode | Behavior | Suitable Scenario |
 |------|----------|-------------------|
-| **Coordinator Mode (default)** | User message without @ first triggers built-in "group coordinator agent", it decides which business agent to dispatch; agent's @ also first goes to coordinator for judgment | Multi-role collaborative group, system auto-judges next step |
-| **Auto Mode** | @ in agent message directly triggers other agents | Fixed relay flow, explicit workflow orchestration |
+| **Smart Collaboration (default)** | An agent writing exactly one valid @ takes the fast path and relays directly (zero coordination cost); the built-in "Group Coordinator" is only invoked at 5 points (user routing miss / @ anomaly / parallel-batch join / stall fallback / circuit breaker); user multi-@ triggers in parallel | Vast majority of multi-role collaboration rooms |
 | **Manual Mode** | @ in agent message doesn't trigger other agents, only as mention | User manual orchestration, agents don't cross-stage |
 
-Detailed trigger rules in [11-agent-trigger-system_EN.md](11-agent-trigger-system_EN.md).
+- Storage layer still stores `coordinator` (Smart Collaboration) / `manual`; the legacy value `auto` is an alias equal to Smart Collaboration
+- Built-in triple circuit breaker (20 hops / 3 consecutive round-trips / concurrency 3) + stall detection prevent fan-out storms and loops
+- Every coordinator decision is written to `CoordinatorLog`, viewable in the "Dispatch Log"
+
+Detailed trigger rules in [11-agent-trigger-system_EN.md](11-agent-trigger-system_EN.md); merge design in [13-unified-collaboration-mode-design_EN.md](13-unified-collaboration-mode-design_EN.md).
 
 ### 4.5 Default Receiving Agent
 
 - "When group owner sends message without @ agent, this agent is automatically triggered."
 - Existing solution for problem C (@ trigger ambiguity) — user's casual message without @, handled by default agent fallback
 
-### 4.6 Group Rules
+### 4.6 Group Rules + Dispatch Rules (split in 2026-06)
 
-- "Group rules are injected into all agents' context in group, guiding agent behavior."
-- Single rule add/edit ("No rules yet, click to add")
-- Whole batch sent when saved ("Group rules saved")
+A room now distinguishes two kinds of rules, stored in different fields:
 
-### 4.7 Quick Chat Sub-session
+| Rule | Field | Purpose |
+|------|-------|---------|
+| **Group Rules** | `ChatRoom.rules` | Role behavior constraints / notes, injected into **all** agents' context |
+| **Dispatch Rules (workflow)** | `ChatRoom.dispatchRules` (YAML) | Multi-agent orchestration flow, injected into the **Group Coordinator** to adjudicate "who's next" |
+
+- Group rules: single add/edit, sent as a whole on save ("Group rules saved")
+- Dispatch rules: generated by the Group Assistant's `generate_dispatch_rules` tool (optimize with instructions, auto-generate from the roster otherwise), zod-validated on save; the front-end has a dedicated dialog with a read-only flowchart + YAML source editing + multi-workflow tabs
+- Business agents get a "task flow / handoff (next)" hint injected into their query per step; nothing is injected when there are no rules
+
+### 4.7 Group Environment Variables (envVars, added 2026-06)
+
+- `ChatRoom.envVars` (JSON array `[{ key, value, description }]`) is injected into the environment when this room's agents run shell commands
+- Good for project-level API base, paths, tokens reused by commands
+
+### 4.8 Group History Archive + Fork
+
+- Group messages can be archived into `ChatRoomMessageArchive`, keeping title / start-end time / count
+- **Fork a new chatroom** from an archived segment to keep going (`POST /chatrooms/:id/fork`), leaving the original room clean
+- Duplicating a room (`POST /chatrooms/:id/duplicate`) carries members, rules, `dispatchRules`, etc.
+
+### 4.9 Group Git / Scripts Integration (desktop)
+
+- View git status, create branches, run restricted git commands on the group work directory (`/chatrooms/:id/git-status`, `/git-branch`, `/git-command`)
+- Read and run `package.json` scripts (`/chatrooms/:id/package-scripts`, `/package-scripts/run`)
+
+### 4.10 Group Custom Commands (/commands, added 2026-06)
+
+- Users define `/commands` per room (`ChatRoomCommand`: name + content + sortOrder); typing `/` in the input pops a picker, and selecting fills the content into the input box
+- Endpoints: `GET/POST /chatrooms/:chatRoomId/commands`, `PUT/DELETE /commands/:commandId`
+
+### 4.11 Quick Chat Sub-session
 
 - `POST /chatrooms/:id/quick-chat-session` — Attach a quick session under group
 - "Session records created via quick chat"
@@ -406,10 +458,10 @@ Limitations:
 - Electron client: Can read/write local files, open local directories
 - Web version functionality limited
 
-### 9.6 Internationalization
+### 9.6 Internationalization & User Preferred Language
 
-- Multi-language resources: af / am / ar / bg / bn / ca / cs / da / de / el / en / en_GB / es / es_419 / et / fa / fi / fil / fr / gu / he / hi / hr / hu / id / it / ja / ... (40+ languages)
-- From Electron default resources, UI text currently mainly Chinese
+- Web i18n resources now center on `zh-CN` / `en-US` (`apps/web/src/i18n/locales/`)
+- User-level `preferredLanguage` (`zh-CN` / `en-US`, default `zh-CN`): switches not only the UI language but also the **language of Agent system prompts** (handoff protocol, coordinator prompts, etc. are generated per the user's preference)
 
 ---
 
@@ -454,19 +506,34 @@ This document found **actual product is much richer than described** — here ar
 4. **Agent levels (system / normal)**
 5. **Agent categories (user-created + system)**
 6. **Skill symlink mode (Claude Code compatible)**
-7. **Create skill via chat ("Skill Manager" system agent)**
+7. **Create skills via chat (unified "Group Assistant" system agent)**
 8. **Group-level Cron scheduled tasks**
-9. **Group-level trigger modes (auto/manual)**
+9. **Smart Collaboration / Manual trigger modes**
 10. **Per-agent per-group independent context / history injection toggle**
 11. **Three-layer workDir strategy**
 12. **Streaming thinking chain visualization**
 13. **Execution records and context inspection**
+14. **Workbench today-tasks and dispatch log**
 14. **Task board (6 status columns)**
 15. **Screenshot export**
 16. **Mobile QR code connection**
 17. **Local Agent reuse (connect Claude Code)**
 
-→ **Conclusion**: Product has built quite complete scaffolding, major problem points aren't "missing features", but "mechanism hardness" — i.e., Chapter [04](04-problems-and-solutions_EN.md) focus on "boundaries, state, loop prevention, objective acceptance".
+Added after 2026-06 (some Chapter 04 problems now hardened):
+
+18. **Smart Collaboration mode** (merged auto/coordinator) + triple breaker against fan-out/loops (addresses A1/A2/H)
+19. **Dispatch rules (workflow YAML) + flowchart visualization**
+20. **Parallel batch (fork-join) dispatch**
+21. **Workbench "today tasks" with dispatch**
+22. **Dispatch log (CoordinatorLog) observability**
+23. **Group custom commands `/commands`**
+24. **Group environment variables (envVars)**
+25. **Group history archive + fork; duplicate room**
+26. **Quick chat import/switch local Claude/Codex sessions**
+27. **User preferred language drives Agent prompt language**
+28. **Agent diary / long-term memory daily promotion**
+
+→ **Conclusion**: Product has built quite complete scaffolding, major problem points aren't "missing features", but "mechanism hardness" — i.e., Chapter [04](04-problems-and-solutions_EN.md) focus on "boundaries, state, loop prevention, objective acceptance"; loop/fan-out prevention is now landed via the Smart Collaboration budget.
 
 ---
 
@@ -497,3 +564,56 @@ Architecture details in [08-server-architecture_EN.md §10](08-server-architectu
 | Browser Local Speech | ✅ | `browser-local` mode, zero latency |
 | Voice Catalog | ✅ | `buildSpeechVoiceCatalog()` aggregates all available voices |
 | Provider Config | ✅ | LlmProvider set `modelType = audio`, `audioUsage = tts\|stt\|both` |
+
+---
+
+## 12. Collaboration Orchestration & Observability (New)
+
+A set of capabilities added since 2026-06, centered on "how multi-agent collaboration is orchestrated and made visible".
+
+### 12.1 Smart Collaboration mode
+
+See §4.4 and [11-agent-trigger-system_EN.md](11-agent-trigger-system_EN.md): fast-path relay + 5-point coordinator fallback + triple circuit breaker + parallel batches (fork-join).
+
+### 12.2 Dispatch rules / workflow visualization
+
+| Capability | Status | Description |
+|------------|--------|-------------|
+| YAML dispatch rules | ✅ | `ChatRoom.dispatchRules`, injected into the Group Coordinator |
+| Auto-generate / optimize | ✅ | Group Assistant `generate_dispatch_rules` tool |
+| Structural validation | ✅ | zod-validated on save, invalid rejected |
+| Flowchart visualization | ✅ | Read-only flowchart + YAML source editing + multi-workflow tabs |
+
+### 12.3 Workbench "Today Tasks"
+
+| Capability | Status | Endpoint |
+|------------|--------|----------|
+| Create/edit/delete today tasks | ✅ | `GET/POST /workbench/tasks`, `PUT/DELETE /workbench/tasks/:id` |
+| Dispatch to a chatroom | ✅ | `POST /workbench/tasks/:id/dispatch`, `/dispatch-batch` |
+| Recommend target room | ✅ | `POST /workbench/recommend-room` |
+| Status transitions | ✅ | `draft → dispatched → in_progress → waiting_review → needs_input → completed / blocked`, manually switchable |
+
+`WorkbenchTask` is created by the user in the workbench; once dispatched to an existing room, the Group Coordinator organizes execution; status updates are pushed via socket `workbench:task-updated`.
+
+### 12.4 Dispatch log (Coordinator Log)
+
+- Every Group Coordinator decision (dispatch / no_dispatch / ask_owner / cannot_dispatch) is written to `CoordinatorLog`
+- View via the front-end "Dispatch Log" panel/modal: decision type, target agents, forward-verbatim flag, source (user/agent), reason
+- Endpoints: `GET /coordinator-logs`, `GET /coordinator-logs/:chatRoomId`
+
+### 12.5 Agent diary / long-term memory promotion
+
+- `AgentRoomMemory` long-term summary + a candidate-memory "diary" mechanism: info is promoted to long-term only if it recurs across multiple distinct dates (`AGENT_MEMORY_PROMOTE_MIN_DAYS`); error/lesson items are promoted on first occurrence
+- Agent diaries are generated daily (`GET /agents/:agentId/diary`, `/diary/generate`) by the diary scheduler; gated by a global switch
+
+### 12.6 Template package export / import
+
+- A room's config (members, rules, `dispatchRules`, cron, etc.) can be exported as a `TemplatePackage` and imported elsewhere (`TemplateImportRecord` keeps an import audit trail)
+
+### 12.7 Execution robustness
+
+- Coordinator LLM decision timeout & retry (`AGENT_COORDINATOR_LLM_TIMEOUT_MS` / `_RETRY_COUNT`)
+- Business-agent "no-activity" retry: if there's no output/stream/thinking/tool event for a while after start, the attempt is treated as stuck and retried (`AGENT_EXECUTION_NO_ACTIVITY_TIMEOUT_MS`)
+- Task recovery on restart: executing/pending tasks are marked interrupted and can be resumed manually
+
+See [08-server-architecture_EN.md](08-server-architecture_EN.md) and [09-api-reference_EN.md](09-api-reference_EN.md).

@@ -2,6 +2,8 @@
 
 [English](06-roadmap_EN.md) | 中文
 
+> **2026-06 进展**：阶段一「硬化协作」的防循环/防扇出部分已落地——智能协作模式（合并 auto/coordinator）带来协作预算三重熔断、并行批次 fork-join、协调器 5 点兜底；并新增群调度规则（工作流可视化）、工作台今日任务、调度日志等。任务卡 schema 统一、客观验收钩子、文件并发控制等仍为后续目标。详见 [02-features.md](02-features.md)、[11-agent-trigger-system.md](11-agent-trigger-system.md)、[13-unified-collaboration-mode-design.md](13-unified-collaboration-mode-design.md)。
+
 ## 1. 我们到底在卖什么
 
 **不是**"另一个 Cursor"。

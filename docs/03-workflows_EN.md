@@ -32,7 +32,7 @@ Platform capabilities per step:
 | ⑦ Execute | Streaming output, tool calls, filesystem access | ✅ |
 | ⑧ Acceptance | QA agent + LLM review | 🟡 (no objective acceptance hook) |
 | ⑨ Close Loop | Task status switching | 🟡 (no hard constraint) |
-| ⑩ Wrap-up | Loop prevention, discussion complete marker | 🔵 (pending hardening) |
+| ⑩ Wrap-up | Loop prevention (Smart Collaboration budget/breaker), hand back to owner | ✅ loop prevention hardened; discussion-complete marker still conceptual |
 
 ## 2. In-Group Message Flow Protocol
 
@@ -54,12 +54,13 @@ Agent response = System prompt + Group rules (self-discipline) + Group context w
    ├─ Streaming output display: streamingContent / streamingThinking / toolCalls
    └─ Persistence: messages table + executionRecords
    ↓
-Response contains new @ (coordinator mode) → First goes to group coordinator agent for dispatch judgment
-Response contains new @ (auto mode) → Directly queue for next round
-Response contains new @ (manual mode) → Don't queue, only show as mention
-Response contains [Discussion Complete] and speaker is Coordinator → Group closed
+Exactly one valid @ (Smart Collaboration) → fast path, queue for next round
+@ anomaly / multi-@ (Smart Collaboration) → coordinator adjudicates (fix / parallel batch / ask owner)
+No @ (Smart Collaboration) → not processed now, stall watchdog fallback
+Any @ (manual mode) → don't queue, only show as mention
    ↓
-Round +1, reach limit (default 3 rounds) → Force Coordinator wrap-up
+hops +1; on collaboration-budget trip (20 hops / 3 consecutive round-trips / concurrency 3) → stop auto-dispatch and @ owner
+A human message → resets counters and takes over
 ```
 
 ### 2.1 Three Bottom-Level Invariants
@@ -68,15 +69,14 @@ Round +1, reach limit (default 3 rounds) → Force Coordinator wrap-up
 2. **Agents don't抢先回答** (only speak when @mentioned → prevent @ trigger ambiguity)
 3. **Parse @ before speaking each round** (resolve ambiguity before consuming tokens → prevent context explosion)
 
-### 2.2 Trigger Modes (v0.1.0 Implemented)
+### 2.2 Trigger Modes (merged into two in 2026-06)
 
 | Mode | Behavior | Suitable Scenario |
 |------|----------|-------------------|
-| **Coordinator Mode (default)** | User message without @ first triggers built-in "group coordinator agent", it decides which business agent to dispatch; agent's @ also first goes to coordinator for judgment | Multi-role collaborative group (recommended) |
-| **Auto Mode** | @ in agent message directly triggers other agents | Fixed relay, explicit workflow orchestration |
+| **Smart Collaboration (default)** | Single-@ takes the fast path to relay directly; the Group Coordinator is invoked only at 5 points (user routing miss / @ anomaly / batch join / stall / breaker); user multi-@ triggers in parallel | Vast majority of multi-role collaboration rooms |
 | **Manual Mode** | @ in agent message doesn't trigger other agents, only as mention | User manual orchestration, agents don't cross-stage |
 
-Detailed rules and @ parsing logic in [11-agent-trigger-system_EN.md](11-agent-trigger-system_EN.md).
+The storage layer stores `agentTriggerMode` as `coordinator` (Smart Collaboration) / `manual`, with `auto` as a legacy alias. Detailed rules and @ parsing in [11-agent-trigger-system_EN.md](11-agent-trigger-system_EN.md); merge design in [13-unified-collaboration-mode-design_EN.md](13-unified-collaboration-mode-design_EN.md).
 
 ### 2.3 Default Receiving Agent
 

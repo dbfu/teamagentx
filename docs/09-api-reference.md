@@ -19,6 +19,20 @@
 
 ---
 
+## Setup / App Settings / Health
+
+| 方法 | 路径 | 说明 |
+|-----|------|------|
+| GET | `/health` | 健康检查 |
+| GET | `/network-info` | 局域网访问地址信息 |
+| GET | `/openapi.json` | OpenAPI JSON（开发/非 Electron 默认启用 Swagger） |
+| GET | `/setup/status` | 首次引导状态与 ACP 工具安装情况（公开，桌面端） |
+| POST | `/setup/complete` | 完成首次引导（注册 + 默认 Agent/模型） |
+| POST | `/setup/install-tool` | 流式安装 ACP 工具（Claude / Codex，桌面端） |
+| GET / PUT | `/settings/:key` | 读取 / 更新白名单应用设置（目前 `diaryEnabled`） |
+
+---
+
 ## Agents
 
 | 方法 | 路径 | 说明 |
@@ -44,6 +58,18 @@
 | POST | `/agents/quick-chat` | 创建快速对话临时群聊（`agentId`, `userId`, `workDir?`） |
 | GET | `/agents/:agentId/quick-chat-rooms` | 获取助手的快速对话群聊列表 |
 | GET | `/agents/:agentId/quick-chat-count` | 获取助手的快速对话次数 |
+| GET | `/chatrooms/:chatRoomId/quick-chat-session/claude-local-sessions` | 列出本机 Claude 历史会话 |
+| POST | `/chatrooms/:chatRoomId/quick-chat-session/claude-local-session` | 绑定/切换本机 Claude 会话 |
+| GET | `/chatrooms/:chatRoomId/quick-chat-session/codex-local-sessions` | 列出本机 Codex 历史会话 |
+| POST | `/chatrooms/:chatRoomId/quick-chat-session/codex-local-session` | 绑定/切换本机 Codex 会话 |
+
+### 助手日记 / 记忆
+
+| 方法 | 路径 | 说明 |
+|-----|------|------|
+| GET | `/agents/:agentId/memory` | 助手长期记忆摘要 |
+| GET | `/agents/:agentId/diary` / `/diary/:date` | 助手日记（按日） |
+| POST | `/agents/:agentId/diary/generate` | 立即生成日记 |
 
 ---
 
@@ -54,10 +80,14 @@
 | GET | `/chatrooms` | 所有群聊列表（含 lastMessage、成员） |
 | GET | `/chatrooms/:id` | 单个群聊详情 |
 | POST | `/chatrooms` | 创建群聊（`name`, `workDir?`, `rules?`, `ownerId?`） |
-| PUT | `/chatrooms/:id` | 更新群聊（`name`, `rules`, `workDir`, `defaultAgentId`, `agentTriggerMode`） |
+| PUT | `/chatrooms/:id` | 更新群聊（`name`, `rules`, `dispatchRules`, `workDir`, `envVars`, `defaultAgentId`, `agentTriggerMode`） |
 | DELETE | `/chatrooms/:id` | 删除群聊 |
-| PATCH | `/chatrooms/:id/pin` | 置顶 |
-| PATCH | `/chatrooms/:id/unpin` | 取消置顶 |
+| PATCH | `/chatrooms/:id/pin` `/unpin` | 置顶 / 取消置顶 |
+| PATCH | `/chatrooms/:id/collapse` `/uncollapse` | 折叠 / 取消折叠 |
+| POST | `/chatrooms/:id/duplicate` | 复制群聊（带成员/规则/dispatchRules） |
+| POST | `/chatrooms/:id/fork` | 从归档历史 Fork 新群聊 |
+
+> `dispatchRules`（群调度规则 YAML）通过 `PUT /chatrooms/:id` 保存，保存时做 zod 结构化校验；非法格式拒绝。
 
 ### 群聊成员
 
@@ -80,6 +110,18 @@
 | DELETE | `/chatrooms/:chatRoomId/agents/:agentId/executions` | 删除执行记录 |
 | GET | `/chatrooms/:chatRoomId/agents/:agentName/debug` | 获取助手调试信息 |
 
+### 群聊 Git / 脚本 / 指令（桌面端）
+
+| 方法 | 路径 | 说明 |
+|-----|------|------|
+| GET | `/chatrooms/:id/git-status` | 群工作目录 git 状态 |
+| POST | `/chatrooms/:id/git-branch` | 创建/切换分支 |
+| POST | `/chatrooms/:id/git-command` | 执行受限 git 命令 |
+| GET | `/chatrooms/:id/package-scripts` | 读取 package.json 脚本 |
+| POST | `/chatrooms/:id/package-scripts/run` | 运行脚本 |
+| GET / POST | `/chatrooms/:chatRoomId/commands` | 群自定义指令列表 / 新建 |
+| PUT / DELETE | `/commands/:commandId` | 更新 / 删除指令 |
+
 ---
 
 ## Messages
@@ -89,6 +131,9 @@
 | GET | `/messages` | 消息列表（`chatRoomId?`，最多 100 条） |
 | GET | `/messages/:id` | 单条消息 |
 | GET | `/messages/:id/execution` | 消息关联的执行记录 |
+| GET | `/messages/search` | 全文/条件搜索消息 |
+| GET | `/chatrooms/:chatRoomId/message-archives` | 群历史归档列表 |
+| POST | `/messages/batch-delete` · DELETE `/messages/batch` | 批量删除消息 |
 | DELETE | `/messages/chatroom/:chatRoomId` | 清空群聊消息（同时中止执行、清空上下文） |
 
 ---
@@ -141,6 +186,7 @@
 | 方法 | 路径 | 说明 |
 |-----|------|------|
 | GET | `/categories` | 所有分类 |
+| PUT | `/categories/sort-order` | 批量更新分类排序 |
 | GET | `/categories/:id` | 单个分类 |
 | POST | `/categories` | 创建分类 |
 | PUT | `/categories/:id` | 更新分类 |
@@ -167,9 +213,10 @@
 
 | 方法 | 路径 | 说明 |
 |-----|------|------|
-| GET | `/token-usage/summary` | 全量 token 用量汇总（`startDate?`, `endDate?`, `chatRoomId?`, `agentId?`） |
-| GET | `/token-usage/timeline` | 按天分组的用量趋势 |
-| GET | `/token-usage/providers/:providerId` | 指定供应商的用量 |
+| GET | `/token-usage/by-provider` | 按模型供应商聚合 token 用量 |
+| GET | `/token-usage/daily` | 每日 token 趋势（可按 provider 过滤） |
+| GET | `/token-usage/by-agent` | 按助手聚合 token 用量 |
+| GET | `/token-usage/provider/:id/detail` | 单个供应商明细（总量、助手拆分、最近执行） |
 
 ---
 
@@ -177,7 +224,62 @@
 
 | 方法 | 路径 | 说明 |
 |-----|------|------|
-| POST | `/upload/image` | 上传图片（multipart/form-data，返回 `{url, width, height, ...}`） |
+| POST | `/upload/image` | 上传单张图片（multipart/form-data，返回 `{url, width, height, ...}`） |
+| POST | `/upload/images` | 批量上传图片 |
+| POST | `/upload/audio` | 上传音频（用于 STT） |
+
+---
+
+## Workbench（工作台今日任务）
+
+| 方法 | 路径 | 说明 |
+|-----|------|------|
+| GET | `/workbench/tasks` | 今日任务列表 |
+| POST | `/workbench/tasks` | 创建今日任务 |
+| PUT | `/workbench/tasks/:id` | 更新（含状态流转） |
+| DELETE | `/workbench/tasks/:id` | 删除 |
+| POST | `/workbench/tasks/:id/dispatch` | 派发到群聊 |
+| POST | `/workbench/tasks/dispatch-batch` | 批量派发 |
+| POST | `/workbench/recommend-room` | 推荐目标群聊 |
+
+## Coordinator Logs（调度日志）
+
+| 方法 | 路径 | 说明 |
+|-----|------|------|
+| GET | `/coordinator-logs` | 全部群调度决策日志 |
+| GET | `/coordinator-logs/:chatRoomId` | 指定群的调度日志 |
+
+## Template Packages（群模板包）
+
+| 方法 | 路径 | 说明 |
+|-----|------|------|
+| POST | `/template-packages/export` | 导出群模板 ZIP（成员、规则、dispatchRules、技能引用等） |
+| POST | `/template-packages/preview` | 上传模板 ZIP 并预检导入影响 |
+| POST | `/template-packages/import` | 导入模板 ZIP，生成新群并记录导入审计 |
+
+## Bridge（外部平台机器人，`/api/bridge/*`）
+
+| 方法 | 路径 | 说明 |
+|-----|------|------|
+| GET | `/api/bridge/webhook-url` | 获取当前服务 Webhook 基础地址 |
+| GET | `/api/bridge/platforms` | 支持的平台 |
+| GET | `/api/bridge/playbooks/:platform` | 平台配置向导 |
+| GET / POST | `/api/bridge/bots` | 机器人列表 / 创建 |
+| GET / PATCH / DELETE | `/api/bridge/bots/:id` | 机器人详情 / 更新 / 删除 |
+| POST | `/api/bridge/bots/:id/bind` `/bind-code` `/unbind` | 绑定群 / 生成绑定码 / 解绑 |
+| GET | `/api/bridge/events` | 桥接事件日志 |
+| GET / PUT | `/api/bridge/system-config` | 全局桥接配置 |
+| POST | `/api/bridge/message` | 外部平台入站消息统一入口 |
+| POST | `/api/bridge/webhook/wecom/:botId` 等 | 各平台 Webhook 入口（公开） |
+
+## Speech / 内部工具
+
+| 方法 | 路径 | 说明 |
+|-----|------|------|
+| POST | `/speech/*`（见 `speech.router.ts`） | TTS / STT / 音色目录 |
+| POST | `/internal/agent-tools/*` | 内置助手工具端点（后台命令、生成图片、系统工具、助手间消息） |
+| POST | `/codex-router/:token/:providerId/v1/responses` | Codex chat↔responses 协议转换（内部） |
+| POST | `/codex-router/:token/:providerId/v1/chat/completions` | Codex responses↔chat 协议转换（内部） |
 
 ---
 
@@ -186,4 +288,4 @@
 - 所有成功响应格式：`{ success: true, data: ... }`
 - 错误响应格式：`{ success: false, error: "..." }`
 - JWT token 通过 `Authorization: Bearer <token>` 传递
-- 需要认证的接口未列出认证要求（当前版本大部分接口无强制认证，依赖 Socket JWT 认证）
+- **全局 `authHook`（`onRequest`）对所有非公开端点强制校验 JWT**；公开端点包括登录/注册/首次引导状态/部分平台 Webhook。Socket 连接另在 `auth.token` 校验 JWT

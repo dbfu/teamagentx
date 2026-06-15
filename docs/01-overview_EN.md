@@ -128,28 +128,27 @@ v0.1.0 implemented related capabilities:
 ```
 [User / Agent] speaks
    ↓
-[Message Bus] parses @ list + group rules validation (heuristic layer hooks)
+[Message Bus] parses @ list + injects group rules (he-discipline hooks are a design concept)
    ↓
-Agents @mentioned → enter "pending response" queue
+Smart Collaboration: single-@ takes the fast path; anomalies/joins/fallbacks are adjudicated by the Group Coordinator
 Agents not @mentioned → silently consume context, don't speak
    ↓
-Queue processed sequentially (no抢先回答)
+Queue processed sequentially (no jumping the queue)
    ↓
-Agent response = System prompt + Group rules (self-discipline layer) + Group context window + Own memory slice + Loaded skills
+Agent response = System prompt + Group rules (self-discipline) + Dispatch rules + Group context window + Own memory slice + Loaded skills
    ↓
-Response contains new @ → queue for next round
-Response contains [Discussion Complete] and speaker is Coordinator → group closed
+Response contains a new valid @ → queue for next round (hops +1)
    ↓
-Round +1, reach limit → force Coordinator wrap-up
+On collaboration-budget trip (hops/cycle/concurrency) → stop auto-dispatch and @ owner; a human message resets counters and takes over
 ```
 
-**Three Bottom-Level Invariants**:
+**Three Bottom-Level Invariants** (now realized by the Smart Collaboration budget):
 
-1. **Only Coordinator can announce completion** (exclusive completion right → prevent loops)
-2. **Agents don't抢先回答** (only speak when @mentioned → prevent @ trigger ambiguity)
+1. **The execution graph has a deterministic upper bound** (out-degree ≤ 1 + every fork joins + triple breaker → prevent loops/fan-out)
+2. **Agents don't jump the queue** (only speak when @mentioned → prevent @ trigger ambiguity)
 3. **Parse @ before speaking each round** (resolve ambiguity before consuming tokens → prevent context explosion)
 
-Detailed workflows in [03-workflows_EN.md](03-workflows_EN.md).
+Detailed workflows in [03-workflows_EN.md](03-workflows_EN.md); triggering and the collaboration budget in [11-agent-trigger-system_EN.md](11-agent-trigger-system_EN.md).
 
 ---
 
@@ -161,7 +160,7 @@ Detailed workflows in [03-workflows_EN.md](03-workflows_EN.md).
 
 ## 9. Document Navigation
 
-- [02 · Feature List](02-features_EN.md) —— v0.1.0 delivered capabilities review
+- [02 · Feature List](02-features_EN.md) —— v0.1.x delivered capabilities review
 - [03 · Workflows](03-workflows_EN.md) —— Group lifecycle, state machines, message flow
 - [04 · Major Problems and Solutions](04-problems-and-solutions_EN.md) —— **Core Chapter**: 13 problems deep analysis
 - [05 · Competitor Analysis](05-competitors_EN.md) —— 5 track comparison, learnable optimizations

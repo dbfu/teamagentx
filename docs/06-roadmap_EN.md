@@ -2,6 +2,8 @@
 
 English | [中文](06-roadmap.md)
 
+> **2026-06 progress**: the loop/fan-out hardening of Phase 1 ("harden collaboration") has shipped — Smart Collaboration (merged auto/coordinator) brings the triple collaboration-budget breaker, parallel-batch fork-join, and 5-point coordinator fallback; plus new dispatch rules (workflow visualization), workbench today-tasks, and the dispatch log. Unified task-card schema, objective acceptance hooks, and file-concurrency control remain future goals. See [02-features_EN.md](02-features_EN.md), [11-agent-trigger-system_EN.md](11-agent-trigger-system_EN.md), [13-unified-collaboration-mode-design_EN.md](13-unified-collaboration-mode-design_EN.md).
+
 ## 1. What We're Actually Selling
 
 **NOT** "another Cursor".

@@ -310,7 +310,7 @@ Transfer development collaboration's "分工 / responsibilities / boundaries / w
 | **Group-level Cron** | No one does "hang scheduled tasks in group" |
 | **Paste text one-click parse model config** | UX outstanding |
 | **Streaming prompt optimization** | New angle helping user write good system prompts |
-| **Create skill via chat** ("@Skill Manager" system agent) | Skill creation zero门槛 |
+| **Create skill via chat** (unified "@Group Assistant" system agent) | Skill creation zero门槛 |
 | **Local Agent reuse** (connect Claude Code key) | Complementary with Claude Code not competing |
 | **Three-layer workDir strategy** | Group-level shared + Agent default + Quick Chat independent |
 | **Per-agent per-group independent context / history injection toggle** | More fine-grained than CrewAI etc. |
