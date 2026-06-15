@@ -145,9 +145,12 @@ export function AssistantConfigTab({ agent, onUpdate }: AssistantConfigTabProps)
   const isSystemAgent = agent.agentLevel === 'system'
 
   const thinkingModeLabels: Record<Agent['thinkingMode'], string> = {
+    max: t('assistant.thinkingMaxShort'),
+    xhigh: t('assistant.thinkingXhighShort'),
     high: t('assistant.thinkingHighShort'),
     medium: t('assistant.thinkingMediumShort'),
     low: t('assistant.thinkingLowShort'),
+    minimal: t('assistant.thinkingMinimalShort'),
     off: t('assistant.thinkingOffShort'),
   }
 

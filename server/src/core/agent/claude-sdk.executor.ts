@@ -215,9 +215,12 @@ function getClaudeThinkingOptions(
     const mode = thinkingMode || DEFAULT_AGENT_THINKING_MODE;
     if (mode === 'off') return {type: 'disabled'};
     const budgetTokensByMode: Record<Exclude<AgentThinkingMode, 'off'>, number> = {
+      minimal: 2000,
       low: 4000,
       medium: 10000,
       high: 16000,
+      xhigh: 24000,
+      max: 32000,
     };
     return {type: 'enabled', budgetTokens: budgetTokensByMode[mode]};
   }

@@ -30,6 +30,7 @@ export function ConversationListItem({
   room,
   selected,
   unreadCount,
+  isExecuting,
   hasOwnerMention,
   isMobile,
   onSelect,
@@ -66,11 +67,18 @@ export function ConversationListItem({
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-1.5">
-          <span className={cn(
-            "min-w-0 truncate font-medium",
-            isMobile ? "text-base leading-6" : "text-sm leading-5",
-            unreadCount > 0 ? "text-foreground" : "text-muted-foreground"
-          )}>{room.name}</span>
+          <div className="flex min-w-0 flex-1 items-center gap-1.5">
+            <span className={cn(
+              "min-w-0 truncate font-medium",
+              isMobile ? "text-base leading-6" : "text-sm leading-5",
+              unreadCount > 0 ? "text-foreground" : "text-muted-foreground"
+            )}>{room.name}</span>
+            {isExecuting && (
+              <span className="inline-flex shrink-0 items-center rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary">
+                {t('chat.executingTag')}
+              </span>
+            )}
+          </div>
           {room.lastMessage && (
             <span className={cn("shrink-0 text-muted-foreground/70 tabular-nums", isMobile ? "text-sm leading-6" : "text-xs leading-5")}>
               {formatDateTime(room.lastMessage.time)}

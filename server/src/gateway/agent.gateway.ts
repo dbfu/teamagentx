@@ -103,7 +103,7 @@ const agentResponseSchema = {
     codexModel: { type: 'string', nullable: true },
     codexFastMode: { type: 'boolean' },
     claudeModel: { type: 'string', nullable: true },
-    thinkingMode: { type: 'string', enum: ['off', 'low', 'medium', 'high'] },
+    thinkingMode: { type: 'string', enum: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] },
     speechConfig: {
       type: 'object',
       nullable: true,
@@ -214,7 +214,7 @@ const createAgentBodySchema = {
     codexModel: { type: 'string', nullable: true, description: 'Codex 本地配置模式下指定的模型名称' },
     codexFastMode: { type: 'boolean', description: 'Codex Fast service tier 开关' },
     claudeModel: { type: 'string', nullable: true, description: 'Claude 本地配置模式下指定的模型名称' },
-    thinkingMode: { type: 'string', enum: ['off', 'low', 'medium', 'high'], description: '思考模式，默认 high' },
+    thinkingMode: { type: 'string', enum: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'], description: '思考模式，默认 high' },
     speechConfig: {
       type: 'object',
       nullable: true,
@@ -285,7 +285,7 @@ const updateAgentBodySchema = {
     codexModel: { type: 'string', nullable: true },
     codexFastMode: { type: 'boolean' },
     claudeModel: { type: 'string', nullable: true },
-    thinkingMode: { type: 'string', enum: ['off', 'low', 'medium', 'high'] },
+    thinkingMode: { type: 'string', enum: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] },
     speechConfig: {
       type: 'object',
       nullable: true,

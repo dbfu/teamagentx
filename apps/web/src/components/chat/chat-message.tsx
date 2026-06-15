@@ -1,4 +1,4 @@
-import { Message } from '@/lib/agent-api'
+import { Message, THINKING_MODE_I18N_KEY } from '@/lib/agent-api'
 import { tokenUsageApi } from '@/lib/token-usage-api'
 import { cn, formatDateTime } from '@/lib/utils'
 import { copyToClipboard } from '@/lib/copy-utils'
@@ -126,7 +126,7 @@ const TypingAgentsIndicator = memo(function TypingAgentsIndicator({
           >
             {isPending && <Clock className="size-3" />}
             {!isPending && (
-              <span className="flex h-3 w-4 items-center justify-start text-xs font-bold leading-[12px]">
+              <span className="flex h-3 items-center justify-start text-xs font-bold leading-[12px]">
                 {'.'.repeat(dotFrame + 1)}
               </span>
             )}
@@ -670,14 +670,22 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
             {t('chat.tokens')}：{tokenUsageApi.formatTokens(Math.max(0, message.totalTokens - (message.cacheReadTokens ?? 0)))}
           </span>
         )}
-        {message.model && (
-          <span
-            className="inline-flex items-center rounded-full bg-emerald-100 dark:bg-emerald-900/30 px-2 py-0.5 text-xs text-emerald-600 dark:text-emerald-400"
-            title={message.model}
-          >
-            {t('chat.model')}：{message.model}
-          </span>
-        )}
+        {message.model && (() => {
+          // 思考强度只对 claude/codex 类型助手有意义；取助手当前配置展示，如「glm5 · 高」。
+          // 使用短标签（如「高」而非「高（默认）」）避免冗余。
+          const thinkingLabel =
+            currentAgent && (currentAgent.acpTool === 'claude' || currentAgent.acpTool === 'codex')
+              ? t(`${THINKING_MODE_I18N_KEY[currentAgent.thinkingMode || 'high']}Short`)
+              : null
+          return (
+            <span
+              className="inline-flex items-center rounded-full bg-emerald-100 dark:bg-emerald-900/30 px-2 py-0.5 text-xs text-emerald-600 dark:text-emerald-400"
+              title={thinkingLabel ? `${message.model} · ${thinkingLabel}` : message.model}
+            >
+              {t('chat.model')}：{message.model}{thinkingLabel ? ` · ${thinkingLabel}` : ''}
+            </span>
+          )
+        })()}
       </>
     )
   }

@@ -277,7 +277,10 @@ type CodexReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
 function getCodexReasoningEffort(thinkingMode?: AgentThinkingMode | null): CodexReasoningEffort {
   if (thinkingMode) {
-    return thinkingMode === 'off' ? 'minimal' : thinkingMode;
+    // Codex 无 off（最低为 minimal），也无 max（封顶 xhigh）。
+    if (thinkingMode === 'off') return 'minimal';
+    if (thinkingMode === 'max') return 'xhigh';
+    return thinkingMode;
   }
 
   const value = process.env.CODEX_SDK_REASONING_EFFORT?.trim().toLowerCase();

@@ -3,7 +3,28 @@ import type { SpeechProfile } from '@/speech'
 
 // 智能协作（coordinator）/ 手动（manual）；'auto' 为历史值，仅为兼容旧数据保留，等同 coordinator
 export type AgentTriggerMode = 'auto' | 'manual' | 'coordinator'
-export type AgentThinkingMode = 'off' | 'low' | 'medium' | 'high'
+export type AgentThinkingMode = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+// 不同 ACP 工具支持的思考强度档位（按强度从高到低排列，用于下拉框展示）。
+// Claude 原生 effort 档位为 low/medium/high/xhigh/max（无 minimal），外加显式关闭 off；
+// Codex reasoning effort 为 minimal/low/medium/high/xhigh（无显式关闭、最低 minimal，也无 max）。
+export const CLAUDE_THINKING_MODES: AgentThinkingMode[] = ['max', 'xhigh', 'high', 'medium', 'low', 'off']
+export const CODEX_THINKING_MODES: AgentThinkingMode[] = ['xhigh', 'high', 'medium', 'low', 'minimal']
+
+export function getThinkingModeOptions(acpTool?: string | null): AgentThinkingMode[] {
+  return acpTool === 'codex' ? CODEX_THINKING_MODES : CLAUDE_THINKING_MODES
+}
+
+// 思考强度 -> i18n key 映射，供下拉框与详情展示统一使用。
+export const THINKING_MODE_I18N_KEY: Record<AgentThinkingMode, string> = {
+  off: 'assistant.thinkingOff',
+  minimal: 'assistant.thinkingMinimal',
+  low: 'assistant.thinkingLow',
+  medium: 'assistant.thinkingMedium',
+  high: 'assistant.thinkingHigh',
+  xhigh: 'assistant.thinkingXhigh',
+  max: 'assistant.thinkingMax',
+}
 
 // 分类相关类型
 export interface AgentCategory {

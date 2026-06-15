@@ -1,5 +1,5 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { AcpToolInfo, Agent, AgentSpeechConfig, agentApi, AgentCategory, acpToolsApi, categoryApi, type AgentThinkingMode } from '@/lib/agent-api';
+import { AcpToolInfo, Agent, AgentSpeechConfig, agentApi, AgentCategory, acpToolsApi, categoryApi, type AgentThinkingMode, getThinkingModeOptions, THINKING_MODE_I18N_KEY } from '@/lib/agent-api';
 import { AgentAvatarImage, agentAvatarOptions } from '@/lib/agent-avatars';
 import { AvatarSelector } from './avatar-selector';
 import { FallbackModelSelector } from './fallback-model-selector';
@@ -610,10 +610,9 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
                     <SelectValue placeholder={t('assistant.selectThinkingMode')} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="high">{t('assistant.thinkingHigh')}</SelectItem>
-                    <SelectItem value="medium">{t('assistant.thinkingMedium')}</SelectItem>
-                    <SelectItem value="low">{t('assistant.thinkingLow')}</SelectItem>
-                    <SelectItem value="off">{t('assistant.thinkingOff')}</SelectItem>
+                    {getThinkingModeOptions(formAcpTool).map((mode) => (
+                      <SelectItem key={mode} value={mode}>{t(THINKING_MODE_I18N_KEY[mode])}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 <p className="mt-1.5 text-xs text-muted-foreground">

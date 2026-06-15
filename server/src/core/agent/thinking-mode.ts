@@ -1,4 +1,4 @@
-export const AGENT_THINKING_MODES = ['off', 'low', 'medium', 'high'] as const;
+export const AGENT_THINKING_MODES = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type AgentThinkingMode = (typeof AGENT_THINKING_MODES)[number];
 
 export const DEFAULT_AGENT_THINKING_MODE = 'high' satisfies AgentThinkingMode;
@@ -16,5 +16,5 @@ export function normalizeAgentThinkingMode(
   const normalized = value.trim().toLowerCase();
   if (isAgentThinkingMode(normalized)) return normalized;
 
-  throw new Error('思考模式仅支持 off、low、medium、high');
+  throw new Error('思考模式仅支持 off、minimal、low、medium、high、xhigh、max');
 }
