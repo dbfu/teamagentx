@@ -42,8 +42,8 @@ Default mode for new regular chatrooms. The design goal is **"auto's fast path +
 
 - **Fast path (zero coordination cost)**: when an agent writes exactly one valid `@agent` in its reply, that agent is triggered directly for the handoff, bypassing the coordinator
 - **Coordinator fallback**: the built-in `Group Coordinator` is only invoked at 5 intervention points — user-message routing miss / agent `@` anomaly / parallel-batch join / stall fallback / circuit-breaker escalation (see §6)
-- **Parallel dispatch**: when a user `@`s multiple agents at once, or the coordinator decides work can run in parallel, a parallel batch (fork-join) is opened
-- **Convergence guarantee**: the shape of the execution graph is locked by three layers — "agent out-degree ≤ 1", "every fork must join", and "triple circuit breaker (hops / cycle / concurrency)" — preventing fan-out storms and infinite loops (see §5)
+- **Multi-agent dispatch**: the coordinator can split one decision into multiple independent tasks, run **in parallel** (enqueued together, then a join adjudicates) or **serially** (one by one in order) per `dispatchMode`
+- **Convergence guarantee**: the shape of the execution graph is locked by three layers — "agent out-degree ≤ 1", "every fork joins (parallel batch / serial chain)", and "two circuit breakers (hops / cycle)" — preventing fan-out storms and infinite loops (see §5)
 
 Suitable for the vast majority of multi-role collaboration rooms: low latency for fixed handoffs, plus the ability to auto-decide who's next.
 
@@ -68,7 +68,7 @@ Rules are evaluated from highest to lowest priority.
 | 1 | No `@` | Quick-chat room | Trigger the quick-chat agent (skip history injection) |
 | 2 | One triggerable `@xxx` | Quick-chat room | Trigger the `@`-ed agent (quick-chat agent not triggered) |
 | 3 | One triggerable `@xxx` | Regular room, any mode | Trigger the `@`-ed agent |
-| 4 | Multiple triggerable `@`s | Smart Collaboration | **Parallel-trigger** all `@`-ed agents, open a parallel batch; if over the concurrency cap, truncate and post a visible message stating which were triggered / truncated |
+| 4 | Multiple triggerable `@`s | Smart Collaboration | Treated as an ambiguity signal, **handed to the coordinator** (split into single task / parallel batch / serial chain), not silently truncated |
 | 5 | Multiple triggerable `@`s | Manual / quick-chat | Trigger only the first valid `@` |
 | 6 | No `@`, manual reply to an agent message | Regular room | Trigger the agent of the replied-to message |
 | 7 | No `@`, previous message was an agent `@`-ing this user | Smart Collaboration | Direct reply: trigger that agent |
@@ -85,7 +85,7 @@ Rules are evaluated from highest to lowest priority.
 |---|---------|------|--------|
 | 12 | Exactly one valid `@` | Smart Collaboration | Fast-path direct trigger, hops +1 |
 | 13 | Exactly one `@` but target invalid (typo / not in room / disabled) | Smart Collaboration | Coordinator (point ②: fix or ask_owner) |
-| 14 | ≥2 triggerable `@`s | Smart Collaboration | Coordinator (point ②): true parallel → open batch; single real handoff → dispatch one; unclear → ask_owner |
+| 14 | ≥2 triggerable `@`s | Smart Collaboration | Coordinator (point ②): true parallel → open parallel batch; dependent → open serial chain; single real handoff → dispatch one; unclear → ask_owner |
 | 15 | Ends with no `@` | Smart Collaboration | Not processed immediately; only arm the stall watchdog |
 | 16 | `@` the user (question / awaiting confirmation) | Smart Collaboration | No agent triggered; await user reply (rule 7); watchdog skips |
 | 17 | `@` self | Any | Ignored (selfMention skipped) |
@@ -135,15 +135,16 @@ In Smart Collaboration, the execution-graph shape is locked by three layers, gua
 
 **Structural layer**: business-agent out-degree ≤ 1 — a single agent message triggers at most one `@` directly; a fork (multiple `@`s) must be legitimized by the coordinator as a parallel batch.
 
-**Batch layer**: fork-join semantics — dispatching N agents in parallel opens a batch; while the batch is running, any `@` in member messages is suspended (not triggered); when the last member finishes, the join adjudicates once, guaranteeing every fork converges.
+**Batch/chain layer**: when the coordinator dispatches multiple agents, there are two execution relationships, both guaranteeing every fork joins (flowcharts in [14-agent-dispatch-flowcharts_EN.md](14-agent-dispatch-flowcharts_EN.md)):
+- **Parallel batch (fork-join)**: N tasks enqueued together; any `@` in member messages while the batch runs is suspended (not triggered); the last member finishing triggers one join adjudication (`parallel-batch-tracker`);
+- **Serial chain (ordered)**: only the head task is enqueued at a time, advanced by the **queue task settlement event** (completed) rather than the `@` in agent output; later agents see prior output via incremental room history (`serial-chain-tracker` + `task-lifecycle`).
 
-**Budget layer**: triple circuit breaker (all are config env vars):
+**Budget layer**: two circuit breakers (only constrain the "agent single-`@` direct relay" fast path; coordinator-initiated parallel/serial tasks are not counted against this budget):
 
 | Breaker | Default | Env var | On trip |
 |---------|---------|---------|---------|
 | Hop budget (auto-triggered tasks carry a depth count, +1 on dispatch) | 20 hops | `AGENT_MAX_HANDOFF_HOPS` | Don't trigger the next hop; ask_owner with the sticking point |
 | Cycle detection (the same pair A↔B ping-ponging **consecutively**, no third party / user) | 3 round-trips (6 hops) | `AGENT_HANDOFF_CYCLE_REPEAT_LIMIT` | Truncate, ask_owner |
-| Concurrency cap (agents triggered at once in one dispatch) | 3 | `AGENT_MAX_PARALLEL_DISPATCH` | Hard-truncate coordinator dispatch; truncate user multi-`@` with a visible notice |
 
 > After a circuit-breaker escalation, only `ask_owner` is allowed (`@` the room owner as the coordinator, stating the sticking point) — a deterministic notification, no LLM, no coordinator continuation. Cycle detection is "consecutive ping-pong", not cumulative repeats within a window — hub-and-spoke collaboration (e.g. a game host `@`-ing players one by one) legitimately repeats the same edge across phases and should not be falsely killed.
 
@@ -159,7 +160,7 @@ In Smart Collaboration, the built-in `Group Coordinator` is narrowed from "a dis
 |---|-------|---------|----------------------------|
 | ① | User-message routing miss | User has no `@`, and reply / direct-reply / default-agent all miss | Decide who to dispatch (dispatch / ask_owner / no_dispatch) |
 | ② | Agent `@` anomaly | `@` target invalid, or one message has ≥2 triggerable `@`s | Infer real intent: corrected dispatch / open parallel batch / ask_owner |
-| ③ | Parallel-batch join | All batch members finished | Take all outputs + suspended handoff intents and adjudicate once |
+| ③ | Parallel-batch / serial-chain join | All parallel members finished, or the serial chain's tail finished | Take all outputs + suspended handoff intents and adjudicate once |
 | ④ | Stall watchdog rescue | Room idle timeout, no running/queued task, last message is a business agent's and didn't `@` the user | Really done → no_dispatch (silent); chain broken → `@` agent to continue |
 | ⑤ | Circuit-breaker escalation | Hop budget exceeded or cycle detected | ask_owner only (deterministic, no LLM, no continuation) |
 
@@ -300,8 +301,8 @@ Check whether it's "exactly one valid `@`": a misspelled target, not in the room
 
 ### Q: What happens when a user `@`s multiple agents at once?
 
-In Smart Collaboration all `@`-ed agents are **triggered in parallel** and a batch opens; over the concurrency cap (default 3), the rest are truncated with a visible message listing who was triggered / truncated (`@` the truncated ones separately after the current task). Manual mode and quick-chat rooms trigger only the first valid `@`.
+In Smart Collaboration this is **handed to the coordinator**: it splits the multiple `@`s into independent tasks and dispatches them in parallel (run together, then a join adjudicates) or serially (one by one), per `dispatchMode` — rather than blindly triggering all. Manual mode and quick-chat rooms trigger only the first valid `@`.
 
 ### Q: How are agent-to-agent `@` loops prevented?
 
-Smart Collaboration has a built-in triple breaker (20 hops / 3 consecutive round-trips / concurrency 3) plus the stall fallback; on a trip it stops auto-dispatch and `@`s the owner. Any user message immediately resets the counters and takes over.
+For the "agent single-`@` direct relay" path, Smart Collaboration has a built-in two-breaker (20 hops / 3 consecutive round-trips) plus the stall fallback; on a trip it stops auto-dispatch and `@`s the owner. Any user message immediately resets the counters and takes over.

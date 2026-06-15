@@ -224,11 +224,11 @@ The former "Coordinator" and "Auto" modes are merged into a single **Smart Colla
 
 | Mode | Behavior | Suitable Scenario |
 |------|----------|-------------------|
-| **Smart Collaboration (default)** | An agent writing exactly one valid @ takes the fast path and relays directly (zero coordination cost); the built-in "Group Coordinator" is only invoked at 5 points (user routing miss / @ anomaly / parallel-batch join / stall fallback / circuit breaker); user multi-@ triggers in parallel | Vast majority of multi-role collaboration rooms |
+| **Smart Collaboration (default)** | An agent writing exactly one valid @ takes the fast path and relays directly (zero coordination cost); the built-in "Group Coordinator" is only invoked at 5 points (user routing miss / @ anomaly / batch join / stall fallback / circuit breaker); user multi-@ goes to the coordinator to split into single/parallel/serial | Vast majority of multi-role collaboration rooms |
 | **Manual Mode** | @ in agent message doesn't trigger other agents, only as mention | User manual orchestration, agents don't cross-stage |
 
 - Storage layer still stores `coordinator` (Smart Collaboration) / `manual`; the legacy value `auto` is an alias equal to Smart Collaboration
-- Built-in triple circuit breaker (20 hops / 3 consecutive round-trips / concurrency 3) + stall detection prevent fan-out storms and loops
+- For the "agent single-`@` direct relay", a built-in two-breaker (20 hops / 3 consecutive round-trips) + stall detection prevent fan-out storms and loops; coordinator multi-agent dispatch supports parallel/serial (see [14](14-agent-dispatch-flowcharts_EN.md))
 - Every coordinator decision is written to `CoordinatorLog`, viewable in the "Dispatch Log"
 
 Detailed trigger rules in [11-agent-trigger-system_EN.md](11-agent-trigger-system_EN.md); merge design in [13-unified-collaboration-mode-design_EN.md](13-unified-collaboration-mode-design_EN.md).
@@ -521,9 +521,9 @@ This document found **actual product is much richer than described** — here ar
 
 Added after 2026-06 (some Chapter 04 problems now hardened):
 
-18. **Smart Collaboration mode** (merged auto/coordinator) + triple breaker against fan-out/loops (addresses A1/A2/H)
+18. **Smart Collaboration mode** (merged auto/coordinator) + two-breaker against fan-out/loops (addresses A1/A2/H)
 19. **Dispatch rules (workflow YAML) + flowchart visualization**
-20. **Parallel batch (fork-join) dispatch**
+20. **Parallel-batch / serial-chain dispatch** (coordinator picks per dispatchMode)
 21. **Workbench "today tasks" with dispatch**
 22. **Dispatch log (CoordinatorLog) observability**
 23. **Group custom commands `/commands`**
@@ -573,7 +573,7 @@ A set of capabilities added since 2026-06, centered on "how multi-agent collabor
 
 ### 12.1 Smart Collaboration mode
 
-See §4.4 and [11-agent-trigger-system_EN.md](11-agent-trigger-system_EN.md): fast-path relay + 5-point coordinator fallback + triple circuit breaker + parallel batches (fork-join).
+See §4.4 and [11-agent-trigger-system_EN.md](11-agent-trigger-system_EN.md): fast-path relay + 5-point coordinator fallback + two breakers + parallel-batch/serial-chain dispatch. Full flowcharts in [14-agent-dispatch-flowcharts_EN.md](14-agent-dispatch-flowcharts_EN.md).
 
 ### 12.2 Dispatch rules / workflow visualization
 

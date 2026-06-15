@@ -16,7 +16,11 @@ This design has landed; chatroom user-facing modes have converged to **Smart Col
 - Decision audit: `CoordinatorLog` table + front-end "Dispatch Log" panel
 - Storage compatibility: `agentTriggerMode` still stores `coordinator`/`manual`; `auto` is a legacy alias equal to Smart Collaboration; template import maps accordingly
 
-The "design" sections below are essentially consistent with the current state; where wording (e.g. "not implemented" markers) differs, this section is authoritative.
+**Divergences from this proposal** (the implementation evolved further; the code and [14-agent-dispatch-flowcharts_EN.md](14-agent-dispatch-flowcharts_EN.md) are authoritative):
+- Coordinator multi-agent dispatch added a **serial chain** (`serial-chain-tracker` + `task-lifecycle`, `dispatchMode: parallel | serial`) alongside the parallel batch; §2.2's "batch layer" below only describes the parallel batch.
+- **The concurrency cap (originally §2.2's `AGENT_MAX_PARALLEL_DISPATCH=3`) was removed**: user multi-`@` is no longer truncated by a cap but handed to the coordinator to split into single/parallel/serial; the collaboration budget thus converges to **two breakers (hops + cycle)** and only constrains the "agent single-`@` direct relay" fast path — coordinator-initiated parallel/serial tasks are not counted.
+
+The "design" sections below are essentially consistent with the current state; where wording (e.g. "not implemented" markers, the concurrency cap, parallel-batch-only) differs, this section and doc 14 are authoritative.
 
 ---
 

@@ -139,12 +139,12 @@ Agent response = System prompt + Group rules (self-discipline) + Dispatch rules 
    ↓
 Response contains a new valid @ → queue for next round (hops +1)
    ↓
-On collaboration-budget trip (hops/cycle/concurrency) → stop auto-dispatch and @ owner; a human message resets counters and takes over
+On collaboration-budget trip on single-@ relay (hops/cycle) → stop auto-dispatch and @ owner; a human message resets counters and takes over
 ```
 
 **Three Bottom-Level Invariants** (now realized by the Smart Collaboration budget):
 
-1. **The execution graph has a deterministic upper bound** (out-degree ≤ 1 + every fork joins + triple breaker → prevent loops/fan-out)
+1. **The execution graph has a deterministic upper bound** (out-degree ≤ 1 + every fork joins "parallel batch/serial chain" + two breakers → prevent loops/fan-out)
 2. **Agents don't jump the queue** (only speak when @mentioned → prevent @ trigger ambiguity)
 3. **Parse @ before speaking each round** (resolve ambiguity before consuming tokens → prevent context explosion)
 

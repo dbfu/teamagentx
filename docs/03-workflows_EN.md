@@ -55,11 +55,11 @@ Agent response = System prompt + Group rules (self-discipline) + Group context w
    └─ Persistence: messages table + executionRecords
    ↓
 Exactly one valid @ (Smart Collaboration) → fast path, queue for next round
-@ anomaly / multi-@ (Smart Collaboration) → coordinator adjudicates (fix / parallel batch / ask owner)
+@ anomaly / multi-@ (Smart Collaboration) → coordinator adjudicates (fix / parallel batch / serial chain / ask owner)
 No @ (Smart Collaboration) → not processed now, stall watchdog fallback
 Any @ (manual mode) → don't queue, only show as mention
    ↓
-hops +1; on collaboration-budget trip (20 hops / 3 consecutive round-trips / concurrency 3) → stop auto-dispatch and @ owner
+hops +1; on collaboration-budget trip (20 hops / 3 consecutive round-trips, single-@ relay only) → stop auto-dispatch and @ owner
 A human message → resets counters and takes over
 ```
 
@@ -73,7 +73,7 @@ A human message → resets counters and takes over
 
 | Mode | Behavior | Suitable Scenario |
 |------|----------|-------------------|
-| **Smart Collaboration (default)** | Single-@ takes the fast path to relay directly; the Group Coordinator is invoked only at 5 points (user routing miss / @ anomaly / batch join / stall / breaker); user multi-@ triggers in parallel | Vast majority of multi-role collaboration rooms |
+| **Smart Collaboration (default)** | Single-@ takes the fast path to relay directly; the Group Coordinator is invoked only at 5 points (user routing miss / @ anomaly / batch join / stall / breaker); user multi-@ goes to the coordinator to split into single/parallel/serial | Vast majority of multi-role collaboration rooms |
 | **Manual Mode** | @ in agent message doesn't trigger other agents, only as mention | User manual orchestration, agents don't cross-stage |
 
 The storage layer stores `agentTriggerMode` as `coordinator` (Smart Collaboration) / `manual`, with `auto` as a legacy alias. Detailed rules and @ parsing in [11-agent-trigger-system_EN.md](11-agent-trigger-system_EN.md); merge design in [13-unified-collaboration-mode-design_EN.md](13-unified-collaboration-mode-design_EN.md).

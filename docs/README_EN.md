@@ -58,6 +58,7 @@ Jump directly to [04 Problems and Solutions](04-problems-and-solutions_EN.md), e
 | [11-agent-trigger-system.md](11-agent-trigger-system_EN.md) | Agent trigger system · **Smart Collaboration + Manual** modes · collaboration budget/breakers · @ parsing · Prompt suggestions | ⭐⭐⭐⭐ | ~4k |
 | [12-user-guide.md](12-user-guide_EN.md) | Beginner user guide · Initialization · Models/Agents/Skills · Group collaboration | ⭐⭐⭐ | ~7k |
 | [13-unified-collaboration-mode-design_EN.md](13-unified-collaboration-mode-design_EN.md) | Smart Collaboration merge design (shipped) · coordinator intervention points · convergence | ⭐⭐⭐ | ~5k |
+| [14-agent-dispatch-flowcharts_EN.md](14-agent-dispatch-flowcharts_EN.md) | **Full dispatch-system flowcharts** (Mermaid) · authoritative current behavior · parallel/serial/fallback | ⭐⭐⭐⭐ | ~5k |
 
 > Major 2026-06 update: `auto`/`coordinator` merged into **Smart Collaboration**; added **dispatch rules (workflows)**, **workbench today-tasks**, **dispatch log**, group commands/env vars, quick-chat import of local Claude/Codex sessions, etc. See 02 / 08 / 11 / 13.
 
@@ -105,7 +106,7 @@ Jump directly to [04 Problems and Solutions](04-problems-and-solutions_EN.md), e
 
 ### 3. v0.1.x Delivered (Far Beyond Initial User Description)
 12 major feature domains, ~90+ API endpoints, several unique highlights:
-- ⭐ **Smart Collaboration mode** (merged auto/coordinator): fast-path relay + 5-point coordinator fallback + triple collaboration-budget breaker (2026-06)
+- ⭐ **Smart Collaboration mode** (merged auto/coordinator): fast-path relay + 5-point coordinator fallback + two collaboration-budget breakers + parallel/serial dispatch (2026-06)
 - ⭐ **Dispatch rules (workflow YAML) + flowchart visualization** (2026-06)
 - ⭐ **Workbench "today tasks"**: create and dispatch to a room, coordinator organizes execution (2026-06)
 - ⭐ **Dispatch log (CoordinatorLog)**: coordinator decisions are observable (2026-06)

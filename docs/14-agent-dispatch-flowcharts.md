@@ -1,5 +1,7 @@
 # TeamAgentX 调度系统全场景流程图
 
+[English](14-agent-dispatch-flowcharts_EN.md) | 中文
+
 > 更新日期：2026-06-15  
 > 状态：当前实现说明，以服务端源码为准  
 > 范围：Web、桌面端、移动端、Bridge 和定时任务进入同一消息调度链路后的行为

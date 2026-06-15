@@ -5,8 +5,8 @@ English | [中文](04-problems-and-solutions.md)
 > This is the **Core Chapter** of the documentation. It categorizes 13 real pitfalls of group-chat orchestrated multi-AI agents into 4 themes, each problem expanded using the same **7-section format**: Symptom / Root Cause / Current Handling / **Recommended Solution (with implementation steps)** / **Alternative/Supplementary Solutions** (multiple paths listed) / Priority / Work Effort Estimate.
 > Priority legend: 🔴 High (P0, must do next phase) / 🟡 Medium (P1, 3-6 months) / 🟢 Low (P2, long-term).
 
-> **2026-06 progress (some problems hardened)**: after Smart Collaboration (merged auto/coordinator) landed, the following are now covered by "collaboration budget + triple breaker + parallel batch fork-join + 5-point coordinator fallback":
-> - **A1 loop prevention / A2 fan-out storm**: triple breaker on hops (20) / consecutive cycle (3 round-trips) / concurrency (3); on a trip it stops and `@`s the owner; user multi-`@` over the cap is truncated visibly.
+> **2026-06 progress (some problems hardened)**: after Smart Collaboration (merged auto/coordinator) landed, the following are now covered by "collaboration budget (two breakers) + parallel-batch/serial-chain + 5-point coordinator fallback" (full flowcharts in [14-agent-dispatch-flowcharts_EN.md](14-agent-dispatch-flowcharts_EN.md)):
+> - **A1 loop prevention / A2 fan-out storm**: two breakers (hops 20 / consecutive cycle 3 round-trips) on the "agent single-`@` direct relay"; on a trip it stops and `@`s the owner; user multi-`@` is handed to the coordinator to split into single task / parallel batch / serial chain (no silent truncation).
 > - **C @ trigger ambiguity**: an agent `@` anomaly (typo/multi-`@`) escalates to the coordinator for correction; the default agent fallback is kept.
 > - **H deadlock**: cycle detection + stall watchdog fallback; a human message takes over at any time.
 > See [11-agent-trigger-system_EN.md](11-agent-trigger-system_EN.md) and [13-unified-collaboration-mode-design_EN.md](13-unified-collaboration-mode-design_EN.md). The solutions below remain as design rationale and as reference for the parts not yet covered (objective acceptance, file concurrency, hard state-machine constraints, etc.).
@@ -31,7 +31,7 @@ Each problem ends with a **Recommended Combination** —拼接 recommended solut
 | Theme | Problem | Priority | Keywords |
 |-------|---------|----------|----------|
 | **Flow Control** | A1 Agents endlessly @ each other | 🔴 | Collaboration budget + cycle breaker (shipped); completion authority can still be hardened |
-| | **A2 Fan-out-Fan-in Storm** | 🔴 | Concurrency cap + fork-join (shipped); task-event aggregation still pending |
+| | **A2 Fan-out-Fan-in Storm** | 🔴 | Parallel-batch/serial-chain + fork-join (shipped); task-event aggregation still pending |
 | | C @ trigger ambiguity | 🟡 | Smart Collaboration anomaly escalation + default recipient |
 | | H Deadlock/Stalemate | 🟡 | Stall watchdog + human takeover |
 | | K Human intervention timing | 🟡 | Risk level + permission mode |
@@ -65,7 +65,7 @@ Tokens burned out, user feels "group一直在吵".
 #### Current Handling (v0.1.x)
 
 - ✅ **Smart Collaboration / Manual trigger modes** — Manual blocks agent-message `@` triggers; Smart Collaboration uses the single-`@` fast path and escalates anomalies to the coordinator.
-- ✅ **Triple collaboration-budget breaker** — hop, consecutive-cycle, and concurrency caps stop auto-dispatch and `@` the owner.
+- ✅ **Two collaboration-budget breakers** — hop and consecutive-cycle detection on single-`@` relay stop auto-dispatch and `@` the owner.
 - ✅ **Stall watchdog** — when collaboration stalls, the coordinator adjudicates the fallback.
 - ✅ Group rules exist (still a soft constraint).
 - 🔵 The v1 "exclusive completion right" concept is not yet a hard platform state.
@@ -159,9 +159,9 @@ Three layers叠加:
 
 #### Current Handling (v0.1.x)
 
-- ✅ **Concurrency cap**: user multi-`@` or coordinator parallel dispatch triggers at most 3 targets; truncated targets are shown visibly.
-- ✅ **Parallel batch fork-join**: batch members complete and join before the coordinator adjudicates the next step.
-- ✅ **Collaboration-budget breaker**: repeated fan-out/cycles stop auto-dispatch and `@` the owner.
+- ✅ **Coordinator structured dispatch**: user multi-`@` or agent multi-`@` is handed to the coordinator, split into independent tasks run in parallel or serial per `dispatchMode` (no blind fan-out).
+- ✅ **Parallel-batch / serial-chain fork-join**: parallel members complete, or the serial chain's tail finishes, then the coordinator adjudicates the next step.
+- ✅ **Collaboration-budget breaker**: repeated fan-out/cycles on single-`@` relay stop auto-dispatch and `@` the owner.
 - 🔵 **Task-card event aggregation** is still not fully implemented; the "state-change channel + aggregation window" below remains a recommended next step.
 
 #### Recommended Solution

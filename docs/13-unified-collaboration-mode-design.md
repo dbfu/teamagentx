@@ -18,7 +18,11 @@
 - 决策审计：`CoordinatorLog` 表 + 前端「调度日志」面板
 - 存储兼容：`agentTriggerMode` 仍存 `coordinator`/`manual`；`auto` 作为历史别名等同智能协作；模板导入按此映射
 
-下文「方案设计」描述与现状基本一致，仅个别措辞（如「未实现」标注）以本节为准。
+**落地与本提案的差异**（实现进一步演进，以代码与 [14-agent-dispatch-flowcharts.md](14-agent-dispatch-flowcharts.md) 为权威）：
+- 协调器多助手派发新增 **串行链**（`serial-chain-tracker` + `task-lifecycle`，`dispatchMode: parallel | serial`），与并行批次并列；下文 §2.2「批次层」只描述了并行批次。
+- **并发上限（原 §2.2 的 `AGENT_MAX_PARALLEL_DISPATCH=3`）已移除**：用户多 `@` 不再按并发上限截断，而是整体交协调器拆分为单任务/并行/串行；协作预算因此收敛为**两重熔断（跳数 + 环路）**，且只约束「助手单 `@` 直连接力」快路径，协调器主动发起的并行/串行任务不计入。
+
+下文「方案设计」描述与现状基本一致，仅个别措辞（如「未实现」标注、并发上限、仅并行批次）以本节与文档 14 为准。
 
 ---
 

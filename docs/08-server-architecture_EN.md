@@ -129,8 +129,8 @@ Core path of Smart Collaboration (see [11-agent-trigger-system_EN.md](11-agent-t
 
 - **Fast path**: an agent's reply with exactly one valid `@` triggers the relay directly, zero coordination cost
 - **5 coordinator intervention points**: user routing miss / `@` anomaly / parallel-batch join / stall fallback / circuit-breaker escalation — adjudicated by `coordinator-dispatch.ts` + `internal-coordinator-agent.ts`
-- **Collaboration budget** (`collaboration-budget.ts`): triple breaker on hops / consecutive cycle / concurrency, counting window "between two human messages"
-- **Parallel batches** (`parallel-batch-tracker.ts`): fork-join; `@`s inside a batch are suspended to the join for unified adjudication; user intervention takes over
+- **Collaboration budget** (`collaboration-budget.ts`): only constrains the "agent single-`@` direct relay" fast path with two breakers on hops / consecutive cycle, counting window "between two human messages"
+- **Multi-agent dispatch**: the coordinator picks parallel or serial per `dispatchMode` — **parallel batch** (`parallel-batch-tracker.ts`, fork-join; `@`s inside a batch suspended to the join) or **serial chain** (`serial-chain-tracker.ts` + `task-lifecycle.ts`, only the head dispatched at a time, advanced by queue settlement events); user intervention takes over. Full flowcharts in [14-agent-dispatch-flowcharts_EN.md](14-agent-dispatch-flowcharts_EN.md)
 - **Stall fallback** (`stall-watchdog.ts`): wakes the coordinator when the room is idle after an agent finishes
 - **Dispatch rules** (`dispatch-rules/`): `ChatRoom.dispatchRules` (YAML) injected into the coordinator's system prompt to orchestrate "who's next"
 - **Execution robustness**: coordinator LLM decision timeout/retry, business-agent "no-activity" retry (`no-activity-timeout.ts`)
@@ -302,9 +302,8 @@ Since 2026-06, system agents are consolidated from "several separate @agents" in
 | `AGENT_COORDINATOR_LLM_TIMEOUT_MS` | `120000` | Coordinator LLM decision timeout |
 | `AGENT_COORDINATOR_LLM_RETRY_COUNT` | `1` | Coordinator LLM retry count |
 | `AGENT_EXECUTION_NO_ACTIVITY_TIMEOUT_MS` | `90000` | Agent no-activity retry timeout (0 disables) |
-| `AGENT_MAX_HANDOFF_HOPS` | `20` | Collaboration budget: hop budget |
+| `AGENT_MAX_HANDOFF_HOPS` | `20` | Collaboration budget: single-`@` relay hop budget |
 | `AGENT_HANDOFF_CYCLE_REPEAT_LIMIT` | `3` | Collaboration budget: consecutive round-trip cap |
-| `AGENT_MAX_PARALLEL_DISPATCH` | `3` | Collaboration budget: per-dispatch concurrency cap |
 | `BRIDGE_ENCRYPTION_KEY` | `''` | Bridge credential encryption key |
 | `BRIDGE_REQUIRE_SIGNATURE` | `false` | Whether to enforce webhook signature |
 | `EDGE_TTS_BINARY` / `EDGE_TTS_DEFAULT_VOICE` | `edge-tts` / `zh-CN-XiaoxiaoNeural` | Speech synthesis |
