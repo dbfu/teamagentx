@@ -149,6 +149,7 @@ ${chatRoomRules.trim()}`,
 - 每个助手的交接内容必须是分配给该助手的独立、具体任务。
 - 交接行不能位于代码块、引用块或示例中。
 - 目标助手必须是本群已存在的助手。
+- 不要重复已在途的交接：如果你在本话题中已经 @ 过某助手、而它尚未返回结果（你还没看到它的回复），就不要再 @ 它——即使你这次只是完成了用户临时插进来要求的支线小事。它会通过群历史看到你的最新产出，无需再次触发。只有当你确有一个新的、不同的事项要交给它时，才再次 @。
 如果确实无法确定正确的助手，不要乱猜——改为请用户选择来结束。
 2. 结束 —— 任务已完成，或现在需要用户介入（更多输入、决策或确认）。不要提及任何助手。如果你在向用户提问或等待其确认/决策，回复必须 @ 该用户（如 @username），以便系统把回答直接路由回你；否则只给出结果。
 禁止在暗示仍有后续工作（例如"接下来应该…""然后需要测试/构建/审查/由…处理"）时不带交接行就结束回复。发送前重读回复末尾：如果你的回复暗示一个或多个助手还得行动，确认每个目标都有一行以 "@" 开头的明确交接。`,
@@ -162,6 +163,7 @@ Format rules for these handoff lines (otherwise they will NOT trigger and the ta
 - Each handoff must contain a standalone, specific task for that assistant.
 - Handoff lines must NOT be inside a code block, blockquote, or example.
 - Every target assistant must be an existing assistant in this chatroom.
+- Do NOT repeat a handoff that is still in flight: if you already @-ed an assistant earlier in this thread and it has not returned its result yet (you have not seen its reply), do NOT @ it again — even if all you just did was a small side task the user injected. It will see your latest output via the group history and needs no re-trigger. Only @ it again if you genuinely have a new, different task for it.
 If the correct assistant is genuinely unclear, do NOT guess — end by asking the user to choose instead.
 2. FINISH — the task is complete, or it now needs the user (more input, a decision, or confirmation). Do NOT mention any assistant. If you are asking the user a question or waiting for their confirmation/decision, the reply MUST @ that user (e.g. @username) so the system can route their answer straight back to you; otherwise just give the result.
 It is FORBIDDEN to end a reply that implies further work is still needed (e.g. "next we should…", "then it needs to be tested / built / reviewed / handled by …") WITHOUT HAND OFF lines. Before sending, re-read the end of the reply: if one or more assistants must act, confirm every target has a clear line starting with "@".`,
@@ -234,8 +236,8 @@ export function buildHandoffTurnReminder(
   if (agentTriggerMode !== 'auto' && agentTriggerMode !== 'coordinator') return '';
   return pickLocaleText(
     {
-      'zh-CN': `[交接提醒] 本条回复必须恰好以以下之一结束：(a) 若一个或多个助手必须继续，在回复末尾为每个目标单独写一行 "@助手名 接下来要做什么"；@ 位于行首，任务具体且不在代码块内。多个 @ 会由群调度助手判断并行或串行；(b) 若任务已完成或现在需要用户，不要提及任何助手——但如果你在请用户确认、决策或回答后才能继续，则 @ 该用户（@username），以便其回答路由回你。绝不要在暗示仍有后续工作时不带交接行就结束回复。`,
-      'en-US': `[Handoff Reminder] End this reply with exactly ONE of: (a) if one or more assistants must continue, add one line per target at the end in the form "@assistant_name what to do next"; put @ at the start of each line, give each assistant a specific task, and keep the lines outside code blocks. Multiple @mentions are routed to the group coordinator to decide parallel or serial execution; (b) if the task is done or now needs the user, do not mention any assistant—but if you are asking the user to confirm, decide, or answer before you can continue, @ that user (@username) so their reply routes back to you. Never end a reply that implies further work is still needed without handoff lines.`,
+      'zh-CN': `[交接提醒] 本条回复必须恰好以以下之一结束：(a) 若一个或多个助手必须继续，在回复末尾为每个目标单独写一行 "@助手名 接下来要做什么"；@ 位于行首，任务具体且不在代码块内。多个 @ 会由群调度助手判断并行或串行。但若某助手你在本话题已经 @ 过且它尚未返回，不要重复 @ 它（哪怕你这次只是完成了用户临时要求的支线），改按 (b) 收尾；(b) 若任务已完成或现在需要用户，不要提及任何助手——但如果你在请用户确认、决策或回答后才能继续，则 @ 该用户（@username），以便其回答路由回你。绝不要在暗示仍有后续工作时不带交接行就结束回复。`,
+      'en-US': `[Handoff Reminder] End this reply with exactly ONE of: (a) if one or more assistants must continue, add one line per target at the end in the form "@assistant_name what to do next"; put @ at the start of each line, give each assistant a specific task, and keep the lines outside code blocks. Multiple @mentions are routed to the group coordinator to decide parallel or serial execution. But if you already @-ed an assistant earlier in this thread and it has not returned yet, do NOT @ it again (even if all you just did was a user-injected side task) — end with (b) instead; (b) if the task is done or now needs the user, do not mention any assistant—but if you are asking the user to confirm, decide, or answer before you can continue, @ that user (@username) so their reply routes back to you. Never end a reply that implies further work is still needed without handoff lines.`,
     },
     locale,
   );
