@@ -154,8 +154,8 @@ type CurrentUser = {
   avatar?: string | null
 } | null
 
-const LARGE_MESSAGE_CHAR_THRESHOLD = 1200
-const LARGE_MESSAGE_LINE_THRESHOLD = 18
+const LARGE_MESSAGE_CHAR_THRESHOLD = 2400
+const LARGE_MESSAGE_LINE_THRESHOLD = 36
 function isLargeMessageContent(content: string): boolean {
   if (content.length > LARGE_MESSAGE_CHAR_THRESHOLD) return true
   return content.split(/\r\n|\r|\n/).length > LARGE_MESSAGE_LINE_THRESHOLD

@@ -274,7 +274,7 @@ export function ChatAreaHeader({
               onPointerLeave={handlePackageScriptsTriggerPointerLeave}
             >
               {runningScript ? (
-                <Loader2 className="size-5 animate-spin" />
+                <Loader2 className="size-5 animate-spin transform-gpu [will-change:transform]" />
               ) : (
                 <TerminalSquare className="size-5" />
               )}
@@ -289,7 +289,7 @@ export function ChatAreaHeader({
         </DropdownMenuLabel>
         {loadingScripts ? (
           <div className="flex items-center gap-2 px-2 py-2 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" />
+            <Loader2 className="size-4 animate-spin transform-gpu [will-change:transform]" />
             {t('chat.refreshing')}
           </div>
         ) : visibleScripts.length > 0 ? (
