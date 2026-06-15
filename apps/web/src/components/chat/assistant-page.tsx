@@ -32,6 +32,8 @@ import {
   Pencil,
   Check,
   X,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react'
 import { agentApi, categoryApi, Agent, AgentCategory, AgentSpeechConfig, AgentsGrouped, type AgentThinkingMode, type ChatRoom } from '@/lib/agent-api'
 import { cn } from '@/lib/utils'
@@ -272,6 +274,51 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
   // dnd-kit 状态（仅用于同组内排序）
   const [activeAgent, setActiveAgent] = useState<Agent | null>(null)
   const activeTabKeyRef = useRef<string | null>(null)
+
+  // 分类标签栏横向滚动（单行 + 左右箭头）
+  const tabScrollRef = useRef<HTMLDivElement | null>(null)
+  const tabResizeObserver = useRef<ResizeObserver | null>(null)
+  const [tabScroll, setTabScroll] = useState({ left: false, right: false })
+
+  const updateTabScroll = useCallback(() => {
+    const el = tabScrollRef.current
+    if (!el) return
+    setTabScroll({
+      left: el.scrollLeft > 1,
+      right: Math.ceil(el.scrollLeft + el.clientWidth) < el.scrollWidth - 1,
+    })
+  }, [])
+
+  // 鼠标滚轮（纵向）转横向滚动；横向滚轮（触控板）保持默认
+  const handleTabWheel = useCallback((e: WheelEvent) => {
+    const el = tabScrollRef.current
+    if (!el || el.scrollWidth <= el.clientWidth) return
+    if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return
+    el.scrollLeft += e.deltaY
+    e.preventDefault()
+  }, [])
+
+  // 回调 ref：节点挂载即绑定 ResizeObserver / wheel 监听并立即测量，避免 effect 时序问题
+  const attachTabScroll = useCallback((node: HTMLDivElement | null) => {
+    tabResizeObserver.current?.disconnect()
+    const prev = tabScrollRef.current
+    if (prev) prev.removeEventListener('wheel', handleTabWheel)
+    tabScrollRef.current = node
+    if (node) {
+      const observer = new ResizeObserver(() => updateTabScroll())
+      observer.observe(node)
+      tabResizeObserver.current = observer
+      // passive: false 才能 preventDefault 阻止页面纵向滚动
+      node.addEventListener('wheel', handleTabWheel, { passive: false })
+      updateTabScroll()
+    }
+  }, [updateTabScroll, handleTabWheel])
+
+  const scrollTabs = (direction: 'left' | 'right') => {
+    const el = tabScrollRef.current
+    if (!el) return
+    el.scrollBy({ left: direction === 'left' ? -240 : 240, behavior: 'smooth' })
+  }
 
   // dnd-kit 传感器配置
   const sensors = useSensors(
@@ -806,6 +853,17 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     activeTabKeyRef.current = activeTab?.key ?? null
   }, [activeTab?.key])
 
+  // 标签增减会改变 scrollWidth 但不改变容器盒子（ResizeObserver 抓不到），故显式重算；
+  // 同时监听窗口 resize。rAF 确保在布局完成后再测量。
+  useEffect(() => {
+    const raf = requestAnimationFrame(updateTabScroll)
+    window.addEventListener('resize', updateTabScroll)
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener('resize', updateTabScroll)
+    }
+  }, [updateTabScroll, tabs])
+
   // 当前 Tab 下经过搜索过滤的助手；“搜索结果”Tab 展示跨分类的全部匹配项
   const activeAgents = activeTab
     ? (activeTab.type === 'search'
@@ -815,7 +873,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
 
   return (
     <>
-      <div className="flex flex-1 flex-col bg-[var(--surface)]">
+      <div className="flex min-w-0 flex-1 flex-col bg-[var(--surface)]">
         {/* Header */}
         <div
           className="flex h-[52px] items-center border-b border-border px-4 shrink-0 bg-[var(--surface-raised)]"
@@ -888,27 +946,47 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto">
-          <div className={cn(isMobile ? "ta-page-section-mobile" : "ta-page-section")}>
+        <div className="flex min-h-0 flex-1 flex-col">
             {loading ? (
-              <div className="flex items-center justify-center h-full">
+              <div className="flex flex-1 items-center justify-center">
                 <div className="size-6 animate-spin rounded-full border-2 border-muted border-t-primary" />
               </div>
             ) : assistants.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+              <div className="flex flex-1 flex-col items-center justify-center text-muted-foreground">
                 <Bot className="size-12 mb-2" />
                 <p>{t('assistant.noAssistants')}</p>
               </div>
             ) : tabs.length > 0 && activeTab ? (
               <>
+                {/* 固定的分类标签栏（不随网格纵向滚动） */}
+                <div className={cn("shrink-0", isMobile ? "px-3 pt-5" : "px-5 pt-6")}>
                 {/* 分类 Tab 栏（药丸样式，普通分类支持拖拽排序 + 右键重命名/删除） */}
                 <DndContext
                   sensors={sensors}
                   collisionDetection={closestCenter}
                   onDragEnd={handleCategoryTabDragEnd}
                 >
-                  <SortableContext items={sortableCategoryIds} strategy={horizontalListSortingStrategy}>
-                    <div className="mb-5 flex items-center gap-1.5 overflow-x-auto pb-1">
+                  <div className="mb-5 flex items-center gap-1.5">
+                    <div className="relative min-w-0 flex-1">
+                    {/* 左滚动箭头 */}
+                    {tabScroll.left && (
+                      <button
+                        type="button"
+                        onClick={() => scrollTabs('left')}
+                        className="absolute left-0 top-0 bottom-0 z-20 flex items-center bg-gradient-to-r from-[var(--surface)] via-[var(--surface)] to-transparent pr-8"
+                        aria-label={t('common.previous', { defaultValue: '上一页' })}
+                      >
+                        <span className="flex size-8 items-center justify-center rounded-full border border-border bg-[var(--surface-raised)] text-foreground shadow-md transition-colors hover:bg-muted">
+                          <ChevronLeft className="size-4" />
+                        </span>
+                      </button>
+                    )}
+                    <SortableContext items={sortableCategoryIds} strategy={horizontalListSortingStrategy}>
+                      <div
+                        ref={attachTabScroll}
+                        onScroll={updateTabScroll}
+                        className="no-scrollbar flex items-center gap-1.5 overflow-x-auto"
+                      >
                       {tabs.map((tab) => {
                         const isActive = tab.key === activeTab.key
 
@@ -980,19 +1058,39 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
                         )
                       })}
 
-                      {/* 末尾的添加分类按钮 */}
+                      </div>
+                    </SortableContext>
+                    {/* 右滚动箭头 */}
+                    {tabScroll.right && (
                       <button
                         type="button"
-                        onClick={() => setIsCreateCategoryModalOpen(true)}
-                        title={t('assistant.createCategory')}
-                        className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-blue-500 transition-colors hover:bg-blue-500/20"
+                        onClick={() => scrollTabs('right')}
+                        className="absolute right-0 top-0 bottom-0 z-20 flex items-center bg-gradient-to-l from-[var(--surface)] via-[var(--surface)] to-transparent pl-8"
+                        aria-label={t('common.next', { defaultValue: '下一页' })}
                       >
-                        <Plus className="size-4" />
+                        <span className="flex size-8 items-center justify-center rounded-full border border-border bg-[var(--surface-raised)] text-foreground shadow-md transition-colors hover:bg-muted">
+                          <ChevronRight className="size-4" />
+                        </span>
                       </button>
+                    )}
                     </div>
-                  </SortableContext>
-                </DndContext>
 
+                    {/* 固定在最右侧的添加分类按钮（不随标签滚动） */}
+                    <button
+                      type="button"
+                      onClick={() => setIsCreateCategoryModalOpen(true)}
+                      title={t('assistant.createCategory')}
+                      className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-blue-500 transition-colors hover:bg-blue-500/20"
+                    >
+                      <Plus className="size-4" />
+                    </button>
+                  </div>
+                </DndContext>
+                </div>
+
+                {/* 可纵向滚动的助手网格区 */}
+                <div className="flex-1 overflow-y-auto">
+                  <div className={cn(isMobile ? "px-3 pb-5 pt-1" : "px-5 pb-6 pt-1")}>
                 {/* 当前分类下的助手网格 */}
                 {activeAgents.length === 0 && (activeTab.type === 'system' || searchQuery.trim() !== '') ? (
                   <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
@@ -1032,7 +1130,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
                         {activeTab.type !== 'system' && activeTab.type !== 'search' && (
                           <button
                             onClick={() => openCreateModalWithCategory(activeTab.categoryId)}
-                            className="group flex h-[180px] w-full max-w-[360px] flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border bg-card/40 p-5 text-muted-foreground transition-all duration-200 hover:border-blue-500 hover:text-blue-500"
+                            className="group flex h-[180px] w-full flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border bg-card/40 p-5 text-muted-foreground transition-all duration-200 hover:border-blue-500 hover:text-blue-500"
                             title={t('assistant.addAssistant')}
                           >
                             <div className="flex size-12 items-center justify-center rounded-full border border-dashed border-border transition-colors group-hover:border-blue-500">
@@ -1090,14 +1188,15 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
                     </DragOverlay>
                   </DndContext>
                 )}
+                  </div>
+                </div>
               </>
             ) : (
-              <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+              <div className="flex flex-1 flex-col items-center justify-center text-muted-foreground">
                 <Search className="size-12 mb-2" />
                 <p>{t('assistant.noMatchingAssistants')}</p>
               </div>
             )}
-          </div>
         </div>
       </div>
 

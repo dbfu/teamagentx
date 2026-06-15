@@ -9,7 +9,7 @@ import { PendingImage } from '@/components/chat/image-preview-list'
 import { compressImage, fileToBase64, createPreviewUrl, revokePreviewUrl, getImageDimensions, isValidImageType, isValidImageSize } from '@/lib/image-utils'
 import { isActivelyViewingChatRoom } from '@/lib/chat-room-presence'
 import { coerceThinkingText } from '@/lib/utils'
-import { isStreamViewBlocked } from '@/lib/system-agents'
+import { GROUP_COORDINATOR_ID, isStreamViewBlocked } from '@/lib/system-agents'
 import { toast } from 'sonner'
 import { useIsMobile } from '@/hooks/use-mobile'
 
@@ -2053,6 +2053,33 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
       })) : undefined,
     }
     addMessage(newMessage)
+
+    // 调度消息已经可见时，调度助手本轮工作必然已产出结果。以消息作为 agent:done
+    // 的幂等兜底，避免消息广播与紧随其后的 done 事件之间发生订阅切换时永久残留执行态。
+    const coordinatorTriggerMessageId = newMessage.replyMessageId
+    if (newMessage.agentId === GROUP_COORDINATOR_ID && coordinatorTriggerMessageId) {
+      useChatStore.setState((state) => {
+        const agents = state.typingAgents.get(coordinatorTriggerMessageId)
+        if (!agents?.some((agent) => agent.agentId === GROUP_COORDINATOR_ID)) {
+          return state
+        }
+
+        const nextTypingAgents = new Map(state.typingAgents)
+        const remainingAgents = agents.filter((agent) => agent.agentId !== GROUP_COORDINATOR_ID)
+        if (remainingAgents.length === 0) {
+          nextTypingAgents.delete(coordinatorTriggerMessageId)
+        } else {
+          nextTypingAgents.set(coordinatorTriggerMessageId, remainingAgents)
+        }
+
+        const nextCompletedAgents = new Set(state.completedAgents)
+        nextCompletedAgents.add(`${coordinatorTriggerMessageId}_${GROUP_COORDINATOR_ID}`)
+        return {
+          typingAgents: nextTypingAgents,
+          completedAgents: nextCompletedAgents,
+        }
+      })
+    }
   }, [addMessage])
 
   // 进入群聊时刷新助手配置，确保系统助手或详情页更新后的语音配置能即时生效
@@ -2194,7 +2221,13 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     const messageContent = normalizedCommandContent?.content ?? trimmedInput
 
     const mentionedDispatchableAgentNames = getMentionedDispatchableAgentNames(messageContent, chatRoom, allAgents)
-    if (mentionedDispatchableAgentNames.length > 1) {
+    // 智能协作模式（coordinator）且非快速对话群：允许用户一次 @ 多个助手，
+    // 由后端按并发上限并行派发（超限会截断并提示），与 handler.ts 的 allowParallel 对齐。
+    // 手动模式 / 快速对话群：仍只允许 @ 单个助手。
+    const allowParallelMentions =
+      (chatRoom.agentTriggerMode ?? 'coordinator') === 'coordinator' &&
+      !chatRoom.isQuickChatRoom
+    if (!allowParallelMentions && mentionedDispatchableAgentNames.length > 1) {
       toast.warning(createTooManyMentionsToast())
       return
     }

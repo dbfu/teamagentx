@@ -24,7 +24,15 @@ import {
 import { pickLocaleText, type Locale, normalizeLocale } from './agent-handler/locale.js';
 import { enqueueAgentTask } from './agent-handler/agent-dispatch.service.js';
 import { startParallelBatch } from './agent-handler/parallel-batch-tracker.js';
-import { clampParallelDispatch } from './agent-handler/collaboration-budget.js';
+import {
+  startSerialChain,
+  advanceSerialChain,
+  bindSerialTask,
+  clearSerialChainForTask,
+  clearSerialChain,
+  skipUnboundSerialAgent,
+} from './agent-handler/serial-chain-tracker.js';
+import type { AgentTaskOutcome } from './agent-handler/task-lifecycle.js';
 import {
   globalEmit,
   globalBroadcastMessage,
@@ -35,11 +43,23 @@ import { buildAIMessage } from './agent-handler/message-utils.js';
 import type { Message } from '../../types/message.js';
 import { debugLog } from './agent-handler/debug.js';
 
+export interface DispatchAssignment {
+  targetAgentName: string;
+  content: string;
+  forwardVerbatim?: boolean;
+}
+
 export interface DispatchDecision {
   decision: 'dispatch' | 'no_dispatch' | 'ask_owner' | 'cannot_dispatch';
+  assignments?: DispatchAssignment[];
+  /** @deprecated 兼容旧版协调器输出；新输出使用 assignments。 */
   targetAgentIds?: string[];
+  /** ask_owner 的问题内容；dispatch 时仅用于兼容旧版协调器输出。 */
   content?: string;
+  /** @deprecated 兼容旧版协调器输出；新输出使用 assignment.forwardVerbatim。 */
   forwardVerbatim?: boolean;
+  /** 多个任务时的执行方式：parallel=同时并行（默认）；serial=按 assignments 顺序逐个执行。 */
+  dispatchMode?: 'parallel' | 'serial';
   reason?: 'no_suitable_assistant' | 'system_management';
 }
 
@@ -48,9 +68,18 @@ export interface CoordinatorDispatchOptions {
   signal?: AbortSignal;
   /** 本次调度实际派发的目标助手 id 回调（含尚未执行的排队任务），供调用方在用户介入时一并停掉。 */
   onAgentsDispatched?: (agentIds: string[]) => void;
+  /** 协调器介入原因；用于对特定入口施加更严格的路由约束。 */
+  routingReason?: string;
 }
 
 const DISPATCH_TOOL_NAME = 'dispatch_decision';
+
+interface DispatchToolConstraints {
+  maxAssignments?: number;
+  forbidNoSuitableAssistant?: boolean;
+  allowedDecisions?: DispatchDecision['decision'][];
+  requireAssignments?: boolean;
+}
 
 function getDispatchToolDescription(locale?: string): string {
   return pickLocaleText(
@@ -63,14 +92,18 @@ function getDispatchToolDescription(locale?: string): string {
   );
 }
 
-function getDispatchToolParameters(locale?: string) {
+function getDispatchToolParameters(
+  locale?: string,
+  constraints?: DispatchToolConstraints,
+) {
   const pendingMarker = coordinatorPendingDecisionLabel(locale);
   return {
     type: 'object' as const,
     properties: {
       decision: {
         type: 'string',
-        enum: ['dispatch', 'no_dispatch', 'ask_owner', 'cannot_dispatch'],
+        enum: constraints?.allowedDecisions ??
+          ['dispatch', 'no_dispatch', 'ask_owner', 'cannot_dispatch'],
         description: pickLocaleText(
           {
             'zh-CN': '决策类型：dispatch=调度助手；no_dispatch=无需调度；ask_owner=需群主确认；cannot_dispatch=系统管理请求',
@@ -80,14 +113,68 @@ function getDispatchToolParameters(locale?: string) {
           locale,
         ),
       },
-      targetAgentIds: {
+      assignments: {
         type: 'array',
-        items: { type: 'string' },
+        items: {
+          type: 'object',
+          properties: {
+            targetAgentName: {
+              type: 'string',
+              description: pickLocaleText(
+                {
+                  'zh-CN': '目标助手名称，必须与当前群聊成员清单完全一致',
+                  'en-US':
+                    'Target assistant name; it must exactly match the current chatroom member list',
+                },
+                locale,
+              ),
+            },
+            content: {
+              type: 'string',
+              description: pickLocaleText(
+                {
+                  'zh-CN': '只分配给该助手的独立、可直接执行的任务，不要包含 @助手名称',
+                  'en-US':
+                    'A standalone actionable task assigned only to this assistant; do not include an @mention',
+                },
+                locale,
+              ),
+            },
+            forwardVerbatim: {
+              type: 'boolean',
+              description: pickLocaleText(
+                {
+                  'zh-CN': `仅单助手且需原样转发用户消息时设为 true；后端将使用 [${pendingMarker}] 原文并忽略 content`,
+                  'en-US':
+                    `Set true only for a single assistant when the user's message must be forwarded verbatim; the backend uses the [${pendingMarker}] original text and ignores content`,
+                },
+                locale,
+              ),
+            },
+          },
+          required: ['targetAgentName', 'content'],
+        },
+        minItems: 1,
+        ...(constraints?.maxAssignments
+          ? { maxItems: constraints.maxAssignments }
+          : {}),
         description: pickLocaleText(
           {
-            'zh-CN': 'dispatch 时必填：目标助手的「名称」数组，必须与群成员清单中的助手名称完全一致（逐字、不要自造 ID），可多个（并行）',
+            'zh-CN': 'dispatch 时必填：逐助手任务列表。每个助手都有独立任务；dispatchMode=serial 时数组顺序即执行顺序',
             'en-US':
-              'Required for dispatch: an array of target assistant "names", each matching a chatroom member name exactly (verbatim, never invent IDs); may be multiple (parallel)',
+              'Required for dispatch: per-assistant task assignments. Every assistant has an independent task; for dispatchMode=serial, array order is execution order',
+          },
+          locale,
+        ),
+      },
+      dispatchMode: {
+        type: 'string',
+        enum: ['parallel', 'serial'],
+        description: pickLocaleText(
+          {
+            'zh-CN': '多个任务时的执行方式：parallel=同时并行（默认）；serial=按 assignments 顺序逐个执行，前一个完成后再派下一个。用户表达「依次/按顺序/逐个/轮流/先…再…」或后续任务依赖前序产出时用 serial。单个任务时忽略本字段',
+            'en-US':
+              'Execution mode for multiple tasks: parallel = run simultaneously (default); serial = run one by one in assignments order, dispatching the next only after the previous finishes. Use serial when requested or when later tasks depend on earlier output. Ignored for a single task',
           },
           locale,
         ),
@@ -96,26 +183,18 @@ function getDispatchToolParameters(locale?: string) {
         type: 'string',
         description: pickLocaleText(
           {
-            'zh-CN': 'dispatch/ask_owner 时的消息内容；ask_owner 时格式：@群主用户名 + 问题（保留 Markdown）',
+            'zh-CN': '仅 ask_owner 时使用：@群主用户名 + 问题（保留 Markdown）',
             'en-US':
-              'Message content for dispatch/ask_owner; for ask_owner the format is @owner_username + question (preserve Markdown)',
-          },
-          locale,
-        ),
-      },
-      forwardVerbatim: {
-        type: 'boolean',
-        description: pickLocaleText(
-          {
-            'zh-CN': `true 时后端直接用 [${pendingMarker}] 原文发送给目标助手，忽略 content`,
-            'en-US': `When true, the backend sends the [${pendingMarker}] original text directly to the target assistant and ignores content`,
+              'Used only for ask_owner: @owner_username + question (preserve Markdown)',
           },
           locale,
         ),
       },
       reason: {
         type: 'string',
-        enum: ['no_suitable_assistant', 'system_management'],
+        enum: constraints?.forbidNoSuitableAssistant
+          ? ['system_management']
+          : ['no_suitable_assistant', 'system_management'],
         description: pickLocaleText(
           {
             'zh-CN': 'cannot_dispatch 时的原因',
@@ -125,7 +204,9 @@ function getDispatchToolParameters(locale?: string) {
         ),
       },
     },
-    required: ['decision'],
+    required: constraints?.requireAssignments
+      ? ['decision', 'assignments']
+      : ['decision'],
   };
 }
 
@@ -289,8 +370,17 @@ function buildMemberSection(
   const memberLabel = t({ 'zh-CN': '成员：', 'en-US': 'Member: ' });
 
   const agentLines = chatRoomAgents
-    .filter((cra) => cra.agent && (cra.agent as any).isActive && cra.agent.id !== GROUP_COORDINATOR_ID)
-    .map((cra) => `- ${cra.agent!.name}`);
+    .filter((cra) =>
+      cra.agent &&
+      (cra.agent as any).isActive &&
+      (cra.agent as any).agentLevel !== 'system' &&
+      cra.agent.id !== GROUP_COORDINATOR_ID)
+    .map((cra) => {
+      const description = cra.agent!.description?.trim();
+      return description
+        ? `- ${cra.agent!.name}：${description}`
+        : `- ${cra.agent!.name}`;
+    });
 
   const humanLines: string[] = [];
   if (ownerUsername) humanLines.push(`${ownerLabel}@${ownerUsername}`);
@@ -312,12 +402,37 @@ function buildMemberSection(
   return `## ${sectionTitle}\n${agentSection}${humanSection}`;
 }
 
+export function buildUnroutedUserConstraintBlock(
+  businessAssistantCount: number,
+  locale?: string,
+): string {
+  if (businessAssistantCount <= 0) return '';
+  return pickLocaleText(
+    {
+      'zh-CN': `\n\n## 本次路由约束
+当前消息是用户在未 @ 助手、且没有可用默认助手时发送的消息。
+- 必须根据业务助手的名称、描述和群调度规则，选择相关度最高的一个助手处理该消息。
+- 只允许 dispatch，并生成一个 assignment；禁止 no_dispatch、ask_owner、cannot_dispatch 和并行拆分。
+- 即使没有完全匹配的助手，也选择职责最接近的一位。
+- 使用 forwardVerbatim: true 原样转发用户请求。`,
+      'en-US': `\n\n## Routing constraint for this request
+This message was sent by a user without an @mention and no usable default assistant was available.
+- You must select exactly one assistant with the highest relevance based on assistant names, descriptions, and group dispatch rules.
+- Only dispatch is allowed, with exactly one assignment; no_dispatch, ask_owner, cannot_dispatch, and parallel splitting are forbidden.
+- Choose the closest available responsibility even without a perfect match.
+- Use forwardVerbatim: true to forward the user's request verbatim.`,
+    },
+    locale,
+  );
+}
+
 async function callAnthropicCoordinator(
   provider: LlmProvider,
   systemPrompt: string,
   memberSection: string,
   userContent: string,
   locale?: string,
+  constraints?: DispatchToolConstraints,
   signal?: AbortSignal,
 ): Promise<DispatchDecision | null> {
   const client = new Anthropic({
@@ -328,7 +443,7 @@ async function callAnthropicCoordinator(
   const tool: Anthropic.Messages.Tool = {
     name: DISPATCH_TOOL_NAME,
     description: getDispatchToolDescription(locale),
-    input_schema: getDispatchToolParameters(locale) as Anthropic.Messages.Tool['input_schema'],
+    input_schema: getDispatchToolParameters(locale, constraints) as Anthropic.Messages.Tool['input_schema'],
   };
 
   const response = await client.messages.create({
@@ -357,6 +472,7 @@ async function callOpenAICoordinator(
   memberSection: string,
   userContent: string,
   locale?: string,
+  constraints?: DispatchToolConstraints,
   signal?: AbortSignal,
 ): Promise<DispatchDecision | null> {
   const client = new OpenAI({
@@ -369,7 +485,7 @@ async function callOpenAICoordinator(
     function: {
       name: DISPATCH_TOOL_NAME,
       description: getDispatchToolDescription(locale),
-      parameters: getDispatchToolParameters(locale),
+      parameters: getDispatchToolParameters(locale, constraints),
     },
   };
 
@@ -463,12 +579,38 @@ async function resolveTargetAgentIds(chatRoomId: string, tokens: string[]): Prom
   return resolved;
 }
 
+export function buildDispatchPlanContent(
+  assignments: Array<{
+    agent: NonNullable<Awaited<ReturnType<typeof agentService.findById>>>;
+    content: string;
+  }>,
+  dispatchMode: 'parallel' | 'serial',
+  locale?: string,
+): string {
+  // 单个任务不再展示标题和前缀，直接输出 @助手 内容
+  if (assignments.length === 1) {
+    const { agent, content } = assignments[0];
+    return `@${agent.name} ${content}`;
+  }
+  const lines = assignments.map(({ agent, content }, index) => {
+    const prefix = dispatchMode === 'serial'
+      ? `${index + 1}.`
+      : '-';
+    return `${prefix} @${agent.name} ${content}`;
+  });
+  const title = dispatchMode === 'serial'
+    ? pickLocaleText({ 'zh-CN': '串行任务', 'en-US': 'Serial tasks' }, locale)
+    : pickLocaleText({ 'zh-CN': '并行任务', 'en-US': 'Parallel tasks' }, locale);
+  return `**${title}**\n${lines.join('\n')}`;
+}
+
 async function executeDecision(
   chatRoomId: string,
   triggerMessage: Message,
   decision: DispatchDecision,
   coordinatorAgent: AgentWithRelations,
   options?: CoordinatorDispatchOptions,
+  locale?: string,
 ): Promise<void> {
   // 被用户发言打断：放弃执行本次调度决策（不派发、不改工作台状态）。
   if (options?.signal?.aborted) {
@@ -478,6 +620,7 @@ async function executeDecision(
   debugLog('coordinatorStructuredDecision', {
     chatRoomId,
     decision: decision.decision,
+    assignments: decision.assignments,
     targetAgentIds: decision.targetAgentIds,
     reason: decision.reason,
     forwardVerbatim: decision.forwardVerbatim,
@@ -552,23 +695,60 @@ async function executeDecision(
     }
 
     case 'dispatch': {
-      const tokens = decision.targetAgentIds ?? [];
-      if (tokens.length === 0) {
-        console.warn('[coordinator-dispatch] dispatch decision missing targetAgentIds');
+      let structuredAssignments = (decision.assignments ?? [])
+        .filter((assignment) => assignment.targetAgentName?.trim())
+        .map((assignment) => ({
+          targetAgentName: assignment.targetAgentName.trim(),
+          content: assignment.content?.trim() || triggerMessage.content,
+          forwardVerbatim: assignment.forwardVerbatim,
+        }));
+      if (
+        options?.routingReason === 'humanUnroutedMessage' &&
+        structuredAssignments.length > 1
+      ) {
+        console.warn(
+          '[coordinator-dispatch] unrouted user decision returned multiple assignments; using the highest-ranked first assignment',
+        );
+        structuredAssignments = structuredAssignments.slice(0, 1);
+      }
+      const legacyContent = decision.forwardVerbatim
+        ? triggerMessage.content
+        : (decision.content?.trim() || triggerMessage.content);
+      let requestedAssignments = structuredAssignments.length > 0
+        ? structuredAssignments
+        : (decision.targetAgentIds ?? [])
+            .filter((token) => token?.trim())
+            .map((token) => ({
+              targetAgentName: token.trim(),
+              content: legacyContent,
+              forwardVerbatim: decision.forwardVerbatim,
+            }));
+      if (
+        options?.routingReason === 'humanUnroutedMessage' &&
+        requestedAssignments.length > 1
+      ) {
+        requestedAssignments = requestedAssignments.slice(0, 1);
+      }
+      if (requestedAssignments.length === 0) {
+        console.warn('[coordinator-dispatch] dispatch decision missing assignments');
         return;
       }
 
       // 协调器现按「名称」回传目标助手，这里容错解析为真实 agentId，
       // 规避 LLM 编造 / 拼接 UUID 导致 findById 查不到、dispatch 静默失败的问题。
-      const ids = await resolveTargetAgentIds(chatRoomId, tokens);
+      const ids = await resolveTargetAgentIds(
+        chatRoomId,
+        requestedAssignments.map((assignment) => assignment.targetAgentName),
+      );
 
-      const dispatchContent = decision.forwardVerbatim
-        ? triggerMessage.content
-        : (decision.content?.trim() || triggerMessage.content);
-
-      // 先解析所有有效的目标助手
-      const targetAgents: Awaited<ReturnType<typeof agentService.findById>>[] = [];
-      for (const agentId of ids) {
+      // 先解析所有有效目标及其独立任务，同一助手只保留第一项，避免重复入队。
+      const resolvedAssignments: Array<{
+        agent: NonNullable<Awaited<ReturnType<typeof agentService.findById>>>;
+        content: string;
+      }> = [];
+      const seenAgentIds = new Set<string>();
+      for (let index = 0; index < ids.length; index += 1) {
+        const agentId = ids[index]!;
         const agent = await agentService.findById(agentId);
         if (!agent || !(agent as any).isActive) {
           console.warn(`[coordinator-dispatch] agent ${agentId} not found or inactive`);
@@ -581,26 +761,27 @@ async function executeDecision(
             continue;
           }
         }
-        targetAgents.push(agent);
-      }
-
-      if (targetAgents.length === 0) return;
-
-      // 并发上限：协调器一次并行派发的助手数硬截断（收敛性预算的一部分）
-      const clampedAgents = clampParallelDispatch(targetAgents);
-      if (clampedAgents.length < targetAgents.length) {
-        debugLog('coordinatorDispatchClamped', {
-          chatRoomId,
-          requested: targetAgents.length,
-          allowed: clampedAgents.length,
+        if (seenAgentIds.has(agent.id)) {
+          console.warn(`[coordinator-dispatch] duplicate assignment for agent ${agent.name}`);
+          continue;
+        }
+        seenAgentIds.add(agent.id);
+        const requested = requestedAssignments[index]!;
+        const useVerbatim =
+          requestedAssignments.length === 1 &&
+          triggerMessage.isHuman &&
+          requested.forwardVerbatim;
+        resolvedAssignments.push({
+          agent,
+          content: useVerbatim ? triggerMessage.content : requested.content,
         });
-        targetAgents.length = 0;
-        targetAgents.push(...clampedAgents);
       }
+
+      if (resolvedAssignments.length === 0) return;
 
       // 提前回报本次将要派发的目标助手 id：即便在「广播 / enqueue」过程中被用户打断，
       // 调用方（卡住检测 watchdog）也能凭此把这些助手的执行/排队任务一并停掉。
-      options?.onAgentsDispatched?.(targetAgents.map((a) => a!.id));
+      options?.onAgentsDispatched?.(resolvedAssignments.map(({ agent }) => agent.id));
 
       // 必须在「广播调度消息 / enqueue 助手」之前，先把工作台任务从 dispatched 推进到 in_progress。
       // 否则被调度的助手可能在该流转之前就执行完并产出消息，触发协调器再次裁决得到 no_dispatch，
@@ -612,9 +793,20 @@ async function executeDecision(
         console.error('[workbench] 同步派发任务状态失败:', error);
       }
 
-      // 保存并广播协调助手的调度消息（与旧流程一致，前端可见）
-      const mentionPart = targetAgents.map((a) => `@${a!.name}`).join(' ');
-      const visibleContent = `${mentionPart} ${dispatchContent}`;
+      // 串行模式（协调器判定用户要「按顺序/依次/逐个」执行）：本次只派队首助手，
+      // 其余按 targetAgents 顺序登记到串行链，由 handler 在每个助手完成后逐个推进。
+      const serialMode = decision.dispatchMode === 'serial' && resolvedAssignments.length > 1;
+      const dispatchMode = serialMode ? 'serial' : 'parallel';
+      const assignmentsToEnqueue = serialMode
+        ? resolvedAssignments.slice(0, 1)
+        : resolvedAssignments;
+
+      // 群里展示完整任务计划；实际入队仍按并行/串行策略执行。
+      const visibleContent = buildDispatchPlanContent(
+        resolvedAssignments,
+        dispatchMode,
+        locale,
+      );
       const dispatchMsg = await buildAIMessage(
         visibleContent,
         triggerMessage.id,
@@ -634,30 +826,201 @@ async function executeDecision(
         replyMessageId: triggerMessage.id,
         isHuman: false,
       });
-      // 关键：调度广播必须用「仅 UI 同步」的 globalBroadcastMessage，而非会触发 receivedMessage
-      // 的 globalEmit。否则这条 "@运维 ..." 广播会重新进入 handler，命中 @提及分派把目标助手
-      // 再入队一次；与下面 executeDecision 直接 enqueue 叠加，导致同一助手被调度两次。
+      // 只同步 UI，不触发 receivedMessage；否则汇总消息中的多个 @ 会造成重复入队。
       if (globalBroadcastMessage) await globalBroadcastMessage(dispatchMsg, chatRoomId);
 
-      // 用已保存的调度消息作为触发源，让目标助手的回复能正确指向它
+      const anchorMessageId = dispatchMsg.id;
       const dispatchedIds: string[] = [];
-      for (const agent of targetAgents) {
+      for (const assignment of assignmentsToEnqueue) {
         const agentTriggerMessage: Message = {
           ...dispatchMsg,
-          content: `@${agent!.name} ${dispatchContent}`,
+          id: anchorMessageId,
+          content: `@${assignment.agent.name} ${assignment.content}`,
         };
-        await enqueueAgentTask(chatRoomId, agentTriggerMessage, agent!);
-        dispatchedIds.push(agent!.id);
+        await enqueueAgentTask(chatRoomId, agentTriggerMessage, assignment.agent, null, {
+          onTaskEnqueued: serialMode
+            ? (task) => {
+                startSerialChain(
+                  chatRoomId,
+                  resolvedAssignments.map(({ agent, content }) => ({
+                    agentId: agent.id,
+                    content,
+                  })),
+                  { triggerMessageId: anchorMessageId },
+                  task.id,
+                );
+              }
+            : undefined,
+          onTaskEnqueueFailed: serialMode
+            ? (task) => {
+                clearSerialChainForTask(chatRoomId, assignment.agent.id, task.id);
+              }
+            : undefined,
+        });
+        dispatchedIds.push(assignment.agent.id);
       }
 
-      if (dispatchedIds.length > 1) {
+      if (!serialMode && dispatchedIds.length > 1) {
         startParallelBatch(chatRoomId, dispatchedIds);
       }
       // 调度日志记录解析后的真实 agentId，而非协调器回传的名称 token。
-      decision.targetAgentIds = dispatchedIds;
+      // 串行模式记录整条链的有序名单（含尚未派发的后继助手），便于审计完整计划。
+      decision.targetAgentIds = serialMode
+        ? resolvedAssignments.map(({ agent }) => agent.id)
+        : dispatchedIds;
+      decision.content = visibleContent;
+      decision.forwardVerbatim = resolvedAssignments.length === 1 &&
+        requestedAssignments[0]?.forwardVerbatim === true;
       await writeLog();
       return;
     }
+  }
+}
+
+/**
+ * 以群调度助手身份，向单个目标助手派发一条调度消息（构建 + 入库 + 仅 UI 广播 + 入队）。
+ * 与 executeDecision 的 dispatch 分支同样的可见消息结构，供串行链推进复用。
+ */
+async function dispatchCoordinatorMessageToAgent(
+  chatRoomId: string,
+  replyToMessageId: string,
+  agent: NonNullable<Awaited<ReturnType<typeof agentService.findById>>>,
+  dispatchContent: string,
+  coordinatorAgent: AgentWithRelations,
+  options?: {
+    silent?: boolean;
+    historyAnchorMessageId?: string;
+    onTaskEnqueued?: (taskId: string) => void;
+    onTaskEnqueueFailed?: (taskId: string) => void;
+  },
+): Promise<void> {
+  const visibleContent = `@${agent.name} ${dispatchContent}`;
+  const dispatchMsg = await buildAIMessage(
+    visibleContent,
+    replyToMessageId,
+    INTERNAL_COORDINATOR_AGENT_NAME,
+    GROUP_COORDINATOR_ID,
+    chatRoomId,
+    coordinatorAgent.avatar,
+    coordinatorAgent.avatarColor,
+  );
+  // silent（串行链推进）：不入库、不广播，仅作为助手任务触发源；群里只显示助手回复。
+  if (!options?.silent) {
+    await messageService.create({
+      id: dispatchMsg.id,
+      type: 'REPLY',
+      content: dispatchMsg.content,
+      time: dispatchMsg.time,
+      agentId: GROUP_COORDINATOR_ID,
+      chatRoomId,
+      replyMessageId: replyToMessageId,
+      isHuman: false,
+    });
+    // 仅 UI 同步，不触发 receivedMessage：否则这条 "@助手 ..." 会重入 handler 把目标助手再入队一次。
+    if (globalBroadcastMessage) await globalBroadcastMessage(dispatchMsg, chatRoomId);
+  }
+  // silent 时把触发源 id 锚定到串行链的锚点消息（原始用户消息）上，
+  // 让本步的「xxx 执行中」继续显示在最开始那条消息下面；
+  // 历史边界则用「上一个助手的回复」（含其本身），保证本助手能看到前驱产出。
+  const taskTriggerMessage: Message = options?.silent
+    ? { ...dispatchMsg, id: replyToMessageId }
+    : dispatchMsg;
+  await enqueueAgentTask(chatRoomId, taskTriggerMessage, agent, null, {
+    historyAnchorMessageId: options?.historyAnchorMessageId,
+    historyInclusive: options?.silent ? true : undefined,
+    onTaskEnqueued: options?.onTaskEnqueued
+      ? (task) => options.onTaskEnqueued?.(task.id)
+      : undefined,
+    onTaskEnqueueFailed: options?.onTaskEnqueueFailed
+      ? (task) => options.onTaskEnqueueFailed?.(task.id)
+      : undefined,
+  });
+}
+
+export type SerialChainAdvanceStatus =
+  | 'advanced'                 // 已派发下一个助手
+  | 'completed'                // 整条链完成，可由调用方触发收尾 join
+  | 'completed_user_intervened' // 整条链完成，但用户已接管：静默收口
+  | 'terminated'               // 当前任务失败/取消或后续派发失败，链已终止
+  | 'none';                    // 完成的助手不属于当前串行链队首 → 走正常流程
+
+/**
+ * 串行链推进：队首助手完成后，派发链上的下一个助手；队尾完成则返回 completed 让调用方收尾。
+ * 跳过已停用 / 已退群的后继助手（递归推进到下一个有效助手）。
+ */
+export async function tryAdvanceSerialChain(
+  chatRoomId: string,
+  completedAgentId: string,
+  completedTaskId: string,
+  completedMessageId: string,
+  outcome: AgentTaskOutcome = 'completed',
+): Promise<SerialChainAdvanceStatus> {
+  if (outcome !== 'completed') {
+    return clearSerialChainForTask(chatRoomId, completedAgentId, completedTaskId)
+      ? 'terminated'
+      : 'none';
+  }
+
+  let advance = advanceSerialChain(chatRoomId, completedAgentId, completedTaskId);
+  if (advance.kind === 'none') return 'none';
+
+  try {
+    while (advance.kind === 'next') {
+      const nextAgentId = advance.nextAgentId;
+      const nextAgent = await agentService.findById(nextAgentId);
+      const isUsable =
+        nextAgent &&
+        (nextAgent as any).isActive &&
+        ((nextAgent as any).agentLevel === 'system' ||
+          (await chatRoomService.isAgentMember(chatRoomId, nextAgentId)));
+      if (!isUsable) {
+        debugLog('serialChainSkipUnusableAgent', { chatRoomId, agentId: nextAgentId });
+        advance = skipUnboundSerialAgent(chatRoomId, nextAgentId);
+        continue;
+      }
+
+      const coordinatorAgent = await agentService.findById(GROUP_COORDINATOR_ID);
+      if (!coordinatorAgent) {
+        clearSerialChain(chatRoomId);
+        return 'terminated';
+      }
+
+      await dispatchCoordinatorMessageToAgent(
+        chatRoomId,
+        advance.context.triggerMessageId,
+        nextAgent!,
+        advance.context.dispatchContent,
+        coordinatorAgent as AgentWithRelations,
+        {
+          silent: true,
+          historyAnchorMessageId: completedMessageId,
+          onTaskEnqueued: (taskId) => {
+            if (!bindSerialTask(chatRoomId, nextAgentId, taskId)) {
+              throw new Error('Failed to bind serial chain task');
+            }
+          },
+          onTaskEnqueueFailed: (taskId) => {
+            clearSerialChainForTask(chatRoomId, nextAgentId, taskId);
+          },
+        },
+      );
+      debugLog('serialChainAdvanced', {
+        chatRoomId,
+        completedAgentId,
+        nextAgentId,
+      });
+      return 'advanced';
+    }
+
+    return advance.kind === 'last'
+      ? 'completed'
+      : advance.kind === 'last_user_intervened'
+        ? 'completed_user_intervened'
+        : 'none';
+  } catch (error) {
+    clearSerialChain(chatRoomId);
+    console.error('[coordinator-dispatch] 串行链后续任务派发失败:', error);
+    return 'terminated';
   }
 }
 
@@ -681,6 +1044,11 @@ export async function runCoordinatorDispatch(
   const locale: Locale = normalizeLocale((chatRoom.owner as any)?.preferredLanguage);
 
   const chatRoomMembers = await chatRoomService.getAgents(chatRoomId);
+  const businessAssistantCount = chatRoomMembers.filter((cra) =>
+    cra.agent &&
+    (cra.agent as any).isActive &&
+    (cra.agent as any).agentLevel !== 'system' &&
+    cra.agent.id !== GROUP_COORDINATOR_ID).length;
   const humanMembers = chatRoom.chatRoomAgents.filter((cra: any) => cra.user);
   const memberSection = buildMemberSection(chatRoomMembers, chatRoom.owner?.username, humanMembers, locale);
 
@@ -690,8 +1058,22 @@ export async function runCoordinatorDispatch(
     name: message.isHuman ? message.user : message.agentName,
   }, locale);
 
+  const isUnroutedUserMessage =
+    options?.routingReason === 'humanUnroutedMessage' && message.isHuman;
+  const toolConstraints: DispatchToolConstraints | undefined =
+    isUnroutedUserMessage && businessAssistantCount > 0
+      ? {
+          maxAssignments: 1,
+          forbidNoSuitableAssistant: true,
+          allowedDecisions: ['dispatch'],
+          requireAssignments: true,
+        }
+      : undefined;
   const systemPrompt = buildInternalCoordinatorPrompt(locale)
-    + buildDispatchRulesBlock((chatRoom as any).dispatchRules, locale);
+    + buildDispatchRulesBlock((chatRoom as any).dispatchRules, locale)
+    + (isUnroutedUserMessage
+      ? buildUnroutedUserConstraintBlock(businessAssistantCount, locale)
+      : '');
   const protocol = ((provider as any).apiProtocol ?? 'anthropic') as string;
 
   if (globalEmitTyping) {
@@ -707,8 +1089,24 @@ export async function runCoordinatorDispatch(
       `coordinator-${protocol}`,
       signal,
       (attemptSignal) => protocol === 'openai'
-        ? callOpenAICoordinator(provider, systemPrompt, memberSection, userContent, locale, attemptSignal)
-        : callAnthropicCoordinator(provider, systemPrompt, memberSection, userContent, locale, attemptSignal),
+        ? callOpenAICoordinator(
+            provider,
+            systemPrompt,
+            memberSection,
+            userContent,
+            locale,
+            toolConstraints,
+            attemptSignal,
+          )
+        : callAnthropicCoordinator(
+            provider,
+            systemPrompt,
+            memberSection,
+            userContent,
+            locale,
+            toolConstraints,
+            attemptSignal,
+          ),
     );
   } catch (error) {
     // 被用户发言打断（abort）属预期路径，不当作错误。
@@ -751,7 +1149,7 @@ export async function runCoordinatorDispatch(
       triggerMessageId: message.id,
       decision: decision.decision,
     });
-    await executeDecision(chatRoomId, message, decision, coordinatorAgent, options);
+    await executeDecision(chatRoomId, message, decision, coordinatorAgent, options, locale);
     console.log('[coordinator-dispatch] executeDecision success', {
       chatRoomId,
       triggerMessageId: message.id,

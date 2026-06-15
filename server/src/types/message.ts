@@ -32,4 +32,6 @@ export interface Message {
   totalTokens?: number | null;
   cacheReadTokens?: number | null;
   model?: string | null;
+  /** Runtime-only queue identity used by server-side task lifecycle routing. */
+  taskQueueId?: string;
 }

@@ -87,7 +87,7 @@ export const roomMessageIndexService = {
     chatRoomId: string,
     currentMessageId: string,
     afterMessageId?: string,
-    options?: { includeRawContent?: boolean; limit?: number },
+    options?: { includeRawContent?: boolean; limit?: number; inclusive?: boolean },
   ): Promise<RoomMessageIndexHistoryMessage[]> {
     const currentMessage = await findMessageAnchor(chatRoomId, currentMessageId);
     if (!currentMessage) return [];
@@ -98,13 +98,23 @@ export const roomMessageIndexService = {
       Math.max(1, config.agent.memoryRecentMessages),
     );
 
+    // 默认上界是「当前触发消息之前」（不含触发消息本身，因为它的内容已作为指令单独传入）。
+    // inclusive=true 时上界改为「含 currentMessage」：用于串行链以「上一个助手的回复」作为边界，
+    // 让下一个助手能看到上一个助手刚产出的内容（否则会差一条、看不到直接前驱）。
     const timeFilters: any[] = [
-      {
-        OR: [
-          {time: {lt: currentMessage.time}},
-          {time: currentMessage.time, id: {lt: currentMessage.id}},
-        ],
-      },
+      options?.inclusive
+        ? {
+            OR: [
+              {time: {lt: currentMessage.time}},
+              {time: currentMessage.time, id: {lte: currentMessage.id}},
+            ],
+          }
+        : {
+            OR: [
+              {time: {lt: currentMessage.time}},
+              {time: currentMessage.time, id: {lt: currentMessage.id}},
+            ],
+          },
     ];
 
     if (afterMessage) {

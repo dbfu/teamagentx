@@ -76,7 +76,7 @@ function buildInternalCoordinatorPromptZh(): string {
 - 涉及群主/admin 的选择、确认、授权、验收或偏好时，不要替群主做决定；必须 ask_owner，让用户回答。
 - 转发助手提出的问题或确认事项给群主时，content 字段必须保留原问题的 Markdown 格式、换行、列表、选项编号和代码块；只在开头添加 @群主用户名，不要压缩成一句话、不要改成纯文本摘要。
 - 不要为了提问或确认而 @其他人类成员；不要把需要用户回答或确认的问题设为 no_dispatch。
-- 不能在同一次决策里同时指定 targetAgentIds 和 ask_owner；必须先 ask_owner 提问，用户回答或确认后，再 dispatch 合适的助手处理。
+- 不能在同一次决策里同时指定 assignments 和 ask_owner；必须先 ask_owner 提问，用户回答或确认后，再 dispatch 合适的助手处理。
 - 回答你刚刚转发给群主的问题时，调度回原始提问的业务助手。
 
 ## 上下文区块
@@ -87,9 +87,13 @@ function buildInternalCoordinatorPromptZh(): string {
 ## 决策工具
 始终调用 dispatch_decision 工具，禁止输出纯文本。
 - decision（必填）：dispatch=调度助手；no_dispatch=无需调度（感谢/问候/进度或完成报告/闲聊）；ask_owner=需群主确认；cannot_dispatch=系统管理请求（创建或编辑助手、安装技能、创建或删除群聊、修改群规则、创建定时任务、配置外部平台集成）。
-- targetAgentIds（dispatch 时必填）：从当前群聊成员清单中逐字复制目标助手的「名称」，组成数组，可多个（并行）。必须与清单中的助手名称完全一致，禁止自造或猜测任何 ID。上一阶段并行任务中有任一助手尚未完成时，不能 dispatch 下一阶段。
-- content（dispatch/ask_owner 时必填）：dispatch=调度内容；ask_owner=@群主用户名 + 待回答问题（保留 Markdown 格式）。dispatch 内容不要添加与原始目标无关的新需求；转发用户原始消息时建议 forwardVerbatim: true 而非手动复制原文。
-- forwardVerbatim（可选）：仅用于把「来自用户」的 [${pendingMarker}] 原文转发给助手；true 时后端直接用 [${pendingMarker}] 原文发送，忽略 content 字段。当 [${pendingMarker}] 来自助手时禁止使用 forwardVerbatim（否则就是把助手自己的话回传给它自己）。
+- assignments（dispatch 时必填）：逐助手任务数组。每项包含 targetAgentName、content，可选 forwardVerbatim。
+  - targetAgentName：从当前群聊成员清单逐字复制助手名称，禁止自造或猜测 ID。
+  - content：只写该助手负责的独立任务，必须可直接执行，不要包含 @助手名称，不要混入其他助手的职责，不要添加与用户目标无关的新需求。
+  - forwardVerbatim：仅当只有一个目标且需原样转发「来自用户」的 [${pendingMarker}] 时使用；来自助手时禁止使用。
+- dispatchMode（多个 assignments 时必填）：parallel=同时并行（任务互不依赖）；serial=按 assignments 顺序逐个执行。用户明确要求「依次/按顺序/逐个/轮流/先…再…」，或后一个任务依赖前一个产出时，必须用 serial。
+- content：仅 ask_owner 时填写，格式为 @群主用户名 + 待回答问题，并保留 Markdown。
+- 上一阶段并行任务中有任一助手尚未完成时，不能 dispatch 下一阶段。
 - reason（cannot_dispatch 时填）：no_suitable_assistant 或 system_management。`;
 }
 
@@ -113,7 +117,7 @@ Do not analyze the problem, explain reasons, propose solutions, draw conclusions
 - For any choice, confirmation, authorization, acceptance, or preference involving the owner/admin, do NOT decide on the owner's behalf; you MUST ask_owner and let the user answer.
 - When forwarding an assistant's question or confirmation request to the owner, the content field MUST preserve the original Markdown formatting, line breaks, lists, option numbering, and code blocks; only prepend @owner_username — do NOT compress it into one sentence or turn it into a plain-text summary.
 - Do NOT @ other human members just to ask or confirm; do NOT set a question that needs the user's answer or confirmation as no_dispatch.
-- You may NOT specify both targetAgentIds and ask_owner in the same decision; you must ask_owner first, and after the user answers or confirms, dispatch the suitable assistant.
+- You may NOT specify both assignments and ask_owner in the same decision; you must ask_owner first, and after the user answers or confirms, dispatch the suitable assistant.
 - When answering a question you just forwarded to the owner, dispatch back to the business assistant that originally asked.
 
 ## Context blocks
@@ -124,9 +128,13 @@ Do not analyze the problem, explain reasons, propose solutions, draw conclusions
 ## Decision tool
 Always call the dispatch_decision tool; outputting plain text is forbidden.
 - decision (required): dispatch = dispatch an assistant; no_dispatch = no dispatch needed (thanks/greeting/progress or completion report/small talk); ask_owner = owner confirmation needed; cannot_dispatch = system-management request (create or edit assistants, install skills, create or delete chatrooms, change group rules, create scheduled tasks, configure external platform integrations).
-- targetAgentIds (required for dispatch): copy the target assistant's "name" verbatim from the current chatroom member list into an array, possibly multiple (parallel). It MUST match a member name exactly; never invent or guess any ID. If any assistant from a previous parallel stage has not finished, you may NOT dispatch the next stage.
-- content (required for dispatch/ask_owner): dispatch = the dispatch content; ask_owner = @owner_username + the question to answer (preserve Markdown). Dispatch content must not add new requirements unrelated to the original goal; when forwarding the user's original message, prefer forwardVerbatim: true over manually copying the text.
-- forwardVerbatim (optional): only for forwarding a [${pendingMarker}] that is "from the user" verbatim to an assistant; when true the backend sends the [${pendingMarker}] original text directly and ignores content. When the [${pendingMarker}] is from an assistant, forwardVerbatim is forbidden (otherwise you echo the assistant's own words back to itself).
+- assignments (required for dispatch): an array of per-assistant tasks. Each item contains targetAgentName, content, and optional forwardVerbatim.
+  - targetAgentName: copy the assistant name verbatim from the current chatroom member list; never invent or guess an ID.
+  - content: write only this assistant's standalone actionable task. Do not include an @mention, another assistant's responsibility, or requirements unrelated to the user's goal.
+  - forwardVerbatim: use only when there is exactly one target and a [${pendingMarker}] "from the user" must be forwarded verbatim; it is forbidden when the pending message comes from an assistant.
+- dispatchMode (required for multiple assignments): parallel = independent tasks run simultaneously; serial = run one by one in assignments order. Use serial when the user requests ordering or a later task depends on an earlier result.
+- content: use only for ask_owner, formatted as @owner_username + question, preserving Markdown.
+- If any assistant from a previous parallel stage has not finished, you may NOT dispatch the next stage.
 - reason (for cannot_dispatch): no_suitable_assistant or system_management.`;
 }
 

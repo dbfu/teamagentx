@@ -52,6 +52,11 @@ import {
   sleepForNoActivityRetry,
   type NoActivityMonitor,
 } from './no-activity-timeout.js';
+import {
+  notifyAgentTaskSettled,
+  type AgentTaskOutcome,
+} from './task-lifecycle.js';
+import type { Message } from '../../../types/message.js';
 
 function normalizeExecutionError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -152,6 +157,8 @@ export async function processQueue(chatRoomId: string, agentId: string) {
         hasHistory: !!task.history,
       });
 
+      let taskOutcome: AgentTaskOutcome = 'failed';
+      let taskFinalMessage: Message | undefined;
       try {
         // 创建 AbortController 用于中断执行
         let abortController = new AbortController();
@@ -288,6 +295,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
               agentInfo?.avatar,
               agentInfo?.avatarColor,
             );
+            aiMessage.taskQueueId = task.id;
 
             debugLog('emitCallbackStart', {
               chatRoomId,
@@ -317,6 +325,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
               });
               // 收集生成的消息 ID，用于后续回填 executionRecordId
               generatedMessageIds.push(aiMessage.id);
+              taskFinalMessage = aiMessage;
             } catch (err) {
               console.error('Failed to save message:', err);
               debugLog('messageSaveFailed', {
@@ -859,6 +868,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
             cacheReadTokens: execResult?.tokenUsage?.cacheReadTokens,
             cacheCreationTokens: execResult?.tokenUsage?.cacheCreationTokens,
           });
+          taskOutcome = wasAborted ? 'cancelled' : (executionError ? 'failed' : 'completed');
 
           // 如果任务失败（非中断），通知来源助手
           if (!wasAborted && executionError) {
@@ -889,6 +899,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
             cancelledMessage.totalTokens = execRecord.totalTokens ?? null;
             cancelledMessage.cacheReadTokens = execRecord.cacheReadTokens ?? null;
             cancelledMessage.model = executionModels;
+            cancelledMessage.taskQueueId = task.id;
 
             await messageService.create({
               id: cancelledMessage.id,
@@ -902,6 +913,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
               executionRecordId: execRecord.id,
             });
             generatedMessageIds.push(cancelledMessage.id);
+            taskFinalMessage = cancelledMessage;
 
             if (globalEmit) {
               await globalEmit(cancelledMessage, chatRoomId);
@@ -963,6 +975,18 @@ export async function processQueue(chatRoomId: string, agentId: string) {
 
         // 删除已处理的任务
         await taskQueueService.delete(task.id);
+
+        try {
+          await notifyAgentTaskSettled({
+            chatRoomId,
+            taskId: task.id,
+            agentId: task.agentId,
+            status: taskOutcome,
+            finalMessage: taskFinalMessage,
+          });
+        } catch (error) {
+          console.error('[processor] 处理任务完成生命周期事件失败:', error);
+        }
 
         // 任务完成后广播任务队列更新（通知前端移除已完成的任务）
         if (globalEmitStatus) {

@@ -75,68 +75,6 @@ export function registerHandoff(
   return 'ok';
 }
 
-/** 单次派发的并发上限截断（用户多 @ 与协调器 dispatch 共用）。 */
-export function clampParallelDispatch<T>(targets: T[]): T[] {
-  const cap = config.agent.maxParallelDispatch;
-  if (!Number.isFinite(cap) || cap <= 0) return targets;
-  return targets.length > cap ? targets.slice(0, cap) : targets;
-}
-
-/**
- * 用户多 @ 超出并发上限时的可见提示：明确告知哪些助手已触发、哪些被截断，
- * 而不是静默丢弃。消息中被截断的助手名不带 @ 前缀，且仅做 UI 同步广播
- * （globalBroadcastMessage），避免这条提示再次进入消息处理流程触发助手。
- */
-export async function notifyParallelDispatchClamped(params: {
-  chatRoomId: string;
-  triggerMessage: Message;
-  triggeredNames: string[];
-  skippedNames: string[];
-}): Promise<void> {
-  const { chatRoomId, triggerMessage, triggeredNames, skippedNames } = params;
-
-  debugLog('parallelDispatchClamped', {
-    chatRoomId,
-    triggerMessageId: triggerMessage.id,
-    triggeredNames,
-    skippedNames,
-  });
-
-  const chatRoom = await chatRoomService.findById(chatRoomId);
-  const locale = normalizeLocale((chatRoom?.owner as any)?.preferredLanguage);
-  const cap = config.agent.maxParallelDispatch;
-
-  const content = pickLocaleText(
-    {
-      'zh-CN': `本次同时 @ 的助手超出并发上限（${cap}），已触发：${triggeredNames.join('、')}；未触发：${skippedNames.join('、')}。如需未触发的助手处理，请等当前任务完成后再单独 @ 它们。`,
-      'en-US': `The assistants mentioned at once exceed the concurrency cap (${cap}). Triggered: ${triggeredNames.join(', ')}; not triggered: ${skippedNames.join(', ')}. To involve the skipped assistants, @ them separately after the current tasks finish.`,
-    },
-    locale,
-  );
-
-  const coordinatorAgent = await agentService.findById(GROUP_COORDINATOR_ID);
-  const msg = await buildAIMessage(
-    content,
-    triggerMessage.id,
-    INTERNAL_COORDINATOR_AGENT_NAME,
-    GROUP_COORDINATOR_ID,
-    chatRoomId,
-    coordinatorAgent?.avatar,
-    coordinatorAgent?.avatarColor,
-  );
-  await messageService.create({
-    id: msg.id,
-    type: 'REPLY',
-    content: msg.content,
-    time: msg.time,
-    agentId: GROUP_COORDINATOR_ID,
-    chatRoomId,
-    replyMessageId: triggerMessage.id,
-    isHuman: false,
-  });
-  if (globalBroadcastMessage) await globalBroadcastMessage(msg, chatRoomId);
-}
-
 /**
  * 熔断后向群主汇报卡点：以群调度助手名义发一条 @群主 的消息（ask_owner 语义）。
  * 该消息来源是 GROUP_COORDINATOR_ID 且只 @ 用户，不会再次触发任何助手或协调器。

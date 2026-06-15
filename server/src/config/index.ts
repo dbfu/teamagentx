@@ -118,8 +118,6 @@ export const config = {
     // 环路检测：同一对助手（A↔B）之间允许「连续」往返的最大来回数，超过即熔断。
     // 判定连续乒乓而非累计重复：轮辐式协作（主持人逐一 @ 各成员）跨阶段重复同一条边是合法推进。
     handoffCycleRepeatLimit: parseInt(process.env.AGENT_HANDOFF_CYCLE_REPEAT_LIMIT || '3', 10),
-    // 并发上限：单次派发（用户多 @ 或协调器 dispatch）最多同时触发的助手数。
-    maxParallelDispatch: parseInt(process.env.AGENT_MAX_PARALLEL_DISPATCH || '3', 10),
   },
   jwt: {
     get secret(): string {

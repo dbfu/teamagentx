@@ -10,7 +10,6 @@ import {
 import {
   resetCollaborationBudget,
   registerHandoff,
-  clampParallelDispatch,
 } from '../../../../core/agent/agent-handler/collaboration-budget.js';
 import {
   startParallelBatch,
@@ -153,17 +152,6 @@ test('collaboration budget enforces hop limit and consecutive ping-pong detectio
     config.agent.maxHandoffHops = originalMaxHops;
     config.agent.handoffCycleRepeatLimit = originalCycleLimit;
     resetCollaborationBudget(roomId);
-  }
-});
-
-test('clampParallelDispatch truncates to the configured concurrency cap', () => {
-  const originalCap = config.agent.maxParallelDispatch;
-  config.agent.maxParallelDispatch = 2;
-  try {
-    assert.deepEqual(clampParallelDispatch(['a', 'b', 'c']), ['a', 'b']);
-    assert.deepEqual(clampParallelDispatch(['a']), ['a']);
-  } finally {
-    config.agent.maxParallelDispatch = originalCap;
   }
 });
 

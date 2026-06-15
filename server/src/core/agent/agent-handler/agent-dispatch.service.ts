@@ -5,6 +5,7 @@ import { messageService } from '../../../modules/message/message.service.js';
 import { roomMessageIndexService } from '../../../modules/message/room-message-index.service.js';
 import { taskQueueService } from '../../../modules/task-queue/task-queue.service.js';
 import type { AttachmentData } from '../../../modules/task-queue/task-queue.service.js';
+import type { TaskQueue } from '@prisma/client';
 import { agentService } from '../agent.service.js';
 import { GROUP_ASSISTANT_ID, GROUP_COORDINATOR_ID } from '../system-assistant.constants.js';
 import type { Message } from '../../../types/message.js';
@@ -25,6 +26,15 @@ export async function enqueueAgentTask(
     attachments?: AttachmentData[];
     skipHistory?: boolean;
     bridgeInfo?: BridgeInfo;
+    // 构建群历史时的上界消息（默认用 message.id）。串行链后续步骤的触发消息锚定在
+    // 汇总调度消息上，但历史边界需推进到「上一个助手的回复」，故单独传入。
+    historyAnchorMessageId?: string;
+    // 历史上界是否包含 historyAnchorMessageId 本身（串行链需含上一个助手回复，置 true）。
+    historyInclusive?: boolean;
+    /** 任务落库后、启动队列处理前调用，用于绑定需要精确 taskId 的调度状态。 */
+    onTaskEnqueued?: (task: TaskQueue) => void;
+    /** 任务绑定后若后续准备失败，用于回滚调用方状态。 */
+    onTaskEnqueueFailed?: (task: TaskQueue) => void;
   },
 ) {
   if (globalEmitTyping) {
@@ -45,8 +55,9 @@ export async function enqueueAgentTask(
   if (!options?.skipHistory && history === undefined && injectGroupHistory && executor) {
     history = await roomMessageIndexService.buildMessageIndex(
       chatRoomId,
-      message.id,
+      options?.historyAnchorMessageId ?? message.id,
       executor.lastInjectedMessageId,
+      { inclusive: options?.historyInclusive },
     );
     console.log(`${agent.name}: 构建群消息索引 ${history.length} 条`);
   }
@@ -85,33 +96,46 @@ export async function enqueueAgentTask(
     sessionDir: options?.sessionDir,
     attachments: attachmentsData,
   });
+  let taskBindingApplied = false;
 
-  // 存储 Bridge 信息到缓存，用于执行时注入到提示词
-  if (options?.bridgeInfo) {
-    bridgeInfoCache.set(task.id, options.bridgeInfo);
-    debugLog('bridgeInfoCached', {
-      taskId: task.id,
-      platform: options.bridgeInfo.platform,
-      externalId: options.bridgeInfo.externalId,
-    });
-  }
+  try {
+    options?.onTaskEnqueued?.(task);
+    taskBindingApplied = true;
 
-  if (!options?.skipHistory && injectGroupHistory && executor && agent.agentLevel !== 'system') {
-    const latestMessages = await messageService.findByChatRoomId(
-      chatRoomId,
-      {take: 1, order: 'desc'},
-    );
-    if (latestMessages.length > 0) {
-      const newLastInjectedId = latestMessages[0].id;
-      executor.setLastInjectedMessageId(newLastInjectedId);
-      await chatRoomService.updateLastInjectedMessageId(chatRoomId, agent.id, newLastInjectedId);
-      console.log(`${agent.name}: 更新上次注入位置为 ${newLastInjectedId}`);
+    // 存储 Bridge 信息到缓存，用于执行时注入到提示词
+    if (options?.bridgeInfo) {
+      bridgeInfoCache.set(task.id, options.bridgeInfo);
+      debugLog('bridgeInfoCached', {
+        taskId: task.id,
+        platform: options.bridgeInfo.platform,
+        externalId: options.bridgeInfo.externalId,
+      });
     }
-  }
 
-  await broadcastAgentStatus(chatRoomId);
-  processQueue(chatRoomId, agent.id);
-  return task;
+    if (!options?.skipHistory && injectGroupHistory && executor && agent.agentLevel !== 'system') {
+      const latestMessages = await messageService.findByChatRoomId(
+        chatRoomId,
+        {take: 1, order: 'desc'},
+      );
+      if (latestMessages.length > 0) {
+        const newLastInjectedId = latestMessages[0].id;
+        executor.setLastInjectedMessageId(newLastInjectedId);
+        await chatRoomService.updateLastInjectedMessageId(chatRoomId, agent.id, newLastInjectedId);
+        console.log(`${agent.name}: 更新上次注入位置为 ${newLastInjectedId}`);
+      }
+    }
+
+    await broadcastAgentStatus(chatRoomId);
+    processQueue(chatRoomId, agent.id);
+    return task;
+  } catch (error) {
+    bridgeInfoCache.delete(task.id);
+    await taskQueueService.delete(task.id).catch(() => undefined);
+    if (taskBindingApplied) {
+      options?.onTaskEnqueueFailed?.(task);
+    }
+    throw error;
+  }
 }
 
 export async function sendMessageToAgent(params: {

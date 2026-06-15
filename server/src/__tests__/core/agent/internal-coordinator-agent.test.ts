@@ -53,7 +53,7 @@ describe('internal coordinator no-dispatch handling', () => {
   test('prompt uses dispatch_decision tool for all decisions', () => {
     const prompt = buildInternalCoordinatorPrompt();
 
-    assert.ok(prompt.length < 2100);
+    assert.ok(prompt.length < 2300);
     assert.match(prompt, /dispatch_decision 工具/);
     assert.match(prompt, /禁止输出纯文本/);
     assert.doesNotMatch(prompt, /无需调度：一句话原因/);
@@ -75,15 +75,19 @@ describe('internal coordinator no-dispatch handling', () => {
     const prompt = buildInternalCoordinatorPrompt();
 
     assert.match(prompt, /forwardVerbatim/);
-    assert.match(prompt, /原文发送，忽略 content 字段/);
-    assert.match(prompt, /不要添加与原始目标无关的新需求/);
+    assert.match(prompt, /只有一个目标/);
+    assert.match(prompt, /不要添加与用户目标无关的新需求/);
   });
 
-  test('prompt supports multiple parallel targetAgentIds', () => {
+  test('prompt supports parallel and serial multi-agent dispatch', () => {
     const prompt = buildInternalCoordinatorPrompt();
 
-    assert.match(prompt, /targetAgentIds/);
-    assert.match(prompt, /可多个（并行）/);
+    assert.match(prompt, /assignments/);
+    assert.match(prompt, /逐助手任务数组/);
+    assert.match(prompt, /只写该助手负责的独立任务/);
+    assert.match(prompt, /dispatchMode/);
+    assert.match(prompt, /parallel=同时并行/);
+    assert.match(prompt, /serial=按 assignments 顺序逐个执行/);
     assert.match(prompt, /必须等所有被并行调度的助手都明确完成各自任务后/);
     assert.match(prompt, /才能调度下一个阶段任务/);
   });
@@ -230,9 +234,12 @@ describe('internal coordinator no-dispatch handling', () => {
     assert.equal(messageCreateCalls, 0);
     assert.equal(updateExecutionRecordCalls, 0);
     assert.equal(executionRecordPayload.status, 'completed');
-    assert.equal(executionRecordPayload.events.length, 1);
+    const outputEvents = executionRecordPayload.events.filter(
+      (event: { type: string }) => event.type === 'output',
+    );
+    assert.equal(outputEvents.length, 1);
     assert.equal(
-      executionRecordPayload.events[0].data.content,
+      outputEvents[0].data.content,
       INTERNAL_COORDINATOR_NO_DISPATCH_RESPONSE,
     );
   });

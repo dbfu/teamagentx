@@ -632,6 +632,15 @@
   scrollbar-color: #d1d5db transparent; /* Firefox - show on hover */
 }
 
+/* Fully hidden scrollbar - used for horizontal tab bars with arrow controls */
+.no-scrollbar {
+  scrollbar-width: none; /* Firefox */
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none; /* Chrome / Safari */
+}
+
 .scrollbar-hover:hover::-webkit-scrollbar-thumb {
   background-color: #d1d5db;
 }

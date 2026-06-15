@@ -204,7 +204,7 @@ export function AgentCard({
   return (
     <div
       className={cn(
-        'group relative flex h-[180px] w-full max-w-[360px] flex-col gap-3 overflow-hidden rounded-2xl bg-card p-5 shadow-sm transition-all duration-200 hover:shadow-md cursor-pointer',
+        'group relative flex h-[180px] w-full flex-col gap-3 overflow-hidden rounded-2xl bg-card p-5 shadow-sm transition-all duration-200 hover:shadow-md cursor-pointer',
         isDragging && 'opacity-40 scale-95',
         !assistant.isActive && 'opacity-60',
         assistant.agentLevel === 'system' && (!assistant.isActive || !onStartQuickChat || isSystemChatDisabled) && 'cursor-default'

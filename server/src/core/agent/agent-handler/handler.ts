@@ -14,7 +14,7 @@ import { enqueueAgentTask } from './agent-dispatch.service.js';
 import { GROUP_COORDINATOR_ID } from '../system-assistant.constants.js';
 import { workbenchTaskService } from '../../../modules/workbench/workbench.service.js';
 import { scheduleStallWatchdog, resetStallWatchdog, abortWatchdogDispatch } from './stall-watchdog.js';
-import { runCoordinatorDispatch } from '../coordinator-dispatch.js';
+import { runCoordinatorDispatch, tryAdvanceSerialChain } from '../coordinator-dispatch.js';
 import { messageMentionsRoomUser, findDirectReplyAgentId } from './user-mention-utils.js';
 import { checkAndClearInterrupted } from './stall-watchdog.js';
 import {
@@ -22,13 +22,16 @@ import {
   markBatchAgentComplete,
   markBatchUserIntervention,
 } from './parallel-batch-tracker.js';
+import {
+  isCurrentSerialTask,
+  markSerialUserIntervention,
+} from './serial-chain-tracker.js';
+import { setAgentTaskSettledHandler } from './task-lifecycle.js';
 import { normalizeTriggerMode } from './trigger-mode.js';
 import {
   resetCollaborationBudget,
   registerHandoff,
-  clampParallelDispatch,
   notifyCollaborationBudgetExceeded,
-  notifyParallelDispatchClamped,
 } from './collaboration-budget.js';
 
 // 消息接收事件接口
@@ -86,7 +89,9 @@ async function triggerCoordinatorAgentDispatch(
     sourceAgentId: message.agentId,
     sourceIsHuman: message.isHuman,
   });
-  await runCoordinatorDispatch(chatRoomId, message, coordinatorAgent);
+  await runCoordinatorDispatch(chatRoomId, message, coordinatorAgent, {
+    routingReason: reason,
+  });
 }
 
 // 消息事件发射器
@@ -151,6 +156,56 @@ export function setupAIHandlers(
     emitAgentsUpdated,
   });
 
+  setAgentTaskSettledHandler(async (event) => {
+    const serialResult = await tryAdvanceSerialChain(
+      event.chatRoomId,
+      event.agentId,
+      event.taskId,
+      event.finalMessage?.id ?? '',
+      event.status,
+    );
+    if (serialResult === 'none') return;
+    if (serialResult === 'advanced') return;
+    if (serialResult === 'terminated') {
+      debugLog('serialChainTerminated', {
+        chatRoomId: event.chatRoomId,
+        agentId: event.agentId,
+        taskId: event.taskId,
+        status: event.status,
+      });
+      return;
+    }
+    if (serialResult === 'completed_user_intervened') {
+      debugLog('serialChainJoinSilenced', {
+        chatRoomId: event.chatRoomId,
+        agentId: event.agentId,
+        taskId: event.taskId,
+        reason: 'userIntervened',
+      });
+      return;
+    }
+    if (!event.finalMessage) {
+      debugLog('serialChainJoinSkipped', {
+        chatRoomId: event.chatRoomId,
+        agentId: event.agentId,
+        taskId: event.taskId,
+        reason: 'missingFinalMessage',
+      });
+      return;
+    }
+    debugLog('serialChainJoin', {
+      chatRoomId: event.chatRoomId,
+      agentId: event.agentId,
+      taskId: event.taskId,
+      triggerMessageId: event.finalMessage.id,
+    });
+    await triggerCoordinatorAgentDispatch(
+      event.chatRoomId,
+      event.finalMessage,
+      'serialChainJoin',
+    );
+  });
+
   // 注入 receivedMessage 触发器，供 broadcastCronTriggerMessage 调用
   setGlobalEmitReceivedMessage((message, chatRoomId) => {
     emitter.emit('receivedMessage', { message, chatRoomId });
@@ -206,6 +261,7 @@ export function setupAIHandlers(
         // 避免与用户介入后的新链路（直达回复 / 显式 @ / 兜底裁决）重复派发或上下文竞争。
         if (!chatRoom?.isQuickChatRoom) {
           markBatchUserIntervention(chatRoomId);
+          markSerialUserIntervention(chatRoomId);
         }
       } else if (
         isSmartMode &&
@@ -232,6 +288,27 @@ export function setupAIHandlers(
           chatRoomId,
           messageId: message.id,
           reason: 'manualMode',
+        });
+        return;
+      }
+
+      // ===== 串行链消息拦截（推进由 processor 的任务完成事件负责）=====
+      // 串行任务执行期间产生的普通/错误消息只展示，不参与助手交接判定。
+      // 必须同时匹配 taskQueueId，避免同一助手的其它任务消息被误认为当前链步骤。
+      if (
+        isSmartMode &&
+        !message.isHuman &&
+        message.agentId &&
+        message.taskQueueId &&
+        message.agentId !== GROUP_COORDINATOR_ID &&
+        !chatRoom?.isQuickChatRoom &&
+        isCurrentSerialTask(chatRoomId, message.agentId, message.taskQueueId)
+      ) {
+        debugLog('serialChainTaskMessageObserved', {
+          chatRoomId,
+          agentId: message.agentId,
+          taskId: message.taskQueueId,
+          messageId: message.id,
         });
         return;
       }
@@ -539,28 +616,26 @@ export function setupAIHandlers(
       }
 
       // ===== 显式 @ 触发 =====
-      // 内置群调度助手的派发消息可并行触发全部 @；
-      // 用户多 @ 在智能协作模式下并行触发（受并发上限截断），手动模式/快速对话保持只取第一个。
       const allowParallel = isSmartMode && !chatRoom?.isQuickChatRoom;
+
+      // 用户多 @：升级协调器裁决并行 / 串行（对称于助手侧 assistantMultiMention）。
+      // 由协调器根据用户意图（"按顺序/依次/逐个"→串行，否则并行）决定执行方式与顺序，
+      // 不再在 handler 里直接并行扇出。单 @ 仍走下方快路径直接派发，省一次协调器 LLM。
+      if (message.isHuman && allowParallel && mentionNames.length > 1) {
+        debugLog('humanMultiMentionEscalated', {
+          chatRoomId,
+          messageId: message.id,
+          mentionNames,
+        });
+        await triggerCoordinatorAgentDispatch(chatRoomId, message, 'humanMultiMention');
+        return;
+      }
+
+      // 单 @（人类）/ 内置协调器派发消息：直接派发被 @ 的助手。
+      // 手动模式 / 快速对话只取第一个；内置协调器派发消息保持全部触发。
       const triggerMentionNames = !message.isHuman
         ? mentionNames
-        : allowParallel
-          ? clampParallelDispatch(mentionNames)
-          : mentionNames.slice(0, 1);
-
-      // 用户多 @ 是强意图（不经协调器），但超出并发上限时要明确提示，而不是静默截断
-      if (
-        message.isHuman &&
-        allowParallel &&
-        triggerMentionNames.length < mentionNames.length
-      ) {
-        await notifyParallelDispatchClamped({
-          chatRoomId,
-          triggerMessage: message,
-          triggeredNames: triggerMentionNames,
-          skippedNames: mentionNames.filter((name) => !triggerMentionNames.includes(name)),
-        });
-      }
+        : mentionNames.slice(0, 1);
 
       debugLog('mentionsFound', {
         chatRoomId,

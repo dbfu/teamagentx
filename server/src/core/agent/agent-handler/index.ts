@@ -75,6 +75,12 @@ export {
   clearParallelBatch,
 } from './parallel-batch-tracker.js';
 
+// 从 serial-chain-tracker 导出
+export {
+  clearSerialChain,
+  clearSerialChainForTask,
+} from './serial-chain-tracker.js';
+
 // 从 claude-sdk.executor 导出
 export { clearClaudeSdkFileSystemContext } from '../claude-sdk.executor.js';
 

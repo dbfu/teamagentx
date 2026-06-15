@@ -12,6 +12,8 @@ import {
   setGlobalBroadcastMessage,
   setGlobalEmitWorkbenchTaskUpdated,
   cancelStallWatchdog,
+  clearSerialChain,
+  clearSerialChainForTask,
   type AgentStatus,
 } from '../core/agent/agent-handler/index.js';
 import type { ToolCall } from '../core/agent/executor.interface.js';
@@ -708,6 +710,11 @@ export function setupSocket(io: Server) {
             // 直接在 DB 标记为 cancelled 并走 agent:task-cancelled 通道。
             if (matchedTask.status === 'pending') {
               await taskQueueService.updateStatus(matchedTask.id, 'cancelled');
+              clearSerialChainForTask(
+                chatRoomId,
+                matchedTask.agentId,
+                matchedTask.id,
+              );
               io.to(chatRoomId).emit('agent:task-cancelled', {
                 chatRoomId,
                 agentId: matchedTask.agentId,
@@ -740,6 +747,9 @@ export function setupSocket(io: Server) {
           // executing 状态，会导致竞态漏判。其他仍在运行的任务完成后会自行
           // 重新调度 watchdog，此处无条件取消不影响它们的正常流程。
           cancelStallWatchdog(chatRoomId);
+          // 用户停止 = 接管：清理可能进行中的串行链，避免被停的队首助手稍后产出消息
+          // 又触发链推进、用旧内容派发下一个助手。
+          clearSerialChain(chatRoomId);
           // 通知前端已停止
           socket.emit('agent:stopped', { chatRoomId, agentId, messageId });
           // 广播给群聊里的所有人
