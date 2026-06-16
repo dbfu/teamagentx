@@ -115,6 +115,12 @@ export function buildAcpProviderEnv(
     env.ANTHROPIC_API_KEY = provider.apiKey;
     env.ANTHROPIC_AUTH_TOKEN = provider.apiKey; // Claude Code 可能使用 AUTH_TOKEN
     env.ANTHROPIC_MODEL = provider.model;
+    // Claude Agent SDK 会用独立的「小/快模型」（默认 haiku）跑子 agent、摘要等后台任务，
+    // 默认 id 会打到只认网关模型的 endpoint 返回 400。统一指向供应商主模型，避免回退到 haiku。
+    env.ANTHROPIC_SMALL_FAST_MODEL = provider.model;
+    env.ANTHROPIC_DEFAULT_HAIKU_MODEL = provider.model;
+    env.ANTHROPIC_DEFAULT_SONNET_MODEL = provider.model;
+    env.ANTHROPIC_DEFAULT_OPUS_MODEL = provider.model;
     if (provider.apiUrl) {
       env.ANTHROPIC_BASE_URL = provider.apiUrl;
       env.ANTHROPIC_API_URL = provider.apiUrl;

@@ -633,6 +633,28 @@ export function setupAIHandlers(
           !chatRoom.isQuickChatRoom &&
           message.isHuman
         ) {
+          // 群内只有一个业务助手时，用户无 @ 发言直接由该助手回复，
+          // 不再经群调度助手裁决（少一次协调器 LLM，也避免单助手群被「接管」）。
+          const businessAgents = (await chatRoomService.getAgents(chatRoomId))
+            .map((cra) => cra.agent)
+            .filter((a): a is NonNullable<typeof a> =>
+              !!a &&
+              a.isActive &&
+              a.agentLevel !== 'system' &&
+              a.id !== GROUP_COORDINATOR_ID);
+          if (businessAgents.length === 1) {
+            const soleAgent = await agentService.findById(businessAgents[0].id);
+            if (soleAgent && soleAgent.isActive) {
+              debugLog('soleBusinessAssistantTrigger', {
+                chatRoomId,
+                agentId: soleAgent.id,
+                agentName: soleAgent.name,
+                triggerMessageId: message.id,
+              });
+              await enqueueAgentTask(chatRoomId, message, soleAgent, null, { bridgeInfo });
+              return;
+            }
+          }
           await triggerCoordinatorAgentDispatch(chatRoomId, message, 'humanUnroutedMessage');
         }
         return;

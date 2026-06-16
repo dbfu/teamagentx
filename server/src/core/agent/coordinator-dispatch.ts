@@ -435,6 +435,40 @@ This message was sent by a user without an @mention and no usable default assist
   );
 }
 
+/**
+ * 用户显式 @ 了多个助手时的路由约束。
+ * 用户的 @ 已是明确的派发意图，协调器不得用 no_dispatch / ask_owner / cannot_dispatch
+ * 把请求吞掉（例如把「@A @B 你好」当成问候而不调度）。协调器此时只决定：
+ * 派给被 @ 的那些助手、并行还是串行、以及每个助手的子任务内容。
+ */
+export function buildExplicitMentionConstraintBlock(locale?: string): string {
+  return pickLocaleText(
+    {
+      'zh-CN': `\n\n## 本次路由约束
+当前消息是用户显式 @ 了多个助手的消息，这是明确的派发意图。
+- 必须 dispatch，并为每个被 @ 的助手生成一个 assignment；禁止 no_dispatch、ask_owner、cannot_dispatch。
+- 只在被用户 @ 到的助手范围内调度，不要新增或漏掉助手。
+- 即使消息只是问候 / 寒暄（如「你好」），也必须把它派发给被 @ 的助手，由助手自行回应。
+- 按 @助手 切分用户消息，逐字提取每个助手对应的正文，禁止改写、概括、翻译、扩写或补充任何额外说明：
+  · 每个被 @ 的助手，其 content = 紧跟在 @它 之后、到下一个 @助手 之前的那段原文；
+  · 若多个助手连续 @ 在一起、后面只跟同一句话（如「@正方辩手 @反方辩手 你好」），则它们共享这句话，content 都填「你好」；
+  · 若各助手后各自带正文（如「@甲 分析数据 @乙 写总结」），则甲的 content 填「分析数据」、乙的填「写总结」，互不混入。
+- 仅决定执行方式：dispatchMode=serial（用户表达「依次/按顺序/逐个/先…再…」或后续依赖前序产出时）或 parallel（默认）。`,
+      'en-US': `\n\n## Routing constraint for this request
+This message explicitly @mentions multiple assistants, which is an unambiguous dispatch intent.
+- You must dispatch, with one assignment per @mentioned assistant; no_dispatch, ask_owner, and cannot_dispatch are forbidden.
+- Only dispatch within the set of assistants the user @mentioned; do not add or drop assistants.
+- Even if the message is just a greeting / small talk (e.g. "hello"), you must still dispatch it to the @mentioned assistants and let them respond.
+- Split the user's message by its @assistant mentions and extract each assistant's text verbatim; do not rewrite, summarize, translate, expand, or add any extra wording:
+  · For each @mentioned assistant, its content = the text right after @it up to the next @assistant.
+  · If several assistants are @mentioned consecutively followed by a single shared sentence (e.g. "@ProDebater @ConDebater hello"), they share it and both contents are "hello".
+  · If each assistant is followed by its own text (e.g. "@Alice analyze the data @Bob write the summary"), Alice's content is "analyze the data" and Bob's is "write the summary", with no cross-mixing.
+- Only decide the execution mode: dispatchMode=serial (when the user asks for one-by-one/sequential order or later tasks depend on earlier output) or parallel (default).`,
+    },
+    locale,
+  );
+}
+
 async function callAnthropicCoordinator(
   provider: LlmProvider,
   systemPrompt: string,
@@ -1082,20 +1116,31 @@ export async function runCoordinatorDispatch(
 
   const isUnroutedUserMessage =
     options?.routingReason === 'humanUnroutedMessage' && message.isHuman;
-  const toolConstraints: DispatchToolConstraints | undefined =
-    isUnroutedUserMessage && businessAssistantCount > 0
-      ? {
-          maxAssignments: 1,
-          forbidNoSuitableAssistant: true,
-          allowedDecisions: ['dispatch'],
-          requireAssignments: true,
-        }
-      : undefined;
+  // 用户显式 @ 多个助手：明确派发意图，协调器只决定并行/串行 + 子任务，不得 no_dispatch。
+  const isExplicitMultiMention =
+    options?.routingReason === 'humanMultiMention' && message.isHuman;
+  let toolConstraints: DispatchToolConstraints | undefined;
+  if (isUnroutedUserMessage && businessAssistantCount > 0) {
+    toolConstraints = {
+      maxAssignments: 1,
+      forbidNoSuitableAssistant: true,
+      allowedDecisions: ['dispatch'],
+      requireAssignments: true,
+    };
+  } else if (isExplicitMultiMention && businessAssistantCount > 0) {
+    toolConstraints = {
+      forbidNoSuitableAssistant: true,
+      allowedDecisions: ['dispatch'],
+      requireAssignments: true,
+    };
+  }
   const systemPrompt = buildInternalCoordinatorPrompt(locale)
     + buildDispatchRulesBlock((chatRoom as any).dispatchRules, locale)
     + (isUnroutedUserMessage
       ? buildUnroutedUserConstraintBlock(businessAssistantCount, locale)
-      : '');
+      : isExplicitMultiMention && businessAssistantCount > 0
+        ? buildExplicitMentionConstraintBlock(locale)
+        : '');
   const protocol = ((provider as any).apiProtocol ?? 'anthropic') as string;
 
   if (globalEmitTyping) {
