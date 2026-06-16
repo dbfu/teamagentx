@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { ChatRoom, ChatRoomAgent, chatRoomApi, agentApi, Agent } from '@/lib/agent-api'
+import { ChatRoom, ChatRoomAgent, chatRoomApi, agentApi, Agent, AgentSpeechConfig, type AgentThinkingMode } from '@/lib/agent-api'
 import { cn } from '@/lib/utils'
 import { Bot, Crown, Plus, Trash2, Star, AtSign } from 'lucide-react'
 import { AddAgentDialog } from '@/components/chat/dialogs/add-agent-dialog'
+import { CreateAssistantModal } from '@/components/chat/create-assistant-modal'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { toast } from 'sonner'
 import type { AgentStatus } from '@/stores/socket-store'
@@ -191,6 +192,7 @@ export function AgentsPanel({ chatRoom, agentStatuses, onSelectAgent, onAgentSet
 
   // Add agent dialog state
   const [addDialogOpen, setAddDialogOpen] = useState(false)
+  const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [availableAgents, setAvailableAgents] = useState<Agent[]>([])
   const [addingAgentIds, setAddingAgentIds] = useState<Set<string>>(new Set())
 
@@ -297,6 +299,69 @@ export function AgentsPanel({ chatRoom, agentStatuses, onSelectAgent, onAgentSet
     }
   }
 
+  const handleOpenCreateAssistant = () => {
+    setAddDialogOpen(false)
+    setCreateDialogOpen(true)
+  }
+
+  const handleCreateAssistant = async (data: {
+    name: string
+    avatar: string
+    description: string
+    prompt: string
+    type: 'builtin' | 'acp'
+    acpTool: string
+    proxyConfig?: string | null
+    codexModel?: string | null
+    codexFastMode?: boolean
+    claudeModel?: string | null
+    thinkingMode?: AgentThinkingMode | null
+    categoryId: string | null
+    llmProviderId: string | null
+    fallbackLlmProviderIds: string[]
+    speechConfig: AgentSpeechConfig | null
+    imageGeneration?: { enabled: boolean; llmProviderId: string | null }
+  }): Promise<boolean> => {
+    const createResponse = await agentApi.create({
+      name: data.name,
+      avatar: data.avatar,
+      description: data.description,
+      prompt: data.prompt,
+      type: data.type,
+      acpTool: data.acpTool || undefined,
+      proxyConfig: data.proxyConfig || null,
+      codexModel: data.codexModel || null,
+      codexFastMode: Boolean(data.codexFastMode),
+      claudeModel: data.claudeModel || null,
+      thinkingMode: data.thinkingMode || 'high',
+      categoryId: data.categoryId || undefined,
+      llmProviderId: data.llmProviderId || undefined,
+      fallbackLlmProviderIds: data.fallbackLlmProviderIds,
+      speechConfig: data.speechConfig,
+      imageGeneration: data.imageGeneration,
+    })
+
+    if (!createResponse.success || !createResponse.data) {
+      toast.error(createResponse.error || t('assistant.createFailed'))
+      return false
+    }
+
+    const addResponse = await chatRoomApi.addAgent(chatRoom.id, {
+      agentId: createResponse.data.id,
+      role: 'MEMBER',
+    })
+
+    if (addResponse.success) {
+      toast.success(t('chat.agentsPanel.createdAndAdded'))
+      await Promise.resolve(onAgentSettingsChange?.())
+      return true
+    }
+
+    toast.error(t('chat.agentsPanel.createdButAddFailed'))
+    await Promise.resolve(onAgentSettingsChange?.())
+    return true
+  }
+
   // 渲染分组
   const renderGroup = (
     title: string,
@@ -372,6 +437,14 @@ export function AgentsPanel({ chatRoom, agentStatuses, onSelectAgent, onAgentSet
         availableAgents={availableAgents}
         addingAgentIds={addingAgentIds}
         onAddAgents={handleAddAgents}
+        onCreateAssistant={handleOpenCreateAssistant}
+      />
+
+      <CreateAssistantModal
+        isOpen={createDialogOpen}
+        onClose={() => setCreateDialogOpen(false)}
+        onSubmit={handleCreateAssistant}
+        submitLabel={t('common.createAndAdd')}
       />
     </>
   )

@@ -39,6 +39,7 @@ interface CreateAssistantModalProps {
     speechConfig: AgentSpeechConfig | null
   }) => Promise<boolean>  // 返回是否成功
   defaultCategoryId?: string  // 预设分类ID
+  submitLabel?: string
 }
 
 // 全屏编辑模态框
@@ -159,7 +160,7 @@ function FullscreenPromptModal({
   )
 }
 
-export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategoryId }: CreateAssistantModalProps) {
+export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategoryId, submitLabel }: CreateAssistantModalProps) {
   const { t } = useTranslation()
   // 直接在 useState 初始化时使用 defaultCategoryId
   const [categoryId, setCategoryId] = useState<string>(defaultCategoryId ?? '')
@@ -680,7 +681,7 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
               disabled={isSubmitting}
               className="rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
-              {isSubmitting ? t('common.creating') : t('common.create')}
+              {isSubmitting ? t('common.creating') : (submitLabel ?? t('common.create'))}
             </button>
           </div>
         </form>

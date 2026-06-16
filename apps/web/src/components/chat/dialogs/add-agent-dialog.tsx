@@ -1,6 +1,6 @@
 import { Agent } from '@/lib/agent-api'
 import { AgentAvatarImage } from '@/lib/agent-avatars'
-import { Loader2, Folder, FolderOpen, ChevronDown, ChevronRight, X, Search, Check } from 'lucide-react'
+import { Loader2, Folder, FolderOpen, ChevronDown, ChevronRight, X, Search, Check, Plus } from 'lucide-react'
 import { useState, useMemo, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -14,6 +14,8 @@ interface AddAgentDialogProps {
   initialSelectedIds?: Set<string>
   /** 确认按钮文案，默认为「添加」 */
   confirmLabel?: string
+  /** 创建新助手入口 */
+  onCreateAssistant?: () => void
 }
 
 export function AddAgentDialog({
@@ -24,6 +26,7 @@ export function AddAgentDialog({
   onAddAgents,
   initialSelectedIds,
   confirmLabel,
+  onCreateAssistant,
 }: AddAgentDialogProps) {
   const { t } = useTranslation()
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set())
@@ -275,9 +278,18 @@ export function AddAgentDialog({
 
           {/* Footer - 确认按钮 */}
           <div className="flex shrink-0 items-center justify-between border-t border-border px-6 py-4">
-            <span className="text-sm text-muted-foreground">
-              {t('chat.clickToMultiSelect')}
-            </span>
+            <div className="flex items-center gap-3">
+              {onCreateAssistant && (
+                <button
+                  type="button"
+                  onClick={onCreateAssistant}
+                  className="flex items-center gap-1.5 rounded-lg border border-blue-200 px-3 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50"
+                >
+                  <Plus className="size-4" />
+                  <span>{t('nav.createAssistant')}</span>
+                </button>
+              )}
+            </div>
             <button
               onClick={handleAddAgents}
               disabled={selectedAgents.size === 0 || isAdding}

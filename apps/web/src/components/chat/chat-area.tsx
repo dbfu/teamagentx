@@ -1,10 +1,11 @@
-import { ChatRoom } from '@/lib/agent-api'
+import { AgentSpeechConfig, ChatRoom, agentApi, chatRoomApi, type AgentThinkingMode } from '@/lib/agent-api'
 import { useChatAreaStore } from '@/stores/chat-store'
 import { ChatAreaHeader } from './chat-area-header'
 import { ChatMessagesList } from './chat-messages-list'
 import { ChatInputArea } from './chat-input-area'
 import { ChatSidePanel } from './chat-side-panel'
 import { AddAgentDialog } from './dialogs/add-agent-dialog'
+import { CreateAssistantModal } from './create-assistant-modal'
 import { ClearMessagesDialog } from './dialogs/clear-messages-dialog'
 import { RoomRulesDialog } from './dialogs/room-rules-dialog'
 import { RoomDispatchRulesDialog } from './dialogs/room-dispatch-rules-dialog'
@@ -20,6 +21,7 @@ import { useQuickChatLocalSessionHint } from './hooks/use-quick-chat-local-sessi
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { AtSign } from 'lucide-react'
+import { toast } from 'sonner'
 
 interface ChatAreaProps {
   chatRoom?: ChatRoom
@@ -33,6 +35,7 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
   const { user: currentUser, stopAgent, completeTodo } = useSocketStore()
   const todos = useSocketStore((s) => s.todos)
   const setScrollToMessageId = useChatStore((s) => s.setScrollToMessageId)
+  const loadAllAgents = useChatStore((s) => s.loadAllAgents)
   const selectRoom = useChatRoomStore((s) => s.selectRoom)
   const [showRoomRules, setShowRoomRules] = useState(false)
   const [showDispatchRules, setShowDispatchRules] = useState(false)
@@ -40,6 +43,7 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
   const [showScreenshot, setShowScreenshot] = useState(false)
   const [showCustomCommands, setShowCustomCommands] = useState(false)
   const [showMessageArchives, setShowMessageArchives] = useState(false)
+  const [showCreateAssistant, setShowCreateAssistant] = useState(false)
   const [showStopAllConfirm, setShowStopAllConfirm] = useState(false)
   const [stopAllTargetAgentIds, setStopAllTargetAgentIds] = useState<string[]>([])
   const [visibleOwnerMentionTodoIds, setVisibleOwnerMentionTodoIds] = useState<Set<string>>(new Set())
@@ -348,6 +352,73 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
     setInputValue(`${prefix}@${agentName} `, chatRoom?.id)
   }
 
+  const handleOpenCreateAssistant = () => {
+    setShowAddAgent(false)
+    setShowCreateAssistant(true)
+  }
+
+  const handleCreateAssistant = async (data: {
+    name: string
+    avatar: string
+    description: string
+    prompt: string
+    type: 'builtin' | 'acp'
+    acpTool: string
+    proxyConfig?: string | null
+    codexModel?: string | null
+    codexFastMode?: boolean
+    claudeModel?: string | null
+    thinkingMode?: AgentThinkingMode | null
+    categoryId: string | null
+    llmProviderId: string | null
+    fallbackLlmProviderIds: string[]
+    speechConfig: AgentSpeechConfig | null
+    imageGeneration?: { enabled: boolean; llmProviderId: string | null }
+  }): Promise<boolean> => {
+    if (!chatRoom) return false
+
+    const createResponse = await agentApi.create({
+      name: data.name,
+      avatar: data.avatar,
+      description: data.description,
+      prompt: data.prompt,
+      type: data.type,
+      acpTool: data.acpTool || undefined,
+      proxyConfig: data.proxyConfig || null,
+      codexModel: data.codexModel || null,
+      codexFastMode: Boolean(data.codexFastMode),
+      claudeModel: data.claudeModel || null,
+      thinkingMode: data.thinkingMode || 'high',
+      categoryId: data.categoryId || undefined,
+      llmProviderId: data.llmProviderId || undefined,
+      fallbackLlmProviderIds: data.fallbackLlmProviderIds,
+      speechConfig: data.speechConfig,
+      imageGeneration: data.imageGeneration,
+    })
+
+    if (!createResponse.success || !createResponse.data) {
+      toast.error(createResponse.error || t('assistant.createFailed'))
+      return false
+    }
+
+    await loadAllAgents()
+
+    const addResponse = await chatRoomApi.addAgent(chatRoom.id, {
+      agentId: createResponse.data.id,
+    })
+
+    if (!addResponse.success) {
+      toast.error(t('chat.agentsPanel.createdButAddFailed'))
+      await Promise.resolve(onChatRoomChange?.())
+      return true
+    }
+
+    toast.success(t('chat.agentsPanel.createdAndAdded'))
+    await Promise.resolve(onChatRoomChange?.())
+    await loadAllAgents()
+    return true
+  }
+
   const isTaskBoardOpen = sidePanelMode === 'task-board'
 
   return (
@@ -483,6 +554,14 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
         availableAgents={availableAgents}
         addingAgentIds={addingAgentIds}
         onAddAgents={handleAddAgents}
+        onCreateAssistant={handleOpenCreateAssistant}
+      />
+
+      <CreateAssistantModal
+        isOpen={showCreateAssistant}
+        onClose={() => setShowCreateAssistant(false)}
+        onSubmit={handleCreateAssistant}
+        submitLabel={t('common.createAndAdd')}
       />
 
       {/* Clear Messages Confirm Dialog */}
