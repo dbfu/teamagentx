@@ -20,7 +20,7 @@ import { updateManager } from '@/lib/update-manager'
 import { cn } from '@/lib/utils'
 import { useAuthStore, useChatRoomStore, useSocketStore } from '@/stores'
 import { useChatStore } from '@/stores/chat-store'
-import { BookOpenText, Bot, Check, CircleArrowUp, Cpu, Globe, LayoutDashboard, MessageSquare, Monitor, Moon, MoreHorizontal, Package, Palette, Plus, Search, Settings, Sun, Users } from 'lucide-react'
+import { BookOpenText, Bot, Check, CircleArrowUp, Cpu, Globe, LayoutDashboard, MessageSquare, Monitor, Moon, MoreHorizontal, Package, Palette, Plug, Plus, Search, Settings, Sun, Users } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
@@ -43,20 +43,21 @@ interface SidebarNavProps {
   onChatRoomCreated?: (chatRoomId: string) => void | Promise<void>
 }
 
-type MainNavTab = 'message' | 'workbench' | 'assistant' | 'skill' | 'model' | 'integration'
+type MainNavTab = 'message' | 'workbench' | 'assistant' | 'skill' | 'model' | 'connectors' | 'integration'
 type OptionalNavTab = Exclude<MainNavTab, 'message'>
 
 const NAV_HIDE_CANDIDATES: OptionalNavTab[][] = [
   [],
-  ['integration'],
-  ['model', 'integration'],
-  ['skill', 'model', 'integration'],
-  ['assistant', 'skill', 'model', 'integration'],
-  ['workbench', 'assistant', 'skill', 'model', 'integration'],
+  ['connectors'],
+  ['connectors', 'integration'],
+  ['connectors', 'integration', 'model'],
+  ['connectors', 'integration', 'model', 'skill'],
+  ['connectors', 'integration', 'model', 'skill', 'assistant'],
+  ['connectors', 'integration', 'model', 'skill', 'assistant', 'workbench'],
 ]
 
 const isOptionalNavTab = (tab: MainNavTab | null): tab is OptionalNavTab => (
-  tab === 'workbench' || tab === 'assistant' || tab === 'skill' || tab === 'model' || tab === 'integration'
+  tab === 'workbench' || tab === 'assistant' || tab === 'skill' || tab === 'model' || tab === 'connectors' || tab === 'integration'
 )
 
 const areSameTabs = (a: OptionalNavTab[], b: OptionalNavTab[]) => (
@@ -91,11 +92,13 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms, onChatRoomCreated
         ? 'assistant'
         : location.pathname.startsWith('/skill')
           ? 'skill'
-          : location.pathname.startsWith('/model')
-            ? 'model'
-            : location.pathname.startsWith('/integration')
-              ? 'integration'
-              : 'message'
+          : location.pathname.startsWith('/connectors')
+            ? 'connectors'
+            : location.pathname.startsWith('/model')
+              ? 'model'
+              : location.pathname.startsWith('/integration')
+                ? 'integration'
+                : 'message'
   const isSettingsActive = location.pathname.startsWith('/settings')
   const currentUser = user || socketUser
   const [hiddenNavTabs, setHiddenNavTabs] = useState<OptionalNavTab[]>([])
@@ -122,6 +125,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms, onChatRoomCreated
     assistant: { icon: Bot, label: t('nav.assistants') },
     skill: { icon: Package, label: t('nav.skills') },
     model: { icon: Cpu, label: t('nav.models') },
+    connectors: { icon: Plug, label: '连接器' },
     integration: { icon: Globe, label: t('nav.integrations') },
   }
 
@@ -160,6 +164,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms, onChatRoomCreated
     { id: 'assistant', icon: Bot, label: t('nav.assistants'), menuLabel: t('nav.assistants') },
     { id: 'skill', icon: Package, label: t('nav.skills'), menuLabel: t('nav.skills') },
     { id: 'model', icon: Cpu, label: t('nav.models'), menuLabel: t('nav.modelManagement') },
+    { id: 'connectors', icon: Plug, label: '连接器', menuLabel: '连接器' },
     { id: 'integration', icon: Globe, label: t('nav.integrations'), menuLabel: t('nav.integrations') },
   ]
   const hiddenMenuTabs = navTabs.filter((tab) => hiddenNavTabSet.has(tab.id))
@@ -370,6 +375,10 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms, onChatRoomCreated
             <DropdownMenuItem onClick={() => handleTabChange('model')}>
               <Cpu className="size-4" />
               {t('nav.modelManagement')}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => navigate('/connectors')}>
+              <Plug className="size-4" />
+              连接器
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

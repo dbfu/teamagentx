@@ -10,9 +10,11 @@ import { setGlobalBroadcastMessage } from '../../../core/agent/agent-handler/sta
 import { messageService } from '../../../modules/message/message.service.js';
 
 const originalMessageCreate = messageService.create;
+const originalConsoleWarn = console.warn;
 
 afterEach(() => {
   messageService.create = originalMessageCreate;
+  console.warn = originalConsoleWarn;
   setGlobalBroadcastMessage(null);
 });
 
@@ -149,6 +151,23 @@ test('broadcastChatRoomRulesUpdatedMessage saves and broadcasts without agent di
   assert.equal(broadcasts[0].chatRoomId, 'room-1');
   assert.equal(broadcasts[0].message.id, messageId);
   assert.equal(broadcasts[0].message.user, '系统');
+});
+
+test('broadcastChatRoomRulesUpdatedMessage does not fail when notice persistence fails', async () => {
+  const broadcasts: any[] = [];
+
+  console.warn = (() => {}) as typeof console.warn;
+  messageService.create = (async () => {
+    throw new Error('database is locked');
+  }) as typeof messageService.create;
+  setGlobalBroadcastMessage((message, chatRoomId) => {
+    broadcasts.push({ message, chatRoomId });
+  });
+
+  const messageId = await broadcastChatRoomRulesUpdatedMessage('room-1', '新的规则');
+
+  assert.ok(messageId);
+  assert.equal(broadcasts.length, 0);
 });
 
 test('broadcastAgentJoinedMessage saves and broadcasts without agent dispatch', async () => {

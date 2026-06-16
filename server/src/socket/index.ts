@@ -295,7 +295,7 @@ export function setupSocket(io: Server) {
     }
 
     try {
-      const decoded = jwt.verify(token, config.jwt.secret) as {
+      const decoded = jwt.verify(token, config.jwt.secret, { ignoreExpiration: true }) as {
         userId: string;
         username: string;
       };

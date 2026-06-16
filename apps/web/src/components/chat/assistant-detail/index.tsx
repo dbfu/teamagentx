@@ -17,6 +17,7 @@ import {
   Globe,
   History,
   Pencil,
+  Plug,
   Power,
   PowerOff,
   Settings,
@@ -35,6 +36,7 @@ import { QuickChatStartDialog } from '../quick-chat-start-dialog'
 import { AssistantConfigTab } from './assistant-config-tab'
 import { AssistantHistoryTab } from './assistant-history-tab'
 import { AssistantSkillsTab } from './assistant-skills-tab'
+import { AssistantConnectorsTab } from './assistant-connectors-tab'
 import { AssistantVoiceTab } from './assistant-voice-tab'
 import { AssistantMemoryTab } from './assistant-memory-tab'
 import { AssistantDiaryTab } from './assistant-diary-tab'
@@ -420,6 +422,10 @@ export function AssistantDetailPage() {
                 </span>
               )}
             </TabsTrigger>
+            <TabsTrigger value="connectors" className="h-9 gap-2 leading-none">
+              <Plug className="size-4" />
+              连接器
+            </TabsTrigger>
             <TabsTrigger value="history" className="h-9 gap-2 leading-none">
               <History className="size-4" />
               {t('assistant.sessionHistory')}
@@ -455,6 +461,10 @@ export function AssistantDetailPage() {
               onUninstall={handleUninstallSkill}
               onRefresh={refreshSkills}
             />
+          </TabsContent>
+
+          <TabsContent value="connectors" className="flex-1 overflow-y-auto p-8 m-0">
+            <AssistantConnectorsTab agentId={agent.id} />
           </TabsContent>
 
           <TabsContent value="history" className="flex-1 overflow-y-auto p-8 m-0">

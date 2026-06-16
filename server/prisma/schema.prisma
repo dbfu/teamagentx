@@ -142,6 +142,7 @@ model Agent {
   bridgeBots        BridgeBot[] // 外部平台机器人实例
   capabilities      AgentCapability[]
   coordinatorLogs   CoordinatorLog[] // 作为来源助手的调度日志
+  connectors        AgentConnector[] // 启用的连接器（MCP server）
 
   @@index([name])
   @@index([categoryId])
@@ -779,4 +780,40 @@ model CoordinatorLog {
   @@index([chatRoomId])
   @@index([createdAt])
   @@map("coordinator_logs")
+}
+
+// 连接器（MCP server）：全局注册，助手按需启用
+model Connector {
+  id          String   @id @default(uuid())
+  name        String   @unique // 注入 MCP 时的命名空间 key（仅字母数字下划线），如 "github"
+  displayName String // 连接器显示名
+  description String? // 连接器说明
+  transport   String   @default("stdio") // 传输类型：stdio | http
+  command     String? // stdio：可执行命令
+  args        String?  @default("[]") // stdio：参数 JSON 数组
+  env         String?  @default("{}") // stdio：环境变量 JSON 对象
+  url         String? // http：服务地址
+  headers     String?  @default("{}") // http：请求头 JSON 对象
+  enabled     Boolean  @default(true) // 全局开关
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  agents      AgentConnector[]
+
+  @@index([enabled])
+}
+
+// 助手与连接器的多对多绑定
+model AgentConnector {
+  agentId     String
+  connectorId String
+  enabled     Boolean  @default(true) // 助手侧勾选开关
+  createdAt   DateTime @default(now())
+
+  agent       Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  connector   Connector @relation(fields: [connectorId], references: [id], onDelete: Cascade)
+
+  @@id([agentId, connectorId])
+  @@index([agentId])
+  @@index([connectorId])
 }

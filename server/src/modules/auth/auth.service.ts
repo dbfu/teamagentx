@@ -1,6 +1,5 @@
 import bcrypt from 'bcryptjs';
-import jwt, { SignOptions } from 'jsonwebtoken';
-import type { StringValue } from 'ms';
+import jwt from 'jsonwebtoken';
 import prisma from '../../lib/prisma.js';
 import { config } from '../../config/index.js';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -74,11 +73,9 @@ function toUserResponse(user: LocalUserConfig): UserResponse {
 }
 
 function createToken(user: LocalUserConfig) {
-  const signOptions: SignOptions = { expiresIn: config.jwt.expiresIn as StringValue };
   return jwt.sign(
     { userId: user.id, username: user.username },
-    config.jwt.secret,
-    signOptions
+    config.jwt.secret
   );
 }
 
@@ -283,7 +280,7 @@ export const authService = {
 
   async getUserFromToken(token: string): Promise<UserResponse | null> {
     try {
-      const decoded = jwt.verify(token, config.jwt.secret) as {
+      const decoded = jwt.verify(token, config.jwt.secret, { ignoreExpiration: true }) as {
         userId: string;
         username: string;
       };

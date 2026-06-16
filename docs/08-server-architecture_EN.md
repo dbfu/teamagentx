@@ -289,7 +289,6 @@ Since 2026-06, system agents are consolidated from "several separate @agents" in
 | `SERVER_HOST` | `0.0.0.0` | Listen address |
 | `DATABASE_URL` | `file:./dev.db` | SQLite path (Electron points to userData) |
 | `JWT_SECRET` | (random, persisted) | If unset, a `.jwt-secret` (0600) is generated in the data dir; never falls back to a hardcoded key |
-| `JWT_EXPIRES_IN` | `7d` | JWT lifetime |
 | `AGENT_HISTORY_THRESHOLD` | `20` | History summary-compaction threshold |
 | `AGENT_MEMORY_RECENT_MESSAGES` | `10` | Recent messages injected |
 | `AGENT_MEMORY_COMPACT_MESSAGES` | `40` | Messages that trigger memory compaction |

@@ -13,6 +13,7 @@ import { MobileTabBar } from './components/chat/mobile-tab-bar'
 import { IntegrationPage } from './components/chat/integration-page'
 import { MessageArchivesModal } from './components/chat/message-archives-modal'
 import { ModelPage } from './components/chat/model-page'
+import { ConnectorPage } from './components/chat/connector/connector-page'
 import { SkillPage } from './components/chat/skill-page'
 import { SidebarNav } from './components/chat/sidebar-nav'
 import { SettingsPage } from './components/chat/settings-page'
@@ -905,6 +906,7 @@ function AppContent() {
         <Route path="/workbench" element={<WorkbenchPage />} />
         <Route path="/skill" element={<SkillPage />} />
         <Route path="/model" element={<ModelPage />} />
+        <Route path="/connectors" element={<ConnectorPage />} />
         <Route path="/integration" element={<IntegrationPage />} />
         <Route path="/settings" element={<SettingsPage isMobile={isMobile} />} />
         <Route

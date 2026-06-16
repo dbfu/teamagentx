@@ -37,6 +37,7 @@
     "@libsql/core": "^0.17.2",
     "@libsql/hrana-client": "^0.10.0",
     "@libsql/isomorphic-ws": "^0.1.5",
+    "@modelcontextprotocol/sdk": "1.29.0",
     "@neon-rs/load": "^0.2.6",
     "@openai/codex-sdk": "^0.128.0",
     "@prisma/adapter-libsql": "^7.5.0",

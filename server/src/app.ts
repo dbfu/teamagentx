@@ -15,6 +15,7 @@ import { authGateway } from './gateway/auth.gateway.js';
 import { categoryGateway } from './gateway/category.gateway.js';
 import { chatRoomGateway } from './gateway/chatroom.gateway.js';
 import { llmProviderGateway } from './gateway/llm-provider.gateway.js';
+import { connectorGateway } from './gateway/connector.gateway.js';
 import { speechGateway } from './gateway/speech.gateway.js';
 import { skillGateway } from './gateway/skill.gateway.js';
 import { cronTaskGateway } from './gateway/cron-task.gateway.js';
@@ -136,6 +137,7 @@ export async function createApp(options?: { enableSwagger?: boolean }) {
     appSettingGateway,
     categoryGateway,
     llmProviderGateway,
+    connectorGateway,
     agentGateway,
     messageGateway,
     chatRoomGateway,

@@ -143,8 +143,7 @@ flutter test
 | `PORT` | `3001` | 后端端口 |
 | `SERVER_HOST` | `0.0.0.0` | 后端监听地址 |
 | `DATABASE_URL` | `file:./dev.db` | Prisma / libsql 数据库地址 |
-| `JWT_SECRET` | `teamagentx-default-secret-key` | JWT 签名密钥，生产环境必须替换 |
-| `JWT_EXPIRES_IN` | `7d` | JWT 过期时间 |
+| `JWT_SECRET` | （随机生成持久化） | JWT 签名密钥；未设置时在数据目录生成 `.jwt-secret` |
 | `AGENT_HISTORY_THRESHOLD` | `20` | agent 历史消息阈值 |
 | `AGENT_MEMORY_RECENT_MESSAGES` | `10` | 记忆摘要保留的近期消息数 |
 | `AGENT_MEMORY_COMPACT_MESSAGES` | `40` | 触发记忆压缩的消息数 |

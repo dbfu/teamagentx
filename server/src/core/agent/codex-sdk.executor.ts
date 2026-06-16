@@ -64,6 +64,7 @@ import type {
   ToolCallEmitCallback,
 } from './executor.interface.js';
 import { coerceThinkingText } from './executor.interface.js';
+import { getAgentConnectors, toCodexMcpServers } from './connector.adapter.js';
 
 function normalizeUsage(usage: Usage | null | undefined): TokenUsage | undefined {
   if (!usage) return undefined;
@@ -940,6 +941,8 @@ export class CodexSdkExecutor implements IAgentExecutor {
   private currentAbortController: AbortController | null = null;
   private thread: TeamAgentXCodexThread | null = null;
   private threadSuppressAssistantHandoff: boolean | null = null;
+  // 当前执行启用的连接器（MCP server），在每轮执行前预加载
+  private connectorMcpServers: Record<string, Record<string, unknown>> = {};
   /** 事件流里最后一条被吞掉的瞬时错误信息，用于进程异常退出时还原真实失败原因。 */
   private lastStreamErrorMessage: string | null = null;
 
@@ -1916,7 +1919,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       skills: {
         include_instructions: false,
       },
-      mcp_servers: builtinMcpServers,
+      mcp_servers: { ...builtinMcpServers, ...this.connectorMcpServers },
       ...(this.llmProvider
         ? buildCodexModelProviderConfig(this.llmProvider, {
             routerBaseUrl: buildCodexRouterBaseUrl(
@@ -2211,6 +2214,10 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     let firstVisibleOutputLogged = false;
     this.lastStreamErrorMessage = null;
 
+    // 预加载用户启用的连接器（MCP server），供 getCodexRunner 合并进 mcp_servers
+    this.connectorMcpServers = toCodexMcpServers(
+      await getAgentConnectors(this.agentId),
+    );
     const thread = this.getThread(suppressAssistantHandoff);
     const { events } = await thread.runStreamed(input, { signal: abortController.signal });
 

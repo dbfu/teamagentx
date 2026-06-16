@@ -17,6 +17,9 @@ describe('template export service', () => {
         name: '客服群',
         description: '客服工作流',
         rules: '优先分诊',
+        envVars: JSON.stringify([
+          { key: 'DAILY_REPORT_TOKEN', value: 'should-not-export', description: '日报接口 Token' },
+        ]),
         workDir: '/Users/private/room',
         defaultAgentId: 'agent-1',
         agentTriggerMode: 'manual',
@@ -62,6 +65,9 @@ describe('template export service', () => {
     assert.equal(payload.manifest.contents.agents, 1);
     assert.equal(payload.manifest.contents.categories, 1);
     assert.equal(payload.snapshot.room.workDir, null);
+    assert.deepEqual(JSON.parse(payload.snapshot.room.envVars ?? '[]'), [
+      { key: 'DAILY_REPORT_TOKEN', value: '', description: '日报接口 Token' },
+    ]);
     assert.equal(payload.snapshot.agents[0]?.proxyConfig, null);
     assert.equal(payload.capabilityDescriptors.length, 1);
     assert.equal(payload.capabilityDescriptors[0]?.capabilityType, 'text');

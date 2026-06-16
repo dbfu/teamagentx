@@ -6,6 +6,7 @@ import { cronTaskHelperTools } from './cron-task-helper.tools.js';
 import { createExternalPlatformHelperTools } from './external-platform-helper.tools.js';
 import { skillManagerTools } from './skill-manager.tools.js';
 import { createExecutionContextTools } from './execution-context.tools.js';
+import { connectorManagerTools } from './connector-manager.tools.js';
 
 type SystemTool = {
   name?: string;
@@ -45,6 +46,7 @@ export function getSystemAssistantTools(
     ...cronTaskHelperTools,
     ...createChatRoomHelperTools(chatRoomId),
     ...createExternalPlatformHelperTools(chatRoomId),
+    ...connectorManagerTools,
     ...createExecutionContextTools(chatRoomId),
   ]);
 }

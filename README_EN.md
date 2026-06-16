@@ -142,8 +142,7 @@ Backend config is centralized in `server/src/config/index.ts`. Frontend build va
 | `PORT` | `3001` | Backend port |
 | `SERVER_HOST` | `0.0.0.0` | Backend listen address |
 | `DATABASE_URL` | `file:./dev.db` | Prisma/libsql database path |
-| `JWT_SECRET` | `teamagentx-default-secret-key` | JWT signing key, must change in production |
-| `JWT_EXPIRES_IN` | `7d` | JWT expiration time |
+| `JWT_SECRET` | (random, persisted) | JWT signing key; if unset, a `.jwt-secret` is generated in the data dir |
 | `AGENT_HISTORY_THRESHOLD` | `20` | Agent history message threshold |
 | `AGENT_MEMORY_RECENT_MESSAGES` | `10` | Recent messages kept for memory summary |
 | `AGENT_MEMORY_COMPACT_MESSAGES` | `40` | Message count triggering memory compression |

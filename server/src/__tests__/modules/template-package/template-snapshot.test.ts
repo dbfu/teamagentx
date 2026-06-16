@@ -11,6 +11,9 @@ describe('template snapshot builder', () => {
         name: '客服群',
         description: '客服工作流',
         rules: '优先分诊',
+        envVars: JSON.stringify([
+          { key: 'CUSTOMER_API_TOKEN', value: 'secret-token', description: '客服 API Token' },
+        ]),
         workDir: '/Users/demo/private-workdir',
         defaultAgentId: 'agent-1',
         agentTriggerMode: 'auto',
@@ -47,6 +50,9 @@ describe('template snapshot builder', () => {
     });
 
     assert.equal(snapshot.room.workDir, null);
+    assert.deepEqual(JSON.parse(snapshot.room.envVars ?? '[]'), [
+      { key: 'CUSTOMER_API_TOKEN', value: '', description: '客服 API Token' },
+    ]);
     assert.equal(snapshot.agents[0]?.workDir, null);
     assert.equal(snapshot.agents[0]?.proxyConfig, null);
     assert.equal(snapshot.agents[0]?.llmProviderId, null);

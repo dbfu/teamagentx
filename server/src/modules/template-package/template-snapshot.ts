@@ -1,3 +1,5 @@
+import { parseRoomEnvVars } from '../../core/agent/room-env-vars.js';
+
 type SnapshotCapabilityType = 'text' | 'image' | 'audio';
 
 interface SnapshotRoomInput {
@@ -6,6 +8,7 @@ interface SnapshotRoomInput {
   description: string | null;
   rules: string | null;
   dispatchRules?: string | null;
+  envVars?: string | null;
   workDir: string | null;
   defaultAgentId: string | null;
   agentTriggerMode: 'auto' | 'manual' | 'coordinator';
@@ -71,6 +74,7 @@ export function buildTemplateSnapshot(input: BuildTemplateSnapshotInput) {
   return {
     room: {
       ...input.room,
+      envVars: serializeTemplateRoomEnvVars(input.room.envVars),
       workDir: null,
       avatar: input.room.avatar ?? null,
       avatarColor: input.room.avatarColor ?? null,
@@ -119,4 +123,14 @@ export function buildTemplateSnapshot(input: BuildTemplateSnapshotInput) {
       maxRetries: task.maxRetries,
     })),
   };
+}
+
+export function serializeTemplateRoomEnvVars(raw: string | null | undefined): string | null {
+  const envVars = parseRoomEnvVars(raw).map((envVar) => ({
+    key: envVar.key,
+    value: '',
+    ...(envVar.description ? { description: envVar.description } : {}),
+  }));
+
+  return envVars.length > 0 ? JSON.stringify(envVars) : null;
 }

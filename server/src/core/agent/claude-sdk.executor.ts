@@ -77,6 +77,7 @@ import {
   type AgentThinkingMode,
 } from './thinking-mode.js';
 import { getDefaultChatRoomWorkDir, resolveAgentWorkDir } from './work-dir.js';
+import { getAgentConnectors, toClaudeMcpServers } from './connector.adapter.js';
 
 function shortHash(input: string): string {
   return createHash('sha256').update(input).digest('hex').slice(0, 16);
@@ -1932,6 +1933,21 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
     const settingSources = getClaudeSettingSources(Boolean(this.llmProvider));
     const autoCompactWindow = getClaudeAutoCompactWindow(this.llmProvider);
     const allowedTaxTools = this.getAllowedTaxTools();
+    // 加载并合并用户启用的连接器（MCP server）
+    const connectors = await getAgentConnectors(this.agentId);
+    const connectorMcpServers = toClaudeMcpServers(connectors);
+    const connectorToolPatterns = connectors.map((c) => `mcp__${c.name}__*`);
+    const mcpServers: Record<string, unknown> = {
+      ...(allowedTaxTools.length > 0 ? { tax: this.buildTeamAgentXMcpServer() } : {}),
+      ...connectorMcpServers,
+    };
+    const hasMcpServers = Object.keys(mcpServers).length > 0;
+    // allowedTools 仅在内置 tax 工具受限时设置；此时需放行连接器工具。
+    // 若只有连接器而无 tax 限制，则不设置 allowedTools（默认全部放行）。
+    const allowedTools =
+      allowedTaxTools.length > 0
+        ? [...allowedTaxTools, ...connectorToolPatterns]
+        : undefined;
     const q = query({
       prompt: this.buildPrompt(fullMessage, attachments),
       options: {
@@ -1959,14 +1975,8 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
               ]
             : []),
         ],
-        ...(allowedTaxTools.length > 0
-          ? {
-              mcpServers: {
-                tax: this.buildTeamAgentXMcpServer(),
-              },
-              allowedTools: allowedTaxTools,
-            }
-          : {}),
+        ...(hasMcpServers ? { mcpServers: mcpServers as never } : {}),
+        ...(allowedTools ? { allowedTools } : {}),
         settingSources,
         hooks: this.buildHooks(),
         sessionId: this.hasStartedSession ? undefined : this.sessionId,

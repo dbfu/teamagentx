@@ -8,7 +8,7 @@ const TOAST_LIMIT = 1
 const TOAST_REMOVE_DELAY = 5000 // 5 seconds
 
 // 主导航项类型
-export type MainNavTab = 'message' | 'workbench' | 'assistant' | 'skill' | 'model' | 'integration'
+export type MainNavTab = 'message' | 'workbench' | 'assistant' | 'skill' | 'model' | 'connectors' | 'integration'
 
 // 默认导航顺序
 const DEFAULT_NAV_ORDER: MainNavTab[] = [
@@ -17,6 +17,7 @@ const DEFAULT_NAV_ORDER: MainNavTab[] = [
   'assistant',
   'skill',
   'model',
+  'connectors',
   'integration',
 ]
 

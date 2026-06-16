@@ -4,6 +4,8 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import { config } from '../../config/index.js';
 import prisma from '../../lib/prisma.js';
 import { authService } from './auth.service.js';
 
@@ -74,6 +76,22 @@ describe('authService local user file', () => {
 
     const result = await authService.login({ username: 'admin', password: 'secret123' });
     assert.equal(result.user.username, 'admin');
+
+    const decoded = jwt.decode(result.token) as jwt.JwtPayload;
+    assert.equal(decoded.exp, undefined);
+  });
+
+  test('已带过期时间的旧 token 仍可继续使用', async () => {
+    const registered = await authService.register({ username: 'admin', password: 'secret123' });
+    const expiredToken = jwt.sign(
+      { userId: registered.user.id, username: registered.user.username },
+      config.jwt.secret,
+      { expiresIn: '-1s' },
+    );
+
+    const user = await authService.getUserFromToken(expiredToken);
+
+    assert.equal(user?.id, registered.user.id);
   });
 
   test('旧数据库账号在密码正确时迁移为本地账号文件', async () => {

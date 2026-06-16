@@ -234,29 +234,38 @@ export async function broadcastChatRoomRulesUpdatedMessage(
     isHuman: true,
   };
 
-  await messageService.create({
-    id: messageId,
-    type: 'MESSAGE',
-    content,
-    time,
-    userId: null,
-    agentId: null,
-    chatRoomId,
-    replyMessageId: null,
-    isHuman: true,
-  });
+  try {
+    await messageService.create({
+      id: messageId,
+      type: 'MESSAGE',
+      content,
+      time,
+      userId: null,
+      agentId: null,
+      chatRoomId,
+      replyMessageId: null,
+      isHuman: true,
+    });
 
-  // Broadcast for UI/unread sync only. Do not emit receivedMessage here,
-  // otherwise the notification itself would trigger the coordinator/default agent.
-  if (globalBroadcastMessage) {
-    await globalBroadcastMessage(message, chatRoomId);
+    // Broadcast for UI/unread sync only. Do not emit receivedMessage here,
+    // otherwise the notification itself would trigger the coordinator/default agent.
+    if (globalBroadcastMessage) {
+      await globalBroadcastMessage(message, chatRoomId);
+    }
+
+    debugLog('chatRoomRulesUpdatedMessage', {
+      chatRoomId,
+      messageId,
+      content,
+    });
+  } catch (error) {
+    console.warn('[broadcastChatRoomRulesUpdatedMessage] failed to save or broadcast notice:', error);
+    debugLog('chatRoomRulesUpdatedMessageFailed', {
+      chatRoomId,
+      messageId,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
-
-  debugLog('chatRoomRulesUpdatedMessage', {
-    chatRoomId,
-    messageId,
-    content,
-  });
 
   return messageId;
 }
@@ -291,21 +300,30 @@ export async function broadcastChatRoomDispatchRulesUpdatedMessage(
     isHuman: true,
   };
 
-  await messageService.create({
-    id: messageId,
-    type: 'MESSAGE',
-    content,
-    time,
-    userId: null,
-    agentId: null,
-    chatRoomId,
-    replyMessageId: null,
-    isHuman: true,
-  });
+  try {
+    await messageService.create({
+      id: messageId,
+      type: 'MESSAGE',
+      content,
+      time,
+      userId: null,
+      agentId: null,
+      chatRoomId,
+      replyMessageId: null,
+      isHuman: true,
+    });
 
-  // 仅用于 UI / 未读同步，不发 receivedMessage，避免触发协调器。
-  if (globalBroadcastMessage) {
-    await globalBroadcastMessage(message, chatRoomId);
+    // 仅用于 UI / 未读同步，不发 receivedMessage，避免触发协调器。
+    if (globalBroadcastMessage) {
+      await globalBroadcastMessage(message, chatRoomId);
+    }
+  } catch (error) {
+    console.warn('[broadcastChatRoomDispatchRulesUpdatedMessage] failed to save or broadcast notice:', error);
+    debugLog('chatRoomDispatchRulesUpdatedMessageFailed', {
+      chatRoomId,
+      messageId,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 
   return messageId;

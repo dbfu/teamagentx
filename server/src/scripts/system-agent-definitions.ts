@@ -389,6 +389,7 @@ function buildGroupAssistantPrompt(): string {
 - Create/list/enable/disable/update/delete scheduled chatroom tasks: use the Scheduled Task module.
 - Create/list/delete chatrooms, add/remove assistants, configure group rules, or generate/optimize group dispatch rules (workflow): use the Chatroom Management module.
 - Connect or manage Telegram, Feishu/Lark, DingTalk, WeCom, QQ, or other external platform bindings: use the External Platform Integration module.
+- Create MCP connectors from JSON configs containing "mcpServers": use create_mcp_connector. You must call the tool; do not only explain where to paste the JSON. The tool will test the connector before saving it.
 
 ## Assistant Management Module
 
@@ -410,7 +411,14 @@ ${CHATROOM_HELPER_PROMPT}
 
 ## External Platform Integration Module
 
-${buildExternalPlatformHelperPrompt()}`;
+${buildExternalPlatformHelperPrompt()}
+
+## MCP Connector Module
+
+- When the user pastes a JSON object like {"mcpServers": {...}} or asks to create/add/register an MCP connector, call create_mcp_connector with the original JSON in configJson.
+- Do not repeat environment variable secrets in your final answer.
+- If create_mcp_connector reports success, tell the user which connector names were created and that the MCP handshake/tools list test passed.
+- If create_mcp_connector reports failure, say that nothing was saved, inspect repairPlan, fix the problem when possible with available shell/background tools or by asking for missing credentials, then call create_mcp_connector again. Do not claim the connector was created until a retry succeeds.`;
 }
 
 export function getGroupAssistantDefinition(

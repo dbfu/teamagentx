@@ -133,7 +133,7 @@ Server config is centralized in `server/src/config/index.ts`:
 - `PORT` (default: `3001`)
 - `SERVER_HOST` (default: `0.0.0.0`)
 - `DATABASE_URL` (default: `file:./dev.db`; Electron sets this to the desktop userData database)
-- `JWT_SECRET`, `JWT_EXPIRES_IN`
+- `JWT_SECRET`
 - `AGENT_HISTORY_THRESHOLD`
 - `AGENT_MEMORY_RECENT_MESSAGES`
 - `AGENT_MEMORY_COMPACT_MESSAGES`

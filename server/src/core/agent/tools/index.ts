@@ -37,5 +37,6 @@ export {
   createExternalPlatformHelperTools,
 } from './external-platform-helper.tools.js';
 
+export { connectorManagerTools } from './connector-manager.tools.js';
 export { createChatHistorySearchTools } from './chat-history-search.tools.js';
 export { getSystemAssistantTools } from './system-assistant.tools.js';

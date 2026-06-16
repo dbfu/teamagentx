@@ -19,6 +19,7 @@ import {
 import { buildTemplatePackagePayload } from './template-export.service.js';
 import { buildTemplateImportPlan } from './template-import.service.js';
 import { previewTemplatePackage } from './template-preview.service.js';
+import { serializeTemplateRoomEnvVars } from './template-snapshot.js';
 import {
     collectSkillsForTemplate,
     materializeTemplateSkills,
@@ -140,6 +141,7 @@ export const templatePackageService = {
         description: room.description,
         rules: room.rules,
         dispatchRules: (room as any).dispatchRules ?? null,
+        envVars: serializeTemplateRoomEnvVars(room.envVars),
         workDir: room.workDir,
         defaultAgentId:
           room.defaultAgentId && exportedAgentIds.has(room.defaultAgentId)
@@ -269,6 +271,7 @@ export const templatePackageService = {
         description: string | null;
         rules: string | null;
         dispatchRules?: string | null;
+        envVars?: string | null;
         defaultAgentId: string | null;
         agentTriggerMode: 'auto' | 'manual' | 'coordinator';
         avatar?: string | null;
@@ -354,6 +357,7 @@ export const templatePackageService = {
           description: input.snapshot.room.description,
           rules: input.snapshot.room.rules,
           dispatchRules: input.snapshot.room.dispatchRules ?? null,
+          envVars: serializeTemplateRoomEnvVars(input.snapshot.room.envVars),
           workDir: null,
           defaultAgentId: null,
           // 老模板的 auto（自由协作）已并入智能协作，导入时映射为 coordinator

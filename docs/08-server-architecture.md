@@ -289,7 +289,6 @@ Socket 连接时在 `auth.token` 传 JWT，服务端验证后将 user 挂到 `so
 | `SERVER_HOST` | `0.0.0.0` | 监听地址 |
 | `DATABASE_URL` | `file:./dev.db` | SQLite 路径（Electron 指向 userData） |
 | `JWT_SECRET` | （随机生成持久化） | 未设置时在数据目录生成 `.jwt-secret`（0600），绝不回退硬编码密钥 |
-| `JWT_EXPIRES_IN` | `7d` | JWT 有效期 |
 | `AGENT_HISTORY_THRESHOLD` | `20` | 历史摘要压缩阈值 |
 | `AGENT_MEMORY_RECENT_MESSAGES` | `10` | 注入最近消息数 |
 | `AGENT_MEMORY_COMPACT_MESSAGES` | `40` | 触发记忆压缩的消息数 |

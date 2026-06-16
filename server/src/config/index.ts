@@ -123,7 +123,6 @@ export const config = {
     get secret(): string {
       return resolveJwtSecret();
     },
-    expiresIn: process.env.JWT_EXPIRES_IN || '7d',
   },
   bridge: {
     encryptionKey: process.env.BRIDGE_ENCRYPTION_KEY || '',
