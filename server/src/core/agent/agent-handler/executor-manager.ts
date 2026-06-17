@@ -52,6 +52,9 @@ export async function getExecutor(
   agentName: string,
   sessionDir?: string,  // 显式运行目录；快速对话未指定时使用群默认目录
   llmProviderOverride?: LlmProvider,
+  options?: {
+    sessionSource?: IAgentExecutor | null;
+  },
 ): Promise<IAgentExecutor | null> {
   const baseCacheKey = sessionDir
     ? `${chatRoomId}_${agentName}_${sessionDir}`  // 自定义运行目录使用独立缓存 key
@@ -62,7 +65,12 @@ export async function getExecutor(
 
   // Check cache
   if (executorCache.has(cacheKey)) {
-    return executorCache.get(cacheKey)!;
+    const cachedExecutor = executorCache.get(cacheKey)!;
+    const snapshot = options?.sessionSource?.getSessionSnapshot?.();
+    if (snapshot) {
+      cachedExecutor.applySessionSnapshot?.(snapshot);
+    }
+    return cachedExecutor;
   }
 
   // 提示词语言跟随群主界面语言（房间维度统一）。先取房间 owner 的 preferredLanguage。
@@ -166,6 +174,10 @@ export async function getExecutor(
     stateless: agent.id === GROUP_COORDINATOR_ID,
     locale,
   });
+  const snapshot = options?.sessionSource?.getSessionSnapshot?.();
+  if (snapshot) {
+    executor.applySessionSnapshot?.(snapshot);
+  }
   executorCache.set(cacheKey, executor);
   return executor;
 }

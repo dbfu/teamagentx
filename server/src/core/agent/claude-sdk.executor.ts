@@ -51,6 +51,7 @@ import type {
     AgentDebugInfo,
     AgentExecOptions,
     AgentExecResult,
+    AgentSessionSnapshot,
     AgentTriggerMode,
     ChatRoomAgentInfo,
     HistoryMessage,
@@ -645,6 +646,32 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
 
   setLastInjectedMessageId(id: string): void {
     this._lastInjectedMessageId = id;
+  }
+
+  getSessionSnapshot(): AgentSessionSnapshot | null {
+    if (this.stateless || !this.sessionId) return null;
+    return {
+      type: 'claude',
+      sessionId: this.sessionId,
+      hasStartedSession: this.hasStartedSession,
+    };
+  }
+
+  applySessionSnapshot(snapshot: AgentSessionSnapshot): boolean {
+    if (this.stateless || snapshot.type !== 'claude') return false;
+    if (!snapshot.sessionId) return false;
+    this.sessionId = snapshot.sessionId;
+    this.hasStartedSession = snapshot.hasStartedSession;
+    this.saveSessionId();
+    logClaudeSdkDebug('applied fallback session snapshot', {
+      agentName: this.name,
+      agentId: this.agentId,
+      chatRoomId: this.chatRoomId,
+      sessionId: this.sessionId,
+      hasStartedSession: this.hasStartedSession,
+      statePath: this.getSessionStatePath(),
+    });
+    return true;
   }
 
   private ensureWorkDirectory(): void {

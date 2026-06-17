@@ -51,6 +51,7 @@ import type {
   AgentDebugInfo,
   AgentExecOptions,
   AgentExecResult,
+  AgentSessionSnapshot,
   AgentTriggerMode,
   ChatRoomAgentInfo,
   HistoryMessage,
@@ -1045,6 +1046,29 @@ export class CodexSdkExecutor implements IAgentExecutor {
 
   setLastInjectedMessageId(id: string): void {
     this._lastInjectedMessageId = id;
+  }
+
+  getSessionSnapshot(): AgentSessionSnapshot | null {
+    if (this.stateless || !this.threadId) return null;
+    return {
+      type: 'codex',
+      threadId: this.threadId,
+    };
+  }
+
+  applySessionSnapshot(snapshot: AgentSessionSnapshot): boolean {
+    if (this.stateless || snapshot.type !== 'codex') return false;
+    if (!snapshot.threadId) return false;
+    this.thread = null;
+    this.threadId = snapshot.threadId;
+    this.saveThreadId();
+    debugLog('codexSdkAppliedFallbackSessionSnapshot', {
+      agentName: this.name,
+      agentId: this.agentId,
+      chatRoomId: this.chatRoomId,
+      threadId: this.threadId,
+    });
+    return true;
   }
 
   private ensureWorkDirectory(): void {

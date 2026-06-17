@@ -681,25 +681,28 @@ export async function processQueue(chatRoomId: string, agentId: string) {
           const runWithModelFallback = async (): Promise<AgentExecResult> => {
             const candidates: Array<{
               provider: LlmProvider | null;
-              executor: IAgentExecutor;
-            }> = [{ provider: null, executor }];
-
-            for (const provider of shouldUseModelFallback ? fallbackLlmProviders : []) {
-              const fallbackExecutor = await getExecutor(
-                chatRoomId,
-                task.agentName,
-                task.sessionDir ?? undefined,
-                provider,
-              );
-              if (fallbackExecutor) {
-                candidates.push({ provider, executor: fallbackExecutor });
-              }
-            }
+            }> = [
+              { provider: null },
+              ...(shouldUseModelFallback
+                ? fallbackLlmProviders.map((provider) => ({ provider }))
+                : []),
+            ];
 
             let lastError: unknown;
             for (let index = 0; index < candidates.length; index += 1) {
               const candidate = candidates[index];
-              const provider = candidate.provider ?? candidate.executor.getDebugInfo().llmProvider ?? null;
+              const candidateExecutor = candidate.provider
+                ? await getExecutor(
+                    chatRoomId,
+                    task.agentName,
+                    task.sessionDir ?? undefined,
+                    candidate.provider,
+                    { sessionSource: executor },
+                  )
+                : executor;
+              if (!candidateExecutor) continue;
+
+              const provider = candidate.provider ?? candidateExecutor.getDebugInfo().llmProvider ?? null;
               const role = index === 0 ? 'primary' : 'fallback';
               const providerLabel = provider
                 ? `${provider.name} (${provider.model})`
@@ -726,9 +729,9 @@ export async function processQueue(chatRoomId: string, agentId: string) {
 
               try {
                 pushModelEvent('in_progress', 1);
-                const result = await runExecutorWithNoActivityRetry(candidate.executor, providerLabel, 1);
+                const result = await runExecutorWithNoActivityRetry(candidateExecutor, providerLabel, 1);
                 pushModelEvent('completed', 1, { model: result.model ?? provider?.model });
-                executionDebugExecutor = candidate.executor;
+                executionDebugExecutor = candidateExecutor;
                 return result;
               } catch (firstError) {
                 if (firstError instanceof Error && firstError.name === 'AbortError') throw firstError;
@@ -773,9 +776,9 @@ export async function processQueue(chatRoomId: string, agentId: string) {
 
               try {
                 pushModelEvent('in_progress', 2);
-                const result = await runExecutorWithNoActivityRetry(candidate.executor, providerLabel, 2);
+                const result = await runExecutorWithNoActivityRetry(candidateExecutor, providerLabel, 2);
                 pushModelEvent('completed', 2, { model: result.model ?? provider?.model });
-                executionDebugExecutor = candidate.executor;
+                executionDebugExecutor = candidateExecutor;
                 return result;
               } catch (secondError) {
                 if (secondError instanceof Error && secondError.name === 'AbortError') throw secondError;
