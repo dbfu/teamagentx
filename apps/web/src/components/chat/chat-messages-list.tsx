@@ -55,6 +55,8 @@ interface ChatMessagesListProps {
   currentUser?: CurrentUser
   isSidePanelOpen?: boolean
   readOnly?: boolean
+  // 无消息时的自定义空状态（如新建群聊未选择助手的引导提示），未提供时回退到默认「暂无消息」
+  emptyHint?: React.ReactNode
 }
 
 interface MessageRowProps {
@@ -393,6 +395,7 @@ export const ChatMessagesList = memo(function ChatMessagesList({
   currentUser,
   isSidePanelOpen = false,
   readOnly = false,
+  emptyHint,
 }: ChatMessagesListProps) {
   const { t } = useTranslation()
   const isMobile = useIsMobile()
@@ -1565,9 +1568,11 @@ export const ChatMessagesList = memo(function ChatMessagesList({
             {t('chat.loadingMessages')}
           </div>
         ) : messages.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-gray-400 select-none">
-            {t('chat.noMessages')}
-          </div>
+          emptyHint ?? (
+            <div className="flex h-full items-center justify-center text-gray-400 select-none">
+              {t('chat.noMessages')}
+            </div>
+          )
         ) : (
           <div
             className="relative w-full"

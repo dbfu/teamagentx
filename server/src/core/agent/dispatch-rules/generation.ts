@@ -19,6 +19,8 @@ export interface DispatchRulesGenInput {
   ownerUsername?: string | null;
   /** 用户的优化要求 / 草稿；为空则自动生成 */
   instructions?: string;
+  /** 群聊当前已有的调度规则 YAML；优化时在其基础上修改，而非从零重建 */
+  existingYaml?: string;
 }
 
 // 固定格式说明 + 一个完整示例（few-shot），保证模型严格按 schema 输出。
@@ -95,9 +97,16 @@ export function buildDispatchRulesGenerationMessages(input: DispatchRulesGenInpu
     ? `\n- 当需要用户确认或回答问题时，约束里写明必须 @${input.ownerUsername}。`
     : '';
 
+  const existing = input.existingYaml?.trim();
+  const existingBlock = existing
+    ? `\n群聊当前已有的调度规则（请在此基础上按要求修改，保留与要求无关的部分，不要从零重建）：\n${existing}\n`
+    : '';
+
   const taskLine = input.instructions?.trim()
-    ? `请参考用户的要求/草稿，结合助手名册，整理并补全为规范的调度规则 YAML。\n\n用户的要求/草稿：\n${input.instructions.trim()}`
-    : `用户未提供具体要求，请根据各助手的职责描述，自动推断一份合理的协作工作流（典型如「分析 → 设计 → 开发 → 评审 → 发布 → 测试」），并对涉及验收/选择的环节给出合理的 on_pass/on_fail 或 constraints。`;
+    ? `请${existing ? '在「当前已有的调度规则」基础上' : ''}参考用户的要求/草稿，结合助手名册，整理并补全为规范的调度规则 YAML。\n\n用户的要求/草稿：\n${input.instructions.trim()}`
+    : existing
+      ? `用户未提供具体要求，请在「当前已有的调度规则」基础上结合助手名册做必要的修正与补全（例如移除已不在群里的助手、补齐缺失的验收/选择环节），保持原有结构与意图。`
+      : `用户未提供具体要求，请根据各助手的职责描述，自动推断一份合理的协作工作流（典型如「分析 → 设计 → 开发 → 评审 → 发布 → 测试」），并对涉及验收/选择的环节给出合理的 on_pass/on_fail 或 constraints。`;
 
   return [
     { role: 'system', content: `${SCHEMA_SPEC}\n\n${EXAMPLE}` },
@@ -108,7 +117,7 @@ export function buildDispatchRulesGenerationMessages(input: DispatchRulesGenInpu
 当前群聊助手（只能使用这些名称）：
 ${agentRoster}
 ${ownerHint}
-
+${existingBlock}
 ${taskLine}
 
 请直接输出纯 YAML。`,

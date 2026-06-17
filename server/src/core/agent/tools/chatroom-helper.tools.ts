@@ -509,6 +509,7 @@ export async function applyDispatchRulesForRoom(
       agents: businessAgents,
       ownerUsername: (chatRoom.owner as any)?.username,
       instructions: opts.instructions,
+      existingYaml: (chatRoom as any).dispatchRules ?? undefined,
     });
 
     const client = createLlmClient(provider, { temperature: 0, maxTokens: 4096 });
@@ -537,6 +538,47 @@ export async function applyDispatchRulesForRoom(
   await broadcastChatRoomDispatchRulesUpdatedMessage(roomId, finalYaml);
 
   return { ok: true, dispatchRules: finalYaml, roomName: chatRoom.name };
+}
+
+// 查看群调度规则（工作流）工具：优化调度规则前先读取现有规则
+export function getDispatchRulesToolForSource(sourceChatRoomId?: string) {
+  return tool(
+    async ({ chatRoomId }: { chatRoomId?: string }) => {
+      try {
+        const roomId = chatRoomId?.trim() || sourceChatRoomId;
+        if (!roomId) {
+          return JSON.stringify({ success: false, error: '未指定群聊，且无法确定当前群聊' });
+        }
+
+        const chatRoom = await chatRoomService.findById(roomId);
+        if (!chatRoom) {
+          return JSON.stringify({ success: false, error: `群聊不存在: ${roomId}` });
+        }
+
+        const dispatchRules = (chatRoom as any).dispatchRules ?? '';
+        return JSON.stringify({
+          success: true,
+          chatRoomId: chatRoom.id,
+          name: chatRoom.name,
+          hasDispatchRules: typeof dispatchRules === 'string' && dispatchRules.trim().length > 0,
+          dispatchRules,
+        });
+      } catch (error) {
+        return JSON.stringify({
+          success: false,
+          error: error instanceof Error ? error.message : '获取群调度规则失败',
+        });
+      }
+    },
+    {
+      name: 'get_dispatch_rules',
+      description:
+        '获取群聊当前的「群调度规则（工作流）」YAML。优化或更新调度规则前必须先调用此工具读取现有规则，再在其基础上修改，避免覆盖已有工作流。不传 chatRoomId 时默认当前群聊。',
+      schema: z.object({
+        chatRoomId: z.string().optional().describe('群聊ID，不传则使用当前群聊'),
+      }),
+    },
+  );
 }
 
 // 生成 / 优化群调度规则（工作流）工具
@@ -575,7 +617,7 @@ export function generateDispatchRulesToolForSource(sourceChatRoomId?: string) {
     {
       name: 'generate_dispatch_rules',
       description:
-        '生成或优化群聊的「群调度规则（工作流）」。不指定 chatRoomId 时默认当前群聊。提供 instructions 时按用户要求优化，不提供时根据群内助手名称与描述自动生成。结果为结构化 YAML，注入给群调度助手并可在群设置中可视化。',
+        '生成或优化群聊的「群调度规则（工作流）」。不指定 chatRoomId 时默认当前群聊。会自动读取群聊现有调度规则并在其基础上修改：提供 instructions 时按用户要求优化，不提供时根据群内助手与现有规则自动补全。结果为结构化 YAML，注入给群调度助手并可在群设置中可视化。',
       schema: z.object({
         chatRoomId: z.string().optional().describe('群聊ID，不传则使用当前群聊'),
         instructions: z
@@ -597,6 +639,7 @@ export function createChatRoomHelperTools(sourceChatRoomId?: string) {
     removeAgentFromChatRoomTool,
     getChatRoomRulesToolForSource(sourceChatRoomId),
     updateChatRoomRulesTool,
+    getDispatchRulesToolForSource(sourceChatRoomId),
     generateDispatchRulesToolForSource(sourceChatRoomId),
     deleteChatRoomTool,
   ];
