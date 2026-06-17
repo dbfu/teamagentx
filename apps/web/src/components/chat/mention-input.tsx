@@ -754,12 +754,12 @@ export const MentionInput = forwardRef<MentionInputRef, MentionInputProps>(funct
     if (showMentions && filteredAgents.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
-        setSelectedIndex(prev => Math.min(prev + 1, filteredAgents.length - 1))
+        setSelectedIndex(prev => (prev + 1) % filteredAgents.length)
         return
       }
       if (e.key === 'ArrowUp') {
         e.preventDefault()
-        setSelectedIndex(prev => Math.max(prev - 1, 0))
+        setSelectedIndex(prev => (prev - 1 + filteredAgents.length) % filteredAgents.length)
         return
       }
       if (e.key === 'Enter' || e.key === 'Tab') {

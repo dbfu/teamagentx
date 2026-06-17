@@ -183,6 +183,8 @@ exports.default = async function (context) {
     }
   }
 
+  assertRequiredRuntimeFiles(nodeModulesDir);
+
   await createServerRuntimeArchive(serverDir, resourcesDir);
 };
 
@@ -974,6 +976,11 @@ function removeDevDirectories(rootDir) {
       if (!entry.isDirectory()) continue;
 
       if (DROP_NAMES.has(entry.name)) {
+        if (isRequiredRuntimeDirectory(full)) {
+          walk(full);
+          continue;
+        }
+
         const size = getPathSize(full);
         try {
           fs.rmSync(full, { recursive: true, force: true });
@@ -990,6 +997,28 @@ function removeDevDirectories(rootDir) {
   walk(rootDir);
   if (removedCount === 0) return [];
   return [`removed ${removedCount} dev directory(ies) (${formatBytes(removedBytes)})`];
+}
+
+function isRequiredRuntimeDirectory(fullPath) {
+  const normalized = fullPath.split(path.sep).join('/');
+  return normalized.endsWith('/node_modules/yaml/dist/doc');
+}
+
+function assertRequiredRuntimeFiles(nodeModulesDir) {
+  const requiredFiles = [
+    path.join(nodeModulesDir, 'yaml', 'dist', 'doc', 'Document.js'),
+    path.join(nodeModulesDir, 'yaml', 'dist', 'doc', 'directives.js'),
+  ];
+
+  const missingFiles = requiredFiles.filter(filePath => !fs.existsSync(filePath));
+  if (missingFiles.length === 0) {
+    return;
+  }
+
+  throw new Error(
+    '[afterPack] Missing required server runtime file(s):\n'
+    + missingFiles.map(filePath => `  - ${filePath}`).join('\n'),
+  );
 }
 
 function removeFilesByPattern(rootDir, matcher) {

@@ -643,6 +643,9 @@ export async function processQueue(chatRoomId: string, agentId: string) {
                 return await runExecutor(candidateExecutor, providerLabel, attempt, noActivityAttempt);
               } catch (error) {
                 if (!(error instanceof NoActivityTimeoutError) || noActivityAttempt >= maxNoActivityAttempts) {
+                  if (error instanceof NoActivityTimeoutError) {
+                    resetAbortController();
+                  }
                   throw error;
                 }
 
@@ -744,6 +747,28 @@ export async function processQueue(chatRoomId: string, agentId: string) {
                   attempt: 1,
                   error: firstError instanceof Error ? firstError.message : String(firstError),
                 });
+                if (firstError instanceof NoActivityTimeoutError && index < candidates.length - 1) {
+                  const nextProvider = candidates[index + 1]?.provider;
+                  executionEvents.push({
+                    type: 'model',
+                    timestamp: Date.now(),
+                    data: {
+                      type: 'switch',
+                      reason: 'no_activity_timeout',
+                      from: providerLabel,
+                      to: nextProvider ? `${nextProvider.name} (${nextProvider.model})` : 'unknown',
+                    },
+                  });
+                  debugLog('agentModelFallbackSwitch', {
+                    chatRoomId,
+                    agentId: task.agentId,
+                    agentName: task.agentName,
+                    reason: 'no_activity_timeout',
+                    from: providerLabel,
+                    to: nextProvider ? `${nextProvider.name} (${nextProvider.model})` : 'unknown',
+                  });
+                  continue;
+                }
               }
 
               try {
@@ -755,7 +780,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
               } catch (secondError) {
                 if (secondError instanceof Error && secondError.name === 'AbortError') throw secondError;
                 const sameError = normalizeExecutionError(secondError) === normalizeExecutionError(lastError);
-                const willSwitch = sameError && index < candidates.length - 1;
+                const willSwitch = index < candidates.length - 1;
                 pushModelEvent('error', 2, {
                   sameError,
                   willSwitch,
@@ -800,13 +825,24 @@ export async function processQueue(chatRoomId: string, agentId: string) {
           try {
             execResult = await runWithModelFallback();
           } catch (error) {
-            // 检查是否是中止错误
-            if (error instanceof Error && error.name === 'AbortError') {
+            const abortReason = abortController.signal.aborted
+              ? abortController.signal.reason
+              : undefined;
+            const isUserRequestedAbort =
+              error instanceof Error &&
+              error.name === 'AbortError' &&
+              abortLocales.has(key) &&
+              !(abortReason instanceof NoActivityTimeoutError);
+
+            // 只有用户显式停止的 abort 才按 cancelled 落库并展示“手动取消”。
+            if (isUserRequestedAbort) {
               wasAborted = true;
               console.log(`Task aborted for agent ${task.agentName}`);
               executionError = new Error('执行已被用户中断');
             } else {
-              executionError = error instanceof Error ? error : new Error(String(error));
+              executionError = abortReason instanceof NoActivityTimeoutError
+                ? abortReason
+                : error instanceof Error ? error : new Error(String(error));
               console.error(
                 `Task execution failed for agent ${task.agentName}:`,
                 error,

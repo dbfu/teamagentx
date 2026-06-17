@@ -257,6 +257,10 @@ export function setupSocket(io: Server) {
     io.emit('chatroom:agents-updated', { chatRoomId });
   };
 
+  const emitChatRoomUpdated = (chatRoomId: string) => {
+    io.emit('chatroom:updated', { chatRoomId });
+  };
+
   // 推送所有正在执行的群聊状态给指定 socket
   async function pushAllExecutingStatuses(socket: AuthenticatedSocket) {
     try {
@@ -284,7 +288,7 @@ export function setupSocket(io: Server) {
     }
   }
 
-  setupAIHandlers(emit, emitTyping, emitDone, emitStream, emitToolCall, emitThinking, emitStatus, emitTodoCreated, broadcastTaskQueue, emitChatRoomCreated, emitAgentsUpdated);
+  setupAIHandlers(emit, emitTyping, emitDone, emitStream, emitToolCall, emitThinking, emitStatus, emitTodoCreated, broadcastTaskQueue, emitChatRoomCreated, emitAgentsUpdated, emitChatRoomUpdated);
 
   // Socket authentication middleware
   io.use(async (socket: AuthenticatedSocket, next) => {

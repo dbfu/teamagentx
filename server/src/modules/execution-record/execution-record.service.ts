@@ -28,6 +28,7 @@ export interface ExecutionEvent {
     error?: string;
     sameError?: boolean;
     willSwitch?: boolean;
+    reason?: string;
     from?: string;
     to?: string;
   };

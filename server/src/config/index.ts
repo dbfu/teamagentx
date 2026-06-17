@@ -106,9 +106,9 @@ export const config = {
     coordinatorLlmTimeoutMs: parseInt(process.env.AGENT_COORDINATOR_LLM_TIMEOUT_MS || '120000', 10),
     coordinatorLlmRetryCount: parseInt(process.env.AGENT_COORDINATOR_LLM_RETRY_COUNT || '1', 10),
     coordinatorLlmRetryDelayMs: parseInt(process.env.AGENT_COORDINATOR_LLM_RETRY_DELAY_MS || '1000', 10),
-    // 普通助手执行启动后若长期没有任何输出/流/思考/工具事件，认为本次 attempt 卡住并重试。
+    // 普通助手执行启动后若 1 分钟没有任何输出/流/思考/工具事件，认为本次 attempt 卡住并重试/切换备用模型。
     // 设置 timeout 为 0 可关闭；只在首次活动前生效，已有活动的长任务不会被该计时器中断。
-    executionNoActivityTimeoutMs: parseInt(process.env.AGENT_EXECUTION_NO_ACTIVITY_TIMEOUT_MS || '90000', 10),
+    executionNoActivityTimeoutMs: parseInt(process.env.AGENT_EXECUTION_NO_ACTIVITY_TIMEOUT_MS || '60000', 10),
     executionNoActivityRetryCount: parseInt(process.env.AGENT_EXECUTION_NO_ACTIVITY_RETRY_COUNT || '1', 10),
     executionNoActivityRetryDelayMs: parseInt(process.env.AGENT_EXECUTION_NO_ACTIVITY_RETRY_DELAY_MS || '1000', 10),
     // 协作预算（智能协作模式）：两次人类发言之间，助手快路径接力的最大跳数。

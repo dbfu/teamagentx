@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { createSystemTool as tool } from './system-tool.js';
 import { chatRoomService } from '../../../modules/chatroom/chatroom.service.js';
 import { agentService } from '../../../core/agent/agent.service.js';
-import { broadcastChatRoomCreated, broadcastAgentsUpdated } from '../agent-handler/status.js';
+import { broadcastChatRoomCreated, broadcastAgentsUpdated, broadcastChatRoomUpdated } from '../agent-handler/status.js';
 import {
   broadcastAgentJoinedMessage,
   broadcastChatRoomRulesUpdatedMessage,
@@ -351,6 +351,47 @@ export const removeAgentFromChatRoomTool = tool(
   },
 );
 
+// 查看群规则工具（修改前先读取现有群规则，避免盲目覆盖历史内容）
+export function getChatRoomRulesToolForSource(sourceChatRoomId?: string) {
+  return tool(
+    async ({ chatRoomId }: { chatRoomId?: string }) => {
+      try {
+        const roomId = chatRoomId?.trim() || sourceChatRoomId;
+        if (!roomId) {
+          return JSON.stringify({ success: false, error: '未指定群聊，且无法确定当前群聊' });
+        }
+
+        const chatRoom = await chatRoomService.findById(roomId);
+        if (!chatRoom) {
+          return JSON.stringify({ success: false, error: `群聊不存在: ${roomId}` });
+        }
+
+        const rules = chatRoom.rules ?? '';
+        return JSON.stringify({
+          success: true,
+          chatRoomId: chatRoom.id,
+          name: chatRoom.name,
+          hasRules: rules.trim().length > 0,
+          rules,
+        });
+      } catch (error) {
+        return JSON.stringify({
+          success: false,
+          error: error instanceof Error ? error.message : '获取群规则失败',
+        });
+      }
+    },
+    {
+      name: 'get_chatroom_rules',
+      description:
+        '获取群聊当前的群规则内容。修改或更新群规则前必须先调用此工具读取现有群规则，再在其基础上修改，避免覆盖已有内容。不传 chatRoomId 时默认当前群聊。',
+      schema: z.object({
+        chatRoomId: z.string().optional().describe('群聊ID，不传则使用当前群聊'),
+      }),
+    },
+  );
+}
+
 // 配置群规则工具
 export const updateChatRoomRulesTool = tool(
   async ({
@@ -368,6 +409,8 @@ export const updateChatRoomRulesTool = tool(
 
       const updatedChatRoom = await chatRoomService.update(chatRoomId, { rules });
       clearExecutorCacheEntries(undefined, chatRoomId);
+      // 通知前端刷新群聊信息，避免用户打开群规则时看到的还是旧内容
+      broadcastChatRoomUpdated(chatRoomId);
       if ((chatRoom.rules ?? '') !== (updatedChatRoom.rules ?? '')) {
         await broadcastChatRoomRulesUpdatedMessage(chatRoomId, updatedChatRoom.rules);
       }
@@ -489,6 +532,8 @@ export async function applyDispatchRulesForRoom(
   const finalYaml = stringifyDispatchRules(parsed.data);
   await chatRoomService.update(roomId, { dispatchRules: finalYaml });
   clearExecutorCacheEntries(undefined, roomId);
+  // 通知前端刷新群聊信息，避免用户打开调度规则时看到的还是旧内容
+  broadcastChatRoomUpdated(roomId);
   await broadcastChatRoomDispatchRulesUpdatedMessage(roomId, finalYaml);
 
   return { ok: true, dispatchRules: finalYaml, roomName: chatRoom.name };
@@ -550,6 +595,7 @@ export function createChatRoomHelperTools(sourceChatRoomId?: string) {
     listAgentsTool,
     addAgentToChatRoomTool,
     removeAgentFromChatRoomTool,
+    getChatRoomRulesToolForSource(sourceChatRoomId),
     updateChatRoomRulesTool,
     generateDispatchRulesToolForSource(sourceChatRoomId),
     deleteChatRoomTool,

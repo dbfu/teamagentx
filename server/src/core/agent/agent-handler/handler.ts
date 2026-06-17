@@ -163,6 +163,7 @@ export function setupAIHandlers(
   ) => void,
   emitChatRoomCreated: (chatRoom: any) => void,
   emitAgentsUpdated: (chatRoomId: string) => void,
+  emitChatRoomUpdated?: (chatRoomId: string) => void,
 ) {
   // 保存全局回调
   setGlobalCallbacks({
@@ -177,6 +178,7 @@ export function setupAIHandlers(
     broadcastTaskQueue,
     emitChatRoomCreated,
     emitAgentsUpdated,
+    emitChatRoomUpdated,
   });
 
   setAgentTaskSettledHandler(async (event) => {
