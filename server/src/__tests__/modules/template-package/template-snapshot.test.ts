@@ -108,6 +108,14 @@ describe('template snapshot builder', () => {
         enabled: true,
         maxRetries: 5,
       }],
+      commands: [
+        {
+          id: 'cmd-1',
+          name: '初始化项目',
+          content: '/初始化项目\n请检查当前仓库并给出启动建议',
+          sortOrder: 1,
+        },
+      ],
     });
 
     assert.equal(snapshot.room.name, '客服群');
@@ -123,6 +131,14 @@ describe('template snapshot builder', () => {
     assert.equal(snapshot.room.avatarColor, '#2563eb');
     assert.equal(snapshot.agents[0]?.avatar, '7');
     assert.equal(snapshot.agents[0]?.avatarColor, '#f97316');
+    assert.deepEqual(snapshot.commands, [
+      {
+        id: 'cmd-1',
+        name: '初始化项目',
+        content: '/初始化项目\n请检查当前仓库并给出启动建议',
+        sortOrder: 1,
+      },
+    ]);
   });
 
   test('keeps coordinator trigger mode in room metadata', () => {

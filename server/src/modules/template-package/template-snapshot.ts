@@ -63,11 +63,19 @@ interface SnapshotCronTaskInput {
   maxRetries: number;
 }
 
+interface SnapshotCommandInput {
+  id?: string;
+  name: string;
+  content: string;
+  sortOrder: number;
+}
+
 interface BuildTemplateSnapshotInput {
   room: SnapshotRoomInput;
   agents: SnapshotAgentInput[];
   categories: SnapshotCategoryInput[];
   cronTasks: SnapshotCronTaskInput[];
+  commands?: SnapshotCommandInput[];
 }
 
 export function buildTemplateSnapshot(input: BuildTemplateSnapshotInput) {
@@ -121,6 +129,12 @@ export function buildTemplateSnapshot(input: BuildTemplateSnapshotInput) {
       agentIds: task.agentIds,
       enabled: task.enabled,
       maxRetries: task.maxRetries,
+    })),
+    commands: (input.commands ?? []).map((command) => ({
+      ...(command.id ? { id: command.id } : {}),
+      name: command.name,
+      content: command.content,
+      sortOrder: command.sortOrder,
     })),
   };
 }
