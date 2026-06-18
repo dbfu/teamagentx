@@ -140,33 +140,27 @@ ${chatRoomRules.trim()}`,
     ? pickLocaleText(
         {
           'zh-CN': `### 收尾交接协议（强制）
-每条回复必须恰好以下面两种方式之一结束。发送前你必须刻意判断适用哪一种：
-1. 交接 —— 任务尚未完成，需要一个或多个助手继续、验证、补充或接手。你回复的末尾必须包含如下格式的可触发提及，每个目标助手单独一行：
-@目标助手 <他们接下来要做的具体事项>
-这些交接行的格式规则（否则不会触发，任务会无声停滞）：
-- "@" 必须位于对应交接行的最开头。
-- 可以提及一个或多个目标助手；提及多个助手时，系统会交给群调度助手判断并行或串行执行。
-- 每个助手的交接内容必须是分配给该助手的独立、具体任务。
-- 交接行不能位于代码块、引用块或示例中。
+每条回复结束时，你必须刻意判断属于下面哪一种：
+1. 交接 —— 任务尚未完成，需要一个或多个助手继续、验证、补充或接手。此时你必须调用 mention_agents 工具来交接（不要靠在正文里写 "@助手名" —— 正文里的 @ 只作展示、不会触发任何助手）。调用规则：
+- 在 mentions 数组里为每个目标助手各填一项：agent=该助手在本群的名称，task=分配给它的独立、具体任务。
+- 可以一次交接一个或多个助手；交接多个时，系统会交给群调度助手判断并行或串行执行。
 - 目标助手必须是本群已存在的助手。
-- 不要重复已在途的交接：如果你在本话题中已经 @ 过某助手、而它尚未返回结果（你还没看到它的回复），就不要再 @ 它——即使你这次只是完成了用户临时插进来要求的支线小事。它会通过群历史看到你的最新产出，无需再次触发。只有当你确有一个新的、不同的事项要交给它时，才再次 @。
-如果确实无法确定正确的助手，不要乱猜——改为请用户选择来结束。
-2. 结束 —— 任务已完成，或现在需要用户介入（更多输入、决策或确认）。不要提及任何助手。如果你在向用户提问或等待其确认/决策，回复必须 @ 该用户（如 @username），以便系统把回答直接路由回你；否则只给出结果。
-禁止在暗示仍有后续工作（例如"接下来应该…""然后需要测试/构建/审查/由…处理"）时不带交接行就结束回复。发送前重读回复末尾：如果你的回复暗示一个或多个助手还得行动，确认每个目标都有一行以 "@" 开头的明确交接。`,
+- 派发在你本轮结束后统一进行；你可多次调用，目标会自动合并去重。
+- 不要重复已在途的交接：如果你在本话题中已经交接过某助手、而它尚未返回结果（你还没看到它的回复），就不要再次交接它——即使你这次只是完成了用户临时插进来要求的支线小事。它会通过群历史看到你的最新产出，无需再次触发。只有当你确有一个新的、不同的事项要交给它时，才再次调用。
+如果确实无法确定正确的助手，不要乱猜——也不要调用 mention_agents，改为请用户选择来结束。
+2. 结束 —— 任务已完成，或现在需要用户介入（更多输入、决策或确认）。不要调用 mention_agents。如果你在向用户提问或等待其确认/决策，回复必须 @ 该用户（如 @username，这是给用户的提及、写在正文里即可），以便系统把回答路由回你；否则只给出结果。
+禁止在暗示仍有后续工作（例如"接下来应该…""然后需要测试/构建/审查/由…处理"）时，既不调用 mention_agents、也不收尾。发送前重新判断：如果你的回复暗示一个或多个助手还得行动，就必须通过 mention_agents 交接。`,
           'en-US': `### End-of-Turn Handoff Protocol (MANDATORY)
-Every reply MUST end in exactly ONE of these two ways. You must decide deliberately which one applies before sending:
-1. HAND OFF — the task is NOT finished and one or more assistants must continue, validate, supplement, or take over. The end of your reply MUST contain triggerable mentions in this exact form, one target assistant per line:
-@target_assistant <the specific thing they must do next>
-Format rules for these handoff lines (otherwise they will NOT trigger and the task silently stalls):
-- The "@" must be at the very start of each handoff line.
-- You may mention one or multiple target assistants; when multiple assistants are mentioned, the group coordinator decides whether to run them in parallel or serially.
-- Each handoff must contain a standalone, specific task for that assistant.
-- Handoff lines must NOT be inside a code block, blockquote, or example.
+At the end of every reply, deliberately decide which case applies:
+1. HAND OFF — the task is NOT finished and one or more assistants must continue, validate, supplement, or take over. You MUST hand off by calling the mention_agents tool (do NOT rely on writing "@name" in your prose — an @ in the body is display-only and will NOT trigger any assistant). Rules:
+- In the mentions array, add one item per target: agent = that assistant's name in this chatroom, task = the standalone, specific task assigned to it.
+- You may hand off to one or multiple assistants; for multiple, the group coordinator decides parallel or serial execution.
 - Every target assistant must be an existing assistant in this chatroom.
-- Do NOT repeat a handoff that is still in flight: if you already @-ed an assistant earlier in this thread and it has not returned its result yet (you have not seen its reply), do NOT @ it again — even if all you just did was a small side task the user injected. It will see your latest output via the group history and needs no re-trigger. Only @ it again if you genuinely have a new, different task for it.
-If the correct assistant is genuinely unclear, do NOT guess — end by asking the user to choose instead.
-2. FINISH — the task is complete, or it now needs the user (more input, a decision, or confirmation). Do NOT mention any assistant. If you are asking the user a question or waiting for their confirmation/decision, the reply MUST @ that user (e.g. @username) so the system can route their answer straight back to you; otherwise just give the result.
-It is FORBIDDEN to end a reply that implies further work is still needed (e.g. "next we should…", "then it needs to be tested / built / reviewed / handled by …") WITHOUT HAND OFF lines. Before sending, re-read the end of the reply: if one or more assistants must act, confirm every target has a clear line starting with "@".`,
+- Dispatch happens after your turn ends; you may call it multiple times and targets are merged/deduped automatically.
+- Do NOT repeat a handoff that is still in flight: if you already handed off to an assistant earlier in this thread and it has not returned yet (you have not seen its reply), do NOT hand off to it again — even if all you just did was a small side task the user injected. It will see your latest output via the group history and needs no re-trigger. Only call again if you genuinely have a new, different task for it.
+If the correct assistant is genuinely unclear, do NOT guess and do NOT call mention_agents — end by asking the user to choose instead.
+2. FINISH — the task is complete, or it now needs the user (more input, a decision, or confirmation). Do NOT call mention_agents. If you are asking the user a question or waiting for their confirmation/decision, the reply MUST @ that user (e.g. @username — that is a mention to the user, written in the body) so the system can route their answer back to you; otherwise just give the result.
+It is FORBIDDEN to end a reply that implies further work is still needed (e.g. "next we should…", "then it needs to be tested / built / reviewed / handled by …") while neither calling mention_agents nor finishing. Before sending, re-decide: if one or more assistants must act, you MUST hand off via mention_agents.`,
         },
         locale,
       )
@@ -188,13 +182,13 @@ This chatroom is in manual mode: @assistant mentions in assistant messages do NO
       )
     : pickLocaleText(
         {
-          'zh-CN': `## 助手提及
-在 TeamAgentX 中，@助手 提及可以触发助手任务。单条消息可以提及一个或多个助手；提及多个助手时，系统会交给群调度助手判断并行或串行执行。请为每个被提及的助手写清独立、具体的任务，不要让多个助手共用一段含糊指令。
-每当你在回复结尾请用户确认、决策或回答某事后才能继续时，回复中必须 @ 该用户（如 @username）。这能让系统把用户的回答直接路由回你。对于只是给出最终结果、无需回应的消息，不要 @ 用户。
+          'zh-CN': `## 助手提及与交接
+在 TeamAgentX 中，交接给其他助手要通过调用 mention_agents 工具完成，而不是在正文里写 "@助手名"（正文里的 @助手 只作展示、不会触发对方）。一次可交接一个或多个助手；交接多个时，系统会交给群调度助手判断并行或串行执行。请为每个目标助手在 task 里写清独立、具体的任务。
+@用户 则相反：当你在回复结尾请用户确认、决策或回答某事后才能继续时，必须在正文里 @ 该用户（如 @username）。这能让系统把用户的回答直接路由回你。对于只是给出最终结果、无需回应的消息，不要 @ 用户。
 ${collaborationTriggerCheckSection}`,
-          'en-US': `## Assistant Mentions
-In TeamAgentX, @assistant mentions can trigger assistant tasks. A single message may mention one or multiple assistants; when multiple assistants are mentioned, the group coordinator decides whether to run them in parallel or serially. Give every mentioned assistant a standalone, specific task instead of sharing one ambiguous instruction across targets.
-Whenever you end a reply by asking the user to confirm, decide, or answer something before you can continue, you MUST @ that user (e.g. @username) in the reply. This lets the system route the user's reply directly back to you. Do not @ the user for messages that are just a final result and need no response.
+          'en-US': `## Assistant Mentions & Handoff
+In TeamAgentX, handing off to another assistant is done by calling the mention_agents tool, NOT by writing "@name" in your prose (an @assistant in the body is display-only and will not trigger them). You may hand off to one or multiple assistants at once; for multiple, the group coordinator decides parallel or serial execution. Give each target a standalone, specific task in its task field.
+@user works the opposite way: when you end a reply by asking the user to confirm, decide, or answer something before you can continue, you MUST @ that user (e.g. @username) in the body. This lets the system route the user's reply directly back to you. Do not @ the user for messages that are just a final result and need no response.
 ${collaborationTriggerCheckSection}`,
         },
         locale,
@@ -236,8 +230,8 @@ export function buildHandoffTurnReminder(
   if (agentTriggerMode !== 'auto' && agentTriggerMode !== 'coordinator') return '';
   return pickLocaleText(
     {
-      'zh-CN': `[交接提醒] 本条回复必须恰好以以下之一结束：(a) 若一个或多个助手必须继续，在回复末尾为每个目标单独写一行 "@助手名 接下来要做什么"；@ 位于行首，任务具体且不在代码块内。多个 @ 会由群调度助手判断并行或串行。但若某助手你在本话题已经 @ 过且它尚未返回，不要重复 @ 它（哪怕你这次只是完成了用户临时要求的支线），改按 (b) 收尾；(b) 若任务已完成或现在需要用户，不要提及任何助手——但如果你在请用户确认、决策或回答后才能继续，则 @ 该用户（@username），以便其回答路由回你。绝不要在暗示仍有后续工作时不带交接行就结束回复。`,
-      'en-US': `[Handoff Reminder] End this reply with exactly ONE of: (a) if one or more assistants must continue, add one line per target at the end in the form "@assistant_name what to do next"; put @ at the start of each line, give each assistant a specific task, and keep the lines outside code blocks. Multiple @mentions are routed to the group coordinator to decide parallel or serial execution. But if you already @-ed an assistant earlier in this thread and it has not returned yet, do NOT @ it again (even if all you just did was a user-injected side task) — end with (b) instead; (b) if the task is done or now needs the user, do not mention any assistant—but if you are asking the user to confirm, decide, or answer before you can continue, @ that user (@username) so their reply routes back to you. Never end a reply that implies further work is still needed without handoff lines.`,
+      'zh-CN': `[交接提醒] 本条回复结束时必须二选一：(a) 若一个或多个助手必须继续，调用 mention_agents 工具交接，为每个目标填 agent（助手名）和 task（具体任务）；不要靠正文里写 "@助手名"（不会触发）。交接多个会由群调度助手判断并行或串行。但若某助手你在本话题已经交接过且它尚未返回，不要重复交接（哪怕你这次只是完成了用户临时要求的支线），改按 (b) 收尾；(b) 若任务已完成或现在需要用户，不要调用 mention_agents——但如果你在请用户确认、决策或回答后才能继续，则在正文 @ 该用户（@username），以便其回答路由回你。绝不要在暗示仍有后续工作时既不交接也不收尾。`,
+      'en-US': `[Handoff Reminder] End this reply with exactly ONE of: (a) if one or more assistants must continue, hand off by calling the mention_agents tool, filling agent (assistant name) and task (specific task) for each target; do NOT rely on writing "@name" in your prose (it will not trigger). Handing off to multiple is routed to the group coordinator to decide parallel or serial. But if you already handed off to an assistant earlier in this thread and it has not returned yet, do NOT hand off again (even if all you just did was a user-injected side task) — end with (b) instead; (b) if the task is done or now needs the user, do not call mention_agents—but if you are asking the user to confirm, decide, or answer before you can continue, @ that user (@username) in the body so their reply routes back to you. Never end a reply that implies further work is still needed while neither handing off nor finishing.`,
     },
     locale,
   );

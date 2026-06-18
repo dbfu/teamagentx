@@ -9,6 +9,7 @@ import { setGlobalCallbacks, setGlobalEmitReceivedMessage } from './status.js';
 import type { AgentStatus } from './status.js';
 import type { ToolCall } from '../executor.interface.js';
 import { parseKnownMentions } from './message-utils.js';
+import { takeMentions } from './mention-buffer.js';
 import { debugLog } from './debug.js';
 import { enqueueAgentTask } from './agent-dispatch.service.js';
 import { GROUP_COORDINATOR_ID } from '../system-assistant.constants.js';
@@ -379,14 +380,27 @@ export function setupAIHandlers(
         // 'none'：不在批次里，继续正常流程
       }
 
-      // 先解析 @mentions，判断是否有 @助手
+      // 解析 @mentions，判断是否有 @助手。
+      // - 人类消息：仍解析自由文本里的 @助手名（人类输入沿用纯文本格式）。
+      // - 助手消息：改由 mention_agents 工具登记的结构化 buffer 驱动，不再解析助手自由 prose，
+      //   从根上避免「交给 @UI设计 进行界面设计」这类叙述性文本被误派发。
+      //   （buffer 在 processor 任务开始时已清空，确保不会跨轮残留；助手须在产出收尾消息前调用工具。）
       const activeAgents = await agentService.findActive();
       const activeAgentByName = new Map(activeAgents.map((agent) => [agent.name, agent]));
-      const mentionNames = parseKnownMentions(
-        message.content,
-        activeAgents.map((agent) => agent.name),
-        { allowInline: true },
-      );
+      const isAssistantMessage =
+        !message.isHuman &&
+        !!message.agentId &&
+        message.agentId !== GROUP_COORDINATOR_ID;
+      const pendingMentions = isAssistantMessage
+        ? takeMentions(chatRoomId, message.agentId!)
+        : [];
+      const mentionNames = isAssistantMessage
+        ? pendingMentions.map((m) => m.agentName)
+        : parseKnownMentions(
+            message.content,
+            activeAgents.map((agent) => agent.name),
+            { allowInline: true },
+          );
       const hasMentions = mentionNames.length > 0;
 
       // 快速对话群聊：如果没有 @其他助手，则触发快速对话助手
@@ -467,6 +481,7 @@ export function setupAIHandlers(
             chatRoomId,
             messageId: message.id,
             mentionNames: handoff.names,
+            pendingMentions,
           });
           await triggerCoordinatorAgentDispatch(chatRoomId, message, 'assistantMultiMention');
           return;

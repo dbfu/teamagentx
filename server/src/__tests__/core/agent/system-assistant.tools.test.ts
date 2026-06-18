@@ -31,10 +31,13 @@ describe('System assistant tools', () => {
     const toolNames = getSystemAssistantTools(AGENT_CREATOR_ID, 'room-1')
       .map((tool) => tool.name);
 
+    // mention_agents 是助手交接的统一入口，所有业务助手（含旧系统助手）都具备，
+    // 排在房间上下文工具之后。
     assert.deepStrictEqual(toolNames, [
       'get_room_message_detail',
       'get_recent_room_messages',
       'search_room_messages',
+      'mention_agents',
     ]);
   });
 
@@ -46,7 +49,8 @@ describe('System assistant tools', () => {
       includeRoomContextTools: false,
     }).map((tool) => tool.name);
 
-    assert.deepStrictEqual(legacyToolNames, []);
+    // mention_agents 与群历史开关无关，始终可用；房间上下文工具则被关闭。
+    assert.deepStrictEqual(legacyToolNames, ['mention_agents']);
     assert.ok(!groupToolNames.includes('get_room_message_detail'));
     assert.ok(!groupToolNames.includes('get_recent_room_messages'));
     assert.ok(!groupToolNames.includes('search_room_messages'));

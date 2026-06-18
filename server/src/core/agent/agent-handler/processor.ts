@@ -42,6 +42,8 @@ import {
 import { getExecutor } from './executor-manager.js';
 import { buildAgentDispatchPlan } from '../dispatch-rules/agent-dispatch-plan.js';
 import { buildAIMessage } from './message-utils.js';
+import { clearMentions, peekMentions } from './mention-buffer.js';
+import { appendMentionBlock } from '../tools/mention.tools.js';
 import { debugLog } from './debug.js';
 import { notifySourceAgentOnFailure } from './task-failure-notification.js';
 import { shouldSuppressInternalCoordinatorMessage } from '../internal-coordinator-agent.js';
@@ -238,6 +240,10 @@ export async function processQueue(chatRoomId: string, agentId: string) {
           // 收集生成的消息 ID，用于后续回填 executionRecordId
           const generatedMessageIds: string[] = [];
 
+          // 清空本助手在本群的 mention_agents 缓冲：每轮执行从干净状态开始，
+          // 防止上一轮未被消费的派发意图（如调用了工具但没有收尾消息）残留泄漏到本轮。
+          clearMentions(chatRoomId, task.agentId);
+
           // 收集执行事件（用于保存到 ExecutionRecord）
           const executionEvents: ExecutionEvent[] = [];
           // 记录最近一次「仅记录」的中间文本段内容，用于去重：
@@ -251,22 +257,26 @@ export async function processQueue(chatRoomId: string, agentId: string) {
 
           // 创建 emit 回调，在 tool 调用时直接广播消息
           const emitCallback = async (content: string, replyMessageId?: string) => {
+            const contentWithMentionBlock = appendMentionBlock(
+              content,
+              peekMentions(chatRoomId, task.agentId),
+            );
             if (content && content.trim()) {
               markExecutionActivity();
             }
             const shouldSuppressGroupMessage = shouldSuppressInternalCoordinatorMessage(
               task.agentId,
-              content,
+              contentWithMentionBlock,
             );
 
             // 合并连续的 output 事件
             const lastEvent = executionEvents[executionEvents.length - 1];
             if (lastEvent && lastEvent.type === 'output') {
               // 在同一个 output 事件内累加内容
-              lastEvent.data.content = (lastEvent.data.content || '') + content;
+              lastEvent.data.content = (lastEvent.data.content || '') + contentWithMentionBlock;
             } else if (
-              content.trim() &&
-              content.trim() === lastRecordedSegmentContent?.trim()
+              contentWithMentionBlock.trim() &&
+              contentWithMentionBlock.trim() === lastRecordedSegmentContent?.trim()
             ) {
               // 与刚记录的中间段完全相同：不再重复写入执行详情，但下面仍照常发群消息
             } else {
@@ -274,7 +284,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
               executionEvents.push({
                 type: 'output',
                 timestamp: Date.now(),
-                data: { content, type: 'message' },
+                data: { content: contentWithMentionBlock, type: 'message' },
               });
             }
 
@@ -289,7 +299,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
             }
 
             const aiMessage = await buildAIMessage(
-              content,
+              contentWithMentionBlock,
               replyMessageId || null,
               task.agentName,
               task.agentId,
@@ -356,7 +366,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
                 messageTime: aiMessage.time,
                 triggerAgentId: task.agentId,
                 triggerAgentName: task.agentName,
-                content,
+                content: contentWithMentionBlock,
               });
 
               if (todo?.ownerUserId && globalEmitTodoCreated) {
@@ -587,6 +597,8 @@ export async function processQueue(chatRoomId: string, agentId: string) {
             attempt: number,
             noActivityAttempt: number,
           ): Promise<AgentExecResult> => {
+            // 每次模型重试都从干净的 mention buffer 开始，避免失败尝试留下派发意图。
+            clearMentions(chatRoomId, task.agentId);
             const monitor = createNoActivityMonitor(
               noActivityTimeoutMs,
               (error) => abortController.abort(error),
@@ -842,6 +854,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
               wasAborted = true;
               console.log(`Task aborted for agent ${task.agentName}`);
               executionError = new Error('执行已被用户中断');
+              clearMentions(chatRoomId, task.agentId);
             } else {
               executionError = abortReason instanceof NoActivityTimeoutError
                 ? abortReason
@@ -850,6 +863,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
                 `Task execution failed for agent ${task.agentName}:`,
                 error,
               );
+              clearMentions(chatRoomId, task.agentId);
               if (shouldUseModelFallback) {
                 try {
                   await emitCallback(`${task.agentName} 执行出错: ${executionError.message}`, task.messageId);
