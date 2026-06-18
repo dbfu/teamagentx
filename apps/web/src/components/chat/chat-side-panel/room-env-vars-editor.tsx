@@ -1,6 +1,6 @@
 import { chatRoomApi } from '@/lib/agent-api';
-import { Eye, EyeOff, Plus, Save, Trash2 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { Eye, EyeOff, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useState, forwardRef, useImperativeHandle } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 
@@ -16,6 +16,16 @@ interface RoomEnvVarsEditorProps {
   envVars: string | null
   /** 保存成功后刷新群聊数据 */
   onSaved: () => void
+  /** 保存成功后关闭弹框 */
+  onClose?: () => void
+  /** 状态变化回调，用于通知父组件 */
+  onStateChange?: (state: { dirty: boolean; hasErrors: boolean; saving: boolean }) => void
+}
+
+export interface RoomEnvVarsEditorRef {
+  save: () => void
+  addRow: () => void
+  getState: () => { dirty: boolean; hasErrors: boolean; saving: boolean }
 }
 
 const VALID_ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/
@@ -37,98 +47,112 @@ function parseRows(raw: string | null): EnvVarRow[] {
   }
 }
 
-export function RoomEnvVarsEditor({ chatRoomId, envVars, onSaved }: RoomEnvVarsEditorProps) {
-  const { t } = useTranslation()
-  const [rows, setRows] = useState<EnvVarRow[]>(() => parseRows(envVars))
-  const [revealed, setRevealed] = useState<Record<number, boolean>>({})
-  const [saving, setSaving] = useState(false)
-  const [dirty, setDirty] = useState(false)
+export const RoomEnvVarsEditor = forwardRef<RoomEnvVarsEditorRef, RoomEnvVarsEditorProps>(
+  function RoomEnvVarsEditor({ chatRoomId, envVars, onSaved, onClose, onStateChange }, ref) {
+    const { t } = useTranslation()
+    const [rows, setRows] = useState<EnvVarRow[]>(() => parseRows(envVars))
+    const [revealed, setRevealed] = useState<Record<number, boolean>>({})
+    const [saving, setSaving] = useState(false)
+    const [dirty, setDirty] = useState(false)
 
-  useEffect(() => {
-    setRows(parseRows(envVars))
-    setRevealed({})
-    setDirty(false)
-  }, [chatRoomId, envVars])
+    useEffect(() => {
+      setRows(parseRows(envVars))
+      setRevealed({})
+      setDirty(false)
+    }, [chatRoomId, envVars])
 
-  // 校验：key 非空、格式合法、不重复
-  const keyErrors = useMemo(() => {
-    const errors: Record<number, string> = {}
-    const seen = new Map<string, number>()
-    rows.forEach((row, index) => {
-      const key = row.key.trim()
-      if (!key) {
-        errors[index] = t('chat.envVars.keyEmpty')
-        return
-      }
-      if (!VALID_ENV_KEY.test(key)) {
-        errors[index] = t('chat.envVars.keyInvalid')
-        return
-      }
-      if (seen.has(key)) {
-        errors[index] = t('chat.envVars.keyDuplicate')
-        return
-      }
-      seen.set(key, index)
-    })
-    return errors
-  }, [rows, t])
-
-  const hasErrors = Object.keys(keyErrors).length > 0
-
-  const updateRow = (index: number, patch: Partial<EnvVarRow>) => {
-    setRows((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)))
-    setDirty(true)
-  }
-
-  const addRow = () => {
-    setRows((prev) => [...prev, { key: '', value: '', description: '' }])
-    setDirty(true)
-  }
-
-  const removeRow = (index: number) => {
-    setRows((prev) => prev.filter((_, i) => i !== index))
-    setRevealed((prev) => {
-      const next = { ...prev }
-      delete next[index]
-      return next
-    })
-    setDirty(true)
-  }
-
-  const handleSave = async () => {
-    if (hasErrors) {
-      toast.error(t('chat.envVars.fixKeyFirst'))
-      return
-    }
-    setSaving(true)
-    try {
-      const payload = rows.map((row) => ({
-        key: row.key.trim(),
-        value: row.value,
-        description: row.description.trim() || undefined,
-      }))
-      const response = await chatRoomApi.update(chatRoomId, {
-        envVars: payload.length > 0 ? JSON.stringify(payload) : null,
-      })
-      if (response.success) {
-        const skipped = response.skippedReservedKeys ?? []
-        if (skipped.length > 0) {
-          toast.warning(t('chat.envVars.reservedKeysIgnored', { keys: skipped.join(', ') }))
-        } else {
-          toast.success(t('chat.envVars.saved'))
+    // 校验：key 非空、格式合法、不重复
+    const keyErrors = useMemo(() => {
+      const errors: Record<number, string> = {}
+      const seen = new Map<string, number>()
+      rows.forEach((row, index) => {
+        const key = row.key.trim()
+        if (!key) {
+          errors[index] = t('chat.envVars.keyEmpty')
+          return
         }
-        setDirty(false)
-        onSaved()
-      } else {
-        toast.error(t('chat.envVars.saveFailed'))
-      }
-    } finally {
-      setSaving(false)
+        if (!VALID_ENV_KEY.test(key)) {
+          errors[index] = t('chat.envVars.keyInvalid')
+          return
+        }
+        if (seen.has(key)) {
+          errors[index] = t('chat.envVars.keyDuplicate')
+          return
+        }
+        seen.set(key, index)
+      })
+      return errors
+    }, [rows, t])
+
+    const hasErrors = Object.keys(keyErrors).length > 0
+
+    // 状态变化回调
+    useEffect(() => {
+      onStateChange?.({ dirty, hasErrors, saving })
+    }, [dirty, hasErrors, saving, onStateChange])
+
+    const updateRow = (index: number, patch: Partial<EnvVarRow>) => {
+      setRows((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)))
+      setDirty(true)
     }
-  }
+
+    const addRow = () => {
+      setRows((prev) => [...prev, { key: '', value: '', description: '' }])
+      setDirty(true)
+    }
+
+    const removeRow = (index: number) => {
+      setRows((prev) => prev.filter((_, i) => i !== index))
+      setRevealed((prev) => {
+        const next = { ...prev }
+        delete next[index]
+        return next
+      })
+      setDirty(true)
+    }
+
+    const handleSave = async () => {
+      if (hasErrors) {
+        toast.error(t('chat.envVars.fixKeyFirst'))
+        return
+      }
+      setSaving(true)
+      try {
+        const payload = rows.map((row) => ({
+          key: row.key.trim(),
+          value: row.value,
+          description: row.description.trim() || undefined,
+        }))
+        const response = await chatRoomApi.update(chatRoomId, {
+          envVars: payload.length > 0 ? JSON.stringify(payload) : null,
+        })
+        if (response.success) {
+          const skipped = response.skippedReservedKeys ?? []
+          if (skipped.length > 0) {
+            toast.warning(t('chat.envVars.reservedKeysIgnored', { keys: skipped.join(', ') }))
+          } else {
+            toast.success(t('chat.envVars.saved'))
+          }
+          setDirty(false)
+          onSaved()
+          onClose?.()
+        } else {
+          toast.error(t('chat.envVars.saveFailed'))
+        }
+      } finally {
+        setSaving(false)
+      }
+    }
+
+    // 暴露方法给父组件
+    useImperativeHandle(ref, () => ({
+      save: handleSave,
+      addRow,
+      getState: () => ({ dirty, hasErrors, saving }),
+    }), [dirty, hasErrors, saving])
 
   return (
-    <div className="border-t border-border pt-4 mt-4">
+    <div className="relative">
       <label className="mb-2 block text-sm font-medium text-muted-foreground">{t('chat.envVars.label')}</label>
       <p className="mb-3 text-xs text-muted-foreground">
         {t('chat.envVars.hint')}
@@ -196,27 +220,6 @@ export function RoomEnvVarsEditor({ chatRoomId, envVars, onSaved }: RoomEnvVarsE
           ))}
         </div>
       )}
-
-      <div className="mt-2 flex items-center justify-between">
-        <button
-          type="button"
-          onClick={addRow}
-          className="flex items-center gap-1 rounded-lg border border-input px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent disabled:opacity-50"
-          disabled={saving}
-        >
-          <Plus className="size-3" />
-          {t('chat.envVars.addVariable')}
-        </button>
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saving || !dirty || hasErrors}
-          className="flex items-center gap-1 rounded-lg bg-blue-500 px-3 py-1.5 text-xs text-white hover:bg-blue-600 disabled:opacity-50"
-        >
-          <Save className="size-3" />
-          {t('chat.envVars.save')}
-        </button>
-      </div>
     </div>
   )
-}
+})

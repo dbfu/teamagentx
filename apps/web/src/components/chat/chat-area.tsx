@@ -18,7 +18,7 @@ import { MessageArchivesModal } from './message-archives-modal'
 import { CustomCommandModal } from './dialogs/custom-command-modal'
 import { useSocketStore, useChatRoomStore } from '@/stores'
 import { useChatStore } from '@/stores/chat-store'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useQuickChatLocalSessionHint } from './hooks/use-quick-chat-local-session-hint'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
@@ -289,7 +289,14 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
 
   if (!chatRoom) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-[var(--surface)] text-muted-foreground">
+      <div className="relative flex flex-1 items-center justify-center bg-[var(--surface)] text-muted-foreground">
+        {!isMobile && window.electronAPI?.isElectron && (
+          <div
+            aria-hidden="true"
+            className="absolute left-0 right-0 top-0 h-12"
+            style={{ WebkitAppRegion: 'drag' } as CSSProperties}
+          />
+        )}
         {t('chat.selectGroupToChat')}
       </div>
     )

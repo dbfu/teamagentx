@@ -143,7 +143,7 @@ In Smart Collaboration, the execution-graph shape is locked by three layers, gua
 
 | Breaker | Default | Env var | On trip |
 |---------|---------|---------|---------|
-| Hop budget (auto-triggered tasks carry a depth count, +1 on dispatch) | 20 hops | `AGENT_MAX_HANDOFF_HOPS` | Don't trigger the next hop; ask_owner with the sticking point |
+| Hop budget (auto-triggered tasks carry a depth count, +1 on dispatch) | 100 hops | `AGENT_MAX_HANDOFF_HOPS` | Don't trigger the next hop; ask_owner with the sticking point |
 | Cycle detection (the same pair A↔B ping-ponging **consecutively**, no third party / user) | 3 round-trips (6 hops) | `AGENT_HANDOFF_CYCLE_REPEAT_LIMIT` | Truncate, ask_owner |
 
 > After a circuit-breaker escalation, only `ask_owner` is allowed (`@` the room owner as the coordinator, stating the sticking point) — a deterministic notification, no LLM, no coordinator continuation. Cycle detection is "consecutive ping-pong", not cumulative repeats within a window — hub-and-spoke collaboration (e.g. a game host `@`-ing players one by one) legitimately repeats the same edge across phases and should not be falsely killed.
@@ -305,4 +305,4 @@ In Smart Collaboration this is **handed to the coordinator**: it splits the mult
 
 ### Q: How are agent-to-agent `@` loops prevented?
 
-For the "agent single-`@` direct relay" path, Smart Collaboration has a built-in two-breaker (20 hops / 3 consecutive round-trips) plus the stall fallback; on a trip it stops auto-dispatch and `@`s the owner. Any user message immediately resets the counters and takes over.
+For the "agent single-`@` direct relay" path, Smart Collaboration has a built-in two-breaker (100 hops / 3 consecutive round-trips) plus the stall fallback; on a trip it stops auto-dispatch and `@`s the owner. Any user message immediately resets the counters and takes over.

@@ -1502,7 +1502,7 @@ export function useAgentEventSubscription(chatRoomId: string | null) {
       // 完成会删除该 key，先把待写增量落盘
       flushPendingStreamDeltas()
       const state = useChatStore.getState()
-      const { completedAgents, typingAgents, streamEvents, streamingViewAgent, sidePanelMode } = state
+      const { completedAgents, typingAgents, streamEvents, streamingViewAgent, sidePanelMode, agentStatuses } = state
 
       // 按 messageId_agentId 标记完成
       const completedKey = `${data.triggerMessageId}_${data.agentId}`
@@ -1524,17 +1524,19 @@ export function useAgentEventSubscription(chatRoomId: string | null) {
         })),
       })
 
-      // 只移除 triggerMessageId 对应的 typingAgent，不影响其他消息的 typing
+      // done 事件偶尔会晚于恢复状态或对应不到本地 messageId。按 agentId 清理残留，
+      // 避免隐藏系统助手（如群调度助手）失败后长期显示执行中。
       const newTypingAgents = new Map(typingAgents)
-      const agentsForMessage = newTypingAgents.get(data.triggerMessageId)
-      if (agentsForMessage) {
+      for (const [messageId, agentsForMessage] of newTypingAgents) {
         const filtered = agentsForMessage.filter(a => a.agentId !== data.agentId)
         if (filtered.length === 0) {
-          newTypingAgents.delete(data.triggerMessageId)
+          newTypingAgents.delete(messageId)
         } else {
-          newTypingAgents.set(data.triggerMessageId, filtered)
+          newTypingAgents.set(messageId, filtered)
         }
       }
+      const newAgentStatuses = new Map(agentStatuses)
+      newAgentStatuses.set(data.agentId, 'idle')
 
       // 完成时清空该 messageId_agentId 的流式数据（下次执行时重新开始）
       const streamKey = `${data.triggerMessageId}_${data.agentId}`
@@ -1545,11 +1547,14 @@ export function useAgentEventSubscription(chatRoomId: string | null) {
       setCompletedAgents(newCompletedAgents)
       setTypingAgents(newTypingAgents)
       setStreamEvents(newStreamEvents)
+      setAgentStatuses(newAgentStatuses)
       console.log('[chat-store] cleared agent:done typing', {
         chatRoomId,
         agentId: data.agentId,
         triggerMessageId: data.triggerMessageId,
-        stillHasTypingAgent: (newTypingAgents.get(data.triggerMessageId) ?? []).some(a => a.agentId === data.agentId),
+        stillHasTypingAgent: Array.from(newTypingAgents.values()).some((agents) =>
+          agents.some(a => a.agentId === data.agentId)
+        ),
       })
 
       // 如果当前正在查看该 messageId_agentId 的流式面板，自动关闭

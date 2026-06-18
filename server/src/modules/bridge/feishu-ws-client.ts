@@ -6,6 +6,7 @@ import lark from '@larksuiteoapi/node-sdk';
 import { bridgeService } from './bridge.service.js';
 import { getBridgeInboundTextAdapter } from './platform-inbound-adapters.js';
 import { resolveFeishuReceiveIdType } from './platform-senders.js';
+import { bindFeishuCreatorOpenId, getBridgeBotById } from './bridge-bot-store.js';
 
 const { WSClient, EventDispatcher } = lark;
 
@@ -43,6 +44,20 @@ export function parseFeishuMessageTimestamp(value: unknown): number | null {
       : NaN;
   if (!Number.isFinite(numeric) || numeric <= 0) return null;
   return numeric < 10_000_000_000 ? numeric * 1000 : numeric;
+}
+
+export function isFeishuCreatorBindCommand(text: string): boolean {
+  return /^\/bind$/i.test(text.trim());
+}
+
+export function shouldAcceptFeishuGroupMessageFromCreator(params: {
+  chatType?: string;
+  senderOpenId?: string | null;
+  feishuCreatorOpenId?: string | null;
+}): boolean {
+  if (params.chatType !== 'group') return true;
+  if (!params.feishuCreatorOpenId) return true;
+  return params.senderOpenId === params.feishuCreatorOpenId;
 }
 
 // Fix #55: resolve open_id to display name, with cache
@@ -149,6 +164,33 @@ async function supervisedStart(
             '[Bridge/Feishu-WS] 归一化后的飞书文本',
           );
 
+          const openId = data.sender?.sender_id?.open_id ?? '未知用户';
+          const chatType = msg.chat_type;
+
+          if (isFeishuCreatorBindCommand(text)) {
+            const sendReply = async (replyText: string) => {
+              await sendFeishuMessage(appId, appSecret, externalId, replyText, log);
+            };
+            if (chatType !== 'p2p') {
+              await sendReply('请私聊机器人发送 /bind 绑定创建者身份。');
+              return;
+            }
+            if (!openId || openId === '未知用户') {
+              await sendReply('绑定失败：无法识别当前飞书用户。');
+              return;
+            }
+
+            const result = await bindFeishuCreatorOpenId(botId, openId);
+            if (result.status === 'bound') {
+              await sendReply('绑定成功。后续只有你在群里 @ 机器人时会触发 TeamAgentX。');
+            } else if (result.status === 'already-bound') {
+              await sendReply('你已经绑定过了，无需重复绑定。');
+            } else {
+              await sendReply('该机器人已经绑定创建者，其他人不能再绑定。');
+            }
+            return;
+          }
+
           // 处理 /bind CODE
           const bindCode = adapter.extractBindCode(text);
           if (bindCode && bindCodeHandler) {
@@ -159,7 +201,19 @@ async function supervisedStart(
             return;
           }
 
-          const openId = data.sender?.sender_id?.open_id ?? '未知用户';
+          const bridgeBot = await getBridgeBotById(botId);
+          if (!shouldAcceptFeishuGroupMessageFromCreator({
+            chatType,
+            senderOpenId: openId,
+            feishuCreatorOpenId: bridgeBot?.feishuCreatorOpenId,
+          })) {
+            log.info(
+              { botId, externalId, messageId: msg.message_id, senderOpenId: openId },
+              '[Bridge/Feishu-WS] 忽略非绑定创建者的群消息',
+            );
+            return;
+          }
+
           // Fix #55: resolve display name from open_id
           const senderName = openId !== '未知用户'
             ? await resolveFeishuSenderName(openId, appId, appSecret, log)

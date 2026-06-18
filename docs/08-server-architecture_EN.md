@@ -298,10 +298,10 @@ Since 2026-06, system agents are consolidated from "several separate @agents" in
 | `AGENT_MEMORY_CANDIDATE_TTL_DAYS` | `14` | TTL for unpromoted candidates |
 | `AGENT_STALL_WATCHDOG_DELAY_MS` | `180000` | Stall-detection delay |
 | `AGENT_STALL_WATCHDOG_MAX_CONSECUTIVE` | `5` | Consecutive rescue cap |
-| `AGENT_COORDINATOR_LLM_TIMEOUT_MS` | `120000` | Coordinator LLM decision timeout |
-| `AGENT_COORDINATOR_LLM_RETRY_COUNT` | `1` | Coordinator LLM retry count |
+| `AGENT_COORDINATOR_LLM_TIMEOUT_MS` | `120000` | Coordinator LLM decision timeout for the first attempt; retry attempts use 2x timeout |
+| `AGENT_COORDINATOR_LLM_RETRY_COUNT` | `1` | Coordinator LLM retry count; after the primary model fails, configured fallback models are tried in order |
 | `AGENT_EXECUTION_NO_ACTIVITY_TIMEOUT_MS` | `90000` | Agent no-activity retry timeout (0 disables) |
-| `AGENT_MAX_HANDOFF_HOPS` | `20` | Collaboration budget: single-`@` relay hop budget |
+| `AGENT_MAX_HANDOFF_HOPS` | `100` | Collaboration budget: single-`@` relay hop budget |
 | `AGENT_HANDOFF_CYCLE_REPEAT_LIMIT` | `3` | Collaboration budget: consecutive round-trip cap |
 | `BRIDGE_ENCRYPTION_KEY` | `''` | Bridge credential encryption key |
 | `BRIDGE_REQUIRE_SIGNATURE` | `false` | Whether to enforce webhook signature |

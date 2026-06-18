@@ -11,7 +11,7 @@
 本方案已落地，群聊对外模式收敛为 **智能协作 + 手动** 两种。关键实现位置：
 
 - 模式归一：`server/src/core/agent/agent-handler/trigger-mode.ts`（`auto`/`coordinator` → 归一为 `coordinator`，即智能协作；`manual` 不变）
-- 协作预算与三重熔断：`collaboration-budget.ts`（跳数 `AGENT_MAX_HANDOFF_HOPS`=20 / 环路 `AGENT_HANDOFF_CYCLE_REPEAT_LIMIT`=3 / 并发 `AGENT_MAX_PARALLEL_DISPATCH`=3，见 `config/index.ts`）
+- 协作预算与三重熔断：`collaboration-budget.ts`（跳数 `AGENT_MAX_HANDOFF_HOPS`=100 / 环路 `AGENT_HANDOFF_CYCLE_REPEAT_LIMIT`=3 / 并发 `AGENT_MAX_PARALLEL_DISPATCH`=3，见 `config/index.ts`）
 - 并行批次 fork-join：`parallel-batch-tracker.ts`（含批次期间用户介入 `markBatchUserIntervention`）
 - 卡住兜底：`stall-watchdog.ts`；协调器派发：`coordinator-dispatch.ts`、`internal-coordinator-agent.ts`
 - 统一消息流转入口：`agent-handler/handler.ts`（5 个协调器介入点）；交接协议系统提示：`agent-system-prompt.ts`
@@ -90,7 +90,7 @@
 
 | 熔断器 | 默认值 | 触发后行为 |
 |---|---|---|
-| 跳数预算：自动触发任务带深度计数，派发时继承 +1 | 20 跳（`AGENT_MAX_HANDOFF_HOPS` 可调）。病态环路主要由环路检测兜底，跳数只做绝对保险；定低了会误杀游戏/长流水线等轮辐式长链路 | 不触发下一跳，直接 ask_owner 说明卡点 |
+| 跳数预算：自动触发任务带深度计数，派发时继承 +1 | 100 跳（`AGENT_MAX_HANDOFF_HOPS` 可调）。病态环路主要由环路检测兜底，跳数只做绝对保险；定低了会误杀游戏/长流水线等轮辐式长链路 | 不触发下一跳，直接 ask_owner 说明卡点 |
 | 环路检测：同一对助手（A↔B）**连续**往返、无第三方/用户介入 | 3 个来回 = 6 连跳（`AGENT_HANDOFF_CYCLE_REPEAT_LIMIT`） | 截断，直接 ask_owner |
 | 并发上限：单次派发同时触发的助手数 | 3（`AGENT_MAX_PARALLEL_DISPATCH`） | 协调器派发硬截断；用户多 @ 截断并可见提示 |
 
@@ -195,11 +195,11 @@
 ## 6. 待确认决策点
 
 1. **CoordinatorLog 数据验证**（实施前置条件）：统计协调器 dispatch 决策中改写目标 vs forwardVerbatim 原样转发的比例，确认每跳裁决的真实价值。
-2. ~~熔断阈值默认值~~（已定）：跳数 20 / 环路 3 个来回 / 并发 3，均为 config 环境变量。跳数曾按评审意见定为 12，后因「谁是卧底游戏房间」实例（轮辐式长链路一局 ≈24 跳）确认偏紧，调回 20：连续乒乓环路已由环路检测精准兜底，跳数预算只承担绝对保险职责。
+2. ~~熔断阈值默认值~~（已定）：跳数 100 / 环路 3 个来回 / 并发 3，均为 config 环境变量。跳数曾按评审意见定得更紧，后因「谁是卧底游戏房间」实例（轮辐式长链路一局 ≈24 跳）确认偏紧；本轮进一步调到 100：连续乒乓环路已由环路检测精准兜底，跳数预算只承担绝对保险职责。
    > 环路判定为「连续乒乓」而非窗口内累计重复：轮辐式协作（如游戏主持人逐一 @ 各玩家、
    > 玩家逐一回 @ 主持人）会让同一条边跨阶段反复出现，这是合法推进，累计计数会误杀
    > （实例：「谁是卧底游戏房间」一局 24+ 跳、同边每阶段重复一次）。只有 A↔B 不间断
    > 互踢才是病态环路。
-5. ~~跳数上限是否做房间级可配置~~（已定）：不做，保持全局默认 20 + 环境变量调整，避免增加 schema 与设置项；超长链路场景若仍受限，调 `AGENT_MAX_HANDOFF_HOPS`。
+5. ~~跳数上限是否做房间级可配置~~（已定）：不做，保持全局默认 100 + 环境变量调整，避免增加 schema 与设置项；超长链路场景若仍受限，调 `AGENT_MAX_HANDOFF_HOPS`。
 3. ~~介入点 ⑤ 的决策空间~~（已定）：直接 ask_owner 确定性通知，不经 LLM、不允许 dispatch 续跑——命中安全熔断后不应再给协调器续跑的决策空间。
 4. ~~用户多 @ 是否过协调器~~（已定）：不过——用户多 @ 是强意图，无需二次裁决；但超并发上限时以可见消息提示，不静默截断。

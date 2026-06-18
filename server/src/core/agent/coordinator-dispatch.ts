@@ -3,7 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import type { LlmProvider } from '@prisma/client';
 import { config } from '../../config/index.js';
-import type { AgentWithRelations } from './agent.service.js';
+import { parseFallbackLlmProviderIds, type AgentWithRelations } from './agent.service.js';
 import { chatRoomService } from '../../modules/chatroom/chatroom.service.js';
 import { messageService } from '../../modules/message/message.service.js';
 import { agentService } from './agent.service.js';
@@ -88,6 +88,13 @@ interface DispatchToolConstraints {
   forbidNoSuitableAssistant?: boolean;
   allowedDecisions?: DispatchDecision['decision'][];
   requireAssignments?: boolean;
+}
+
+type CoordinatorProviderRole = 'primary' | 'fallback';
+
+interface CoordinatorProviderCandidate {
+  provider: LlmProvider;
+  role: CoordinatorProviderRole;
 }
 
 function getDispatchToolDescription(locale?: string): string {
@@ -219,18 +226,55 @@ function getDispatchToolParameters(
   };
 }
 
-async function findCoordinatorProvider(coordinatorAgent: AgentWithRelations): Promise<LlmProvider | null> {
-  if (coordinatorAgent.llmProvider) return coordinatorAgent.llmProvider;
-
+function getCoordinatorRequiredProtocol(coordinatorAgent: AgentWithRelations): 'anthropic' | 'openai' {
   const requiredProtocol: 'anthropic' | 'openai' =
     (coordinatorAgent as any).acpTool === 'codex' ? 'openai' : 'anthropic';
+  return requiredProtocol;
+}
 
-  const defaultProvider = await llmProviderService.findDefault();
-  if (defaultProvider && ((defaultProvider as any).apiProtocol ?? 'anthropic') === requiredProtocol) {
-    return defaultProvider;
+function canUseCoordinatorProvider(
+  provider: LlmProvider | null | undefined,
+  requiredProtocol: 'anthropic' | 'openai',
+): provider is LlmProvider {
+  if (!provider) return false;
+  if (((provider as any).modelType || 'text') !== 'text') return false;
+  return ((provider as any).apiProtocol ?? 'anthropic') === requiredProtocol;
+}
+
+export async function findCoordinatorProviders(
+  coordinatorAgent: AgentWithRelations,
+): Promise<CoordinatorProviderCandidate[]> {
+  const requiredProtocol = getCoordinatorRequiredProtocol(coordinatorAgent);
+  const candidates: CoordinatorProviderCandidate[] = [];
+  const seen = new Set<string>();
+
+  const addCandidate = (provider: LlmProvider | null | undefined, role: CoordinatorProviderRole) => {
+    if (!canUseCoordinatorProvider(provider, requiredProtocol)) return;
+    if (seen.has(provider.id)) return;
+    seen.add(provider.id);
+    candidates.push({ provider, role });
+  };
+
+  addCandidate(coordinatorAgent.llmProvider, 'primary');
+
+  const fallbackIds = parseFallbackLlmProviderIds((coordinatorAgent as any).fallbackLlmProviderIds);
+  if (fallbackIds.length > 0) {
+    const activeProviders = await llmProviderService.findActive('text');
+    const activeProviderById = new Map(activeProviders.map((provider) => [provider.id, provider]));
+    for (const providerId of fallbackIds) {
+      addCandidate(activeProviderById.get(providerId), 'fallback');
+    }
   }
-  const active = await llmProviderService.findActive();
-  return active.find((p) => ((p as any).apiProtocol ?? 'anthropic') === requiredProtocol) ?? null;
+
+  if (candidates.length > 0) return candidates;
+
+  const defaultProvider = await llmProviderService.findDefault('text');
+  addCandidate(defaultProvider, 'primary');
+  if (candidates.length > 0) return candidates;
+
+  const active = await llmProviderService.findActive('text');
+  addCandidate(active.find((p) => ((p as any).apiProtocol ?? 'anthropic') === requiredProtocol), 'primary');
+  return candidates;
 }
 
 function createCoordinatorAttemptSignal(
@@ -320,7 +364,10 @@ async function callCoordinatorLlmWithRetry<T>(
       throw signal.reason ?? new Error('Coordinator LLM call aborted');
     }
 
-    const attemptSignal = createCoordinatorAttemptSignal(signal, timeoutMs, label, attempt);
+    // First attempt uses the configured timeout. Retry attempts get a longer window
+    // because coordinator prompts often include recent room context and tool schema.
+    const attemptTimeoutMs = timeoutMs > 0 && attempt > 1 ? timeoutMs * 2 : timeoutMs;
+    const attemptSignal = createCoordinatorAttemptSignal(signal, attemptTimeoutMs, label, attempt);
     try {
       return await operation(attemptSignal.signal);
     } catch (error) {
@@ -332,11 +379,19 @@ async function callCoordinatorLlmWithRetry<T>(
           label,
           attempt,
           maxAttempts,
-          timeoutMs,
+          timeoutMs: attemptTimeoutMs,
           retryDelayMs,
         });
         await sleepForCoordinatorRetry(retryDelayMs, signal);
         continue;
+      }
+      if (timedOut) {
+        console.warn('[coordinator-dispatch] LLM 调用最终超时', {
+          label,
+          attempt,
+          maxAttempts,
+          timeoutMs: attemptTimeoutMs,
+        });
       }
 
       throw error;
@@ -489,7 +544,7 @@ async function callAnthropicCoordinator(
     input_schema: getDispatchToolParameters(locale, constraints) as Anthropic.Messages.Tool['input_schema'],
   };
 
-  const response = await client.messages.create({
+  const request: Anthropic.Messages.MessageCreateParamsNonStreaming = {
     model: provider.model,
     max_tokens: 512,
     temperature: 0,
@@ -499,14 +554,46 @@ async function callAnthropicCoordinator(
     ] as Anthropic.Messages.TextBlockParam[],
     messages: [{ role: 'user', content: userContent }],
     tools: [tool],
-    tool_choice: { type: 'any' },
-  }, { signal });
+  };
+
+  let response: Anthropic.Messages.Message;
+  try {
+    response = await client.messages.create({
+      ...request,
+      tool_choice: { type: 'any' },
+    }, { signal });
+  } catch (error) {
+    if (!isAnthropicToolChoiceCompatibilityError(error)) {
+      throw error;
+    }
+    console.warn('[coordinator-dispatch] 当前 Anthropic 兼容模型不支持强制 tool_choice，降级为自动工具选择', {
+      providerId: provider.id,
+      providerName: (provider as any).name,
+      model: provider.model,
+    });
+    response = await client.messages.create(request, { signal });
+  }
 
   const toolUse = response.content.find(
     (c): c is Anthropic.Messages.ToolUseBlock =>
       c.type === 'tool_use' && c.name === DISPATCH_TOOL_NAME,
   );
   return toolUse ? (toolUse.input as DispatchDecision) : null;
+}
+
+export function isAnthropicToolChoiceCompatibilityError(error: unknown): boolean {
+  const message = error instanceof Error
+    ? error.message
+    : typeof error === 'string'
+      ? error
+      : JSON.stringify(error);
+  const normalized = message.toLowerCase();
+  return normalized.includes('tool_choice') &&
+    (
+      normalized.includes('thinking mode') ||
+      normalized.includes('does not support') ||
+      normalized.includes('required or object')
+    );
 }
 
 async function callOpenAICoordinator(
@@ -1086,8 +1173,8 @@ export async function runCoordinatorDispatch(
   options?: CoordinatorDispatchOptions,
 ): Promise<void> {
   const signal = options?.signal;
-  const provider = await findCoordinatorProvider(coordinatorAgent);
-  if (!provider) {
+  const providerCandidates = await findCoordinatorProviders(coordinatorAgent);
+  if (providerCandidates.length === 0) {
     console.warn('[coordinator-dispatch] 找不到 LLM Provider，跳过协调');
     options?.onFailure?.('provider_unavailable');
     return;
@@ -1141,8 +1228,6 @@ export async function runCoordinatorDispatch(
       : isExplicitMultiMention && businessAssistantCount > 0
         ? buildExplicitMentionConstraintBlock(locale)
         : '');
-  const protocol = ((provider as any).apiProtocol ?? 'anthropic') as string;
-
   if (globalEmitTyping) {
     globalEmitTyping(
       { messageId: message.id, agentId: GROUP_COORDINATOR_ID, agentName: INTERNAL_COORDINATOR_AGENT_NAME, status: 'executing' },
@@ -1151,30 +1236,90 @@ export async function runCoordinatorDispatch(
   }
 
   let decision: DispatchDecision | null;
+  let lastLlmError: unknown;
+  let sawEmptyDecision = false;
   try {
-    decision = await callCoordinatorLlmWithRetry(
-      `coordinator-${protocol}`,
-      signal,
-      (attemptSignal) => protocol === 'openai'
-        ? callOpenAICoordinator(
-            provider,
-            systemPrompt,
-            memberSection,
-            userContent,
-            locale,
-            toolConstraints,
-            attemptSignal,
-          )
-        : callAnthropicCoordinator(
-            provider,
-            systemPrompt,
-            memberSection,
-            userContent,
-            locale,
-            toolConstraints,
-            attemptSignal,
-          ),
-    );
+    decision = null;
+    for (let index = 0; index < providerCandidates.length; index += 1) {
+      const { provider, role } = providerCandidates[index];
+      const protocol = ((provider as any).apiProtocol ?? 'anthropic') as 'anthropic' | 'openai';
+      const providerLabel = `${provider.name} (${provider.model})`;
+      try {
+        const providerDecision = await callCoordinatorLlmWithRetry(
+          `coordinator-${protocol}-${role}`,
+          signal,
+          (attemptSignal) => protocol === 'openai'
+            ? callOpenAICoordinator(
+                provider,
+                systemPrompt,
+                memberSection,
+                userContent,
+                locale,
+                toolConstraints,
+                attemptSignal,
+              )
+            : callAnthropicCoordinator(
+                provider,
+                systemPrompt,
+                memberSection,
+                userContent,
+                locale,
+                toolConstraints,
+                attemptSignal,
+              ),
+        );
+
+        if (providerDecision) {
+          decision = providerDecision;
+          debugLog('coordinatorModelDecision', {
+            chatRoomId,
+            triggerMessageId: message.id,
+            role,
+            providerId: provider.id,
+            providerName: provider.name,
+            model: provider.model,
+          });
+          break;
+        }
+
+        sawEmptyDecision = true;
+        console.error('[coordinator-dispatch] 结构化调用未返回决策', {
+          chatRoomId,
+          triggerMessageId: message.id,
+          provider: providerLabel,
+          role,
+          willSwitch: index < providerCandidates.length - 1,
+        });
+        debugLog('coordinatorModelEmptyDecision', {
+          chatRoomId,
+          triggerMessageId: message.id,
+          role,
+          providerId: provider.id,
+          providerName: provider.name,
+          model: provider.model,
+        });
+      } catch (error) {
+        if (signal?.aborted) throw error;
+        lastLlmError = error;
+        const willSwitch = index < providerCandidates.length - 1;
+        console.error('[coordinator-dispatch] LLM 调用失败:', {
+          provider: providerLabel,
+          role,
+          willSwitch,
+          error,
+        });
+        debugLog('coordinatorModelAttemptFailed', {
+          chatRoomId,
+          triggerMessageId: message.id,
+          role,
+          providerId: provider.id,
+          providerName: provider.name,
+          model: provider.model,
+          willSwitch,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
   } catch (error) {
     // 被用户发言打断（abort）属预期路径，不当作错误。
     if (signal?.aborted) {
@@ -1199,8 +1344,13 @@ export async function runCoordinatorDispatch(
   }
 
   if (!decision) {
-    console.error('[coordinator-dispatch] 结构化调用未返回决策，跳过');
-    options?.onFailure?.('empty_decision');
+    if (lastLlmError) {
+      console.error('[coordinator-dispatch] 所有群调度助手模型调用失败，跳过协调:', lastLlmError);
+      options?.onFailure?.('llm_error', lastLlmError);
+    } else {
+      console.error('[coordinator-dispatch] 所有群调度助手模型均未返回结构化决策，跳过');
+      options?.onFailure?.(sawEmptyDecision ? 'empty_decision' : 'llm_error');
+    }
     if (globalEmitDone) {
       globalEmitDone(
         { agentId: GROUP_COORDINATOR_ID, agentName: INTERNAL_COORDINATOR_AGENT_NAME, triggerMessageId: message.id },

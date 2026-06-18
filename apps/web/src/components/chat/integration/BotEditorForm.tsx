@@ -83,6 +83,7 @@ export function BotEditorForm({
   const { t } = useTranslation()
   const activeFields = platformInfo?.configFields ?? []
   const selectedDraftRoom = rooms.find((room) => room.id === draftChatRoomId) ?? null
+  const activePlatformLabel = platformInfo?.label ?? activePlatform
 
   return (
     <div className="space-y-4">
@@ -231,7 +232,7 @@ export function BotEditorForm({
               <Loader2 className="size-3.5 animate-spin" />
               {t('integration.saving')}
             </span>
-          ) : editingBotId ? t('integration.updateBotInstance') : t('integration.createBotInstanceBtn')}
+          ) : editingBotId ? t('integration.updateBotInstance') : t('integration.createPlatformBotBtn', { platform: activePlatformLabel })}
         </button>
       </div>
     </div>

@@ -3,11 +3,14 @@ import assert from 'node:assert/strict';
 import {
   buildDispatchPlanContent,
   buildUnroutedUserConstraintBlock,
+  findCoordinatorProviders,
+  isAnthropicToolChoiceCompatibilityError,
 } from '../../../core/agent/coordinator-dispatch.js';
 import {
   markTaskWithoutAssistantHandoff,
   parseTaskPromptPolicy,
 } from '../../../core/agent/task-prompt-policy.js';
+import { llmProviderService } from '../../../modules/llm-provider/llm-provider.service.js';
 
 const task = (name: string, content: string) => ({
   agent: { name } as any,
@@ -84,4 +87,84 @@ test('unrouted user task requires the most relevant single assistant', () => {
 
 test('unrouted user constraint is omitted when no business assistant exists', () => {
   assert.equal(buildUnroutedUserConstraintBlock(0, 'zh-CN'), '');
+});
+
+test('anthropic coordinator detects tool_choice incompatibility in thinking mode', () => {
+  const error = new Error(
+    '400 {"error":{"message":"The tool_choice parameter does not support being set to required or object in thinking mode"}}',
+  );
+
+  assert.equal(isAnthropicToolChoiceCompatibilityError(error), true);
+});
+
+test('anthropic coordinator does not hide unrelated provider errors', () => {
+  assert.equal(isAnthropicToolChoiceCompatibilityError(new Error('401 invalid api key')), false);
+});
+
+test('coordinator provider candidates include compatible fallback models in order', async () => {
+  const originalFindActive = llmProviderService.findActive;
+  const originalFindDefault = llmProviderService.findDefault;
+  const primary = {
+    id: 'primary-anthropic',
+    name: 'primary',
+    model: 'primary-model',
+    apiProtocol: 'anthropic',
+    modelType: 'text',
+  };
+  const fallbackAnthropic = {
+    id: 'fallback-anthropic',
+    name: 'fallback',
+    model: 'fallback-model',
+    apiProtocol: 'anthropic',
+    modelType: 'text',
+  };
+  const fallbackOpenAI = {
+    id: 'fallback-openai',
+    name: 'wrong-protocol',
+    model: 'wrong-model',
+    apiProtocol: 'openai',
+    modelType: 'text',
+  };
+  const fallbackImage = {
+    id: 'fallback-image',
+    name: 'wrong-type',
+    model: 'image-model',
+    apiProtocol: 'anthropic',
+    modelType: 'image',
+  };
+
+  try {
+    (llmProviderService as any).findActive = async () => [
+      fallbackOpenAI,
+      fallbackAnthropic,
+      fallbackImage,
+      primary,
+    ];
+    (llmProviderService as any).findDefault = async () => null;
+
+    const candidates = await findCoordinatorProviders({
+      acpTool: 'claude',
+      llmProvider: primary,
+      fallbackLlmProviderIds: JSON.stringify([
+        'fallback-openai',
+        'fallback-anthropic',
+        'fallback-image',
+        'primary-anthropic',
+      ]),
+    } as any);
+
+    assert.deepEqual(
+      candidates.map((candidate) => ({
+        id: candidate.provider.id,
+        role: candidate.role,
+      })),
+      [
+        { id: 'primary-anthropic', role: 'primary' },
+        { id: 'fallback-anthropic', role: 'fallback' },
+      ],
+    );
+  } finally {
+    (llmProviderService as any).findActive = originalFindActive;
+    (llmProviderService as any).findDefault = originalFindDefault;
+  }
 });

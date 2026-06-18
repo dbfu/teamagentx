@@ -935,7 +935,19 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
 
     const providerEnv = this.llmProvider
       ? buildAcpProviderEnv('claude', this.llmProvider, this.agentId)
-      : {CLAUDE_CONFIG_DIR: claudeConfigDir};
+      : {
+          CLAUDE_CONFIG_DIR: claudeConfigDir,
+          // 本地配置（OAuth 订阅，不绑 LlmProvider）模式下，把子进程 HOME 隔离到
+          // per-agent 配置目录。否则当该目录位于用户真实 HOME（~/.teamagentx/...）下时，
+          // Claude CLI 会向上读到用户 home 的 ~/.claude.json，其登录/账号状态会顶掉我们
+          // 写入 per-agent dir 的 .credentials.json，导致官方接口返回
+          // “401 Invalid authentication credentials”。配置目录里已有一致的
+          // .claude.json + .credentials.json，HOME 指向它即可让鉴权自洽。
+          // 绑定 LlmProvider 的助手走 env 注入鉴权（ANTHROPIC_AUTH_TOKEN/BASE_URL），
+          // 不受 home 污染影响，因此保持原行为。
+          HOME: claudeConfigDir,
+          USERPROFILE: claudeConfigDir,
+        };
 
     if (this.llmProvider) {
       this.acpProviderInfo = {

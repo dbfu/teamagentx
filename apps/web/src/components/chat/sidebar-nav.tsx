@@ -146,6 +146,7 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms, onChatRoomCreated
   // 检测是否在 Electron 环境中
   const isElectron = window.electronAPI?.isElectron ?? false
   const isMac = isElectron && /mac/i.test(navigator.platform)
+  const navTopPaddingClass = isMac ? 'pt-10' : 'pt-3'
   const modeOptions = [
     { value: 'light', label: t('nav.light'), icon: Sun },
     { value: 'dark', label: t('nav.dark'), icon: Moon },
@@ -299,8 +300,8 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms, onChatRoomCreated
   const renderMeasuredNavGroup = (hiddenTabs: OptionalNavTab[]) => {
     const hiddenTabsSet = new Set(hiddenTabs)
     return (
-    <div className="flex w-full flex-col items-center gap-1 px-2 pb-4 select-none">
-      <button tabIndex={-1} className="group flex w-full items-center justify-center rounded-lg py-2 text-muted-foreground">
+    <div className={cn("flex w-full flex-col items-center gap-1 px-2 pb-4 select-none", navTopPaddingClass)}>
+      <button tabIndex={-1} className="group flex w-full items-center justify-center rounded-lg py-1 text-muted-foreground">
         <span className="flex size-8 items-center justify-center rounded-full">
           <Search className="size-4" />
         </span>
@@ -324,23 +325,15 @@ export function SidebarNav({ messageBadge, onRefreshChatRooms, onChatRoomCreated
       className="relative flex h-full w-20 shrink-0 flex-col items-center border-r border-sidebar-border bg-sidebar/95 shadow-[var(--control-shadow)] backdrop-blur"
       style={isElectron ? { WebkitAppRegion: 'drag' } as React.CSSProperties : {}}
     >
-      {/* Logo area - 拖拽区域 */}
-      <div className={cn(
-        "mb-2 flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-sidebar-border bg-[var(--surface-raised)] shadow-[var(--control-shadow)]",
-        isMac ? "mt-10" : "mt-4"
-      )}>
-        <img src={`${import.meta.env.BASE_URL}app-logo.png`} alt="TeamAgentX" className="size-full object-cover" />
-      </div>
-
       {/* Nav items */}
-      <div ref={navItemsRef} className="flex min-h-0 w-full flex-1 flex-col items-center gap-1 px-2 pb-4 select-none">
+      <div ref={navItemsRef} className={cn("flex min-h-0 w-full flex-1 flex-col items-center gap-1 px-2 pb-4 select-none", navTopPaddingClass)}>
         <button
           onClick={() => setIsSearchOpen(true)}
           className="group flex w-full cursor-pointer items-center justify-center rounded-lg py-1 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
           title={t('globalSearch.title')}
           style={isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
         >
-          <span className="flex size-8 items-center justify-center rounded-full bg-sidebar-accent text-muted-foreground transition-colors group-hover:text-foreground">
+          <span className="flex size-8 items-center justify-center rounded-full bg-foreground/10 text-muted-foreground transition-colors group-hover:bg-foreground/15 group-hover:text-foreground">
             <Search className="size-4" />
           </span>
         </button>
