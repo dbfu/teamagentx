@@ -83,6 +83,12 @@ export interface CoordinatorDispatchOptions {
 
 const DISPATCH_TOOL_NAME = 'dispatch_decision';
 
+// 强约束：只允许调用工具返回决策，禁止任何分析 / 解说文本。
+// 配合关闭 thinking，可把 GLM 等模型的调度延迟从 8~30s 降到 ~2s，避免冲破超时。
+const COORDINATOR_TOOL_ONLY_INSTRUCTION =
+  '\n\nRespond ONLY by calling the ' + DISPATCH_TOOL_NAME +
+  ' tool. Do NOT output any analysis, reasoning, or explanatory text. Call the tool immediately.';
+
 interface DispatchToolConstraints {
   maxAssignments?: number;
   forbidNoSuitableAssistant?: boolean;
@@ -549,29 +555,61 @@ async function callAnthropicCoordinator(
     max_tokens: 512,
     temperature: 0,
     system: [
-      { type: 'text', text: systemPrompt },
+      { type: 'text', text: systemPrompt + COORDINATOR_TOOL_ONLY_INSTRUCTION },
       { type: 'text', text: memberSection, cache_control: { type: 'ephemeral' } },
     ] as Anthropic.Messages.TextBlockParam[],
     messages: [{ role: 'user', content: userContent }],
     tools: [tool],
   };
 
+  // 关闭扩展思考：GLM 等模型默认会在工具调用前输出大段 thinking，调度场景纯属浪费且拖慢/超时。
+  const requestWithThinking = {
+    ...request,
+    thinking: { type: 'disabled' as const },
+  } as Anthropic.Messages.MessageCreateParamsNonStreaming;
+
+  const createMessage = (
+    req: Anthropic.Messages.MessageCreateParamsNonStreaming,
+    forceToolChoice: boolean,
+  ): Promise<Anthropic.Messages.Message> =>
+    client.messages.create(
+      forceToolChoice ? { ...req, tool_choice: { type: 'any' } } : req,
+      { signal },
+    );
+
   let response: Anthropic.Messages.Message;
   try {
-    response = await client.messages.create({
-      ...request,
-      tool_choice: { type: 'any' },
-    }, { signal });
+    response = await createMessage(requestWithThinking, true);
   } catch (error) {
-    if (!isAnthropicToolChoiceCompatibilityError(error)) {
+    if (isAnthropicThinkingCompatibilityError(error)) {
+      console.warn('[coordinator-dispatch] 当前 Anthropic 兼容模型不支持 thinking 字段，去掉后重试', {
+        providerId: provider.id,
+        providerName: (provider as any).name,
+        model: provider.model,
+      });
+      try {
+        response = await createMessage(request, true);
+      } catch (retryError) {
+        if (!isAnthropicToolChoiceCompatibilityError(retryError)) {
+          throw retryError;
+        }
+        console.warn('[coordinator-dispatch] 当前 Anthropic 兼容模型不支持强制 tool_choice，降级为自动工具选择', {
+          providerId: provider.id,
+          providerName: (provider as any).name,
+          model: provider.model,
+        });
+        response = await createMessage(request, false);
+      }
+    } else if (isAnthropicToolChoiceCompatibilityError(error)) {
+      console.warn('[coordinator-dispatch] 当前 Anthropic 兼容模型不支持强制 tool_choice，降级为自动工具选择', {
+        providerId: provider.id,
+        providerName: (provider as any).name,
+        model: provider.model,
+      });
+      response = await createMessage(requestWithThinking, false);
+    } else {
       throw error;
     }
-    console.warn('[coordinator-dispatch] 当前 Anthropic 兼容模型不支持强制 tool_choice，降级为自动工具选择', {
-      providerId: provider.id,
-      providerName: (provider as any).name,
-      model: provider.model,
-    });
-    response = await client.messages.create(request, { signal });
   }
 
   const toolUse = response.content.find(
@@ -593,6 +631,28 @@ export function isAnthropicToolChoiceCompatibilityError(error: unknown): boolean
       normalized.includes('thinking mode') ||
       normalized.includes('does not support') ||
       normalized.includes('required or object')
+    );
+}
+
+// 部分 Anthropic 兼容网关不认 `thinking` 字段，会抛 400。识别后降级为不带该字段重发。
+// 注意与 tool_choice 兼容错误区分：后者必然包含 'tool_choice' 关键字。
+export function isAnthropicThinkingCompatibilityError(error: unknown): boolean {
+  const message = error instanceof Error
+    ? error.message
+    : typeof error === 'string'
+      ? error
+      : JSON.stringify(error);
+  const normalized = message.toLowerCase();
+  if (normalized.includes('tool_choice')) return false;
+  return normalized.includes('thinking') &&
+    (
+      normalized.includes('does not support') ||
+      normalized.includes('not support') ||
+      normalized.includes('unsupported') ||
+      normalized.includes('unknown') ||
+      normalized.includes('unexpected') ||
+      normalized.includes('invalid') ||
+      normalized.includes('not allowed')
     );
 }
 
@@ -624,7 +684,7 @@ async function callOpenAICoordinator(
     max_tokens: 512,
     temperature: 0,
     messages: [
-      { role: 'system', content: `${systemPrompt}\n\n${memberSection}` },
+      { role: 'system', content: `${systemPrompt}${COORDINATOR_TOOL_ONLY_INSTRUCTION}\n\n${memberSection}` },
       { role: 'user', content: userContent },
     ],
     tools: [tool],

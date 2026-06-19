@@ -4,9 +4,8 @@ import {
 } from '../../../modules/message/room-message-index.service.js';
 import { type Locale, pickLocaleText } from './locale.js';
 
-// 调度助手裁决时参考的最近消息条数（较完整内容）和更早消息条数（摘要）。
+// 调度助手裁决时参考的最近消息条数；每条均截断为约 100 字，不再注入更早历史。
 export const COORDINATOR_RECENT_HISTORY_LIMIT = 5;
-const COORDINATOR_OLDER_HISTORY_LIMIT = 10;
 
 // 注入上下文与调度提示词之间的「逐字契约」标记文案。
 // 调度提示词（internal-coordinator-agent.ts）按 locale 引用相同标记，二者必须同语种，
@@ -165,8 +164,8 @@ export function withCoordinatorContext(
 }
 
 /**
- * 分层历史上下文：近 5 条保留首尾各 300 字（保留换行），更早最多 10 条取首 100 字摘要。
- * 供结构化单次 LLM 调用使用；不同于 buildCoordinatorRecentContext 的纯 100 字摘要。
+ * 最近历史上下文：仅取近 5 条，每条首尾各 50 字（约 100 字）截断，保留换行。
+ * 不再注入更早历史。供结构化单次 LLM 调用使用。
  */
 export async function buildCoordinatorLayeredContext(
   chatRoomId: string,
@@ -175,16 +174,15 @@ export async function buildCoordinatorLayeredContext(
 ): Promise<string> {
   let entries: RoomMessageIndexHistoryMessage[] = [];
   try {
-    const totalLimit = COORDINATOR_RECENT_HISTORY_LIMIT + COORDINATOR_OLDER_HISTORY_LIMIT;
     entries = await roomMessageIndexService.buildMessageIndex(
       chatRoomId,
       currentMessageId,
       undefined,
-      { includeRawContent: true, limit: totalLimit },
+      { includeRawContent: true, limit: COORDINATOR_RECENT_HISTORY_LIMIT },
     );
   } catch (error) {
     console.error(
-      `[coordinator-context] ${chatRoomId} 构建分层历史索引失败，降级为空上下文:`,
+      `[coordinator-context] ${chatRoomId} 构建最近历史索引失败，降级为空上下文:`,
       error,
     );
     return '';
@@ -193,26 +191,21 @@ export async function buildCoordinatorLayeredContext(
   if (entries.length === 0) return '';
 
   const recent = entries.slice(-COORDINATOR_RECENT_HISTORY_LIMIT);
-  const older = entries.slice(0, -COORDINATOR_RECENT_HISTORY_LIMIT);
 
-  const formatEntry = (entry: RoomMessageIndexHistoryMessage, fullContent: boolean): string => {
-    const preview = fullContent
-      ? headTailPreview(entry.rawContent || entry.preview, 300, 300, locale)
-      : entry.preview;
-    return formatContextLine(entry, preview, locale);
-  };
-
-  const lines = [
-    ...older.map((e) => formatEntry(e, false)),
-    ...recent.map((e) => formatEntry(e, true)),
-  ];
+  const lines = recent.map((entry) =>
+    formatContextLine(
+      entry,
+      headTailPreview(entry.rawContent || entry.preview, 50, 50, locale),
+      locale,
+    ),
+  );
 
   const intro = pickLocaleText(
     {
       'zh-CN':
-        '以下是当前消息之前的最近群消息预览，仅用于帮助你判断任务进展与下一步该谁执行；近 5 条保留较完整内容，更早消息为摘要。',
+        '以下是当前消息之前的最近 5 条群消息预览，仅用于帮助你判断任务进展与下一步该谁执行；每条均为约 100 字截断摘要。',
       'en-US':
-        'Below are previews of recent room messages before the current one, only to help you judge task progress and who should act next; the latest 5 keep fuller content, earlier ones are summaries.',
+        'Below are previews of the latest 5 room messages before the current one, only to help you judge task progress and who should act next; each is truncated to ~100 chars.',
     },
     locale,
   );
