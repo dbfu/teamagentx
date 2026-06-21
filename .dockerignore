@@ -1,0 +1,28 @@
+# 依赖与构建产物（镜像内重新安装/构建）
+**/node_modules
+**/dist
+**/dist-electron
+apps/web/dist
+apps/desktop/release
+apps/desktop/out
+
+# Flutter 移动端（不参与服务端镜像）
+apps/mobile
+
+# 本地数据库与运行时数据
+server/dev.db
+server/dev.db-*
+server/.jwt-secret
+server/uploads
+server/.tools
+**/*.log
+
+# VCS / IDE / 系统
+.git
+.gitignore
+.idea
+.vscode
+**/.DS_Store
+
+# 文档（服务端运行不需要）
+*.md

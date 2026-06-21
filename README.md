@@ -80,6 +80,91 @@ pnpm install
 
 Electron 模式下，桌面端会启动内置后端，默认监听 `11053`。
 
+## Docker 部署
+
+把服务端打包成**单容器**：Fastify 同时托管前端 SPA + API + Socket，客户端浏览器通过
+`http://<服务器IP>:3001` 访问（同源，零配置）。SQLite 数据库、上传文件、账号等持久化在 `/data` 数据卷。
+
+> 完整说明（HTTPS 反代、跨架构构建并推送镜像、安全建议）见 [`docs/docker-deploy.md`](docs/docker-deploy.md)。
+
+容器以 root 启动 entrypoint，自动把数据卷属主交给 `node` 用户后降权运行（Claude Code CLI 拒绝在 root 下运行），因此下列任一启动方式都开箱即用。
+
+### 方式一：docker compose（推荐）
+
+```bash
+# 1. 准备环境变量
+cp .env.docker.example .env
+# 编辑 .env：必须设置 AUTH_PASSWORD；建议设置 JWT_SECRET（openssl rand -hex 32）
+
+# 2. 构建并启动（首次会构建镜像）
+docker compose up -d --build
+
+# 3. 浏览器访问 http://<服务器IP>:3001
+#    用 .env 里的 AUTH_USERNAME / AUTH_PASSWORD 登录
+
+# 常用运维
+docker compose logs -f          # 查看日志
+docker compose up -d --build    # 升级（重建镜像 + 自动迁移）
+docker compose down             # 停止（数据卷保留）
+```
+
+### 方式二：docker 命令
+
+```bash
+# 1. 构建镜像
+docker build -t teamagentx-server .
+
+# 2. 启动（数据持久化到命名卷 teamagentx-data）
+docker run -d --name teamagentx-server \
+  -p 3001:3001 \
+  -e JWT_SECRET="$(openssl rand -hex 32)" \
+  -e AUTH_USERNAME=admin \
+  -e AUTH_PASSWORD=改成你的口令 \
+  -v teamagentx-data:/data \
+  teamagentx-server
+
+# 查看日志 / 停止
+docker logs -f teamagentx-server
+docker rm -f teamagentx-server      # 删除容器（命名卷 teamagentx-data 保留）
+```
+
+### 方式三：直接使用已发布的远程镜像（最快，无需构建）
+
+镜像已发布到公开仓库，**无需 `docker login`、无需本地构建**，拉取即用：
+
+```text
+registry.cn-hangzhou.aliyuncs.com/teamagentx/teamagentx-server:latest
+```
+
+docker 命令：
+
+```bash
+docker run -d --name teamagentx-server \
+  -p 3001:3001 \
+  -e JWT_SECRET="$(openssl rand -hex 32)" \
+  -e AUTH_USERNAME=admin \
+  -e AUTH_PASSWORD=改成你的口令 \
+  -v teamagentx-data:/data \
+  registry.cn-hangzhou.aliyuncs.com/teamagentx/teamagentx-server:latest
+```
+
+或用 compose（仓库已提供 `deploy/prod/docker-compose.prod.yml`，直接拉取远程镜像、不构建）：
+
+```bash
+cd deploy/prod
+cp ../../.env.docker.example .env    # 编辑 .env：必填 AUTH_PASSWORD，建议设 JWT_SECRET
+docker compose -f docker-compose.prod.yml up -d   # 公开仓库，无需先 docker login
+
+# 升级到最新镜像
+docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml up -d
+```
+
+说明：
+
+- 账号由 `AUTH_USERNAME` / `AUTH_PASSWORD` 在容器启动时预置，**避免服务起来后被同网络他人抢先注册**；改口令后重启即生效。
+- `prisma migrate deploy` 在启动时自动执行，对数据卷里的库建表/升级。
+- Claude / Codex SDK 已内置镜像，无需运行时安装。
+
 ## 常用命令
 
 ### 后端

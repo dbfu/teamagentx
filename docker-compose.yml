@@ -1,0 +1,59 @@
+# TeamAgentX 服务端 Docker 部署
+#
+# 用法：
+#   1. 复制 .env.docker.example 为 .env 并按需修改
+#   2. 纯内网 HTTP：   docker compose up -d        → 访问 http://<服务器IP>:${HOST_PORT}
+#   3. 启用 HTTPS 反代：docker compose --profile tls up -d
+#                       （编辑 deploy/Caddyfile 填写域名或自签配置，访问 https://<域名或IP>）
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: teamagentx-server:latest
+    restart: unless-stopped
+    # 纯内网/直连 HTTP 时暴露端口；启用 tls 反代时可去掉对外端口、仅供 caddy 内部访问
+    ports:
+      - "${HOST_PORT:-3001}:3001"
+    environment:
+      NODE_ENV: production
+      SERVER_HOST: 0.0.0.0
+      PORT: 3001
+      # 强烈建议显式设置（openssl rand -hex 32），多实例/可控
+      JWT_SECRET: ${JWT_SECRET:-}
+      # 单账号：用环境变量预置账号口令，启动即建好账号防止他人抢注；改后重启即生效
+      AUTH_USERNAME: ${AUTH_USERNAME:-admin}
+      AUTH_PASSWORD: ${AUTH_PASSWORD:?请在 .env 中设置 AUTH_PASSWORD}
+      # CORS：默认 '*'（同源单容器本不依赖）；公网部署可设为具体源收紧，逗号分隔
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+    volumes:
+      - teamagentx-data:/data
+    networks:
+      - teamagentx
+
+  # 可选 HTTPS 反代（profile: tls）。默认不启动。
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    profiles: ["tls"]
+    depends_on:
+      - server
+    ports:
+      - "${TLS_HTTP_PORT:-80}:80"
+      - "${TLS_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - teamagentx
+
+networks:
+  teamagentx:
+    driver: bridge
+
+volumes:
+  teamagentx-data:
+  caddy-data:
+  caddy-config:

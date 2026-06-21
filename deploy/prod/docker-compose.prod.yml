@@ -1,0 +1,29 @@
+# TeamAgentX 服务端生产部署（拉取已发布镜像，不在服务器上构建）
+# 用法（服务器上）：
+#   cp ../../.env.docker.example .env   # 编辑 .env：必填 AUTH_PASSWORD，建议设 JWT_SECRET
+#   docker compose -f docker-compose.prod.yml up -d
+# 仓库为公开仓库，无需 docker login；仅当改为私有时才需先登录：
+#   docker login registry.cn-hangzhou.aliyuncs.com
+#
+# 镜像 entrypoint 以 root 启动 → chown 数据卷 → 降权为 node 运行
+#（Claude Code CLI 拒绝在 root 下使用 --dangerously-skip-permissions）。
+services:
+  server:
+    image: registry.cn-hangzhou.aliyuncs.com/teamagentx/teamagentx-server:latest
+    container_name: teamagentx-server
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      NODE_ENV: production
+      SERVER_HOST: 0.0.0.0
+      PORT: 3001
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      AUTH_USERNAME: ${AUTH_USERNAME:-admin}
+      AUTH_PASSWORD: ${AUTH_PASSWORD:?set AUTH_PASSWORD in .env}
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+    volumes:
+      - teamagentx-data:/data
+
+volumes:
+  teamagentx-data:

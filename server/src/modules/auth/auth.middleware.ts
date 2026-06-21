@@ -1,5 +1,6 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { authService } from './auth.service.js';
+import { isWebServingEnabled, resolveWebStaticFile } from '../../lib/web-static.js';
 
 /**
  * 认证中间件
@@ -56,6 +57,18 @@ export async function authHook(
 ): Promise<void> {
   // 跳过公开接口
   if (isPublicPath(request.url)) {
+    return;
+  }
+
+  // 单容器部署：放行前端 SPA 静态资源与前端路由（SPA 深链回退）。
+  // 仅对 GET 生效，且：① 命中前端产物目录内的真实文件（静态资源），或
+  // ② 未匹配任何后端路由的请求（request.is404，交给 setNotFoundHandler 返回 index.html）。
+  // 受保护的 JSON API（命中真实路由、is404=false 且无同名静态文件）不会被放行。
+  if (
+    isWebServingEnabled() &&
+    request.method === 'GET' &&
+    (request.is404 === true || resolveWebStaticFile(request.url) !== null)
+  ) {
     return;
   }
 
