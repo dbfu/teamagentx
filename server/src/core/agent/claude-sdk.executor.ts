@@ -25,6 +25,7 @@ import { quickChatSessionService } from '../../modules/quick-chat-session/quick-
 import { skillInstallService } from '../../modules/skill/skill-install.service.js';
 import type { AttachmentData } from '../../modules/task-queue/task-queue.service.js';
 import { backgroundCommandService } from '../shell/background-command.service.js';
+import { getDefaultShell } from '../shell/default-shell.js';
 import {
     buildAcpProviderEnv,
     type AcpProviderInfo,
@@ -1257,7 +1258,7 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
       let timedOut = false;
       const child = spawn(trimmedCommand, [], {
         cwd: this.workDir,
-        shell: process.env.SHELL || '/bin/bash',
+        shell: getDefaultShell(),
         env: this.buildMcpCommandEnv(),
         stdio: ['ignore', 'pipe', 'pipe'],
       });
