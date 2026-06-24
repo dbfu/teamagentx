@@ -119,7 +119,10 @@ export const config = {
     handoffFanoutMax: parseInt(process.env.AGENT_HANDOFF_FANOUT_MAX || '3', 10),
     handoffDepthMax: parseInt(process.env.AGENT_HANDOFF_DEPTH_MAX || '100', 10),
     handoffBudgetMax: parseInt(process.env.AGENT_HANDOFF_BUDGET_MAX || '20', 10),
-    handoffRevisitMax: parseInt(process.env.AGENT_HANDOFF_REVISIT_MAX || '1', 10),
+    // 单链同一助手的重访上限。注意：这是"枢纽迭代协作"（如产品经理反复派活/收口）与
+    // "死循环"难以区分的指标，过紧会误伤正常协调。真正的失控兜底是 handoffBudgetMax
+    // （整条级联总派发量），所以这里放宽，让 budget 当主兜底。
+    handoffRevisitMax: parseInt(process.env.AGENT_HANDOFF_REVISIT_MAX || '5', 10),
   },
   jwt: {
     get secret(): string {

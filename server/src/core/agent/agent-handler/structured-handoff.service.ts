@@ -158,8 +158,10 @@ async function resumeConvergenceOwner(batch: HandoffBatch): Promise<void> {
     return;
   }
 
+  // 收敛者把并行分支的结果接回自己收口，是 fanout 的正常终点，不算"重访循环"，
+  // 因此忽略 revisit 护栏；depth/其它护栏仍然生效，失控由 handoffBudgetMax 兜底。
   const guardrail = evaluateHandoffTargetGuardrail(batch.ownerContext, owner.id);
-  if (guardrail) {
+  if (guardrail && guardrail !== 'revisit') {
     await notifyGuardrail(
       batch.chatRoomId,
       batch.sourceMessage,

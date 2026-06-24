@@ -283,6 +283,17 @@ function isRecoverableSessionError(message: string): boolean {
   );
 }
 
+// 会话本身已不可用，必须重置（新建 session），无法靠 resume 同一会话恢复。
+// 注意：resetSession 会删除 jsonl 会话文件 = 丢掉整段对话历史，所以仅限这两类真正
+// 损坏/丢失的情况。其余可恢复错误（如子进程瞬时崩溃 exited with code 1、会话被占用）
+// 只应原样 resume 重试，绝不能删历史，否则长对话里会突然失忆。
+function isSessionUnusableError(message: string): boolean {
+  return (
+    message.includes('No conversation found with session ID') ||
+    message.includes('has invalid role: system')
+  );
+}
+
 const DEFAULT_BACKGROUND_IDLE_FINISH_MS = 60 * 1000;
 function getBackgroundIdleFinishMs(): number {
   const rawValue = process.env.CLAUDE_AGENT_BACKGROUND_IDLE_FINISH_MS;
@@ -2175,16 +2186,24 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
           throw new DOMException('执行已被用户中断', 'AbortError');
         }
 
-        const canRetryWithFreshSession =
-          isRecoverableSessionError(errorDetails);
-        if (!canRetryWithFreshSession) {
+        const canRetry = isRecoverableSessionError(errorDetails);
+        if (!canRetry) {
           throw error;
         }
 
-        console.warn(
-          `${this.name}: Claude SDK session 失败，清理 session 后重试一次`,
-        );
-        this.resetSession();
+        // 仅当会话确实不可用时才 resetSession（会删除 jsonl 历史文件）。
+        // 其余瞬时/外部错误（如子进程 exited with code 1、会话被占用）保留历史、
+        // 直接 resume 同一会话重试一次，避免误删导致助手在长对话中突然失忆。
+        if (isSessionUnusableError(errorDetails)) {
+          console.warn(
+            `${this.name}: Claude SDK 会话不可用，重置 session 后重试一次`,
+          );
+          this.resetSession();
+        } else {
+          console.warn(
+            `${this.name}: Claude SDK 执行失败（瞬时），保留会话历史并重试一次`,
+          );
+        }
         this.resetCollectors();
         tokenUsage = await this.runQuery(
           fullMessage,
