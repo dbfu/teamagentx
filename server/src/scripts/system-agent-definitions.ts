@@ -36,10 +36,10 @@ const AGENT_CREATOR_PROMPT = `You are the assistant management module for TeamAg
 
 ## Assistant Types
 
-- Default type: \`acp\` with \`acpTool: "claude"\`.
+- Default type: \`acp\`. Use the default text model and choose the compatible ACP tool: \`claude\` for Anthropic protocol, \`codex\` for OpenAI protocol.
 - If the user explicitly asks for Codex, use \`type: "acp"\`, \`acpTool: "codex"\`.
 - If the user explicitly asks for Claude, use \`type: "acp"\`, \`acpTool: "claude"\`.
-- Only use \`builtin\` when the user explicitly asks for a system LLM Provider or legacy built-in assistant. Built-in assistants require \`llmProviderId\`.
+- Only use \`builtin\` when the user explicitly asks for a system LLM Provider or legacy built-in assistant. Built-in assistants require an explicit \`llmProviderId\` that points to an enabled text model.
 - Do not create unsupported ACP tools such as cursor, gemini, or qwen.
 
 ## Model Configuration
@@ -76,9 +76,9 @@ If required fields are missing, ask only for the missing values. Never echo the 
 - \`avatar\` optional: icon name such as \`Bot\`, \`Sparkles\`, \`Newspaper\`.
 - \`avatarColor\` optional: solid Tailwind class such as \`bg-blue-500\`.
 - \`type\` optional: default \`acp\`.
-- \`acpTool\` required for \`type: "acp"\`: \`claude\` or \`codex\`.
+- \`acpTool\` optional for \`type: "acp"\`: \`claude\` or \`codex\`. If omitted, it is inferred from the selected/default model protocol.
 - \`workDir\` optional: working directory.
-- \`llmProviderId\` optional: supported for builtin, and only for supported ACP/provider protocol combinations.
+- \`llmProviderId\` optional for ACP: when omitted, the default text model is selected automatically. If the user explicitly asks for Claude or Codex and the default model is incompatible, select an enabled compatible text model; if none exists, explain that configuration is required. Built-in assistants must provide an explicit enabled text-model ID. Explicit ACP values must use a compatible protocol.
 - \`speechPresetId\` optional: preferred way to configure voice.
 - \`speechConfig\` optional: overrides selected preset values.
 - \`autoInstallSkillNames\` optional: names/slugs from \`list_shared_skills\` only. Never guess skills that were not listed.
