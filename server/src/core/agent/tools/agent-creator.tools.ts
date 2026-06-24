@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import * as fs from 'fs';
 import * as path from 'path';
+import type { LlmProvider } from '@prisma/client';
 import { createSystemTool as tool } from './system-tool.js';
 import { agentService } from '../../../core/agent/agent.service.js';
 import { chatRoomService } from '../../../modules/chatroom/chatroom.service.js';
@@ -85,6 +86,11 @@ type UpdateAgentConfig = {
   injectGroupHistory?: boolean;
 };
 
+type AgentCreationModelSnapshot = {
+  defaultTextProvider: LlmProvider | null;
+  activeTextProviders: LlmProvider[];
+};
+
 function getRandomAgentAvatarValue(): string {
   return String(Math.floor(Math.random() * (AGENT_AVATAR_COUNT - 1)) + 1);
 }
@@ -153,14 +159,89 @@ async function addCreatedAgentToRoom({
   };
 }
 
-function normalizeAgentTypeConfig(config: Pick<AgentConfig, 'type' | 'acpTool'>): {
+function normalizeAgentTypeConfig(
+  config: Pick<AgentConfig, 'type' | 'acpTool'>,
+  providerProtocol?: string | null,
+): {
   type: 'builtin' | 'acp';
   acpTool?: AcpToolValue;
 } {
   const type = config.type || 'acp';
+  const defaultAcpTool = providerProtocol === 'openai' ? 'codex' : 'claude';
   return {
     type,
-    acpTool: type === 'acp' ? (config.acpTool || 'claude') : undefined,
+    acpTool: type === 'acp' ? (config.acpTool || defaultAcpTool) : undefined,
+  };
+}
+
+function getRequiredAcpProviderProtocol(acpTool?: AcpToolValue): 'anthropic' | 'openai' | null {
+  if (acpTool === 'claude') return 'anthropic';
+  if (acpTool === 'codex') return 'openai';
+  return null;
+}
+
+function getAcpToolLabel(acpTool: AcpToolValue): 'Claude' | 'Codex' {
+  return acpTool === 'codex' ? 'Codex' : 'Claude';
+}
+
+async function getAgentCreationModelSnapshot(): Promise<AgentCreationModelSnapshot> {
+  const [defaultTextProvider, activeTextProviders] = await Promise.all([
+    llmProviderService.findDefault('text'),
+    llmProviderService.findActive('text'),
+  ]);
+  return { defaultTextProvider, activeTextProviders };
+}
+
+async function resolveAgentCreationRuntimeConfig(
+  config: Pick<AgentConfig, 'type' | 'acpTool' | 'llmProviderId'>,
+  modelSnapshot?: AgentCreationModelSnapshot,
+): Promise<{
+  type: 'builtin' | 'acp';
+  acpTool?: AcpToolValue;
+  llmProviderId: string;
+}> {
+  const explicitProviderId = config.llmProviderId?.trim();
+  const type = config.type || 'acp';
+  if (type === 'builtin' && !explicitProviderId) {
+    throw new Error('内置助手必须指定文本模型。');
+  }
+
+  let provider: LlmProvider | null;
+  if (explicitProviderId) {
+    provider = await llmProviderService.findById(explicitProviderId);
+  } else {
+    const snapshot = modelSnapshot || await getAgentCreationModelSnapshot();
+    provider = snapshot.defaultTextProvider;
+    const requiredProtocol = getRequiredAcpProviderProtocol(config.acpTool);
+    if (requiredProtocol && provider?.apiProtocol !== requiredProtocol) {
+      provider = snapshot.activeTextProviders.find(
+        (candidate) => candidate.apiProtocol === requiredProtocol,
+      ) || null;
+    }
+  }
+
+  if (!provider) {
+    const requiredProtocol = getRequiredAcpProviderProtocol(config.acpTool);
+    if (requiredProtocol && !explicitProviderId) {
+      throw new Error(`未找到可用的 ${getAcpToolLabel(config.acpTool!)} 文本模型，请先在模型管理中配置并启用对应模型。`);
+    }
+    if (explicitProviderId) {
+      throw new Error('LLM 供应商不存在。');
+    }
+    throw new Error('未找到默认文本模型，请先在模型管理中设置默认模型。');
+  }
+
+  if (!provider.isActive) {
+    throw new Error(`LLM 供应商 ${provider.name} 已停用，不能用于创建助手。`);
+  }
+  if (provider.modelType !== 'text') {
+    throw new Error(`助手只能绑定文本模型，当前供应商 ${provider.name} 的模型类型是 ${provider.modelType}。`);
+  }
+
+  const normalizedType = normalizeAgentTypeConfig(config, provider?.apiProtocol);
+  return {
+    ...normalizedType,
+    llmProviderId: provider.id,
   };
 }
 
@@ -292,7 +373,11 @@ export function createCreateAgentTool(defaultChatRoomId?: string) {
       injectGroupHistory,
     }: AgentConfig) => {
       try {
-        const normalizedType = normalizeAgentTypeConfig({ type, acpTool });
+        const runtimeConfig = await resolveAgentCreationRuntimeConfig({
+          type,
+          acpTool,
+          llmProviderId,
+        });
 
         // 检查名称是否已存在
         const existing = await agentService.findByName(name);
@@ -305,10 +390,10 @@ export function createCreateAgentTool(defaultChatRoomId?: string) {
           description,
           prompt,
           avatar: getRandomAgentAvatarValue(),
-          type: normalizedType.type,
-          acpTool: normalizedType.acpTool,
+          type: runtimeConfig.type,
+          acpTool: runtimeConfig.acpTool,
           workDir,
-          llmProviderId,
+          llmProviderId: runtimeConfig.llmProviderId,
           categoryId,
           speechConfig: resolveSpeechConfigInput({
             speechPresetId,
@@ -365,12 +450,12 @@ export function createCreateAgentTool(defaultChatRoomId?: string) {
           .enum(['builtin', 'acp'])
           .optional()
           .describe('助手类型，默认 acp'),
-        acpTool: z.enum(ACP_TOOL_VALUES).optional().describe('本地 Agent 工具名称（type=acp 时默认 claude）'),
+        acpTool: z.enum(ACP_TOOL_VALUES).optional().describe('本地 Agent 工具名称；不填时根据所选/默认模型协议自动选择 claude 或 codex'),
         workDir: z.string().optional().describe('工作目录路径，可选'),
         llmProviderId: z
           .string()
           .optional()
-          .describe('LLM供应商ID，可选；本地 Agent 仅支持 claude/anthropic 和 codex/openai'),
+          .describe('LLM供应商ID；不填时自动绑定默认文本模型；本地 Agent 仅支持 claude/anthropic 和 codex/openai'),
         categoryId: z.string().optional().describe('分类ID，可选'),
         speechPresetId: speechPresetIdSchema,
         speechConfig: speechConfigSchema,
@@ -411,10 +496,11 @@ export function createCreateAgentsTool(defaultChatRoomId?: string) {
 
       let successCount = 0;
       let failCount = 0;
+      const modelSnapshot = await getAgentCreationModelSnapshot();
 
       for (const config of agents) {
         try {
-          const normalizedType = normalizeAgentTypeConfig(config);
+          const runtimeConfig = await resolveAgentCreationRuntimeConfig(config, modelSnapshot);
 
           // 检查名称是否已存在
           const existing = await agentService.findByName(config.name);
@@ -433,10 +519,10 @@ export function createCreateAgentsTool(defaultChatRoomId?: string) {
             description: config.description,
             prompt: config.prompt,
             avatar: getRandomAgentAvatarValue(),
-            type: normalizedType.type,
-            acpTool: normalizedType.acpTool,
+            type: runtimeConfig.type,
+            acpTool: runtimeConfig.acpTool,
             workDir: config.workDir,
-            llmProviderId: config.llmProviderId,
+            llmProviderId: runtimeConfig.llmProviderId,
             categoryId: config.categoryId,
             speechConfig: resolveSpeechConfigInput({
               speechPresetId: config.speechPresetId,
@@ -503,12 +589,12 @@ export function createCreateAgentsTool(defaultChatRoomId?: string) {
               description: z.string().describe('助手功能描述'),
               prompt: z.string().describe('系统提示词，定义助手的行为和能力'),
               type: z.enum(['builtin', 'acp']).optional().describe('助手类型，默认 acp'),
-              acpTool: z.enum(ACP_TOOL_VALUES).optional().describe('本地 Agent 工具名称（type=acp 时默认 claude）'),
+              acpTool: z.enum(ACP_TOOL_VALUES).optional().describe('本地 Agent 工具名称；不填时根据所选/默认模型协议自动选择 claude 或 codex'),
               workDir: z.string().optional().describe('工作目录路径'),
               llmProviderId: z
                 .string()
                 .optional()
-                .describe('LLM供应商ID；本地 Agent 仅支持 claude/anthropic 和 codex/openai'),
+                .describe('LLM供应商ID；不填时自动绑定默认文本模型；本地 Agent 仅支持 claude/anthropic 和 codex/openai'),
               categoryId: z.string().optional().describe('分类ID'),
               speechPresetId: speechPresetIdSchema,
               speechConfig: speechConfigSchema,

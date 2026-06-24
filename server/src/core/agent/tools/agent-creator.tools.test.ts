@@ -58,6 +58,19 @@ test.beforeEach(async () => {
       },
     },
   });
+  await prisma.llmProvider.create({
+    data: {
+      name: 'Agent Creator Tool Test Default Text Provider',
+      type: 'custom',
+      modelType: 'text',
+      apiProtocol: 'anthropic',
+      apiUrl: 'https://example.com/v1',
+      apiKey: 'test-key',
+      model: 'test-default-model',
+      isActive: true,
+      isDefault: true,
+    },
+  });
   clearBrowserLocalVoiceSnapshots();
   executorCache.clear();
 });
@@ -247,6 +260,184 @@ test('room-aware create_agent adds new agent to current room with group history 
   assert.match(createdAgent?.avatar ?? '', /^\d+$/);
   assert.ok(Number(createdAgent?.avatar) >= 1 && Number(createdAgent?.avatar) < 30);
   assert.equal(createdAgent?.avatarColor, null);
+  const defaultProvider = await prisma.llmProvider.findFirst({
+    where: { modelType: 'text', isDefault: true },
+  });
+  assert.equal(createdAgent?.llmProviderId, defaultProvider?.id);
+  assert.equal(createdAgent?.type, 'acp');
+  assert.equal(createdAgent?.acpTool, 'claude');
+});
+
+test('create_agents binds the default OpenAI model and infers Codex', async () => {
+  await prisma.llmProvider.updateMany({
+    where: { modelType: 'text' },
+    data: { isDefault: false },
+  });
+  const defaultProvider = await prisma.llmProvider.create({
+    data: {
+      name: 'Agent Creator Tool Test Default OpenAI Provider',
+      type: 'custom',
+      modelType: 'text',
+      apiProtocol: 'openai',
+      apiUrl: 'https://example.com/v1',
+      apiKey: 'test-key',
+      model: 'test-openai-model',
+      isActive: true,
+      isDefault: true,
+    },
+  });
+
+  const result = await getTool('create_agents').invoke({
+    agents: [
+      {
+        name: 'Agent Creator Tool Test Default OpenAI Agent',
+        description: 'Uses the default OpenAI model.',
+        prompt: 'Use the configured default model.',
+      },
+    ],
+  });
+  const parsed = JSON.parse(String(result));
+
+  assert.equal(parsed.success, true);
+  const createdAgent = await prisma.agent.findUnique({
+    where: { id: parsed.results[0].agent.id },
+  });
+  assert.equal(createdAgent?.llmProviderId, defaultProvider.id);
+  assert.equal(createdAgent?.type, 'acp');
+  assert.equal(createdAgent?.acpTool, 'codex');
+});
+
+test('create_agent selects an enabled compatible model for an explicitly requested ACP tool', async () => {
+  const compatibleProvider = await prisma.llmProvider.create({
+    data: {
+      name: 'Agent Creator Tool Test Compatible OpenAI Provider',
+      type: 'custom',
+      modelType: 'text',
+      apiProtocol: 'openai',
+      apiUrl: 'https://example.com/v1',
+      apiKey: 'test-key',
+      model: 'test-compatible-openai-model',
+      isActive: true,
+      isDefault: false,
+    },
+  });
+
+  const result = await getTool('create_agent').invoke({
+    name: 'Agent Creator Tool Test Explicit Codex Agent',
+    description: 'Uses a compatible OpenAI model.',
+    prompt: 'Use Codex.',
+    acpTool: 'codex',
+  });
+  const parsed = JSON.parse(String(result));
+
+  assert.equal(parsed.success, true);
+  const createdAgent = await prisma.agent.findUnique({
+    where: { id: parsed.agent.id },
+  });
+  assert.equal(createdAgent?.llmProviderId, compatibleProvider.id);
+  assert.equal(createdAgent?.acpTool, 'codex');
+});
+
+test('create_agent rejects an inactive explicit model provider', async () => {
+  const inactiveProvider = await prisma.llmProvider.create({
+    data: {
+      name: 'Agent Creator Tool Test Inactive Text Provider',
+      type: 'custom',
+      modelType: 'text',
+      apiProtocol: 'anthropic',
+      apiUrl: 'https://example.com/v1',
+      apiKey: 'test-key',
+      model: 'test-inactive-model',
+      isActive: false,
+      isDefault: false,
+    },
+  });
+
+  const result = await getTool('create_agent').invoke({
+    name: 'Agent Creator Tool Test Inactive Provider Agent',
+    description: 'Should reject inactive provider.',
+    prompt: 'Require an active provider.',
+    llmProviderId: inactiveProvider.id,
+  });
+  const parsed = JSON.parse(String(result));
+
+  assert.equal(parsed.success, false);
+  assert.match(parsed.error, /已停用/);
+  assert.equal(
+    await prisma.agent.count({
+      where: { name: 'Agent Creator Tool Test Inactive Provider Agent' },
+    }),
+    0,
+  );
+});
+
+test('create_agent requires an explicit text model for builtin assistants', async () => {
+  const result = await getTool('create_agent').invoke({
+    name: 'Agent Creator Tool Test Builtin Without Model Agent',
+    description: 'Should require an explicit model.',
+    prompt: 'Require an explicit model.',
+    type: 'builtin',
+  });
+  const parsed = JSON.parse(String(result));
+
+  assert.equal(parsed.success, false);
+  assert.match(parsed.error, /内置助手必须指定文本模型/);
+});
+
+test('create_agents uses one default-model snapshot for the entire batch', async () => {
+  const result = await getTool('create_agents').invoke({
+    agents: [
+      {
+        name: 'Agent Creator Tool Test Snapshot Agent One',
+        description: 'Uses the batch default model.',
+        prompt: 'Use the configured default model.',
+      },
+      {
+        name: 'Agent Creator Tool Test Snapshot Agent Two',
+        description: 'Uses the batch default model.',
+        prompt: 'Use the configured default model.',
+      },
+    ],
+  });
+  const parsed = JSON.parse(String(result));
+
+  assert.equal(parsed.success, true);
+  const createdAgents = await prisma.agent.findMany({
+    where: {
+      name: {
+        in: [
+          'Agent Creator Tool Test Snapshot Agent One',
+          'Agent Creator Tool Test Snapshot Agent Two',
+        ],
+      },
+    },
+    select: { llmProviderId: true },
+  });
+  assert.equal(createdAgents.length, 2);
+  assert.equal(createdAgents[0].llmProviderId, createdAgents[1].llmProviderId);
+});
+
+test('create_agent fails clearly when no default text model exists', async () => {
+  await prisma.llmProvider.updateMany({
+    where: { modelType: 'text' },
+    data: { isDefault: false },
+  });
+
+  const result = await getTool('create_agent').invoke({
+    name: 'Agent Creator Tool Test Missing Default Model',
+    description: 'Should not fall back to local configuration.',
+    prompt: 'Require a configured default model.',
+  });
+  const parsed = JSON.parse(String(result));
+
+  assert.equal(parsed.success, false);
+  assert.match(parsed.error, /未找到默认文本模型/);
+  assert.equal(
+    await prisma.agent.count({
+      where: { name: 'Agent Creator Tool Test Missing Default Model' },
+    }),
+    0,
+  );
 });
 
 test('create_llm_provider supports image model configuration fields', async () => {
