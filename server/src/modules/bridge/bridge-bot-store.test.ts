@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import prisma from '../../lib/prisma.js';
 import {
+  bindFeishuCreatorOpenId,
   bindBridgeBotToChatRoom,
   createBridgeBot,
   listBridgeBots,
@@ -111,4 +112,22 @@ test('updateBridgeBot merges partial config so unchanged secrets are preserved',
     appSecret: 'secret-a',
     defaultExternalId: 'oc_default_chat',
   });
+});
+
+test('bindFeishuCreatorOpenId only allows the first Feishu user to bind', async () => {
+  const bot = await createBridgeBot({
+    platform: 'feishu',
+    name: '飞书机器人',
+    config: { appId: 'app-a', appSecret: 'secret-a' },
+  });
+
+  const first = await bindFeishuCreatorOpenId(bot.id, 'ou_creator');
+  const repeat = await bindFeishuCreatorOpenId(bot.id, 'ou_creator');
+  const other = await bindFeishuCreatorOpenId(bot.id, 'ou_other');
+  const stored = (await listBridgeBots('feishu')).find((item) => item.id === bot.id);
+
+  assert.deepEqual(first, { status: 'bound', openId: 'ou_creator' });
+  assert.deepEqual(repeat, { status: 'already-bound', openId: 'ou_creator' });
+  assert.deepEqual(other, { status: 'bound-to-other', openId: 'ou_creator' });
+  assert.equal(stored?.feishuCreatorOpenId, 'ou_creator');
 });

@@ -1,14 +1,13 @@
 import { cn } from '@/lib/utils';
-import { HelpCircle, Settings, SlidersHorizontal, Smartphone, User } from 'lucide-react';
+import { HelpCircle, Settings, SlidersHorizontal, Smartphone } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AccountSection } from './settings/account-section';
 import { AboutSection } from './settings/about-section';
 import { GeneralSection } from './settings/general-section';
 import { SoftwareSection } from './settings/software-section';
 
-type SettingsSection = 'account' | 'general' | 'software' | 'about'
+type SettingsSection = 'general' | 'software' | 'about'
 
 interface SettingsPageProps {
   isMobile?: boolean
@@ -16,10 +15,9 @@ interface SettingsPageProps {
 
 export function SettingsPage({ isMobile }: SettingsPageProps) {
   const { t } = useTranslation()
-  const [section, setSection] = useState<SettingsSection>('account')
+  const [section, setSection] = useState<SettingsSection>('general')
 
   const navItems: Array<{ id: SettingsSection; label: string; icon: LucideIcon }> = [
-    { id: 'account', label: t('settings.navAccount'), icon: User },
     { id: 'general', label: t('settings.navGeneral'), icon: SlidersHorizontal },
     { id: 'software', label: t('settings.navSoftware'), icon: Smartphone },
     { id: 'about', label: t('settings.navAbout'), icon: HelpCircle },
@@ -27,8 +25,6 @@ export function SettingsPage({ isMobile }: SettingsPageProps) {
 
   const renderSection = () => {
     switch (section) {
-      case 'account':
-        return <AccountSection />
       case 'general':
         return <GeneralSection />
       case 'software':

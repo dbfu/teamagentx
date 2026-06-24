@@ -97,6 +97,7 @@ export function IntegrationPage() {
   const [pendingBotIds, setPendingBotIds] = useState<Set<string>>(new Set())
 
   const platformInfo = platforms.find((item) => item.key === activePlatform) ?? null
+  const activePlatformLabel = platformInfo?.label ?? platformLabel(platforms, activePlatform)
   const activeFields = platformInfo?.configFields ?? []
 
   useEffect(() => {
@@ -464,6 +465,7 @@ export function IntegrationPage() {
             editingBotId={editingBotId}
             pendingBotIds={pendingBotIds}
             baseUrl={baseUrl}
+            activePlatformLabel={activePlatformLabel}
             noDragStyle={NO_DRAG_STYLE}
             onBotSearchChange={setBotSearch}
             onCreateBot={startCreateBot}
@@ -592,11 +594,11 @@ export function IntegrationPage() {
           style={NO_DRAG_STYLE}
         >
           <DialogHeader>
-            <DialogTitle>{editingBotId ? t('integration.editBotInstance') : t('integration.newBotInstance')}</DialogTitle>
+            <DialogTitle>{editingBotId ? t('integration.editBotInstance') : t('integration.newPlatformBot', { platform: activePlatformLabel })}</DialogTitle>
             <DialogDescription>
               {editingBotId
                 ? t('integration.editBotHint')
-                : t('integration.newBotHint', { platform: platformInfo?.label ?? t('integration.pageTitle') })}
+                : t('integration.newBotHint', { platform: activePlatformLabel })}
             </DialogDescription>
           </DialogHeader>
           <BotEditorForm

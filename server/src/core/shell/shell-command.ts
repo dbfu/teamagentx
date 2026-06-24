@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import treeKill from 'tree-kill';
 import { detectBlocking, BLOCK_DETECTION_CONFIG, type BlockDetectionResult } from './block-detector.js';
 import { TaskOutput } from './task-output.js';
+import { getDefaultShell } from './default-shell.js';
 
 /**
  * Shell 命令状态
@@ -87,7 +88,7 @@ export class ShellCommand {
     this.workDir = workDir;
     this.options = {
       timeout: options.timeout ?? this.DEFAULT_TIMEOUT,
-      shell: options.shell ?? process.env.SHELL ?? '/bin/bash',
+      shell: options.shell ?? getDefaultShell(),
       env: options.env ?? process.env,
       autoBackground: options.autoBackground ?? true,
     };

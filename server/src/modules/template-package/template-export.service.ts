@@ -25,6 +25,7 @@ interface BuildTemplatePackagePayloadInput {
   agents: Parameters<typeof buildTemplateSnapshot>[0]['agents'];
   categories: Parameters<typeof buildTemplateSnapshot>[0]['categories'];
   cronTasks: Parameters<typeof buildTemplateSnapshot>[0]['cronTasks'];
+  commands?: Parameters<typeof buildTemplateSnapshot>[0]['commands'];
   skills?: TemplateSkillPackage[];
   skillUsages?: TemplateSkillUsage[];
   degradedSkills?: Array<{ slug: string; reason: string }>;
@@ -43,6 +44,7 @@ export function buildTemplatePackagePayload(input: BuildTemplatePackagePayloadIn
     agents: input.agents,
     categories: input.categories,
     cronTasks: includedCronTasks,
+    commands: input.commands,
   });
 
   const manifest: TemplateManifest = {

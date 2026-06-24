@@ -414,6 +414,12 @@ export interface TemplatePackageSnapshot {
     name: string
     payload: string
   }>
+  commands?: Array<{
+    id?: string
+    name: string
+    content: string
+    sortOrder: number
+  }>
 }
 
 export interface TemplatePackageExportPayload {

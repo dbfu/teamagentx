@@ -42,6 +42,11 @@ export interface UpdateBridgeBotInput {
   enabled?: boolean;
 }
 
+export type BindFeishuCreatorResult =
+  | { status: 'bound'; openId: string }
+  | { status: 'already-bound'; openId: string }
+  | { status: 'bound-to-other'; openId: string };
+
 function parseEncryptedConfig(config?: string | null): Record<string, unknown> | undefined {
   if (!config) return undefined;
   try {
@@ -231,6 +236,40 @@ export async function updateBridgeBot(id: string, input: UpdateBridgeBotInput) {
         select: { id: true, name: true, avatar: true, avatarColor: true },
       },
     },
+  });
+}
+
+export async function bindFeishuCreatorOpenId(
+  botId: string,
+  openId: string,
+): Promise<BindFeishuCreatorResult> {
+  const normalizedOpenId = openId.trim();
+  if (!normalizedOpenId) {
+    throw new Error('飞书用户 open_id 不能为空');
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const bot = await tx.bridgeBot.findUnique({
+      where: { id: botId },
+      select: { id: true, platform: true, feishuCreatorOpenId: true },
+    });
+    if (!bot) {
+      throw new Error('机器人实例不存在');
+    }
+    if (bot.platform !== 'feishu') {
+      throw new Error('只有飞书机器人支持绑定创建者');
+    }
+    if (!bot.feishuCreatorOpenId) {
+      await tx.bridgeBot.update({
+        where: { id: botId },
+        data: { feishuCreatorOpenId: normalizedOpenId },
+      });
+      return { status: 'bound', openId: normalizedOpenId };
+    }
+    if (bot.feishuCreatorOpenId === normalizedOpenId) {
+      return { status: 'already-bound', openId: normalizedOpenId };
+    }
+    return { status: 'bound-to-other', openId: bot.feishuCreatorOpenId };
   });
 }
 

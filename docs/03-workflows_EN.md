@@ -59,7 +59,7 @@ Exactly one valid @ (Smart Collaboration) → fast path, queue for next round
 No @ (Smart Collaboration) → not processed now, stall watchdog fallback
 Any @ (manual mode) → don't queue, only show as mention
    ↓
-hops +1; on collaboration-budget trip (20 hops / 3 consecutive round-trips, single-@ relay only) → stop auto-dispatch and @ owner
+hops +1; on collaboration-budget trip (100 hops / 3 consecutive round-trips, single-@ relay only) → stop auto-dispatch and @ owner
 A human message → resets counters and takes over
 ```
 

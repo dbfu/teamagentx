@@ -59,6 +59,14 @@ describe('template export service', () => {
         enabled: true,
         maxRetries: 3,
       }],
+      commands: [
+        {
+          id: 'cmd-init',
+          name: '初始化项目',
+          content: '/初始化项目\n检查仓库状态并建立计划',
+          sortOrder: 1,
+        },
+      ],
     });
 
     assert.equal(payload.manifest.templateId, 'tpl-customer-support');
@@ -81,6 +89,14 @@ describe('template export service', () => {
     assert.equal(payload.snapshot.room.avatarColor, '#2563eb');
     assert.equal(payload.snapshot.agents[0]?.avatar, '7');
     assert.equal(payload.snapshot.agents[0]?.avatarColor, '#f97316');
+    assert.deepEqual(payload.snapshot.commands, [
+      {
+        id: 'cmd-init',
+        name: '初始化项目',
+        content: '/初始化项目\n检查仓库状态并建立计划',
+        sortOrder: 1,
+      },
+    ]);
   });
 
   test('omits skills and cron tasks when export options disable them', () => {

@@ -228,7 +228,7 @@ The former "Coordinator" and "Auto" modes are merged into a single **Smart Colla
 | **Manual Mode** | @ in agent message doesn't trigger other agents, only as mention | User manual orchestration, agents don't cross-stage |
 
 - Storage layer still stores `coordinator` (Smart Collaboration) / `manual`; the legacy value `auto` is an alias equal to Smart Collaboration
-- For the "agent single-`@` direct relay", a built-in two-breaker (20 hops / 3 consecutive round-trips) + stall detection prevent fan-out storms and loops; coordinator multi-agent dispatch supports parallel/serial (see [14](14-agent-dispatch-flowcharts_EN.md))
+- For the "agent single-`@` direct relay", a built-in two-breaker (100 hops / 3 consecutive round-trips) + stall detection prevent fan-out storms and loops; coordinator multi-agent dispatch supports parallel/serial (see [14](14-agent-dispatch-flowcharts_EN.md))
 - Every coordinator decision is written to `CoordinatorLog`, viewable in the "Dispatch Log"
 
 Detailed trigger rules in [11-agent-trigger-system_EN.md](11-agent-trigger-system_EN.md); merge design in [13-unified-collaboration-mode-design_EN.md](13-unified-collaboration-mode-design_EN.md).
@@ -612,7 +612,7 @@ See §4.4 and [11-agent-trigger-system_EN.md](11-agent-trigger-system_EN.md): fa
 
 ### 12.7 Execution robustness
 
-- Coordinator LLM decision timeout & retry (`AGENT_COORDINATOR_LLM_TIMEOUT_MS` / `_RETRY_COUNT`)
+- Coordinator LLM decision timeout, retry, and fallback-model switching (`AGENT_COORDINATOR_LLM_TIMEOUT_MS` / `_RETRY_COUNT`; first attempt uses the base timeout, retry attempts use 2x timeout)
 - Business-agent "no-activity" retry: if there's no output/stream/thinking/tool event for a while after start, the attempt is treated as stuck and retried (`AGENT_EXECUTION_NO_ACTIVITY_TIMEOUT_MS`)
 - Task recovery on restart: executing/pending tasks are marked interrupted and can be resumed manually
 

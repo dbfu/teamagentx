@@ -660,18 +660,19 @@ model PlatformConfig {
 
 // 外部平台机器人实例（同一平台可配置多个凭证实例）
 model BridgeBot {
-  id             String   @id @default(uuid())
-  platform       String
-  name           String
-  botToken       String?
-  config         String?
-  credentialHash String? // SHA-256(platform + 凭证明文)，用于去重
-  defaultAgentId String?
-  chatRoomId     String?
-  ownerId        String?
-  enabled        Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                  String   @id @default(uuid())
+  platform            String
+  name                String
+  botToken            String?
+  config              String?
+  credentialHash      String? // SHA-256(platform + 凭证明文)，用于去重
+  feishuCreatorOpenId String? // 飞书私聊 /bind 首次绑定的机器人创建者 open_id
+  defaultAgentId      String?
+  chatRoomId          String?
+  ownerId             String?
+  enabled             Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   chatRoom     ChatRoom? @relation(fields: [chatRoomId], references: [id], onDelete: SetNull)
   defaultAgent Agent?    @relation(fields: [defaultAgentId], references: [id], onDelete: SetNull)
@@ -681,6 +682,7 @@ model BridgeBot {
   @@index([platform, createdAt])
   @@index([chatRoomId])
   @@index([ownerId])
+  @@index([feishuCreatorOpenId])
 }
 
 // 桥接事件日志

@@ -925,7 +925,7 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
                   {t('common.refresh')}
                 </button>
                 <button
-                  onClick={() => setIsCreateModalOpen(true)}
+                  onClick={() => openCreateModalWithCategory(activeTab.type === 'system' ? null : activeTab.categoryId)}
                   className="ta-button-primary"
                 >
                   <Plus className="size-4" />

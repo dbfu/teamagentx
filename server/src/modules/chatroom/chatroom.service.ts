@@ -363,6 +363,9 @@ export const chatRoomService = {
       where: { id: data.sourceChatRoomId },
       include: {
         chatRoomAgents: true,
+        customCommands: {
+          orderBy: { sortOrder: 'asc' },
+        },
       },
     });
 
@@ -408,6 +411,19 @@ export const chatRoomService = {
             lastInjectedMessageId: null,
             joinedAt: now,
             lastReadAt: now,
+          })),
+        });
+      }
+
+      if (source.customCommands.length > 0) {
+        await tx.chatRoomCommand.createMany({
+          data: source.customCommands.map((command) => ({
+            id: randomUUID(),
+            chatRoomId: newChatRoomId,
+            name: command.name,
+            content: command.content,
+            sortOrder: command.sortOrder,
+            createdBy: command.createdBy,
           })),
         });
       }

@@ -113,6 +113,91 @@ describe('ChatRoom Gateway API', () => {
     });
   });
 
+  describe('POST /chatrooms/:id/duplicate', () => {
+    test('复制群聊时应复制自定义群命令', async () => {
+      const sourceResponse = await app.inject({
+        method: 'POST',
+        url: '/chatrooms',
+        payload: {
+          name: `Command Source Room ${Date.now()}`,
+          workDir: path.join(workDirRoot, 'command-source-room'),
+        },
+      });
+      assert.strictEqual(sourceResponse.statusCode, 201);
+      const sourceRoom = sourceResponse.json().data;
+
+      await prisma.chatRoomCommand.createMany({
+        data: [
+          {
+            id: randomUUID(),
+            chatRoomId: sourceRoom.id,
+            name: '初始化项目',
+            content: '/初始化项目\n检查仓库并建立项目计划',
+            sortOrder: 1,
+          },
+          {
+            id: randomUUID(),
+            chatRoomId: sourceRoom.id,
+            name: '审查当前改动',
+            content: '/审查当前改动\n请做代码审查',
+            sortOrder: 2,
+          },
+          {
+            id: randomUUID(),
+            chatRoomId: sourceRoom.id,
+            name: '收口交付',
+            content: '/收口交付\n验证并总结交付内容',
+            sortOrder: 3,
+          },
+        ],
+      });
+
+      const duplicateResponse = await app.inject({
+        method: 'POST',
+        url: `/chatrooms/${sourceRoom.id}/duplicate`,
+        payload: {
+          name: `Command Copied Room ${Date.now()}`,
+        },
+      });
+
+      assert.strictEqual(duplicateResponse.statusCode, 201);
+      const copiedRoom = duplicateResponse.json().data;
+      const copiedCommands = await prisma.chatRoomCommand.findMany({
+        where: { chatRoomId: copiedRoom.id },
+        orderBy: { sortOrder: 'asc' },
+      });
+
+      assert.deepStrictEqual(
+        copiedCommands.map((command) => ({
+          chatRoomId: command.chatRoomId,
+          name: command.name,
+          content: command.content,
+          sortOrder: command.sortOrder,
+        })),
+        [
+          {
+            chatRoomId: copiedRoom.id,
+            name: '初始化项目',
+            content: '/初始化项目\n检查仓库并建立项目计划',
+            sortOrder: 1,
+          },
+          {
+            chatRoomId: copiedRoom.id,
+            name: '审查当前改动',
+            content: '/审查当前改动\n请做代码审查',
+            sortOrder: 2,
+          },
+          {
+            chatRoomId: copiedRoom.id,
+            name: '收口交付',
+            content: '/收口交付\n验证并总结交付内容',
+            sortOrder: 3,
+          },
+        ],
+      );
+    });
+  });
+
   describe('GET /chatrooms/:id', () => {
     test('应该返回 404 当聊天室不存在时', async () => {
       const response = await app.inject({

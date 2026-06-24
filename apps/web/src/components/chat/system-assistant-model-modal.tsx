@@ -218,12 +218,14 @@ export function SystemAssistantModelModal({
   }, [acpTool, effectiveSelectedProviderId, providerSelectionTouched, providers, selectedProviderId])
 
   useEffect(() => {
+    if (providers.length === 0) return
+
     const compatibleIds = new Set(compatibleFallbackProviders.map((provider) => provider.id))
     const nextIds = fallbackLlmProviderIds.filter((id) => compatibleIds.has(id))
     if (nextIds.length !== fallbackLlmProviderIds.length) {
       setFallbackLlmProviderIds(nextIds)
     }
-  }, [compatibleFallbackProviders, fallbackLlmProviderIds])
+  }, [compatibleFallbackProviders, fallbackLlmProviderIds, providers.length])
 
   if (!isOpen || !assistant) return null
 

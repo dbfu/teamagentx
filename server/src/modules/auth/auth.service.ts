@@ -228,6 +228,43 @@ async function loadLocalUser(username?: string, password?: string): Promise<Loca
 }
 
 export const authService = {
+  /**
+   * 用环境变量 AUTH_USERNAME / AUTH_PASSWORD 预置/对齐本地单账号（Docker / 独立部署）。
+   * 启动即建好账号，使开放注册接口对已存在账号直接拒绝，消除「谁先连谁抢注」风险。
+   * - 账号不存在 → 用 env 创建；
+   * - 已存在但用户名/口令与 env 不一致 → 以 env 为准更新（保留头像、语言、id、创建时间）；
+   * - 两个变量缺一则不做任何操作（保持原有注册流程）。
+   */
+  async seedLocalUserFromEnv(): Promise<void> {
+    const username = process.env.AUTH_USERNAME?.trim();
+    const password = process.env.AUTH_PASSWORD;
+    if (!username || !password) return;
+
+    const existing = await readLocalUser().catch(() => null);
+    if (existing && existing.username === username && existing.password === password) {
+      return; // 无变化
+    }
+
+    const now = new Date().toISOString();
+    const user: LocalUserConfig = existing
+      ? { ...existing, username, password, updatedAt: now }
+      : {
+          id: randomUUID(),
+          username,
+          password,
+          avatar: '0',
+          preferredLanguage: 'zh-CN',
+          createdAt: now,
+          updatedAt: now,
+        };
+
+    await writeLocalUser(user);
+    await syncCompatibilityUser(user).catch((error) => {
+      console.warn('[Auth] 预置账号同步兼容记录失败:', error);
+    });
+    console.log(`[Auth] 已根据环境变量预置本地账号：${username}`);
+  },
+
   async register(data: RegisterData): Promise<AuthResponse> {
     const { username, password, avatar } = data;
 

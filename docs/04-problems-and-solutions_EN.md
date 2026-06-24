@@ -6,7 +6,7 @@ English | [中文](04-problems-and-solutions.md)
 > Priority legend: 🔴 High (P0, must do next phase) / 🟡 Medium (P1, 3-6 months) / 🟢 Low (P2, long-term).
 
 > **2026-06 progress (some problems hardened)**: after Smart Collaboration (merged auto/coordinator) landed, the following are now covered by "collaboration budget (two breakers) + parallel-batch/serial-chain + 5-point coordinator fallback" (full flowcharts in [14-agent-dispatch-flowcharts_EN.md](14-agent-dispatch-flowcharts_EN.md)):
-> - **A1 loop prevention / A2 fan-out storm**: two breakers (hops 20 / consecutive cycle 3 round-trips) on the "agent single-`@` direct relay"; on a trip it stops and `@`s the owner; user multi-`@` is handed to the coordinator to split into single task / parallel batch / serial chain (no silent truncation).
+> - **A1 loop prevention / A2 fan-out storm**: two breakers (hops 100 / consecutive cycle 3 round-trips) on the "agent single-`@` direct relay"; on a trip it stops and `@`s the owner; user multi-`@` is handed to the coordinator to split into single task / parallel batch / serial chain (no silent truncation).
 > - **C @ trigger ambiguity**: an agent `@` anomaly (typo/multi-`@`) escalates to the coordinator for correction; the default agent fallback is kept.
 > - **H deadlock**: cycle detection + stall watchdog fallback; a human message takes over at any time.
 > See [11-agent-trigger-system_EN.md](11-agent-trigger-system_EN.md) and [13-unified-collaboration-mode-design_EN.md](13-unified-collaboration-mode-design_EN.md). The solutions below remain as design rationale and as reference for the parts not yet covered (objective acceptance, file concurrency, hard state-machine constraints, etc.).

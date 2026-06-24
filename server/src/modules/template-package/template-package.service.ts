@@ -66,6 +66,9 @@ export const templatePackageService = {
       where: {id: input.chatRoomId},
       include: {
         chatRoomAgents: true,
+        customCommands: {
+          orderBy: {sortOrder: 'asc'},
+        },
       },
     });
 
@@ -191,6 +194,11 @@ export const templatePackageService = {
         agentIds: parseCronTaskAgentIds(task.agentIds),
         enabled: task.enabled,
         maxRetries: task.maxRetries,
+      })),
+      commands: room.customCommands.map((command) => ({
+        name: command.name,
+        content: command.content,
+        sortOrder: command.sortOrder,
       })),
       skills: collectedSkills.skills,
       skillUsages: collectedSkills.usages,
@@ -319,6 +327,11 @@ export const templatePackageService = {
         agentIds: string[];
         enabled: boolean;
         maxRetries: number;
+      }>;
+      commands?: Array<{
+        name: string;
+        content: string;
+        sortOrder: number;
       }>;
     };
     skills?: TemplateSkillPackage[];
@@ -554,6 +567,19 @@ export const templatePackageService = {
         });
       }
 
+      const commands = normalizeTemplateCommands(input.snapshot.commands ?? []);
+      if (commands.length > 0) {
+        await tx.chatRoomCommand.createMany({
+          data: commands.map((command) => ({
+            id: randomUUID(),
+            chatRoomId: roomId,
+            name: command.name,
+            content: command.content,
+            sortOrder: command.sortOrder,
+          })),
+        });
+      }
+
       await tx.templateImportRecord.create({
         data: {
           templateId: preview.manifest.templateId,
@@ -621,6 +647,41 @@ export const templatePackageService = {
     };
   },
 };
+
+function normalizeTemplateCommands(
+  commands: Array<{name: string; content: string; sortOrder: number}>,
+) {
+  const seenNames = new Set<string>();
+
+  return commands.map((command) => {
+    if (
+      typeof command.name !== 'string' ||
+      typeof command.content !== 'string' ||
+      (
+        command.sortOrder !== undefined &&
+        (typeof command.sortOrder !== 'number' || !Number.isInteger(command.sortOrder))
+      )
+    ) {
+      throw new Error('模板命令格式无效');
+    }
+
+    const name = command.name.trim();
+    if (!name) {
+      throw new Error('模板命令名称不能为空');
+    }
+
+    if (seenNames.has(name)) {
+      throw new Error(`模板命令名称重复：${name}`);
+    }
+    seenNames.add(name);
+
+    return {
+      name,
+      content: command.content,
+      sortOrder: command.sortOrder ?? 0,
+    };
+  });
+}
 
 async function rollbackImportedTemplateArtifacts(input: {
   roomId: string;

@@ -334,7 +334,7 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
 
         {/* Form */}
         <form onSubmit={handleSubmit}>
-          <div className="max-h-[50vh] overflow-y-auto p-6">
+          <div className="max-h-[60vh] overflow-y-auto p-6">
             {/* Name */}
             <div className="mb-4">
               <label className="mb-1.5 block text-sm font-medium text-foreground">

@@ -138,6 +138,23 @@ describe('Template Package Gateway API', () => {
     });
     assert.equal(addAgentResponse.statusCode, 201);
 
+    await prisma.chatRoomCommand.createMany({
+      data: [
+        {
+          chatRoomId: room.id,
+          name: '初始化项目',
+          content: '/初始化项目\n检查仓库并建立项目计划',
+          sortOrder: 1,
+        },
+        {
+          chatRoomId: room.id,
+          name: '收口交付',
+          content: '/收口交付\n验证并总结交付内容',
+          sortOrder: 3,
+        },
+      ],
+    });
+
     const response = await app.inject({
       method: 'POST',
       url: '/template-packages/export',
@@ -155,6 +172,18 @@ describe('Template Package Gateway API', () => {
     assert.equal(exported.manifest.title, '客服模板');
     assert.equal(exported.snapshot.room.workDir, null);
     assert.ok(Array.isArray(exported.capabilityDescriptors));
+    assert.deepEqual(exported.snapshot.commands, [
+      {
+        name: '初始化项目',
+        content: '/初始化项目\n检查仓库并建立项目计划',
+        sortOrder: 1,
+      },
+      {
+        name: '收口交付',
+        content: '/收口交付\n验证并总结交付内容',
+        sortOrder: 3,
+      },
+    ]);
   });
 
   test('POST /template-packages/export 默认包含全部技能与定时任务', async () => {
@@ -565,6 +594,29 @@ describe('Template Package Gateway API', () => {
       },
     });
 
+    await prisma.chatRoomCommand.createMany({
+      data: [
+        {
+          chatRoomId: room.id,
+          name: '初始化项目',
+          content: '/初始化项目\n检查仓库并建立项目计划',
+          sortOrder: 1,
+        },
+        {
+          chatRoomId: room.id,
+          name: '审查当前改动',
+          content: '/审查当前改动\n请做代码审查',
+          sortOrder: 2,
+        },
+        {
+          chatRoomId: room.id,
+          name: '收口交付',
+          content: '/收口交付\n验证并总结交付内容',
+          sortOrder: 3,
+        },
+      ],
+    });
+
     const agentSkillDir = path.join(skillInstallService.getAgentSkillsDir(primaryAgent), 'browser-use');
     fs.mkdirSync(agentSkillDir, { recursive: true });
     fs.writeFileSync(
@@ -662,6 +714,35 @@ describe('Template Package Gateway API', () => {
     assert.ok(importedCronTasks[0]?.nextRunAt);
     const importedAgentIds = importedRoom.chatRoomAgents.map((roomAgent) => roomAgent.agentId).sort();
     assert.deepEqual(JSON.parse(importedCronTasks[0]?.agentIds ?? '[]').sort(), importedAgentIds);
+
+    const importedCommands = await prisma.chatRoomCommand.findMany({
+      where: { chatRoomId: importedRoom.id },
+      orderBy: { sortOrder: 'asc' },
+    });
+    assert.deepEqual(
+      importedCommands.map((command) => ({
+        name: command.name,
+        content: command.content,
+        sortOrder: command.sortOrder,
+      })),
+      [
+        {
+          name: '初始化项目',
+          content: '/初始化项目\n检查仓库并建立项目计划',
+          sortOrder: 1,
+        },
+        {
+          name: '审查当前改动',
+          content: '/审查当前改动\n请做代码审查',
+          sortOrder: 2,
+        },
+        {
+          name: '收口交付',
+          content: '/收口交付\n验证并总结交付内容',
+          sortOrder: 3,
+        },
+      ],
+    );
   });
 
   test('POST /template-packages/import 应忽略模板中的系统群助手', async () => {
@@ -886,6 +967,72 @@ describe('Template Package Gateway API', () => {
       importedRoom.chatRoomAgents.some((item) => item.agent?.name.startsWith('群助手（模板副本')),
       false,
     );
+  });
+
+  test('POST /template-packages/import 应拒绝重复的模板命令名', async () => {
+    const zipBuffer = buildTemplateZip({
+      manifest: {
+        schemaVersion: '1.0',
+        templateId: `tpl-duplicate-command-${Date.now()}`,
+        version: '1.0.0',
+        title: '重复命令模板',
+        source: { type: 'local' },
+        contents: {
+          group: true,
+          agents: 0,
+          categories: 0,
+          skills: 0,
+          cronTasks: 0,
+        },
+      },
+      snapshot: {
+        room: {
+          name: '重复命令模板',
+          description: null,
+          rules: null,
+          defaultAgentId: null,
+          agentTriggerMode: 'auto',
+        },
+        agents: [],
+        categories: [],
+        cronTasks: [],
+        commands: [
+          {
+            name: '初始化项目',
+            content: '第一次',
+            sortOrder: 1,
+          },
+          {
+            name: ' 初始化项目 ',
+            content: '第二次',
+            sortOrder: 2,
+          },
+        ],
+      },
+      capabilityDescriptors: [],
+    });
+
+    const multipart = buildMultipartPayload(
+      { desiredGroupName: `重复命令模板导入 ${Date.now()}` },
+      {
+        fieldName: 'template',
+        fileName: 'group-template.zip',
+        contentType: 'application/zip',
+        content: zipBuffer,
+      },
+    );
+
+    const importResponse = await app.inject({
+      method: 'POST',
+      url: '/template-packages/import',
+      headers: {
+        'content-type': multipart.contentType,
+      },
+      payload: multipart.payload,
+    });
+
+    assert.equal(importResponse.statusCode, 400);
+    assert.match(importResponse.json().error, /模板命令名称重复/);
   });
 
   test('POST /template-packages/export 对导入后的群组应沿用原模板 templateId', async () => {

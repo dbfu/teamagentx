@@ -228,7 +228,7 @@ UI 提示：
 | **手动模式** | 助手消息中的 @ 不触发其他助手，仅作提及 | 用户手动调度，助手不串台 |
 
 - 存储层 `agentTriggerMode` 仍存 `coordinator`（智能协作）/`manual`；历史值 `auto` 作为别名等同智能协作
-- 对「助手单 @ 直连接力」内置两重熔断（跳数 20 / 连续环路 3 来回）+ 卡住检测，防扇出风暴与死循环；协调器多助手派发支持并行/串行（见 [14](14-agent-dispatch-flowcharts.md)）
+- 对「助手单 @ 直连接力」内置两重熔断（跳数 100 / 连续环路 3 来回）+ 卡住检测，防扇出风暴与死循环；协调器多助手派发支持并行/串行（见 [14](14-agent-dispatch-flowcharts.md)）
 - 协调器每次决策写入 `CoordinatorLog`，可在「调度日志」查看
 
 详细触发规则见 [11-agent-trigger-system.md](11-agent-trigger-system.md)，合并设计见 [13-unified-collaboration-mode-design.md](13-unified-collaboration-mode-design.md)。
@@ -612,7 +612,7 @@ UI 提示：
 
 ### 12.7 执行健壮性
 
-- 群调度助手 LLM 决策超时与重试（`AGENT_COORDINATOR_LLM_TIMEOUT_MS` / `_RETRY_COUNT`）
+- 群调度助手 LLM 决策超时、重试与备用模型切换（`AGENT_COORDINATOR_LLM_TIMEOUT_MS` / `_RETRY_COUNT`；首轮用基础超时，重试轮次用 2 倍超时）
 - 普通助手「无活动」重试：启动后长期无任何输出/流/思考/工具事件即判卡住并重试（`AGENT_EXECUTION_NO_ACTIVITY_TIMEOUT_MS`）
 - 服务重启时任务恢复：executing/pending 任务标记 interrupted，可手动恢复
 

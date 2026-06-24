@@ -313,12 +313,14 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
   }, [assistantForForm, assistantType, formAcpTool, llmProviderId, llmProviders])
 
   useEffect(() => {
+    if (llmProviders.length === 0) return
+
     const compatibleIds = new Set(compatibleFallbackProviders.map((provider) => provider.id))
     const nextIds = fallbackLlmProviderIds.filter((id) => compatibleIds.has(id))
     if (nextIds.length !== fallbackLlmProviderIds.length) {
       setFallbackLlmProviderIds(nextIds)
     }
-  }, [compatibleFallbackProviders, fallbackLlmProviderIds])
+  }, [compatibleFallbackProviders, fallbackLlmProviderIds, llmProviders.length])
 
   // 获取已安装的 Skills
   const fetchInstalledSkills = async () => {

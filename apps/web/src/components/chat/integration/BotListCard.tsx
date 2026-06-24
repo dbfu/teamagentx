@@ -28,6 +28,7 @@ interface BotListCardProps {
   editingBotId: string | null
   pendingBotIds: Set<string>
   baseUrl: string
+  activePlatformLabel: string
   noDragStyle: CSSProperties
   onBotSearchChange: (value: string) => void
   onCreateBot: () => void
@@ -76,6 +77,7 @@ export function BotListCard({
   editingBotId,
   pendingBotIds,
   baseUrl,
+  activePlatformLabel,
   noDragStyle,
   onBotSearchChange,
   onCreateBot,
@@ -103,7 +105,7 @@ export function BotListCard({
               className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-500 px-3 py-2 text-sm text-white hover:bg-blue-600"
             >
               <Plus className="size-4" />
-              {t('integration.createBotInstance')}
+              {t('integration.createPlatformBot', { platform: activePlatformLabel })}
             </button>
             <div className="relative w-full sm:w-72">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-gray-400" />

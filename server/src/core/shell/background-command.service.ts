@@ -7,6 +7,7 @@ import * as path from 'path';
 import treeKill from 'tree-kill';
 import type { BackgroundTask } from '@prisma/client';
 import prisma from '../../lib/prisma.js';
+import { getDefaultShell } from './default-shell.js';
 
 type ManagedProcess = {
   child: ChildProcess;
@@ -105,7 +106,7 @@ class BackgroundCommandService {
     try {
       child = spawn(command, [], {
         cwd: workDir,
-        shell: process.env.SHELL || '/bin/bash',
+        shell: getDefaultShell(),
         env: input.env ?? process.env,
         stdio: ['ignore', stdoutFd, stderrFd],
         detached: false,

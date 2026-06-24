@@ -79,6 +79,90 @@ Start Electron development mode:
 
 In Electron mode, the desktop app starts an embedded backend listening on port `11053` by default.
 
+## Docker Deployment
+
+Package the backend as a **single container**: Fastify serves the frontend SPA + API + Socket together, so clients access it via `http://<server-ip>:3001` in a browser (same-origin, zero config). The SQLite database, uploads, and account are persisted in the `/data` volume.
+
+> Full guide (HTTPS reverse proxy, cross-arch build & image push, security notes): see [`docs/docker-deploy.md`](docs/docker-deploy.md).
+
+The container starts its entrypoint as root, automatically hands the data volume over to the `node` user, then drops privileges to run (the Claude Code CLI refuses to run as root). So any of the methods below works out of the box.
+
+### Option 1: docker compose (recommended)
+
+```bash
+# 1. Prepare environment variables
+cp .env.docker.example .env
+# Edit .env: AUTH_PASSWORD is required; JWT_SECRET is recommended (openssl rand -hex 32)
+
+# 2. Build and start (builds the image on first run)
+docker compose up -d --build
+
+# 3. Open http://<server-ip>:3001 in a browser
+#    Log in with AUTH_USERNAME / AUTH_PASSWORD from .env
+
+# Operations
+docker compose logs -f          # view logs
+docker compose up -d --build    # upgrade (rebuild image + auto-migrate)
+docker compose down             # stop (data volume preserved)
+```
+
+### Option 2: docker command
+
+```bash
+# 1. Build the image
+docker build -t teamagentx-server .
+
+# 2. Start (data persisted to the named volume teamagentx-data)
+docker run -d --name teamagentx-server \
+  -p 3001:3001 \
+  -e JWT_SECRET="$(openssl rand -hex 32)" \
+  -e AUTH_USERNAME=admin \
+  -e AUTH_PASSWORD=change-me \
+  -v teamagentx-data:/data \
+  teamagentx-server
+
+# Logs / stop
+docker logs -f teamagentx-server
+docker rm -f teamagentx-server      # remove container (named volume teamagentx-data preserved)
+```
+
+### Option 3: use the published remote image (fastest, no build)
+
+The image is published to a **public** registry — **no `docker login`, no local build** required, just pull and run:
+
+```text
+registry.cn-hangzhou.aliyuncs.com/teamagentx/teamagentx-server:latest
+```
+
+docker command:
+
+```bash
+docker run -d --name teamagentx-server \
+  -p 3001:3001 \
+  -e JWT_SECRET="$(openssl rand -hex 32)" \
+  -e AUTH_USERNAME=admin \
+  -e AUTH_PASSWORD=change-me \
+  -v teamagentx-data:/data \
+  registry.cn-hangzhou.aliyuncs.com/teamagentx/teamagentx-server:latest
+```
+
+Or with compose (the repo ships `deploy/prod/docker-compose.prod.yml`, which pulls the remote image instead of building):
+
+```bash
+cd deploy/prod
+cp ../../.env.docker.example .env    # edit .env: AUTH_PASSWORD required, JWT_SECRET recommended
+docker compose -f docker-compose.prod.yml up -d   # public registry, no docker login needed
+
+# upgrade to the latest image
+docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml up -d
+```
+
+Notes:
+
+- The account is pre-provisioned from `AUTH_USERNAME` / `AUTH_PASSWORD` at container startup, **preventing others on the network from registering first**; changing the password and restarting takes effect immediately.
+- `prisma migrate deploy` runs automatically at startup to create/upgrade the schema in the data volume.
+- The Claude / Codex SDKs are bundled in the image — no runtime installation needed.
+
 ## Common Commands
 
 ### Backend

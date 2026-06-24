@@ -1,0 +1,27 @@
+# TeamAgentX 可选 HTTPS 反代（docker compose --profile tls up -d）
+#
+# 反代会把前端、API、WebSocket(Socket.io) 统一以同一来源转发到 server:3001，
+# 前端因同源自动使用 https / wss，无需改任何代码或前端配置。
+#
+# —— 公网（自动签发 Let's Encrypt 证书）：把 :443 改成你的域名，并填邮箱 ——
+#   your.domain.com {
+#       reverse_proxy server:3001
+#   }
+#
+# —— 内网 IP（无公网域名，使用 Caddy 本地自签证书）——
+#   访问 https://<服务器IP> 时浏览器会提示自签证书风险，确认放行即可。
+
+{
+    # 内网自签场景：关闭自动 ACME，使用 Caddy internal CA
+    # 公网域名场景：删除此块并改用上面的域名写法
+    auto_https disable_redirects
+}
+
+:443 {
+    tls internal
+    reverse_proxy server:3001
+}
+
+:80 {
+    reverse_proxy server:3001
+}

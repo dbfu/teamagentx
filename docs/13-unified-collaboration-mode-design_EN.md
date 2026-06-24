@@ -91,7 +91,7 @@ The execution-graph shape is locked by three layers, guaranteeing a deterministi
 
 | Breaker | Default | On trip |
 |---|---|---|
-| Hop budget: auto-triggered tasks carry a depth count, +1 inherited on dispatch | 20 hops (`AGENT_MAX_HANDOFF_HOPS`). Pathological loops are mainly caught by cycle detection; hops are an absolute safety net only — setting it too low would falsely kill game/long-pipeline hub-and-spoke chains | Don't trigger the next hop; ask_owner with the sticking point |
+| Hop budget: auto-triggered tasks carry a depth count, +1 inherited on dispatch | 100 hops (`AGENT_MAX_HANDOFF_HOPS`). Pathological loops are mainly caught by cycle detection; hops are an absolute safety net only — setting it too low would falsely kill game/long-pipeline hub-and-spoke chains | Don't trigger the next hop; ask_owner with the sticking point |
 | Cycle detection: the same pair (A↔B) ping-ponging **consecutively**, no third party / user | 3 round-trips = 6 hops (`AGENT_HANDOFF_CYCLE_REPEAT_LIMIT`) | Truncate, ask_owner |
 | Concurrency cap: agents triggered at once in one dispatch | 3 (`AGENT_MAX_PARALLEL_DISPATCH`) | Hard-truncate coordinator dispatch; truncate user multi-`@` with a visible notice |
 
@@ -194,8 +194,8 @@ Intervention frequency drops from O(per hop) in the old coordinator mode to O(ex
 ## 6. Decision points to confirm
 
 1. **CoordinatorLog data validation** (implementation prerequisite): measure the ratio of target-rewriting vs forwardVerbatim in coordinator dispatch decisions, to confirm the real value of per-hop adjudication.
-2. ~~Breaker default thresholds~~ (decided): hops 20 / cycle 3 round-trips / concurrency 3, all config env vars. Hops were once set to 12 per review feedback, but the "Who Is the Spy game room" example (a hub-and-spoke long chain ≈24 hops per game) showed that was too tight, so it was raised back to 20: consecutive ping-pong loops are precisely caught by cycle detection, so the hop budget only serves as an absolute safety net.
+2. ~~Breaker default thresholds~~ (decided): hops 100 / cycle 3 round-trips / concurrency 3, all config env vars. Hops were once set tighter per review feedback, but the "Who Is the Spy game room" example (a hub-and-spoke long chain ≈24 hops per game) showed that was too tight; this round raises it to 100: consecutive ping-pong loops are precisely caught by cycle detection, so the hop budget only serves as an absolute safety net.
    > Cycle detection is "consecutive ping-pong", not cumulative repeats in a window: hub-and-spoke collaboration (a game host `@`-ing each player; players `@`-ing back the host) makes the same edge recur across phases — legitimate progress that cumulative counting would falsely kill (example: a "Who Is the Spy" room, 24+ hops per game, same edge repeated once per phase). Only uninterrupted A↔B ping-pong is a pathological loop.
-3. ~~Per-room configurable hop limit~~ (decided): no — keep the global default 20 + env-var tuning, avoiding extra schema and settings; for very long chains, tune `AGENT_MAX_HANDOFF_HOPS`.
+3. ~~Per-room configurable hop limit~~ (decided): no — keep the global default 100 + env-var tuning, avoiding extra schema and settings; for very long chains, tune `AGENT_MAX_HANDOFF_HOPS`.
 4. ~~Decision space of point ⑤~~ (decided): directly ask_owner deterministic notification, no LLM, no dispatch continuation — after a safety breaker trips, the coordinator shouldn't get a continuation decision space.
 5. ~~Whether user multi-`@` passes the coordinator~~ (decided): no — user multi-`@` is a strong intent needing no re-adjudication; but over the concurrency cap, notify with a visible message, no silent truncation.
