@@ -407,6 +407,7 @@ export const chatRoomService = {
             agentId: roomAgent.agentId,
             role: roomAgent.role,
             injectGroupHistory: roomAgent.injectGroupHistory,
+            sortOrder: roomAgent.sortOrder,
             customWorkDir: roomAgent.customWorkDir,
             lastInjectedMessageId: null,
             joinedAt: now,
@@ -537,6 +538,7 @@ export const chatRoomService = {
             agentId: roomAgent.agentId,
             role: roomAgent.role,
             injectGroupHistory: roomAgent.injectGroupHistory,
+            sortOrder: roomAgent.sortOrder,
             customWorkDir: roomAgent.customWorkDir,
             // 重写到新消息ID：精确续上老群当时的增量注入状态。
             lastInjectedMessageId: roomAgent.lastInjectedMessageId
@@ -630,6 +632,7 @@ export const chatRoomService = {
       include: {
         chatRoomAgents: {
           include: agentInclude,
+          orderBy: [{ sortOrder: 'desc' }, { joinedAt: 'asc' }],
         },
         owner: {
           select: {
@@ -654,6 +657,7 @@ export const chatRoomService = {
       include: {
         chatRoomAgents: {
           include: agentInclude,
+          orderBy: [{ sortOrder: 'desc' }, { joinedAt: 'asc' }],
         },
         messages: {
           where: { archiveId: null },
@@ -683,6 +687,7 @@ export const chatRoomService = {
       include: {
         chatRoomAgents: {
           include: agentInclude,
+          orderBy: [{ sortOrder: 'desc' }, { joinedAt: 'asc' }],
         },
         owner: {
           select: {
@@ -845,6 +850,42 @@ export const chatRoomService = {
     return deleted;
   },
 
+  async updateAgentSortOrder(
+    chatRoomId: string,
+    items: Array<{ id: string; sortOrder: number }>,
+  ) {
+    const ids = items.map((item) => item.id);
+    if (new Set(ids).size !== ids.length) {
+      throw new Error('助手排序项不能重复');
+    }
+
+    const members = await prisma.chatRoomAgent.findMany({
+      where: { chatRoomId, id: { in: ids } },
+      select: {
+        id: true,
+        agent: { select: { agentLevel: true } },
+      },
+    });
+
+    if (members.length !== items.length) {
+      throw new Error('存在不属于当前群聊的助手');
+    }
+    if (members.some((member) => !member.agent || member.agent.agentLevel === 'system')) {
+      throw new Error('只能调整普通助手的排序');
+    }
+
+    await prisma.$transaction([
+      ...items.map((item) => prisma.chatRoomAgent.update({
+        where: { id: item.id },
+        data: { sortOrder: item.sortOrder },
+      })),
+      prisma.chatRoom.update({
+        where: { id: chatRoomId },
+        data: { updatedAt: new Date() },
+      }),
+    ]);
+  },
+
   async isAgent(chatRoomId: string, userId: string) {
     const agent = await prisma.chatRoomAgent.findFirst({
       where: { chatRoomId, userId },
@@ -927,6 +968,7 @@ export const chatRoomService = {
     const regularAgents = await prisma.chatRoomAgent.findMany({
       where: { chatRoomId },
       include: agentInclude,
+      orderBy: [{ sortOrder: 'desc' }, { joinedAt: 'asc' }],
     });
 
     // 获取所有系统助手

@@ -743,7 +743,8 @@
       "addAssistant": "添加助手",
       "removeAssistant": "移除助手",
       "removeConfirmDesc": "确定要移除助手「{{name}}」吗？移除后该助手将不再参与群聊。",
-      "remove": "移除"
+      "remove": "移除",
+      "sortFailed": "助手排序保存失败"
     },
     "replyDetail": {
       "repliesCount": "{{count}} 条回复",
@@ -1562,7 +1563,7 @@
     "checkUpdate": "检查更新",
     "checkingUpdate": "检查中...",
     "updateAvailable": "发现新版本",
-    "updateAvailableHint": "发现新版本 {{version}}，请查看右上角更新提示",
+    "updateAvailableHint": "发现新版本 {{version}}，已在侧边栏显示更新入口",
     "noUpdate": "当前已是最新版本",
     "updateSupportOnlyDesktop": "仅桌面客户端支持检查更新",
     "checkUpdateFailed": "检查更新失败",

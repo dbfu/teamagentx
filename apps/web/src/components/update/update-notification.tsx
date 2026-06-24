@@ -12,7 +12,7 @@ function formatBytes(bytes: number) {
 
 export function UpdateNotification() {
   const { t } = useTranslation()
-  const { visible, status, currentVersion, update, progress, filePath, error } = useSyncExternalStore(
+  const { visible, notificationPlacement, status, currentVersion, update, progress, filePath, error } = useSyncExternalStore(
     updateManager.subscribe,
     updateManager.getSnapshot,
     updateManager.getSnapshot,
@@ -23,7 +23,7 @@ export function UpdateNotification() {
       const detail = (event as CustomEvent<{ currentVersion: string; update: UpdateInfo }>).detail
       if (!detail?.update) return
 
-      updateManager.applyAvailableUpdate(detail.currentVersion, detail.update, true)
+      updateManager.applyAvailableUpdate(detail.currentVersion, detail.update)
     }
 
     window.addEventListener('teamagentx-update-found', handleUpdateFound)
@@ -38,7 +38,8 @@ export function UpdateNotification() {
       updateManager.setDownloadProgress(nextProgress)
     })
 
-    updateManager.checkForUpdates({ force: true, silent: false, reason: 'startup' })
+    // 启动自动检查仅点亮侧边栏更新入口，不自动弹出浮层。
+    updateManager.checkForUpdates({ force: true, silent: true, reason: 'startup' })
 
     return () => {
       unsubscribe?.()
@@ -87,7 +88,11 @@ export function UpdateNotification() {
     : formatBytes(progress.transferred)
 
   return (
-    <div className="fixed right-4 top-14 z-50 w-[340px] rounded-xl border border-border bg-card p-4 shadow-xl">
+    <div
+      className={notificationPlacement === 'sidebar'
+        ? 'fixed bottom-[136px] left-[72px] z-50 w-[340px] rounded-xl border border-border bg-card p-4 shadow-2xl shadow-black/20'
+        : 'fixed right-4 top-14 z-50 w-[340px] rounded-xl border border-border bg-card p-4 shadow-2xl shadow-black/20'}
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-sm font-semibold text-foreground">{t('settings.updateAvailable')} {update.version}</div>

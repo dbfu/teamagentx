@@ -1,5 +1,6 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { TERMINAL_OPEN_OPTIONS, type TerminalOpenTarget } from '@/lib/open-targets'
+import { updateManager } from '@/lib/update-manager'
 import { useUIStore } from '@/stores'
 import { Download, Loader2, RefreshCw } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -43,12 +44,7 @@ export function SoftwareSection() {
       }
 
       if (result.data?.hasUpdate && result.data.update) {
-        window.dispatchEvent(new CustomEvent('teamagentx-update-found', {
-          detail: {
-            currentVersion: result.data.currentVersion,
-            update: result.data.update,
-          },
-        }))
+        updateManager.applyAvailableUpdate(result.data.currentVersion, result.data.update)
         toast.success(t('settings.updateAvailableHint', { version: result.data.update.version }))
         return
       }

@@ -104,12 +104,12 @@ export function ConnectorConfigModal({ isOpen, onClose, onSuccess, mode = 'repla
             </div>
             <div>
               <h2 className="text-lg font-semibold text-gray-900">
-                {isMergeMode ? '新建连接器' : '配置 MCP'}
+                {isMergeMode ? '新建 MCP' : '配置 MCP'}
               </h2>
               <p className="text-xs text-gray-500">
                 {isMergeMode
-                  ? '粘贴包含 mcpServers 的 JSON，保存后只追加其中的新连接器'
-                  : '编辑完整 ~/.teamagentx/mcp.json，保存后覆盖同步为连接器'}
+                  ? '粘贴包含 mcpServers 的 JSON，保存后只追加其中的新 MCP'
+                  : '编辑完整 ~/.teamagentx/mcp.json，保存后覆盖同步为 MCP'}
               </p>
             </div>
           </div>
@@ -151,8 +151,8 @@ export function ConnectorConfigModal({ isOpen, onClose, onSuccess, mode = 'repla
           )}
           <p className="mt-3 text-xs text-gray-400">
             {isMergeMode
-              ? '只会追加本次 JSON 里的新 mcpServers 条目；同名连接器会被拒绝。'
-              : '这里是完整配置；删除条目会移除对应连接器。'}
+              ? '只会追加本次 JSON 里的新 mcpServers 条目；同名 MCP 会被拒绝。'
+              : '这里是完整配置；删除条目会移除对应 MCP。'}
           </p>
         </div>
       </div>

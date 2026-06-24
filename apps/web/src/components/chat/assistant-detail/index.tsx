@@ -424,7 +424,7 @@ export function AssistantDetailPage() {
             </TabsTrigger>
             <TabsTrigger value="connectors" className="h-9 gap-2 leading-none">
               <Plug className="size-4" />
-              连接器
+              MCP
             </TabsTrigger>
             <TabsTrigger value="history" className="h-9 gap-2 leading-none">
               <History className="size-4" />

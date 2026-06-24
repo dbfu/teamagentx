@@ -67,16 +67,16 @@ export function AssistantConnectorsTab({ agentId }: AssistantConnectorsTabProps)
     <div>
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-semibold text-foreground">连接器</h2>
+          <h2 className="text-xl font-semibold text-foreground">MCP</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            选择该助手启用的 MCP 连接器，仅显示全局已启用的连接器。
+            选择该助手启用的 MCP 服务，仅显示全局已启用的 MCP 服务。
           </p>
         </div>
         <button
           onClick={() => navigate('/connectors')}
           className="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50"
         >
-          管理连接器
+          管理 MCP
         </button>
       </div>
 
@@ -85,8 +85,8 @@ export function AssistantConnectorsTab({ agentId }: AssistantConnectorsTabProps)
           <div className="mb-4 flex size-16 items-center justify-center rounded-full bg-muted">
             <Plug className="size-8 text-muted-foreground" />
           </div>
-          <h3 className="mb-2 text-lg font-medium text-foreground">没有可用的连接器</h3>
-          <p className="mb-6 text-sm text-muted-foreground">先在「连接器」页面创建并启用连接器。</p>
+          <h3 className="mb-2 text-lg font-medium text-foreground">没有可用的 MCP</h3>
+          <p className="mb-6 text-sm text-muted-foreground">先在「MCP」页面创建并启用 MCP 服务。</p>
           <button
             onClick={() => navigate('/connectors')}
             className="rounded-lg bg-blue-500 px-4 py-2 text-sm text-white hover:bg-blue-600"

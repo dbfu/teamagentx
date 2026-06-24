@@ -6,8 +6,6 @@ import { ChatInputArea } from './chat-input-area'
 import { ChatSidePanel } from './chat-side-panel'
 import { AddAgentDialog } from './dialogs/add-agent-dialog'
 import { CreateAssistantModal } from './create-assistant-modal'
-import { ChatEmptyAgentHint } from './chat-empty-agent-hint'
-import { GROUP_ASSISTANT_ID } from '@/lib/system-agents'
 import { ClearMessagesDialog } from './dialogs/clear-messages-dialog'
 import { RoomRulesDialog } from './dialogs/room-rules-dialog'
 import { RoomDispatchRulesDialog } from './dialogs/room-dispatch-rules-dialog'
@@ -153,19 +151,6 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
     [pendingOwnerMentionTodos, visibleOwnerMentionTodoIds],
   )
   const ownerMentionTodo = ownerMentionTodos[0] ?? null
-
-  // 群内是否已有真实助手（排除系统群助手等系统级成员与群主用户）
-  const hasRealAgent = useMemo(
-    () => (chatRoom?.chatRoomAgents ?? []).some(
-      (member) => member.agent && member.agent.agentLevel !== 'system',
-    ),
-    [chatRoom],
-  )
-  // 群助手（可在任意群聊中 @）用于引导用户创建助手
-  const groupAssistant = useMemo(
-    () => mentionAgents.find((agent) => agent.id === GROUP_ASSISTANT_ID),
-    [mentionAgents],
-  )
 
   useEffect(() => {
     if (!chatRoom || pendingOwnerMentionTodos.length === 0) {
@@ -379,16 +364,6 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
     setShowCreateAssistant(true)
   }
 
-  // 新建群聊未选择任何助手时，在群聊中心展示引导提示
-  const emptyAgentHint = !hasRealAgent && groupAssistant && !chatRoom?.isQuickChatRoom
-    ? (
-      <ChatEmptyAgentHint
-        groupAssistantName={groupAssistant.name}
-        onMentionGroupAssistant={() => handleMentionAgent(groupAssistant.id, groupAssistant.name)}
-      />
-    )
-    : undefined
-
   const handleCreateAssistant = async (data: {
     name: string
     avatar: string
@@ -523,7 +498,6 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
               onLoadOlderMessages={loadOlderMessages}
               currentUser={currentUser}
               isSidePanelOpen={!isMobile && sidePanelMode !== null}
-              emptyHint={emptyAgentHint}
             />
 
             {/* Input area */}

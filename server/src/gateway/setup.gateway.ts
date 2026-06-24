@@ -128,6 +128,7 @@ export async function setupGateway(app: FastifyInstance) {
                 token: { type: 'string' },
                 userId: { type: 'string' },
                 username: { type: 'string' },
+                defaultChatRoomId: { type: 'string' },
               },
             },
           },

@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { randomUUID } from 'node:crypto';
 import { FastifyInstance } from 'fastify';
 import { Server } from 'socket.io';
 import { chatRoomService } from '../modules/chatroom/chatroom.service.js';
@@ -32,7 +33,12 @@ import { agentMemoryService } from '../modules/agent-memory/agent-memory.service
 import { deserializeAgentSpeechConfig } from '../modules/speech/speech-config.js';
 import { gitBranchService, type GitCommandAction } from '../modules/chatroom/git-branch.service.js';
 import { packageScriptService } from '../modules/chatroom/package-script.service.js';
+import { compactInlineChatRoomAvatars } from '../modules/chatroom/chatroom-avatar-response.js';
 import { getDefaultChatRoomWorkDir } from '../core/agent/work-dir.js';
+import {
+  GROUP_ASSISTANT_ID,
+  GROUP_ASSISTANT_WELCOME_MESSAGE,
+} from '../core/agent/system-assistant.constants.js';
 
 // Schema definitions
 const lastMessageSchema = {
@@ -108,6 +114,7 @@ const chatRoomSchema = {
           agentId: { type: 'string', nullable: true },
           role: { type: 'string' },
           injectGroupHistory: { type: 'boolean' },
+          sortOrder: { type: 'integer' },
           joinedAt: { type: 'string' },
           user: {
             type: 'object',
@@ -207,6 +214,7 @@ const createChatRoomBodySchema = {
     workDir: { type: 'string', nullable: true, description: '群聊工作目录，留空使用默认目录' },
     ownerId: { type: 'string', description: 'Owner user ID' },
     agentTriggerMode: { type: 'string', enum: ['auto', 'manual', 'coordinator'], description: '助手触发模式' },
+    introduceGroupAssistant: { type: 'boolean', description: '未添加业务助手时，是否由群助手发送介绍消息' },
   },
 };
 
@@ -220,6 +228,41 @@ const addAgentBodySchema = {
   },
 };
 
+const addAgentsBodySchema = {
+  type: 'object',
+  required: ['agentIds'],
+  properties: {
+    agentIds: {
+      type: 'array',
+      minItems: 1,
+      uniqueItems: true,
+      items: { type: 'string' },
+      description: '要批量添加的助手 ID',
+    },
+    role: { type: 'string', enum: ['OWNER', 'ADMIN', 'MEMBER'], description: '成员角色' },
+    injectGroupHistory: { type: 'boolean', description: '是否注入群历史消息作为上下文' },
+  },
+};
+
+const updateAgentSortOrderBodySchema = {
+  type: 'object',
+  required: ['items'],
+  properties: {
+    items: {
+      type: 'array',
+      minItems: 1,
+      items: {
+        type: 'object',
+        required: ['id', 'sortOrder'],
+        properties: {
+          id: { type: 'string' },
+          sortOrder: { type: 'integer' },
+        },
+      },
+    },
+  },
+};
+
 interface CreateChatRoomBody {
   name: string;
   avatar?: string;
@@ -229,6 +272,7 @@ interface CreateChatRoomBody {
   workDir?: string | null;
   ownerId?: string;
   agentTriggerMode?: 'auto' | 'manual' | 'coordinator';
+  introduceGroupAssistant?: boolean;
 }
 
 interface DuplicateChatRoomBody {
@@ -269,6 +313,16 @@ interface AddAgentBody {
   injectGroupHistory?: boolean;
 }
 
+interface AddAgentsBody {
+  agentIds: string[];
+  role?: string;
+  injectGroupHistory?: boolean;
+}
+
+interface UpdateAgentSortOrderBody {
+  items: Array<{ id: string; sortOrder: number }>;
+}
+
 interface ChatRoomParams {
   id: string;
 }
@@ -290,13 +344,19 @@ export async function chatRoomGateway(app: FastifyInstance) {
           properties: {
             success: { type: 'boolean' },
             data: { type: 'array', items: chatRoomSchema },
+            inlineAvatars: {
+              type: 'object',
+              additionalProperties: { type: 'string' },
+            },
           },
         },
       },
     },
   }, async (request, reply) => {
     const chatRooms = await chatRoomService.findAll();
-    return reply.send({ success: true, data: chatRooms.map(serializeChatRoomForResponse) });
+    const serializedChatRooms = chatRooms.map(serializeChatRoomForResponse);
+    const { data, inlineAvatars } = compactInlineChatRoomAvatars(serializedChatRooms);
+    return reply.send({ success: true, data, inlineAvatars });
   });
 
   // Get chatRoom by ID
@@ -685,7 +745,17 @@ export async function chatRoomGateway(app: FastifyInstance) {
       },
     },
   }, async (request, reply) => {
-    const { name, avatar, avatarColor, description, rules, workDir, ownerId, agentTriggerMode } = request.body;
+    const {
+      name,
+      avatar,
+      avatarColor,
+      description,
+      rules,
+      workDir,
+      ownerId,
+      agentTriggerMode,
+      introduceGroupAssistant,
+    } = request.body;
 
     // If ownerId is provided, use createWithOwner to auto-add OWNER agent
     const chatRoom = ownerId
@@ -708,6 +778,18 @@ export async function chatRoomGateway(app: FastifyInstance) {
           workDir,
           agentTriggerMode,
         });
+
+    if (chatRoom && introduceGroupAssistant) {
+      await messageService.create({
+        id: randomUUID(),
+        type: 'MESSAGE',
+        content: GROUP_ASSISTANT_WELCOME_MESSAGE,
+        time: new Date(),
+        agentId: GROUP_ASSISTANT_ID,
+        chatRoomId: chatRoom.id,
+        isHuman: false,
+      });
+    }
 
     // 广播给所有已连接客户端（通知其他端有新群聊创建）
     const io = (app as any).io as Server;
@@ -819,6 +901,101 @@ export async function chatRoomGateway(app: FastifyInstance) {
     io?.emit('chatroom:created', { chatRoom });
 
     return reply.code(201).send({ success: true, data: serializeChatRoomForResponse(chatRoom) });
+  });
+
+  // Batch add agents to chatRoom and emit one aggregated notification.
+  app.post<{ Params: ChatRoomParams; Body: AddAgentsBody }>('/chatrooms/:id/agents/batch', {
+    schema: {
+      description: '批量添加助手到群聊',
+      tags: ['ChatRooms'],
+      params: {
+        type: 'object',
+        properties: { id: { type: 'string' } },
+      },
+      body: addAgentsBodySchema,
+      response: {
+        201: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: { type: 'array' },
+          },
+        },
+        400: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const { agentIds, role, injectGroupHistory } = request.body;
+
+    try {
+      const addedAgents = [];
+      for (const agentId of agentIds) {
+        const chatRoomAgent = await chatRoomService.addAgent({
+          chatRoomId: id,
+          agentId,
+          role,
+          injectGroupHistory,
+        });
+        addedAgents.push(chatRoomAgent);
+      }
+
+      const agentDetails = addedAgents
+        .map((chatRoomAgent) => chatRoomAgent.agent)
+        .filter((agent): agent is NonNullable<typeof agent> => Boolean(agent));
+      if (agentDetails.length === 1) {
+        await broadcastAgentJoinedMessage(id, agentDetails[0].name, agentDetails[0].description);
+      } else if (agentDetails.length > 1) {
+        await broadcastAgentJoinedMessage(id, agentDetails.map((agent) => agent.name));
+      }
+      if (agentDetails.length > 0) {
+        broadcastAgentsUpdated(id);
+      }
+
+      return reply.code(201).send({ success: true, data: addedAgents });
+    } catch (error: any) {
+      return reply.code(400).send({ success: false, error: error.message });
+    }
+  });
+
+  // Reorder normal assistants within a chatRoom.
+  app.put<{ Params: ChatRoomParams; Body: UpdateAgentSortOrderBody }>('/chatrooms/:id/agents/sort-order', {
+    schema: {
+      description: '更新群聊普通助手排序',
+      tags: ['ChatRooms'],
+      params: {
+        type: 'object',
+        properties: { id: { type: 'string' } },
+      },
+      body: updateAgentSortOrderBodySchema,
+      response: {
+        200: {
+          type: 'object',
+          properties: { success: { type: 'boolean' } },
+        },
+        400: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            error: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    try {
+      await chatRoomService.updateAgentSortOrder(request.params.id, request.body.items);
+      broadcastAgentsUpdated(request.params.id);
+      return reply.send({ success: true });
+    } catch (error: any) {
+      return reply.code(400).send({ success: false, error: error.message });
+    }
   });
 
   // Add agent to chatRoom

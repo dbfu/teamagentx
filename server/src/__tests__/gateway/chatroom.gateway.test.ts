@@ -9,7 +9,11 @@ import Fastify, { FastifyInstance } from 'fastify';
 import { getInternalAgentToolToken } from '../../core/agent/agent-handler/internal-agent-tool-auth.js';
 import { agentService } from '../../core/agent/agent.service.js';
 import { getDefaultChatRoomWorkDir } from '../../core/agent/work-dir.js';
-import { GROUP_ASSISTANT_ID, GROUP_COORDINATOR_ID } from '../../core/agent/system-assistant.constants.js';
+import {
+  GROUP_ASSISTANT_ID,
+  GROUP_ASSISTANT_WELCOME_MESSAGE,
+  GROUP_COORDINATOR_ID,
+} from '../../core/agent/system-assistant.constants.js';
 import { chatRoomGateway } from '../../gateway/chatroom.gateway.js';
 import { internalAgentToolsGateway } from '../../gateway/internal-agent-tools.gateway.js';
 import prisma from '../../lib/prisma.js';
@@ -89,6 +93,28 @@ describe('ChatRoom Gateway API', () => {
       assert.strictEqual(body.data.agentTriggerMode, 'coordinator');
     });
 
+    test('未添加助手时可由群助手发送介绍消息', async () => {
+      await syncSystemAgent(getGroupAssistantDefinition());
+      const response = await app.inject({
+        method: 'POST',
+        url: '/chatrooms',
+        payload: {
+          name: `Empty Room ${Date.now()}`,
+          workDir: path.join(workDirRoot, 'empty-room'),
+          introduceGroupAssistant: true,
+        },
+      });
+
+      assert.strictEqual(response.statusCode, 201);
+      const messages = await prisma.message.findMany({
+        where: { chatRoomId: response.json().data.id },
+      });
+      assert.strictEqual(messages.length, 1);
+      assert.strictEqual(messages[0].agentId, GROUP_ASSISTANT_ID);
+      assert.strictEqual(messages[0].content, GROUP_ASSISTANT_WELCOME_MESSAGE);
+      assert.strictEqual(messages[0].isHuman, false);
+    });
+
     test('应该创建包含所有字段的聊天室', async () => {
       const response = await app.inject({
         method: 'POST',
@@ -110,6 +136,102 @@ describe('ChatRoom Gateway API', () => {
       assert.strictEqual(body.data.avatarColor, '#1890ff');
       assert.strictEqual(body.data.description, 'A test chatroom');
       assert.strictEqual(body.data.defaultAgentId, null);
+    });
+
+    test('批量添加多个助手时只生成一条逗号分隔的加入通知', async () => {
+      const suffix = `${Date.now()}-${randomUUID().slice(0, 8)}`;
+      const roomResponse = await app.inject({
+        method: 'POST',
+        url: '/chatrooms',
+        payload: {
+          name: `Batch Agent Room ${suffix}`,
+          workDir: path.join(workDirRoot, `batch-agent-room-${suffix}`),
+        },
+      });
+      const room = roomResponse.json().data;
+      const firstAgent = await agentService.create({
+        name: `前端助手-${suffix}`,
+        description: '负责前端',
+        prompt: '处理前端任务',
+      });
+      const secondAgent = await agentService.create({
+        name: `后端助手-${suffix}`,
+        description: '负责后端',
+        prompt: '处理后端任务',
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/chatrooms/${room.id}/agents/batch`,
+        payload: {
+          agentIds: [firstAgent.id, secondAgent.id],
+          role: 'MEMBER',
+        },
+      });
+
+      assert.strictEqual(response.statusCode, 201);
+      assert.strictEqual(response.json().data.length, 2);
+
+      const notices = await prisma.message.findMany({
+        where: { chatRoomId: room.id },
+      });
+      assert.strictEqual(notices.length, 1);
+      assert.match(notices[0].content, new RegExp(`${firstAgent.name}，${secondAgent.name}`));
+    });
+
+    test('应该持久化群聊普通助手的排序', async () => {
+      const suffix = `${Date.now()}-${randomUUID().slice(0, 8)}`;
+      const roomResponse = await app.inject({
+        method: 'POST',
+        url: '/chatrooms',
+        payload: { name: `Sort Agent Room ${suffix}` },
+      });
+      const room = roomResponse.json().data;
+      const agents = await Promise.all(['甲', '乙', '丙'].map((name) => agentService.create({
+        name: `${name}助手-${suffix}`,
+        prompt: '处理任务',
+      })));
+
+      const addResponse = await app.inject({
+        method: 'POST',
+        url: `/chatrooms/${room.id}/agents/batch`,
+        payload: { agentIds: agents.map((agent) => agent.id) },
+      });
+      const members = addResponse.json().data;
+      const orderedMembers = [members[2], members[0], members[1]];
+
+      const response = await app.inject({
+        method: 'PUT',
+        url: `/chatrooms/${room.id}/agents/sort-order`,
+        payload: {
+          items: orderedMembers.map((member: { id: string }, index: number) => ({
+            id: member.id,
+            sortOrder: (orderedMembers.length - index) * 1000,
+          })),
+        },
+      });
+
+      assert.strictEqual(response.statusCode, 200);
+      const storedMembers = await prisma.chatRoomAgent.findMany({
+        where: { chatRoomId: room.id },
+        orderBy: [{ sortOrder: 'desc' }, { joinedAt: 'asc' }],
+      });
+      assert.deepStrictEqual(
+        storedMembers.map((member) => member.id),
+        orderedMembers.map((member: { id: string }) => member.id),
+      );
+
+      const roomReadResponse = await app.inject({
+        method: 'GET',
+        url: `/chatrooms/${room.id}`,
+      });
+      const returnedMemberIds = roomReadResponse.json().data.chatRoomAgents
+        .filter((member: { id: string }) => orderedMembers.some((ordered: { id: string }) => ordered.id === member.id))
+        .map((member: { id: string }) => member.id);
+      assert.deepStrictEqual(
+        returnedMemberIds,
+        orderedMembers.map((member: { id: string }) => member.id),
+      );
     });
   });
 

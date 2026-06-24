@@ -81,6 +81,8 @@ export function CreateGroupModal({ isOpen, onClose, onSuccess, ownerId }: Create
         ownerId,
         // 默认使用智能协作模式
         agentTriggerMode: 'coordinator',
+        // 未选择业务助手时，由群助手发送与首次引导一致的介绍消息。
+        introduceGroupAssistant: selectedAgentIds.size === 0,
       })
 
       if (!createResponse.success || !createResponse.data) {
@@ -92,9 +94,9 @@ export function CreateGroupModal({ isOpen, onClose, onSuccess, ownerId }: Create
 
       // 添加选中的助手
       const agentIds = Array.from(selectedAgentIds)
-      for (const agentId of agentIds) {
-        await chatRoomApi.addAgent(chatRoomId, {
-          agentId,
+      if (agentIds.length > 0) {
+        await chatRoomApi.addAgents(chatRoomId, {
+          agentIds,
           role: 'MEMBER',
         })
       }

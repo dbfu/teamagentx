@@ -55,6 +55,7 @@ export interface CompleteSetupResponse {
   token: string
   userId: string
   username: string
+  defaultChatRoomId: string
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {

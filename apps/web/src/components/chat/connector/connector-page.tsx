@@ -71,7 +71,7 @@ export function ConnectorPage() {
       >
         <div className="flex items-center gap-2" style={ELECTRON_DRAG_STYLE as CSSProperties}>
           <Plug className="size-4 text-primary" />
-          <span className="text-base font-semibold text-foreground">连接器</span>
+          <span className="text-base font-semibold text-foreground">MCP</span>
         </div>
         <div
           className="ml-auto flex items-center gap-1.5"
@@ -85,7 +85,7 @@ export function ConnectorPage() {
             className="ta-button-primary h-8 px-3 text-xs"
           >
             <Plus className="size-4" />
-            新建连接器
+            新建 MCP
           </button>
         </div>
       </div>
@@ -93,7 +93,7 @@ export function ConnectorPage() {
       <div className="flex-1 overflow-y-auto">
         <div className="ta-page-section">
           <p className="text-sm text-muted-foreground">
-            全局注册 MCP 连接器，助手可在「连接器」标签页按需启用。
+            全局注册 MCP 服务，助手可在「MCP」标签页按需启用。
           </p>
         </div>
         {loading ? (
@@ -103,8 +103,8 @@ export function ConnectorPage() {
             <div className="mb-4 flex size-16 items-center justify-center rounded-full bg-muted">
               <Plug className="size-8 text-muted-foreground" />
             </div>
-            <h3 className="mb-2 text-lg font-medium text-foreground">还没有连接器</h3>
-            <p className="mb-6 text-sm text-muted-foreground">创建一个 MCP 连接器，扩展助手的工具能力。</p>
+            <h3 className="mb-2 text-lg font-medium text-foreground">还没有 MCP</h3>
+            <p className="mb-6 text-sm text-muted-foreground">创建一个 MCP 服务，扩展助手的工具能力。</p>
             <button
               onClick={() => {
                 setConfigMode('merge')
@@ -113,7 +113,7 @@ export function ConnectorPage() {
               className="ta-button-primary"
             >
               <Plus className="size-4" />
-              新建连接器
+              新建 MCP
             </button>
           </div>
         ) : (
@@ -201,8 +201,8 @@ export function ConnectorPage() {
         onOpenChange={(open) => {
           if (!open) setPendingDeleteConnector(null)
         }}
-        title="删除连接器"
-        description={`确定删除连接器「${pendingDeleteConnector?.displayName ?? ''}」吗？已绑定该连接器的助手将无法继续使用它。`}
+        title="删除 MCP"
+        description={`确定删除 MCP「${pendingDeleteConnector?.displayName ?? ''}」吗？已绑定该 MCP 的助手将无法继续使用它。`}
         confirmText="删除"
         onConfirm={handleDelete}
         loading={deleting}

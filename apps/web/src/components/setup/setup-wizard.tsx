@@ -1,14 +1,14 @@
 import { useTranslation } from 'react-i18next'
 import { Check, ChevronDown, Download, Eye, EyeOff, Loader2, RefreshCw } from 'lucide-react'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, type CSSProperties } from 'react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { UserAvatarSelector } from '@/components/chat/user-avatar'
 import { getClaudeModelOptions } from '@/lib/claude-models'
-import { setupApi, type AcpToolInfo } from '@/lib/setup-api'
+import { setupApi, type AcpToolInfo, type CompleteSetupResponse } from '@/lib/setup-api'
 import { getCodexModelOptions } from '@/lib/codex-models'
 
 interface SetupWizardProps {
-  onComplete: (data: { token: string; userId: string; username: string }) => void
+  onComplete: (data: CompleteSetupResponse) => void
   onSkip?: () => void
 }
 
@@ -180,7 +180,14 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-gray-900 dark:to-gray-800">
+    <div className="relative z-50 flex flex-1 items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-gray-900 dark:to-gray-800">
+      {window.electronAPI?.isElectron && (
+        <div
+          aria-hidden="true"
+          className="absolute left-0 right-0 top-0 h-12"
+          style={{ WebkitAppRegion: 'drag' } as CSSProperties}
+        />
+      )}
       <div className="w-[640px] shrink-0 rounded-2xl bg-card shadow-2xl">
         {/* 步骤指示器 */}
         <div className="flex items-center justify-center gap-1.5 border-b border-border px-6 py-4">

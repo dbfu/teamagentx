@@ -232,6 +232,7 @@ function findLatestOwnerMentionReplyTarget(params: {
 }
 
 export type SidePanelMode = 'agents' | 'context' | 'history' | 'stream' | 'agent-detail' | 'record-detail' | 'reply-detail' | 'room-settings' | 'execution-detail' | 'cron-tasks' | 'task-queue' | 'task-board' | 'claude-local-sessions' | 'codex-local-sessions' | null
+export type SidePanelOrigin = 'agents' | 'task-board' | null
 
 interface MentionAgent {
   id: string
@@ -277,6 +278,7 @@ interface ChatStore {
 
   // 面板状态
   sidePanelMode: SidePanelMode
+  sidePanelOrigin: SidePanelOrigin
   debugInfo: AgentDebugInfo | null
   debugLoading: boolean
   executionRecords: ExecutionRecord[]
@@ -339,6 +341,7 @@ interface ChatStore {
   setMessages: (messages: Message[], chatRoomId?: string) => void
   addMessage: (message: Message) => void
   setSidePanelMode: (mode: SidePanelMode) => void
+  setSidePanelOrigin: (origin: SidePanelOrigin) => void
   setShowAddAgent: (show: boolean) => void
   setAddingAgentIds: (ids: Set<string>) => void
   setShowClearConfirm: (show: boolean) => void
@@ -606,6 +609,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
 
   // 面板状态
   sidePanelMode: null,
+  sidePanelOrigin: null,
   debugInfo: null,
   debugLoading: false,
   executionRecords: [],
@@ -767,6 +771,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
     }
   }),
   setSidePanelMode: (mode) => set({ sidePanelMode: mode }),
+  setSidePanelOrigin: (origin) => set({ sidePanelOrigin: origin }),
   setShowAddAgent: (show) => set({ showAddAgent: show }),
   setAddingAgentIds: (ids) => set({ addingAgentIds: ids }),
   setShowClearConfirm: (show) => set({ showClearConfirm: show }),
@@ -2438,12 +2443,7 @@ export function useChatAreaStore(chatRoom?: ChatRoom, onChatRoomChange?: () => v
     if (!chatRoom) return
     setAddingAgentIds(new Set(agentIds))
     try {
-      // 依次添加每个助手，群历史按需通过工具检索
-      for (const agentId of agentIds) {
-        await chatRoomApi.addAgent(chatRoom.id, {
-          agentId,
-        })
-      }
+      await chatRoomApi.addAgents(chatRoom.id, { agentIds })
       await Promise.resolve(onChatRoomChange?.())
       await loadMessages(chatRoom.id)
     } catch (error) {

@@ -271,13 +271,15 @@ export const addAgentToChatRoomTool = tool(
           injectGroupHistory,
         });
         addedAgents.push({ name: agent.name, description: agent.description });
-
-        // 发送助手加入通知消息
-        await broadcastAgentJoinedMessage(chatRoomId, agent.name, agent.description);
       }
 
       let message = `群聊"${chatRoom.name}"操作结果：`;
       if (addedAgents.length > 0) {
+        if (addedAgents.length === 1) {
+          await broadcastAgentJoinedMessage(chatRoomId, addedAgents[0].name, addedAgents[0].description);
+        } else {
+          await broadcastAgentJoinedMessage(chatRoomId, addedAgents.map((agent) => agent.name));
+        }
         message += `\n✅ 已添加: ${addedAgents.map(a => a.name).join(', ')}`;
         // 广播群聊助手列表更新事件，通知前端刷新
         broadcastAgentsUpdated(chatRoomId);

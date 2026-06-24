@@ -1,9 +1,11 @@
 export type UpdateStatus = 'idle' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'error'
+export type UpdateNotificationPlacement = 'top-right' | 'sidebar'
 
 export type UpdateCheckReason = 'startup' | 'socket-connected' | 'window-focus' | 'visibility-change' | 'online' | 'interval' | 'manual' | 'test'
 
 export interface UpdateManagerState {
   visible: boolean
+  notificationPlacement: UpdateNotificationPlacement
   status: UpdateStatus
   currentVersion: string
   update: UpdateInfo | null
@@ -33,6 +35,7 @@ interface CheckForUpdatesOptions {
 
 const initialState: UpdateManagerState = {
   visible: false,
+  notificationPlacement: 'top-right',
   status: 'idle',
   currentVersion: '',
   update: null,
@@ -90,9 +93,15 @@ export function createUpdateManager(options: CreateUpdateManagerOptions = {}) {
     emit()
   }
 
-  const applyAvailableUpdate = (currentVersion: string, update: UpdateInfo, visible: boolean) => {
+  const applyAvailableUpdate = (
+    currentVersion: string,
+    update: UpdateInfo,
+    visible = false,
+    notificationPlacement: UpdateNotificationPlacement = 'top-right',
+  ) => {
     setState({
       visible,
+      notificationPlacement,
       status: 'available',
       currentVersion,
       update,
@@ -118,7 +127,7 @@ export function createUpdateManager(options: CreateUpdateManagerOptions = {}) {
     inFlight = api.checkForUpdates()
       .then((result) => {
         if (result.success && result.data?.hasUpdate && result.data.update) {
-          applyAvailableUpdate(result.data.currentVersion, result.data.update, !silent)
+          applyAvailableUpdate(result.data.currentVersion, result.data.update)
           return result.data
         }
 
@@ -154,7 +163,6 @@ export function createUpdateManager(options: CreateUpdateManagerOptions = {}) {
         if (!silent) {
           const msg = err instanceof Error ? err.message : String(err)
           setState({
-            visible: true,
             status: 'error',
             update: null,
             error: `更新信息查询异常：${msg}`,
@@ -179,9 +187,9 @@ export function createUpdateManager(options: CreateUpdateManagerOptions = {}) {
       return state
     },
     checkForUpdates,
-    openNotification() {
+    openNotification(notificationPlacement: UpdateNotificationPlacement = 'sidebar') {
       if (state.update) {
-        setState({ visible: true, error: '' })
+        setState({ visible: true, error: '', notificationPlacement })
       }
     },
     closeNotification() {

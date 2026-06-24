@@ -150,12 +150,14 @@ export async function broadcastCronTriggerMessage(
 // 广播助手加入群聊通知消息
 export async function broadcastAgentJoinedMessage(
   chatRoomId: string,
-  agentName: string,
+  agentName: string | string[],
   agentDescription?: string | null,
 ): Promise<string> {
   const messageId = randomUUID();
-  const descriptionText = agentDescription ? `\n描述: ${agentDescription}` : '';
-  const content = `🎉 新助手加入群聊\n\n**${agentName}** 已加入群聊${descriptionText}`;
+  const agentNames = Array.isArray(agentName) ? agentName : [agentName];
+  const joinedAgentNames = agentNames.join('，');
+  const descriptionText = agentNames.length === 1 && agentDescription ? `\n描述: ${agentDescription}` : '';
+  const content = `🎉 新助手加入群聊\n\n**${joinedAgentNames}** 已加入群聊${descriptionText}`;
   const time = new Date();
 
   // 创建消息对象
@@ -196,7 +198,7 @@ export async function broadcastAgentJoinedMessage(
   debugLog('agentJoinedMessage', {
     chatRoomId,
     messageId,
-    agentName,
+    agentName: joinedAgentNames,
     content,
   });
 

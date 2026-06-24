@@ -1,7 +1,16 @@
 import prisma from '../../lib/prisma.js';
 import { authService } from '../auth/auth.service.js';
 import { llmProviderService } from '../llm-provider/llm-provider.service.js';
+import { chatRoomService } from '../chatroom/chatroom.service.js';
+import { messageService } from '../message/message.service.js';
+import {
+  GROUP_ASSISTANT_ID,
+  GROUP_ASSISTANT_WELCOME_MESSAGE,
+} from '../../core/agent/system-assistant.constants.js';
 import { updateSystemAgentsAcpTool } from '../../scripts/system-agent-definitions.js';
+import { randomUUID } from 'node:crypto';
+
+const DEFAULT_CHAT_ROOM_NAME = '我的群聊';
 
 export const appSettingService = {
   async get(key: string): Promise<string | null> {
@@ -47,7 +56,7 @@ export const appSettingService = {
       model: string;
       apiProtocol: string;
     };
-  }): Promise<{ token: string; userId: string; username: string }> {
+  }): Promise<{ token: string; userId: string; username: string; defaultChatRoomId: string }> {
     // 1. 注册用户
     const result = await authService.register({
       username: data.username,
@@ -74,10 +83,34 @@ export const appSettingService = {
       });
     }
 
+    // 5. 创建首次进入时默认选中的群聊，并由群助手发送欢迎消息。
+    // 群助手是系统级虚拟成员，读取群聊时会自动补全，无需重复写入 ChatRoomAgent。
+    const defaultChatRoom = await chatRoomService.createWithOwner({
+      name: DEFAULT_CHAT_ROOM_NAME,
+      avatar: '0',
+      description: '与群助手一起开始使用 TeamAgentX',
+      ownerId: result.user.id,
+      agentTriggerMode: 'coordinator',
+    });
+    if (!defaultChatRoom) {
+      throw new Error('默认群聊创建失败');
+    }
+
+    await messageService.create({
+      id: randomUUID(),
+      type: 'MESSAGE',
+      content: GROUP_ASSISTANT_WELCOME_MESSAGE,
+      time: new Date(),
+      agentId: GROUP_ASSISTANT_ID,
+      chatRoomId: defaultChatRoom.id,
+      isHuman: false,
+    });
+
     return {
       token: result.token,
       userId: result.user.id,
       username: result.user.username,
+      defaultChatRoomId: defaultChatRoom.id,
     };
   },
 };

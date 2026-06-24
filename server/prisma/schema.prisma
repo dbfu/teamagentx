@@ -220,6 +220,7 @@ model ChatRoomAgent {
   agentId               String?
   role                  String   @default("MEMBER")
   injectGroupHistory    Boolean  @default(false)
+  sortOrder             Int      @default(0)
   customWorkDir         String? // 当前群聊中的自定义工作目录
   lastInjectedMessageId String? // 上次注入群历史的最后消息 ID（用于增量注入）
   joinedAt              DateTime @default(now())
@@ -231,6 +232,7 @@ model ChatRoomAgent {
   @@unique([chatRoomId, agentId])
   @@unique([chatRoomId, userId])
   @@index([chatRoomId])
+  @@index([chatRoomId, sortOrder])
 }
 
 model Message {

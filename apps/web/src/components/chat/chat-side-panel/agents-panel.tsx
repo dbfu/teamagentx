@@ -1,7 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties, type HTMLAttributes } from 'react'
 import { ChatRoom, ChatRoomAgent, chatRoomApi, agentApi, Agent, AgentSpeechConfig, type AgentThinkingMode } from '@/lib/agent-api'
 import { cn } from '@/lib/utils'
 import { Bot, Crown, Plus, Trash2, Star, AtSign } from 'lucide-react'
+import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
+import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { AddAgentDialog } from '@/components/chat/dialogs/add-agent-dialog'
 import { CreateAssistantModal } from '@/components/chat/create-assistant-modal'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -90,6 +93,22 @@ function StatusIndicator({ status, t }: { status: AgentStatus; t: (key: string) 
   )
 }
 
+interface AgentItemProps {
+  info: AgentInfo
+  roomAgent: ChatRoomAgent
+  agentStatus?: AgentStatus
+  onSelectAgent: (agent: AgentInfo & { chatRoomId: string }) => void
+  onOpenRemove: (roomAgent: ChatRoomAgent, e: React.MouseEvent) => void
+  chatRoomId: string
+  onInsertMention?: (agentId: string, agentName: string) => void
+  t: (key: string) => string
+  sortable?: boolean
+  isDragging?: boolean
+  nodeRef?: (node: HTMLDivElement | null) => void
+  dragAttributes?: HTMLAttributes<HTMLDivElement>
+  dragStyle?: CSSProperties
+}
+
 // Agent item component
 function AgentItem({
   info,
@@ -100,23 +119,24 @@ function AgentItem({
   chatRoomId,
   onInsertMention,
   t,
-}: {
-  info: AgentInfo
-  roomAgent: ChatRoomAgent
-  agentStatus?: AgentStatus
-  onSelectAgent: (agent: AgentInfo & { chatRoomId: string }) => void
-  onOpenRemove: (roomAgent: ChatRoomAgent, e: React.MouseEvent) => void
-  chatRoomId: string
-  onInsertMention?: (agentId: string, agentName: string) => void
-  t: (key: string) => string
-}) {
+  sortable = false,
+  isDragging = false,
+  nodeRef,
+  dragAttributes,
+  dragStyle,
+}: AgentItemProps) {
   const blocksDetail = info.type === 'agent' && isStreamViewBlocked(info)
 
   return (
     <div
+      ref={nodeRef}
+      {...dragAttributes}
+      style={dragStyle}
       className={cn(
         'flex items-center gap-2 rounded-lg p-2',
-        blocksDetail ? 'cursor-default' : 'cursor-pointer hover:bg-accent'
+        blocksDetail ? 'cursor-default' : 'cursor-pointer hover:bg-accent',
+        sortable && 'touch-none select-none cursor-pointer',
+        isDragging && 'cursor-grabbing opacity-50 shadow-sm'
       )}
       onClick={() => {
         if (blocksDetail) return
@@ -160,6 +180,7 @@ function AgentItem({
       {/* @ 提及按钮 */}
       {info.type === 'agent' && (
         <button
+          onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation()
             onInsertMention?.(info.id, info.name)
@@ -173,6 +194,7 @@ function AgentItem({
       {/* Remove button for non-owner agents */}
       {info.type === 'agent' && info.role !== 'OWNER' && info.agentLevel !== 'system' && (
         <button
+          onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => onOpenRemove(roomAgent, e)}
           className="rounded p-1 text-red-400 hover:bg-destructive/10 hover:text-destructive"
         >
@@ -180,6 +202,26 @@ function AgentItem({
         </button>
       )}
     </div>
+  )
+}
+
+function SortableAgentItem(props: AgentItemProps) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useSortable({
+    id: props.roomAgent.id,
+    animateLayoutChanges: () => false,
+  })
+
+  return (
+    <AgentItem
+      {...props}
+      sortable
+      isDragging={isDragging}
+      nodeRef={setNodeRef}
+      dragAttributes={{ ...attributes, ...listeners }}
+      dragStyle={{
+        transform: CSS.Transform.toString(transform),
+      }}
+    />
   )
 }
 
@@ -195,6 +237,13 @@ export function AgentsPanel({ chatRoom, agentStatuses, onSelectAgent, onAgentSet
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [availableAgents, setAvailableAgents] = useState<Agent[]>([])
   const [addingAgentIds, setAddingAgentIds] = useState<Set<string>>(new Set())
+  const [normalAgentOrder, setNormalAgentOrder] = useState<string[]>([])
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { delay: 250, tolerance: 5 },
+    }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
 
   // 分类助手：群主、系统助手、普通助手
   const categorizeAgents = (chatRoomAgents: ChatRoomAgent[] | undefined) => {
@@ -221,6 +270,29 @@ export function AgentsPanel({ chatRoom, agentStatuses, onSelectAgent, onAgentSet
   }
 
   const { owners, systemAgents, normalAgents } = categorizeAgents(chatRoom.chatRoomAgents)
+  const sortableNormalAgents = normalAgents.filter(({ info }) => (
+    info.type === 'agent' && info.agentLevel !== 'system'
+  ))
+  const sortableNormalAgentIds = sortableNormalAgents.map(({ roomAgent }) => roomAgent.id)
+  const sortableNormalAgentIdSignature = sortableNormalAgentIds.join('|')
+
+  useEffect(() => {
+    setNormalAgentOrder(sortableNormalAgentIds)
+  }, [chatRoom.id, sortableNormalAgentIdSignature])
+
+  const orderedNormalAgents = useMemo(() => {
+    if (normalAgentOrder.length === 0) return normalAgents
+
+    const positions = new Map(normalAgentOrder.map((id, index) => [id, index]))
+    return [...normalAgents].sort((a, b) => {
+      const aPosition = positions.get(a.roomAgent.id)
+      const bPosition = positions.get(b.roomAgent.id)
+      if (aPosition === undefined && bPosition === undefined) return 0
+      if (aPosition === undefined) return 1
+      if (bPosition === undefined) return -1
+      return aPosition - bPosition
+    })
+  }, [normalAgents, normalAgentOrder])
 
   // 打开移除确认对话框
   const handleOpenRemove = (roomAgent: ChatRoomAgent, e: React.MouseEvent) => {
@@ -236,6 +308,34 @@ export function AgentsPanel({ chatRoom, agentStatuses, onSelectAgent, onAgentSet
       chatRoomAgentId: info.chatRoomAgentId!,
     })
     setRemoveDialogOpen(true)
+  }
+
+  const handleDragEnd = async ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) return
+
+    const currentOrder = normalAgentOrder.length > 0 ? normalAgentOrder : sortableNormalAgentIds
+    const oldIndex = currentOrder.indexOf(String(active.id))
+    const newIndex = currentOrder.indexOf(String(over.id))
+    if (oldIndex === -1 || newIndex === -1) return
+
+    const reorderedIds = arrayMove(currentOrder, oldIndex, newIndex)
+    setNormalAgentOrder(reorderedIds)
+
+    const response = await chatRoomApi.updateAgentSortOrder(
+      chatRoom.id,
+      reorderedIds.map((id, index) => ({
+        id,
+        sortOrder: (reorderedIds.length - index) * 1000,
+      })),
+    )
+
+    if (!response.success) {
+      toast.error(t('chat.agentsPanel.sortFailed'))
+      setNormalAgentOrder(sortableNormalAgentIds)
+      return
+    }
+
+    await Promise.resolve(onAgentSettingsChange?.())
   }
 
   // 移除助手
@@ -279,16 +379,14 @@ export function AgentsPanel({ chatRoom, agentStatuses, onSelectAgent, onAgentSet
   const handleAddAgents = async (agentIds: string[]) => {
     setAddingAgentIds(new Set(agentIds))
     try {
-      for (const agentId of agentIds) {
-        const response = await chatRoomApi.addAgent(chatRoom.id, {
-          agentId,
-          role: 'MEMBER',
-        })
+      const response = await chatRoomApi.addAgents(chatRoom.id, {
+        agentIds,
+        role: 'MEMBER',
+      })
 
-        if (!response.success) {
-          toast.error(t('chat.agentsPanel.addFailed'))
-          return
-        }
+      if (!response.success) {
+        toast.error(t('chat.agentsPanel.addFailed'))
+        return
       }
 
       toast.success(agentIds.length > 1 ? t('chat.agentsPanel.addedMultiple', { count: agentIds.length }) : t('chat.agentsPanel.addedSingle'))
@@ -366,7 +464,8 @@ export function AgentsPanel({ chatRoom, agentStatuses, onSelectAgent, onAgentSet
   const renderGroup = (
     title: string,
     items: { info: AgentInfo; roomAgent: ChatRoomAgent }[],
-    icon?: React.ReactNode
+    icon?: React.ReactNode,
+    sortable = false,
   ) => {
     if (items.length === 0) return null
 
@@ -378,19 +477,22 @@ export function AgentsPanel({ chatRoom, agentStatuses, onSelectAgent, onAgentSet
           <span className="text-xs text-muted-foreground/60">({items.length})</span>
         </div>
         <div className="space-y-1">
-          {items.map(({ info, roomAgent }) => (
-            <AgentItem
-              key={roomAgent.id}
-              info={info}
-              roomAgent={roomAgent}
-              agentStatus={info.type === 'agent' ? agentStatuses?.get(info.id) : undefined}
-              onSelectAgent={onSelectAgent}
-              onOpenRemove={handleOpenRemove}
-              chatRoomId={chatRoom.id}
-              onInsertMention={onInsertMention}
-              t={t}
-            />
-          ))}
+          {items.map(({ info, roomAgent }) => {
+            const itemProps: AgentItemProps = {
+              info,
+              roomAgent,
+              agentStatus: info.type === 'agent' ? agentStatuses?.get(info.id) : undefined,
+              onSelectAgent,
+              onOpenRemove: handleOpenRemove,
+              chatRoomId: chatRoom.id,
+              onInsertMention,
+              t,
+            }
+            const isSortable = sortable && sortableNormalAgentIds.includes(roomAgent.id)
+            return isSortable
+              ? <SortableAgentItem key={roomAgent.id} {...itemProps} />
+              : <AgentItem key={roomAgent.id} {...itemProps} />
+          })}
         </div>
       </div>
     )
@@ -402,7 +504,11 @@ export function AgentsPanel({ chatRoom, agentStatuses, onSelectAgent, onAgentSet
     <>
       {/* 分组展示 */}
       {renderGroup(t('chat.agentsPanel.ownerGroup'), owners, <Crown className="size-3.5 text-yellow-500" />)}
-      {renderGroup(t('chat.agentsPanel.normalAgentsGroup'), normalAgents, <Bot className="size-3.5 text-primary" />)}
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <SortableContext items={sortableNormalAgentIds} strategy={verticalListSortingStrategy}>
+          {renderGroup(t('chat.agentsPanel.normalAgentsGroup'), orderedNormalAgents, <Bot className="size-3.5 text-primary" />, true)}
+        </SortableContext>
+      </DndContext>
       {renderGroup(t('chat.agentsPanel.systemAgentsGroup'), systemAgents, <Star className="size-3.5 text-orange-500 fill-orange-500" />)}
 
       {totalMembers === 0 && (

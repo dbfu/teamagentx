@@ -857,8 +857,6 @@ function AppContent() {
       {!isMobile && !location.pathname.startsWith('/office/') && (
         <SidebarNav
           messageBadge={totalUnreadCount}
-          onRefreshChatRooms={loadChatRooms}
-          onChatRoomCreated={handleNavigateToChatRoom}
         />
       )}
 
@@ -1123,7 +1121,14 @@ export default function App() {
     return (
       <div className="flex flex-col h-screen w-full bg-background">
         <WindowTitleBar />
-        <div className="flex flex-1 flex-col items-center justify-center px-6">
+        <div className="relative flex flex-1 flex-col items-center justify-center px-6">
+          {window.electronAPI?.isElectron && (
+            <div
+              aria-hidden="true"
+              className="absolute left-0 right-0 top-0 h-12"
+              style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+            />
+          )}
           <div className="flex w-full max-w-md flex-col items-center gap-4 text-center">
             <Loader2 className="size-6 animate-spin text-blue-500" />
             <div className="space-y-1">
@@ -1225,6 +1230,8 @@ export default function App() {
         <SetupWizard
           onComplete={(data) => {
             setupLogin(data)
+            useChatRoomStore.getState().selectRoom(data.defaultChatRoomId)
+            useChatRoomStore.setState({ chatRoomsCacheUserId: data.userId })
             localStorage.removeItem('force_setup_wizard')
           }}
           onSkip={() => {
@@ -1252,7 +1259,6 @@ export default function App() {
         </div>
       )}
 
-      {/* 已登录后才显示更新通知 */}
       {!isUnauthenticated && <UpdateNotification />}
 
       {/* 已登录后才显示主内容 */}

@@ -1,6 +1,8 @@
 import { getApiBaseUrl } from './config'
 import type { SpeechProfile } from '@/speech'
 
+const INLINE_AVATAR_REFERENCE_PREFIX = '__teamagentx_inline_avatar__:'
+
 // 智能协作（coordinator）/ 手动（manual）；'auto' 为历史值，仅为兼容旧数据保留，等同 coordinator
 export type AgentTriggerMode = 'auto' | 'manual' | 'coordinator'
 export type AgentThinkingMode = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
@@ -281,6 +283,7 @@ export interface ChatRoomAgent {
   agentId: string | null
   role: string
   injectGroupHistory: boolean
+  sortOrder?: number
   customWorkDir: string | null
   joinedAt: string
   agent?: {
@@ -312,6 +315,7 @@ export interface CreateChatRoomRequest {
   workDir?: string | null
   ownerId?: string
   agentTriggerMode?: AgentTriggerMode
+  introduceGroupAssistant?: boolean
 }
 
 export interface AddAgentToChatRoomRequest {
@@ -475,6 +479,7 @@ interface ApiResponse<T> {
   success: boolean
   data?: T
   error?: string
+  inlineAvatars?: Record<string, string>
 }
 
 interface MessagePagination {
@@ -623,7 +628,34 @@ export const acpToolsApi = {
 export const chatRoomApi = {
   // 获取所有群组
   async getAll(): Promise<ApiResponse<ChatRoom[]>> {
-    return request<ChatRoom[]>('/chatrooms')
+    const response = await request<ChatRoom[]>('/chatrooms')
+    const inlineAvatars = response.inlineAvatars
+    if (!response.success || !response.data || !inlineAvatars) return response
+
+    const resolveAvatar = (avatar: string | null) => {
+      if (!avatar?.startsWith(INLINE_AVATAR_REFERENCE_PREFIX)) return avatar
+      return inlineAvatars[avatar.slice(INLINE_AVATAR_REFERENCE_PREFIX.length)] ?? avatar
+    }
+
+    return {
+      ...response,
+      data: response.data.map((chatRoom) => ({
+        ...chatRoom,
+        avatar: resolveAvatar(chatRoom.avatar),
+        owner: chatRoom.owner
+          ? { ...chatRoom.owner, avatar: resolveAvatar(chatRoom.owner.avatar) }
+          : chatRoom.owner,
+        chatRoomAgents: chatRoom.chatRoomAgents?.map((chatRoomAgent) => ({
+          ...chatRoomAgent,
+          user: chatRoomAgent.user
+            ? { ...chatRoomAgent.user, avatar: resolveAvatar(chatRoomAgent.user.avatar) }
+            : chatRoomAgent.user,
+          agent: chatRoomAgent.agent
+            ? { ...chatRoomAgent.agent, avatar: resolveAvatar(chatRoomAgent.agent.avatar) }
+            : chatRoomAgent.agent,
+        })),
+      })),
+    }
   },
 
   // 获取单个群组
@@ -704,6 +736,22 @@ export const chatRoomApi = {
     return request<ChatRoomAgent>(`/chatrooms/${chatRoomId}/agents`, {
       method: 'POST',
       body: JSON.stringify(data),
+    })
+  },
+
+  // 批量添加助手到群组，只生成一条汇总通知
+  async addAgents(chatRoomId: string, data: { agentIds: string[]; role?: string; injectGroupHistory?: boolean }): Promise<ApiResponse<ChatRoomAgent[]>> {
+    return request<ChatRoomAgent[]>(`/chatrooms/${chatRoomId}/agents/batch`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  },
+
+  // 更新群聊普通助手的显示顺序
+  async updateAgentSortOrder(chatRoomId: string, items: { id: string; sortOrder: number }[]): Promise<ApiResponse<void>> {
+    return request<void>(`/chatrooms/${chatRoomId}/agents/sort-order`, {
+      method: 'PUT',
+      body: JSON.stringify({ items }),
     })
   },
 

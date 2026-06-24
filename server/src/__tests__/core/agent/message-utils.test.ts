@@ -196,3 +196,21 @@ test('broadcastAgentJoinedMessage saves and broadcasts without agent dispatch', 
   assert.equal(broadcasts[0].message.id, messageId);
   assert.equal(broadcasts[0].message.user, '系统');
 });
+
+test('broadcastAgentJoinedMessage combines multiple assistants into one message', async () => {
+  let created: any;
+  const broadcasts: any[] = [];
+
+  messageService.create = (async (data) => {
+    created = data;
+    return data as any;
+  }) as typeof messageService.create;
+  setGlobalBroadcastMessage((message, chatRoomId) => {
+    broadcasts.push({ message, chatRoomId });
+  });
+
+  await broadcastAgentJoinedMessage('room-1', ['前端开发', '后端开发', '测试助手']);
+
+  assert.match(created.content, /前端开发，后端开发，测试助手/);
+  assert.equal(broadcasts.length, 1);
+});

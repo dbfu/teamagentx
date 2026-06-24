@@ -743,7 +743,8 @@
       "addAssistant": "Add Assistant",
       "removeAssistant": "Remove Assistant",
       "removeConfirmDesc": "Are you sure you want to remove assistant \"{{name}}\"? The assistant will no longer participate in this group chat after removal.",
-      "remove": "Remove"
+      "remove": "Remove",
+      "sortFailed": "Failed to save assistant order"
     },
     "replyDetail": {
       "repliesCount": "{{count}} replies",
@@ -1562,7 +1563,7 @@
     "checkUpdate": "Check Update",
     "checkingUpdate": "Checking...",
     "updateAvailable": "New version available",
-    "updateAvailableHint": "New version {{version}} found, check update prompt in top right corner",
+    "updateAvailableHint": "New version {{version}} found and shown in the sidebar",
     "noUpdate": "Already up to date",
     "updateSupportOnlyDesktop": "Only desktop client supports checking updates",
     "checkUpdateFailed": "Check update failed",

@@ -6,7 +6,7 @@ import { isStreamViewBlocked } from '@/lib/system-agents'
 import { useChatStore, useThrottledStreamEvents, type SidePanelMode } from '@/stores/chat-store'
 import type { AgentStatus } from '@/stores/socket-store'
 import { Bot, ClipboardList, Clock, Info, List, Loader2, MessageSquareMore, MessagesSquare, Settings, Users } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AgentDetailPanel } from './agent-detail-panel'
 import { AgentsPanel } from './agents-panel'
@@ -97,29 +97,32 @@ export function ChatSidePanel({
   const { t } = useTranslation()
   // 仅打开流式面板时读取事件，关闭状态不启动轮询。
   const streamEvents = useThrottledStreamEvents(80, open && sidePanelMode === 'stream')
-  // 记录面板来源，用于返回上一级
-  const previousModeRef = useRef<SidePanelMode | null>(null)
+  // 来源保存在 store 中，避免跳转详情页导致组件卸载后丢失返回层级。
+  const sidePanelOrigin = useChatStore((s) => s.sidePanelOrigin)
+  const setSidePanelOrigin = useChatStore((s) => s.setSidePanelOrigin)
   // 任务看板点详情时，定位主聊天区到对应消息
   const setScrollToMessageId = useChatStore((s) => s.setScrollToMessageId)
 
-  // 当从任务看板或助手列表进入子面板时，记录来源
+  // 当从任务看板或助手列表进入子面板时，记录来源。
   useEffect(() => {
     if (sidePanelMode === 'task-board') {
-      previousModeRef.current = 'task-board'
+      setSidePanelOrigin('task-board')
     } else if (sidePanelMode === 'agents') {
-      previousModeRef.current = 'agents'
+      setSidePanelOrigin('agents')
+    } else if (sidePanelMode === null) {
+      if (sidePanelOrigin) setSidePanelOrigin(null)
     } else if (
-      (TASK_BOARD_CHILD_MODES.includes(sidePanelMode) && previousModeRef.current !== 'task-board') ||
-      (AGENTS_CHILD_MODES.includes(sidePanelMode) && previousModeRef.current !== 'agents')
+      (TASK_BOARD_CHILD_MODES.includes(sidePanelMode) && sidePanelOrigin !== 'task-board') ||
+      (AGENTS_CHILD_MODES.includes(sidePanelMode) && sidePanelOrigin !== 'agents')
     ) {
       // 如果进入了子面板但来源不是预期的父面板，清除来源记录
-      previousModeRef.current = null
+      if (sidePanelOrigin) setSidePanelOrigin(null)
     }
-  }, [sidePanelMode])
+  }, [sidePanelMode, sidePanelOrigin, setSidePanelOrigin])
 
   // 根据当前面板层级决定关闭行为
   const taskBoardExecutionRecord =
-    sidePanelMode === 'execution-detail' && previousModeRef.current === 'task-board'
+    sidePanelMode === 'execution-detail' && sidePanelOrigin === 'task-board'
       ? selectedRecord
       : null
   const visibleExecutionDetailRecord = taskBoardExecutionRecord ?? executionDetailRecord
@@ -131,6 +134,34 @@ export function ChatSidePanel({
       (item) => item.agentId === agentId || item.agent?.id === agentId
     )?.agent ?? null
   }
+
+  // 助手详情页保存后会刷新群聊数据；同步当前选中助手，避免侧边栏继续显示旧名称或头像。
+  useEffect(() => {
+    if (!selectedRoomAgent?.id) return
+
+    const roomAgent = chatRoom.chatRoomAgents?.find(
+      (item) => item.agentId === selectedRoomAgent.id || item.agent?.id === selectedRoomAgent.id
+    )
+    if (!roomAgent?.agent) return
+
+    const nextSelectedAgent = {
+      id: roomAgent.agent.id,
+      name: roomAgent.agent.name,
+      avatar: roomAgent.agent.avatar,
+      avatarColor: roomAgent.agent.avatarColor,
+      description: roomAgent.agent.description,
+      chatRoomAgentId: roomAgent.id,
+      agentType: roomAgent.agent.type,
+      agentLevel: roomAgent.agent.agentLevel,
+      chatRoomId: chatRoom.id,
+      injectGroupHistory: roomAgent.injectGroupHistory,
+    }
+
+    const hasChanged = Object.entries(nextSelectedAgent).some(([key, value]) => (
+      selectedRoomAgent[key as keyof typeof selectedRoomAgent] !== value
+    ))
+    if (hasChanged) setSelectedRoomAgent(nextSelectedAgent)
+  }, [chatRoom.id, chatRoom.chatRoomAgents, selectedRoomAgent?.id, setSelectedRoomAgent])
 
   // 当打开流式面板时，如果没有流式数据，尝试从 ExecutionRecord 恢复
   // 注意：restoreStreamEventsFromRecord 内部会过滤掉已完成的记录
@@ -303,7 +334,7 @@ export function ChatSidePanel({
       return
     }
 
-    previousModeRef.current = 'task-board'
+    setSidePanelOrigin('task-board')
     setSelectedRecord(record)
     setSidePanelMode('execution-detail')
 
@@ -342,36 +373,36 @@ export function ChatSidePanel({
   // 子面板点击 X 返回上一级，顶层面板点击 X 关闭侧拉
   const handleClose = () => {
     // 任务看板中打开的执行详情，点击 X 直接关闭，避免落回历史执行结果
-    if (sidePanelMode === 'execution-detail' && previousModeRef.current === 'task-board') {
-      previousModeRef.current = null
+    if (sidePanelMode === 'execution-detail' && sidePanelOrigin === 'task-board') {
+      setSidePanelOrigin(null)
       setSelectedRecord(null)
       setSidePanelMode(null)
       return
     }
 
     // 从任务看板进入的子面板，返回任务看板
-    if (TASK_BOARD_CHILD_MODES.includes(sidePanelMode) && previousModeRef.current === 'task-board') {
-      previousModeRef.current = 'task-board' // 保持来源，允许继续返回
+    if (TASK_BOARD_CHILD_MODES.includes(sidePanelMode) && sidePanelOrigin === 'task-board') {
+      setSidePanelOrigin('task-board') // 保持来源，允许继续返回
       setSidePanelMode('task-board')
       return
     }
 
     // 从助手列表进入的子面板，返回助手列表
-    if (AGENTS_CHILD_MODES.includes(sidePanelMode) && previousModeRef.current === 'agents') {
+    if (AGENTS_CHILD_MODES.includes(sidePanelMode) && sidePanelOrigin === 'agents') {
       // agent-detail 直接返回 agents
       if (sidePanelMode === 'agent-detail') {
-        previousModeRef.current = null
+        setSidePanelOrigin(null)
         setSidePanelMode('agents')
         return
       }
       // 其他子面板（context/history/stream 等）返回 agent-detail
-      previousModeRef.current = 'agents' // 保持来源标记
+      setSidePanelOrigin('agents') // 保持来源标记
       setSidePanelMode('agent-detail')
       return
     }
 
     // 从助手详情进入的任务队列，返回助手详情（非任务看板来源）
-    if (sidePanelMode === 'task-queue' && previousModeRef.current !== 'task-board') {
+    if (sidePanelMode === 'task-queue' && sidePanelOrigin !== 'task-board') {
       setSidePanelMode('agent-detail')
       return
     }
