@@ -42,8 +42,17 @@ import {
 import { getExecutor } from './executor-manager.js';
 import { buildAgentDispatchPlan } from '../dispatch-rules/agent-dispatch-plan.js';
 import { buildAIMessage } from './message-utils.js';
-import { clearMentions, peekMentions } from './mention-buffer.js';
+import {
+  beginMentionExecution,
+  clearMentions,
+  endMentionExecution,
+  peekMentionState,
+  takeMentionState,
+  type PendingMentionState,
+} from './mention-buffer.js';
 import { appendMentionBlock } from '../tools/mention.tools.js';
+import { createRootHandoffContext } from '../../../types/handoff.js';
+import { restoreHandoffCascade } from './structured-handoff-runtime.js';
 import { debugLog } from './debug.js';
 import { notifySourceAgentOnFailure } from './task-failure-notification.js';
 import { shouldSuppressInternalCoordinatorMessage } from '../internal-coordinator-agent.js';
@@ -60,6 +69,15 @@ import {
 } from './task-lifecycle.js';
 import type { Message } from '../../../types/message.js';
 import { parseTaskPromptPolicy } from '../task-prompt-policy.js';
+import { messageMentionsRoomUser } from './user-mention-utils.js';
+import {
+  buildHandoffAuditPrompt,
+  createHandoffOutputBuffer,
+  mergeHandoffAuditResult,
+  runSilentHandoffAudit,
+  shouldDeferHandoffOutput,
+  shouldRunHandoffAudit,
+} from './handoff-audit.js';
 
 function normalizeExecutionError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -162,6 +180,11 @@ export async function processQueue(chatRoomId: string, agentId: string) {
 
       let taskOutcome: AgentTaskOutcome = 'failed';
       let taskFinalMessage: Message | undefined;
+      const taskHandoffContext = taskQueueService.parseHandoffContext(task)
+        ?? createRootHandoffContext(task.messageId, task.agentId);
+      restoreHandoffCascade(taskHandoffContext);
+      beginMentionExecution(chatRoomId, task.agentId, task.id);
+      let settledMentionState: PendingMentionState = { mentions: [] };
       try {
         const taskPromptPolicy = parseTaskPromptPolicy(task.messageContent);
         // 创建 AbortController 用于中断执行
@@ -240,10 +263,6 @@ export async function processQueue(chatRoomId: string, agentId: string) {
           // 收集生成的消息 ID，用于后续回填 executionRecordId
           const generatedMessageIds: string[] = [];
 
-          // 清空本助手在本群的 mention_agents 缓冲：每轮执行从干净状态开始，
-          // 防止上一轮未被消费的派发意图（如调用了工具但没有收尾消息）残留泄漏到本轮。
-          clearMentions(chatRoomId, task.agentId);
-
           // 收集执行事件（用于保存到 ExecutionRecord）
           const executionEvents: ExecutionEvent[] = [];
           // 记录最近一次「仅记录」的中间文本段内容，用于去重：
@@ -254,12 +273,23 @@ export async function processQueue(chatRoomId: string, agentId: string) {
           const markExecutionActivity = () => {
             activeNoActivityMonitor?.markActivity();
           };
-
-          // 创建 emit 回调，在 tool 调用时直接广播消息
-          const emitCallback = async (content: string, replyMessageId?: string) => {
+          const deferHandoffOutput = shouldDeferHandoffOutput({
+            enabled: config.agent.handoffAuditEnabled,
+            agentTriggerMode: roomForReminder?.agentTriggerMode,
+            agentLevel: (agentInfo as { agentLevel?: string | null } | null)?.agentLevel,
+            agentId: task.agentId,
+            coordinatorAgentId: GROUP_COORDINATOR_ID,
+            suppressAssistantHandoff: taskPromptPolicy.suppressAssistantHandoff,
+            isLeaf: taskHandoffContext.isLeaf === true,
+            isQuickChatRoom: roomForReminder?.isQuickChatRoom === true,
+          });
+          // 真正落库并广播最终消息。结构化交接候选任务会先暂存输出，等 mention buffer
+          // （含必要时的静默复核）确定后再调用这里，使正文与交接块一次性发布。
+          const publishOutputCallback = async (content: string, replyMessageId?: string) => {
             const contentWithMentionBlock = appendMentionBlock(
               content,
-              peekMentions(chatRoomId, task.agentId),
+              peekMentionState(task.id).mentions,
+              { suggestion: taskHandoffContext.isLeaf === true },
             );
             if (content && content.trim()) {
               markExecutionActivity();
@@ -385,6 +415,27 @@ export async function processQueue(chatRoomId: string, agentId: string) {
             // 更新恢复服务状态（Agent 发送了消息）
             recoveryService.updateRoomState(chatRoomId, task.agentName);
           };
+          const handoffOutputBuffer = createHandoffOutputBuffer(publishOutputCallback);
+
+          const emitCallback = async (content: string, replyMessageId?: string) => {
+            if (content && content.trim()) markExecutionActivity();
+            if (deferHandoffOutput) {
+              handoffOutputBuffer.enqueue(content, replyMessageId);
+              debugLog('handoffOutputDeferred', {
+                chatRoomId,
+                taskId: task.id,
+                agentId: task.agentId,
+                agentName: task.agentName,
+                outputCount: handoffOutputBuffer.size,
+              });
+              return;
+            }
+            await publishOutputCallback(content, replyMessageId);
+          };
+
+          const flushDeferredOutputs = async () => {
+            await handoffOutputBuffer.flush();
+          };
 
           // 仅记录回调：把工具调用之前的中间文本段写入执行详情，但不发群消息、不广播。
           // 用于在执行详情里完整保留 agent 在多次工具调用之间产生的每一段文字。
@@ -425,7 +476,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
             }
             streamEventsCache.set(cacheKey, events);
 
-            if (globalEmitStream) {
+            if (globalEmitStream && !deferHandoffOutput) {
               globalEmitStream(
                 { messageId: task.messageId, agentId: task.agentId, agentName: task.agentName, content },
                 chatRoomId,
@@ -598,7 +649,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
             noActivityAttempt: number,
           ): Promise<AgentExecResult> => {
             // 每次模型重试都从干净的 mention buffer 开始，避免失败尝试留下派发意图。
-            clearMentions(chatRoomId, task.agentId);
+            clearMentions(task.id);
             const monitor = createNoActivityMonitor(
               noActivityTimeoutMs,
               (error) => abortController.abort(error),
@@ -839,6 +890,106 @@ export async function processQueue(chatRoomId: string, agentId: string) {
 
           try {
             execResult = await runWithModelFallback();
+            settledMentionState = peekMentionState(task.id);
+            const prospectiveFinalContent = handoffOutputBuffer.latestContent ?? taskFinalMessage?.content;
+            const finalMessageMentionsUser = prospectiveFinalContent
+              ? await messageMentionsRoomUser(chatRoomId, prospectiveFinalContent)
+              : false;
+            const runHandoffAudit = shouldRunHandoffAudit({
+              enabled: config.agent.handoffAuditEnabled,
+              agentTriggerMode: roomForReminder?.agentTriggerMode,
+              agentLevel: (agentInfo as { agentLevel?: string | null } | null)?.agentLevel,
+              agentId: task.agentId,
+              coordinatorAgentId: GROUP_COORDINATOR_ID,
+              suppressAssistantHandoff: taskPromptPolicy.suppressAssistantHandoff,
+              isLeaf: taskHandoffContext.isLeaf === true,
+              isQuickChatRoom: roomForReminder?.isQuickChatRoom === true,
+              hasFinalMessage: !!prospectiveFinalContent,
+              finalMessageMentionsUser,
+              pendingMentionCount: settledMentionState.mentions.length,
+            });
+
+            if (runHandoffAudit) {
+              const auditStartedAt = Date.now();
+              executionEvents.push({
+                type: 'model',
+                timestamp: auditStartedAt,
+                data: {
+                  type: 'handoff_audit',
+                  status: 'in_progress',
+                  model: execResult.model,
+                },
+              });
+              debugLog('handoffAuditStarted', {
+                chatRoomId,
+                taskId: task.id,
+                agentId: task.agentId,
+                agentName: task.agentName,
+              });
+
+              try {
+                const auditResult = await runSilentHandoffAudit({
+                  executor: executionDebugExecutor,
+                  prompt: buildHandoffAuditPrompt(
+                    (roomForReminder?.owner as { preferredLanguage?: string } | undefined)?.preferredLanguage,
+                  ),
+                  originalMessageId: task.messageId,
+                  timeoutMs: config.agent.handoffAuditTimeoutMs,
+                  signal: abortController.signal,
+                  onToolCall: toolCallCallback,
+                });
+                settledMentionState = peekMentionState(task.id);
+                execResult = mergeHandoffAuditResult(execResult, auditResult);
+                executionEvents.push({
+                  type: 'model',
+                  timestamp: Date.now(),
+                  data: {
+                    type: 'handoff_audit',
+                    status: 'completed',
+                    model: auditResult.model ?? execResult.model,
+                    output: {
+                      duration: Date.now() - auditStartedAt,
+                      registeredMentions: settledMentionState.mentions.length,
+                    },
+                  },
+                });
+                debugLog('handoffAuditCompleted', {
+                  chatRoomId,
+                  taskId: task.id,
+                  agentId: task.agentId,
+                  agentName: task.agentName,
+                  registeredMentions: settledMentionState.mentions.map((mention) => mention.agentId),
+                  duration: Date.now() - auditStartedAt,
+                });
+              } catch (auditError) {
+                clearMentions(task.id);
+                if (abortController.signal.aborted && abortLocales.has(key)) {
+                  throw auditError;
+                }
+                executionEvents.push({
+                  type: 'model',
+                  timestamp: Date.now(),
+                  data: {
+                    type: 'handoff_audit',
+                    status: 'error',
+                    model: execResult.model,
+                    error: auditError instanceof Error ? auditError.message : String(auditError),
+                    output: { duration: Date.now() - auditStartedAt },
+                  },
+                });
+                console.warn('[processor] 静默交接复核失败，保留 watchdog 兜底', {
+                  chatRoomId,
+                  taskId: task.id,
+                  agentId: task.agentId,
+                  agentName: task.agentName,
+                  error: auditError instanceof Error ? auditError.message : String(auditError),
+                });
+              }
+            }
+
+            // mention buffer 已最终确定：此时才一次性发布正文 + 交接块。
+            await flushDeferredOutputs();
+            settledMentionState = takeMentionState(task.id);
           } catch (error) {
             const abortReason = abortController.signal.aborted
               ? abortController.signal.reason
@@ -854,7 +1005,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
               wasAborted = true;
               console.log(`Task aborted for agent ${task.agentName}`);
               executionError = new Error('执行已被用户中断');
-              clearMentions(chatRoomId, task.agentId);
+              clearMentions(task.id);
             } else {
               executionError = abortReason instanceof NoActivityTimeoutError
                 ? abortReason
@@ -863,10 +1014,15 @@ export async function processQueue(chatRoomId: string, agentId: string) {
                 `Task execution failed for agent ${task.agentName}:`,
                 error,
               );
-              clearMentions(chatRoomId, task.agentId);
+              clearMentions(task.id);
+              // 保持失败前已生成正文的历史行为，但失败任务不携带交接意图。
+              await flushDeferredOutputs();
               if (shouldUseModelFallback) {
                 try {
-                  await emitCallback(`${task.agentName} 执行出错: ${executionError.message}`, task.messageId);
+                  await publishOutputCallback(
+                    `${task.agentName} 执行出错: ${executionError.message}`,
+                    task.messageId,
+                  );
                 } catch (emitError) {
                   console.error('[processor] 发送最终失败消息时出错:', emitError);
                 }
@@ -1038,6 +1194,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
         );
       } finally {
         taskExecutionStartedAt.delete(task.id);
+        endMentionExecution(chatRoomId, task.agentId, task.id);
 
         // 删除已处理的任务
         await taskQueueService.delete(task.id);
@@ -1049,6 +1206,9 @@ export async function processQueue(chatRoomId: string, agentId: string) {
             agentId: task.agentId,
             status: taskOutcome,
             finalMessage: taskFinalMessage,
+            handoffContext: taskHandoffContext,
+            pendingMentions: settledMentionState.mentions,
+            mentionIntent: settledMentionState.intent,
           });
         } catch (error) {
           console.error('[processor] 处理任务完成生命周期事件失败:', error);

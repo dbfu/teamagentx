@@ -14,6 +14,10 @@ import { processQueue } from './processor.js';
 import { broadcastAgentStatus, globalEmit, globalEmitTyping } from './status.js';
 import { debugLog } from './debug.js';
 import { bridgeInfoCache, type BridgeInfo } from './cache.js';
+import {
+  createRootHandoffContext,
+  type HandoffContext,
+} from '../../../types/handoff.js';
 
 export async function enqueueAgentTask(
   chatRoomId: string,
@@ -26,6 +30,7 @@ export async function enqueueAgentTask(
     attachments?: AttachmentData[];
     skipHistory?: boolean;
     bridgeInfo?: BridgeInfo;
+    handoffContext?: HandoffContext;
     // 构建群历史时的上界消息（默认用 message.id）。串行链后续步骤的触发消息锚定在
     // 汇总调度消息上，但历史边界需推进到「上一个助手的回复」，故单独传入。
     historyAnchorMessageId?: string;
@@ -93,6 +98,7 @@ export async function enqueueAgentTask(
     messageId: message.id,
     messageContent: processedMessageContent,
     history,
+    handoffContext: options?.handoffContext ?? createRootHandoffContext(message.id, agent.id),
     sessionDir: options?.sessionDir,
     attachments: attachmentsData,
   });
@@ -227,6 +233,13 @@ export async function sendMessageToAgent(params: {
     await globalEmit(message, params.chatRoomId);
   }
 
+  // This API already carries an explicit target. Dispatch directly instead of relying on
+  // parsing the assistant's display text in the received-message handler.
+  await enqueueAgentTask(params.chatRoomId, message, targetAgent, null, {
+    historyAnchorMessageId: message.id,
+    historyInclusive: true,
+  });
+
   debugLog('agentToolSendMessage', {
     chatRoomId: params.chatRoomId,
     sourceAgentId: sourceAgent.id,
@@ -234,7 +247,7 @@ export async function sendMessageToAgent(params: {
     targetAgentId: targetAgent.id,
     targetAgentName: targetAgent.name,
     messageId,
-    dispatchMode: 'messageEvent',
+    dispatchMode: 'explicitTarget',
   });
 
   return {

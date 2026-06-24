@@ -1,16 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  classifyAssistantHandoff,
-} from '../../../../core/agent/agent-handler/handler.js';
-import {
   normalizeTriggerMode,
   isSmartCollaborationMode,
 } from '../../../../core/agent/agent-handler/trigger-mode.js';
-import {
-  resetCollaborationBudget,
-  registerHandoff,
-} from '../../../../core/agent/agent-handler/collaboration-budget.js';
 import {
   startParallelBatch,
   markBatchAgentComplete,
@@ -64,96 +57,6 @@ test('trigger mode normalization maps legacy auto to smart collaboration', () =>
   assert.equal(normalizeTriggerMode('manual'), 'manual');
   assert.equal(isSmartCollaborationMode('auto'), true);
   assert.equal(isSmartCollaborationMode('manual'), false);
-});
-
-test('assistant handoff classification: none / single / multiple / self-mention', () => {
-  const agentIdByName = new Map([
-    ['工程师', 'agent-eng'],
-    ['测试员', 'agent-test'],
-    ['文档员', 'agent-doc'],
-  ]);
-
-  // 无 @ → none
-  assert.equal(
-    classifyAssistantHandoff({ mentionNames: [], selfAgentId: 'agent-eng', agentIdByName }).kind,
-    'none',
-  );
-  // 仅 @自己 → none
-  assert.equal(
-    classifyAssistantHandoff({ mentionNames: ['工程师'], selfAgentId: 'agent-eng', agentIdByName }).kind,
-    'none',
-  );
-  // 恰好一个其他助手 → single（快路径）
-  const single = classifyAssistantHandoff({
-    mentionNames: ['测试员'],
-    selfAgentId: 'agent-eng',
-    agentIdByName,
-  });
-  assert.equal(single.kind, 'single');
-  assert.deepEqual(single.names, ['测试员']);
-  // 同一助手重复 @ 去重后仍是 single
-  assert.equal(
-    classifyAssistantHandoff({
-      mentionNames: ['测试员', '测试员'],
-      selfAgentId: 'agent-eng',
-      agentIdByName,
-    }).kind,
-    'single',
-  );
-  // ≥2 个 → multiple（升级协调器）
-  const multiple = classifyAssistantHandoff({
-    mentionNames: ['测试员', '文档员'],
-    selfAgentId: 'agent-eng',
-    agentIdByName,
-  });
-  assert.equal(multiple.kind, 'multiple');
-  assert.deepEqual(multiple.names, ['测试员', '文档员']);
-  // 自己 + 一个其他助手 → 过滤自己后 single
-  assert.equal(
-    classifyAssistantHandoff({
-      mentionNames: ['工程师', '文档员'],
-      selfAgentId: 'agent-eng',
-      agentIdByName,
-    }).kind,
-    'single',
-  );
-});
-
-test('collaboration budget enforces hop limit and consecutive ping-pong detection', () => {
-  const roomId = 'room-budget-test';
-  const originalMaxHops = config.agent.maxHandoffHops;
-  const originalCycleLimit = config.agent.handoffCycleRepeatLimit;
-  config.agent.maxHandoffHops = 20;
-  config.agent.handoffCycleRepeatLimit = 2; // 允许 2 个来回（4 连跳），第 5 跳熔断
-  try {
-    resetCollaborationBudget(roomId);
-    // 连续乒乓：A↔B 不间断往返，超过 2 个来回即熔断
-    assert.equal(registerHandoff(roomId, 'A', 'B'), 'ok');
-    assert.equal(registerHandoff(roomId, 'B', 'A'), 'ok');
-    assert.equal(registerHandoff(roomId, 'A', 'B'), 'ok');
-    assert.equal(registerHandoff(roomId, 'B', 'A'), 'ok');
-    assert.equal(registerHandoff(roomId, 'A', 'B'), 'cycle');
-    // 人类发言清零后恢复
-    resetCollaborationBudget(roomId);
-    assert.equal(registerHandoff(roomId, 'A', 'B'), 'ok');
-
-    // 轮辐式协作（主持人 H 逐一与各玩家往返）：同一条边跨阶段重复属合法推进，
-    // 连续同对长度永远只有 2，绝不触发环路熔断（谁是卧底游戏房间的真实模式）
-    resetCollaborationBudget(roomId);
-    for (let round = 0; round < 3; round++) {
-      for (const player of ['P1', 'P2', 'P3']) {
-        assert.equal(registerHandoff(roomId, 'H', player), 'ok');
-        assert.equal(registerHandoff(roomId, player, 'H'), 'ok');
-      }
-    }
-    // 18 跳后命中的是跳数预算而不是环路
-    config.agent.maxHandoffHops = 18;
-    assert.equal(registerHandoff(roomId, 'H', 'P1'), 'hop_limit');
-  } finally {
-    config.agent.maxHandoffHops = originalMaxHops;
-    config.agent.handoffCycleRepeatLimit = originalCycleLimit;
-    resetCollaborationBudget(roomId);
-  }
 });
 
 test('parallel batch merges concurrent dispatches instead of overwriting', () => {

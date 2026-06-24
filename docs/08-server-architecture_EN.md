@@ -129,7 +129,7 @@ Core path of Smart Collaboration (see [11-agent-trigger-system_EN.md](11-agent-t
 
 - **Fast path**: an agent's reply with exactly one valid `@` triggers the relay directly, zero coordination cost
 - **5 coordinator intervention points**: user routing miss / `@` anomaly / parallel-batch join / stall fallback / circuit-breaker escalation — adjudicated by `coordinator-dispatch.ts` + `internal-coordinator-agent.ts`
-- **Collaboration budget** (`collaboration-budget.ts`): only constrains the "agent single-`@` direct relay" fast path with two breakers on hops / consecutive cycle, counting window "between two human messages"
+- **Structured-handoff guardrails** (`structured-handoff.service.ts` / `structured-handoff-runtime.ts`): bound fan-out, depth, total cascade dispatches, and revisits by root message and lineage
 - **Multi-agent dispatch**: the coordinator picks parallel or serial per `dispatchMode` — **parallel batch** (`parallel-batch-tracker.ts`, fork-join; `@`s inside a batch suspended to the join) or **serial chain** (`serial-chain-tracker.ts` + `task-lifecycle.ts`, only the head dispatched at a time, advanced by queue settlement events); user intervention takes over. Full flowcharts in [14-agent-dispatch-flowcharts_EN.md](14-agent-dispatch-flowcharts_EN.md)
 - **Stall fallback** (`stall-watchdog.ts`): wakes the coordinator when the room is idle after an agent finishes
 - **Dispatch rules** (`dispatch-rules/`): `ChatRoom.dispatchRules` (YAML) injected into the coordinator's system prompt to orchestrate "who's next"
@@ -301,8 +301,12 @@ Since 2026-06, system agents are consolidated from "several separate @agents" in
 | `AGENT_COORDINATOR_LLM_TIMEOUT_MS` | `120000` | Coordinator LLM decision timeout |
 | `AGENT_COORDINATOR_LLM_RETRY_COUNT` | `1` | Coordinator LLM retry count |
 | `AGENT_EXECUTION_NO_ACTIVITY_TIMEOUT_MS` | `90000` | Agent no-activity retry timeout (0 disables) |
-| `AGENT_MAX_HANDOFF_HOPS` | `20` | Collaboration budget: single-`@` relay hop budget |
-| `AGENT_HANDOFF_CYCLE_REPEAT_LIMIT` | `3` | Collaboration budget: consecutive round-trip cap |
+| `AGENT_HANDOFF_FANOUT_MAX` | `3` | Structured-handoff fan-out cap |
+| `AGENT_HANDOFF_DEPTH_MAX` | `100` | Structured-handoff lineage depth cap |
+| `AGENT_HANDOFF_BUDGET_MAX` | `20` | Total cascade dispatch budget per root message |
+| `AGENT_HANDOFF_REVISIT_MAX` | `1` | Per-agent revisit cap within one lineage |
+| `AGENT_HANDOFF_AUDIT_ENABLED` | `true` | Run one silent same-assistant handoff audit when the first turn did not register `mention_agents` |
+| `AGENT_HANDOFF_AUDIT_TIMEOUT_MS` | `30000` | Silent handoff-audit timeout in milliseconds; watchdog remains the fallback |
 | `BRIDGE_ENCRYPTION_KEY` | `''` | Bridge credential encryption key |
 | `BRIDGE_REQUIRE_SIGNATURE` | `false` | Whether to enforce webhook signature |
 | `EDGE_TTS_BINARY` / `EDGE_TTS_DEFAULT_VOICE` | `edge-tts` / `zh-CN-XiaoxiaoNeural` | Speech synthesis |

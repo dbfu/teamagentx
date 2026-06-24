@@ -129,7 +129,7 @@ createApp()
 
 - **快路径**：助手回复中恰好一个合法 `@` 直接触发接力，零协调成本
 - **协调器 5 个介入点**：用户路由落空 / `@` 异常 / 并行批次汇合 / 卡住兜底 / 熔断升级 —— 由 `coordinator-dispatch.ts` + `internal-coordinator-agent.ts` 裁决
-- **协作预算**（`collaboration-budget.ts`）：仅约束「助手单 `@` 直连接力」快路径的跳数 / 连续环路两重熔断，计数窗口为「两次人类发言之间」
+- **结构化交接护栏**（`structured-handoff.service.ts` / `structured-handoff-runtime.ts`）：按根消息与 lineage 约束扇出、depth、级联总预算和有限重访
 - **多助手派发**：协调器按 `dispatchMode` 选择并行或串行——**并行批次**（`parallel-batch-tracker.ts`，fork-join，批次内 `@` 挂起到汇合点统一裁决）或**串行链**（`serial-chain-tracker.ts` + `task-lifecycle.ts`，每次只派队首，由队列结算事件推进下一步）；用户介入即接管。全场景流程图见 [14-agent-dispatch-flowcharts.md](14-agent-dispatch-flowcharts.md)
 - **卡住兜底**（`stall-watchdog.ts`）：助手发完消息后房间长时间无活动时唤醒协调器
 - **群调度规则**（`dispatch-rules/`）：`ChatRoom.dispatchRules`（YAML）注入协调器系统提示，编排「下一棒交给谁」
@@ -301,8 +301,12 @@ Socket 连接时在 `auth.token` 传 JWT，服务端验证后将 user 挂到 `so
 | `AGENT_COORDINATOR_LLM_TIMEOUT_MS` | `120000` | 协调器 LLM 决策超时 |
 | `AGENT_COORDINATOR_LLM_RETRY_COUNT` | `1` | 协调器 LLM 重试次数 |
 | `AGENT_EXECUTION_NO_ACTIVITY_TIMEOUT_MS` | `90000` | 助手无活动重试超时（0 关闭） |
-| `AGENT_MAX_HANDOFF_HOPS` | `20` | 协作预算：单 `@` 接力跳数预算 |
-| `AGENT_HANDOFF_CYCLE_REPEAT_LIMIT` | `3` | 协作预算：连续环路来回上限 |
+| `AGENT_HANDOFF_FANOUT_MAX` | `3` | 结构化交接单次扇出上限 |
+| `AGENT_HANDOFF_DEPTH_MAX` | `100` | 结构化交接血缘深度上限 |
+| `AGENT_HANDOFF_BUDGET_MAX` | `20` | 单个根消息的级联总派发预算 |
+| `AGENT_HANDOFF_REVISIT_MAX` | `1` | 同一助手在单条血缘中的重访上限 |
+| `AGENT_HANDOFF_AUDIT_ENABLED` | `true` | 首轮未登记 `mention_agents` 时，由同一助手执行一次静默交接复核 |
+| `AGENT_HANDOFF_AUDIT_TIMEOUT_MS` | `30000` | 静默交接复核超时（毫秒）；失败后保留 watchdog 兜底 |
 | `BRIDGE_ENCRYPTION_KEY` | `''` | Bridge 凭据加密密钥 |
 | `BRIDGE_REQUIRE_SIGNATURE` | `false` | 是否强制 Webhook 验签 |
 | `EDGE_TTS_BINARY` / `EDGE_TTS_DEFAULT_VOICE` | `edge-tts` / `zh-CN-XiaoxiaoNeural` | 语音合成 |

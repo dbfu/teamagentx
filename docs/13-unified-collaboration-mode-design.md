@@ -6,12 +6,16 @@
 > 日期：2026-06-12 提案 · 2026-06 落地
 > 关联文档：[11-agent-trigger-system.md](./11-agent-trigger-system.md)（当前触发系统，已按本方案更新）
 
+> 2026-06-23 演进：业务助手交接已由正文 `@` 解析升级为 `mention_agents` 结构化派发。
+> 本文中关于“助手单 @ 快路径 / 多 @ 协调器裁决 / 旧两重熔断”的描述仅保留历史设计背景；
+> 当前行为以 [15-mention-dispatch-tool-prd.md](15-mention-dispatch-tool-prd.md) 和代码为准。
+
 ## 0. 实现状态（2026-06 更新）
 
 本方案已落地，群聊对外模式收敛为 **智能协作 + 手动** 两种。关键实现位置：
 
 - 模式归一：`server/src/core/agent/agent-handler/trigger-mode.ts`（`auto`/`coordinator` → 归一为 `coordinator`，即智能协作；`manual` 不变）
-- 协作预算与三重熔断：`collaboration-budget.ts`（跳数 `AGENT_MAX_HANDOFF_HOPS`=20 / 环路 `AGENT_HANDOFF_CYCLE_REPEAT_LIMIT`=3 / 并发 `AGENT_MAX_PARALLEL_DISPATCH`=3，见 `config/index.ts`）
+- 结构化助手交接与四重护栏：`structured-handoff.service.ts` / `structured-handoff-runtime.ts`（扇出 / depth / 级联预算 / 有限重访）
 - 并行批次 fork-join：`parallel-batch-tracker.ts`（含批次期间用户介入 `markBatchUserIntervention`）
 - 卡住兜底：`stall-watchdog.ts`；协调器派发：`coordinator-dispatch.ts`、`internal-coordinator-agent.ts`
 - 统一消息流转入口：`agent-handler/handler.ts`（5 个协调器介入点）；交接协议系统提示：`agent-system-prompt.ts`

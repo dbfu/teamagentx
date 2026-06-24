@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { createSystemTool } from './system-tool.js';
 import { recordMentions } from '../agent-handler/mention-buffer.js';
+import type { HandoffMention } from '../../../types/handoff.js';
 
 /**
  * 助手「显式派发意图」工具 mention_agents。
@@ -19,11 +20,7 @@ import { recordMentions } from '../agent-handler/mention-buffer.js';
  *   或调用 reset，避免上轮残留泄漏到下轮。
  */
 
-export interface PendingMention {
-  agentId: string;
-  agentName: string;
-  task: string;
-}
+export type PendingMention = HandoffMention;
 
 export interface MentionToolContext {
   /** 当前群聊 id，用于把登记写入按 chatRoomId:agentId 键的缓冲注册表。 */
@@ -125,7 +122,15 @@ export function createMentionTools(ctx: MentionToolContext): MentionToolsBundle 
       }
 
       // 并集去重写入注册表（同一目标重复时 task 后写覆盖）。
-      recordMentions(ctx.chatRoomId, ctx.selfAgentId, pending);
+      const recorded = recordMentions(
+        ctx.chatRoomId,
+        ctx.selfAgentId,
+        pending,
+        input.intent,
+      );
+      if (!recorded) {
+        throw new Error('mention_agents 当前不在有效的助手执行上下文中');
+      }
 
       return {
         ok: rejected.length === 0,
@@ -152,10 +157,17 @@ export function createMentionTools(ctx: MentionToolContext): MentionToolsBundle 
  * - 块是机器生成的规范文本（行首「@名称 」+ 空格 + task），不会出现自由 prose 的歧义。
  * - ⚠️ 派发权威是 buffer 本身，不是 parse 这个块；块只承担「显示 + 历史记录」。
  */
-export function appendMentionBlock(content: string, pending: PendingMention[]): string {
+export function appendMentionBlock(
+  content: string,
+  pending: PendingMention[],
+  options?: { suggestion?: boolean },
+): string {
   if (pending.length === 0) return content;
   const block = pending
-    .map((m) => (m.task ? `@${m.agentName} ${m.task}` : `@${m.agentName}`))
+    .map((m) => {
+      const mention = m.task ? `@${m.agentName} ${m.task}` : `@${m.agentName}`;
+      return options?.suggestion ? `建议 ${mention}` : mention;
+    })
     .join('\n');
   const base = content.trimEnd();
   return base ? `${base}\n\n${block}` : block;

@@ -40,10 +40,10 @@ agentTriggerMode = 'coordinator'   # stored value; 'auto' is a legacy alias with
 
 Default mode for new regular chatrooms. The design goal is **"auto's fast path + coordinator's full capability"**:
 
-- **Fast path (zero coordination cost)**: when an agent writes exactly one valid `@agent` in its reply, that agent is triggered directly for the handoff, bypassing the coordinator
-- **Coordinator fallback**: the built-in `Group Coordinator` is only invoked at 5 intervention points — user-message routing miss / agent `@` anomaly / parallel-batch join / stall fallback / circuit-breaker escalation (see §6)
+- **Structured fast path (zero coordination cost)**: an agent calls `mention_agents` with explicit targets and per-target tasks; dispatch runs after TaskQueue settlement without coordinator reinterpretation
+- **Coordinator fallback**: handles user routing, user/coordinator plans, legacy parallel/serial joins, and stall recovery; structured agent handoffs bypass it
 - **Multi-agent dispatch**: the coordinator can split one decision into multiple independent tasks, run **in parallel** (enqueued together, then a join adjudicates) or **serially** (one by one in order) per `dispatchMode`
-- **Convergence guarantee**: the shape of the execution graph is locked by three layers — "agent out-degree ≤ 1", "every fork joins (parallel batch / serial chain)", and "two circuit breakers (hops / cycle)" — preventing fan-out storms and infinite loops (see §5)
+- **Convergence guarantee**: single targets relay along lineage; multiple targets become leaves and return to the initiating convergence owner; fan-out/depth/budget/revisit guardrails bound the graph (see §5)
 
 Suitable for the vast majority of multi-role collaboration rooms: low latency for fixed handoffs, plus the ability to auto-decide who's next.
 
@@ -123,46 +123,52 @@ After announcing the topic, write "@Debater-Pro-1 please open with your argument
 - Longest name matches first (so "Debater-1" doesn't mis-match inside "Pro-Debater-1")
 
 **Mode differences**:
-- **Smart Collaboration**: a business agent's **exactly one valid `@`** takes the fast path; if the `@` count ≠ 1 or the target is invalid, it escalates to the coordinator (no more silent truncation)
-- **Manual**: a business agent's valid `@` triggers nothing
+- **Smart Collaboration**: business agents hand off only through `mention_agents`; every prose `@agent` is display-only
+- **Manual**: business agents do not auto-handoff; prose `@agent` is also display-only
 - **Coordinator-sourced**: a `@` emitted by the built-in `Group Coordinator` itself (source `GROUP_COORDINATOR_ID`) is enqueued directly and not routed back into the coordinator (anti-recursion)
 
 ---
 
 ## 5. Collaboration budget & convergence (anti fan-out / anti loop)
 
-In Smart Collaboration, the execution-graph shape is locked by three layers, guaranteeing a deterministic upper bound on the total work in any one collaboration round. The counting window is always "between two human messages"; a human message resets all counters.
+In Smart Collaboration, agent handoff is a structured `mention_agents` intent processed once after TaskQueue settlement.
 
-**Structural layer**: business-agent out-degree ≤ 1 — a single agent message triggers at most one `@` directly; a fork (multiple `@`s) must be legitimized by the coordinator as a parallel batch.
+**Structural layer**: the tool records intent without dispatching immediately. One target relays directly; multiple targets form a leaf batch without coordinator reinterpretation.
 
-**Batch/chain layer**: when the coordinator dispatches multiple agents, there are two execution relationships, both guaranteeing every fork joins (flowcharts in [14-agent-dispatch-flowcharts_EN.md](14-agent-dispatch-flowcharts_EN.md)):
-- **Parallel batch (fork-join)**: N tasks enqueued together; any `@` in member messages while the batch runs is suspended (not triggered); the last member finishing triggers one join adjudication (`parallel-batch-tracker`);
+**Publication order and missed-handoff fallback**: the final and streamed business-assistant text is buffered instead of being published immediately. If the buffer already contains a handoff, the body and display handoff block are published together once. If the first turn completes successfully with an empty buffer, the processor reuses the same session for one silent handoff audit before publication. Audit text is not posted; only `mention_agents` registrations are retained. It runs at most once with its own timeout, the final message is published only once, and failures fall back to the watchdog.
+
+**Batch/chain layer**:
+- **Structured handoff batch**: when A hands off to B/C, B/C run as leaves. Their `mention_agents` calls become visible suggestions, and A is resumed to converge after every leaf settles (`structured-handoff-runtime`);
+- **Coordinator parallel batch**: user/coordinator plans still join through `parallel-batch-tracker`;
 - **Serial chain (ordered)**: only the head task is enqueued at a time, advanced by the **queue task settlement event** (completed) rather than the `@` in agent output; later agents see prior output via incremental room history (`serial-chain-tracker` + `task-lifecycle`).
 
-**Budget layer**: two circuit breakers (only constrain the "agent single-`@` direct relay" fast path; coordinator-initiated parallel/serial tasks are not counted against this budget):
+**Budget layer**: four orthogonal structured-handoff guardrails keyed by root message and lineage:
 
 | Breaker | Default | Env var | On trip |
 |---------|---------|---------|---------|
-| Hop budget (auto-triggered tasks carry a depth count, +1 on dispatch) | 20 hops | `AGENT_MAX_HANDOFF_HOPS` | Don't trigger the next hop; ask_owner with the sticking point |
-| Cycle detection (the same pair A↔B ping-ponging **consecutively**, no third party / user) | 3 round-trips (6 hops) | `AGENT_HANDOFF_CYCLE_REPEAT_LIMIT` | Truncate, ask_owner |
+| Fan-out per call | 3 | `AGENT_HANDOFF_FANOUT_MAX` | Reject the whole dispatch and ask_owner |
+| Lineage depth | 100 | `AGENT_HANDOFF_DEPTH_MAX` | Stop and ask_owner |
+| Total cascade dispatches | 20 | `AGENT_HANDOFF_BUDGET_MAX` | Stop and ask_owner |
+| Per-agent revisits in one lineage | 1 | `AGENT_HANDOFF_REVISIT_MAX` | Stop and ask_owner |
 
-> After a circuit-breaker escalation, only `ask_owner` is allowed (`@` the room owner as the coordinator, stating the sticking point) — a deterministic notification, no LLM, no coordinator continuation. Cycle detection is "consecutive ping-pong", not cumulative repeats within a window — hub-and-spoke collaboration (e.g. a game host `@`-ing players one by one) legitimately repeats the same edge across phases and should not be falsely killed.
+> After a guardrail trip, only `ask_owner` is allowed (`@` the room owner as the coordinator, stating the sticking point) — a deterministic notification, no LLM, no coordinator continuation.
 
 There is also a "stall detection" fallback (stall watchdog): when an agent finishes a message, the room has no running/queued task, and there's no new activity for `AGENT_STALL_WATCHDOG_DELAY_MS` (default 180s), the coordinator is woken to judge whether the task really finished (point ④), bounded by the consecutive-rescue cap `AGENT_STALL_WATCHDOG_MAX_CONSECUTIVE` (default 5).
 
 ---
 
-## 6. Coordinator intervention points (only 5)
+## 6. Coordinator intervention points (4 points)
 
 In Smart Collaboration, the built-in `Group Coordinator` is narrowed from "a dispatch bus every hop must pass through" to "routing fallback + join adjudication + exception arbitration". On the normal path it is silent.
 
 | # | Point | Trigger | Coordinator responsibility |
 |---|-------|---------|----------------------------|
 | ① | User-message routing miss | User has no `@`, and reply / direct-reply / default-agent all miss | Decide who to dispatch (dispatch / ask_owner / no_dispatch) |
-| ② | Agent `@` anomaly | `@` target invalid, or one message has ≥2 triggerable `@`s | Infer real intent: corrected dispatch / open parallel batch / ask_owner |
-| ③ | Parallel-batch / serial-chain join | All parallel members finished, or the serial chain's tail finished | Take all outputs + suspended handoff intents and adjudicate once |
-| ④ | Stall watchdog rescue | Room idle timeout, no running/queued task, last message is a business agent's and didn't `@` the user | Really done → no_dispatch (silent); chain broken → `@` agent to continue |
-| ⑤ | Circuit-breaker escalation | Hop budget exceeded or cycle detected | ask_owner only (deterministic, no LLM, no continuation) |
+| ② | User multi-`@` | A user names multiple assistants at once | Choose parallel/serial execution and split concrete assignments |
+| ③ | Coordinator batch / serial-chain join | A coordinator-created parallel batch finishes, or a serial chain reaches its tail | Adjudicate once from all outputs |
+| ④ | Stall watchdog rescue | Room idle timeout, no active tasks, last message is a business agent's and didn't `@` the user | Really done → no_dispatch; broken chain → dispatch continuation |
+
+Structured agent-handoff validation, leaf convergence, and guardrail escalation are deterministic code paths and do not call the coordinator LLM. Guardrail notifications only borrow the coordinator identity to `@` the room owner.
 
 Every coordinator decision is written to `CoordinatorLog` (decision type, target agents, forward-verbatim flag, reason, source, etc.), viewable in the front-end "Dispatch Log". Intervention frequency drops from O(per hop) in the old coordinator mode to O(exceptions + join points).
 
@@ -230,10 +236,10 @@ In Smart Collaboration, a room can configure **dispatch rules** (`ChatRoom.dispa
 
 ### 11.1 Relay/process mode (debate / contest / multi-role)
 
-**Room config**: use Smart Collaboration (default). Fixed relay chains advance by agents writing `@next-agent` in their replies; when you need the system to auto-decide who's next, configure dispatch rules or rely on the coordinator fallback.
+**Room config**: use Smart Collaboration (default). Fixed relay chains advance by agents calling `mention_agents`; dispatch rules can remind each role which work should be handed to whom.
 
 **Core principle**:
-> In Smart Collaboration, each intermediate-node agent's reply should contain exactly one `@next-agent`, otherwise that node's relay stalls until the stall watchdog steps in or the user intervenes.
+> In Smart Collaboration, every intermediate node must call `mention_agents`. An `@agent` in prose is display-only and never triggers work.
 
 **Two reliable strategies (pick one)**:
 
@@ -241,8 +247,8 @@ In Smart Collaboration, a room can configure **dispatch rules** (`ChatRoom.dispa
 
 Append to each intermediate-node agent's prompt:
 ```
-When you finish, write @Host-Agent on its own line at the very end to hand control back.
-Don't @ the host at the start; address them in plain text. @ appears only once, at the end.
+When you finish, call mention_agents with agent=Host-Agent and a concrete task describing what the host should do next.
+Do not rely on an @agent written in prose to trigger a handoff.
 ```
 
 **Strategy B: rely on LLM natural behavior (not recommended alone)**
@@ -288,16 +294,16 @@ Group rules define **role behavior constraints**, not the trigger mechanism. Don
 
 First check the room mode:
 
-- **Smart Collaboration**: check whether some node's reply contains exactly one triggerable `@next-agent`. Omitting it stalls the fast path until the stall watchdog (default 180s) steps in or the user intervenes; if a hop/cycle breaker tripped, the coordinator notifies the owner via `ask_owner`
+- **Smart Collaboration**: check execution details for a `mention_agents` call, verify the target is still in the room, and check fan-out/depth/budget/revisit guardrails. Prose `@agent` never triggers
 - **Manual**: agents never auto-relay; the user must `@` each agent manually
 
 ### Q: An agent got triggered twice?
 
-The same triggerable `@agent-name` appearing multiple times in one message triggers only once. But writing `@` at both start and end causes a **display duplicate** — make the prompt say "the triggerable `@` appears only once; address by plain text at the start".
+Within one TaskQueue execution, `mention_agents` deduplicates by agent ID and the latest task wins. Repeated prose `@agent-name` text triggers nothing.
 
 ### Q: In Smart Collaboration, why didn't an agent's `@another-agent` trigger directly?
 
-Check whether it's "exactly one valid `@`": a misspelled target, not in the room, disabled, or ≥2 `@`s in one message all escalate from the fast path to the coordinator, which decides corrected dispatch / parallel / ask-owner instead of relaying directly.
+This is expected: prose `@agent` triggering is permanently disabled for business agents. The agent must call `mention_agents`; unknown targets and self-targets are rejected immediately by the tool.
 
 ### Q: What happens when a user `@`s multiple agents at once?
 
@@ -305,4 +311,4 @@ In Smart Collaboration this is **handed to the coordinator**: it splits the mult
 
 ### Q: How are agent-to-agent `@` loops prevented?
 
-For the "agent single-`@` direct relay" path, Smart Collaboration has a built-in two-breaker (20 hops / 3 consecutive round-trips) plus the stall fallback; on a trip it stops auto-dispatch and `@`s the owner. Any user message immediately resets the counters and takes over.
+Structured handoff carries full lineage and enforces fan-out, depth, root-cascade dispatch budget, and bounded per-agent revisits. Any guardrail trip stops auto-dispatch and `@`s the owner; a user message during a leaf batch takes over subsequent progression.

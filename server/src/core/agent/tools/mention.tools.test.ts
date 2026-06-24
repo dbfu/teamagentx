@@ -9,8 +9,10 @@ import {
   type MentionToolResult,
 } from './mention.tools.js';
 import {
-  peekMentions,
-  takeMentions,
+  beginMentionExecution,
+  endMentionExecution,
+  peekMentionState,
+  takeMentionState,
   clearMentions,
 } from '../agent-handler/mention-buffer.js';
 
@@ -22,6 +24,7 @@ function makeCtx(
 ): MentionToolContext {
   const byName = new Map(agents.map((a) => [a.name, a]));
   const chatRoomId = `mention-test-room-${roomSeq++}`;
+  beginMentionExecution(chatRoomId, selfAgentId, chatRoomId);
   return {
     chatRoomId,
     selfAgentId,
@@ -58,7 +61,7 @@ test('登记有效目标并写入 buffer', async () => {
   assert.equal(res.ok, true);
   assert.deepEqual(res.accepted.map((a) => a.agentId).sort(), ['a1', 'a2']);
   assert.deepEqual(
-    peekMentions(ctx.chatRoomId, 'self').map((p) => p.agentId).sort(),
+    peekMentionState(ctx.chatRoomId).mentions.map((p) => p.agentId).sort(),
     ['a1', 'a2'],
   );
 });
@@ -81,7 +84,7 @@ test('拒绝未知助手与 @自己', async () => {
     ['self', 'unknown_agent'],
   );
   assert.deepEqual(
-    peekMentions(ctx.chatRoomId, 'self').map((p) => p.agentId),
+    peekMentionState(ctx.chatRoomId).mentions.map((p) => p.agentId),
     ['a1'],
   );
 });
@@ -98,31 +101,64 @@ test('多次调用并集去重，task 后写覆盖', async () => {
     ],
   });
 
-  const pending = peekMentions(ctx.chatRoomId, 'self');
+  const pending = peekMentionState(ctx.chatRoomId).mentions;
   assert.equal(pending.length, 2);
   const design = pending.find((p) => p.agentId === 'a1');
   assert.equal(design?.task, '终版');
 });
 
-test('takeMentions 返回完整 pending 并清空 buffer', async () => {
+test('takeMentionState 返回完整 pending 并清空当前 task buffer', async () => {
   const ctx = makeCtx([{ id: 'a1', name: '设计' }], 'self');
   const bundle = createMentionTools(ctx);
 
   await invoke(bundle, { mentions: [{ agent: '设计', task: '出视觉稿' }] });
 
-  assert.deepEqual(takeMentions(ctx.chatRoomId, 'self'), [
+  assert.deepEqual(takeMentionState(ctx.chatRoomId).mentions, [
     { agentId: 'a1', agentName: '设计', task: '出视觉稿' },
   ]);
-  assert.equal(peekMentions(ctx.chatRoomId, 'self').length, 0);
+  assert.equal(peekMentionState(ctx.chatRoomId).mentions.length, 0);
 });
 
 test('clearMentions 清空 buffer', async () => {
   const ctx = makeCtx([{ id: 'a1', name: '设计' }], 'self');
   const bundle = createMentionTools(ctx);
   await invoke(bundle, { mentions: [{ agent: '设计', task: 'x' }] });
-  assert.equal(peekMentions(ctx.chatRoomId, 'self').length, 1);
-  clearMentions(ctx.chatRoomId, 'self');
-  assert.equal(peekMentions(ctx.chatRoomId, 'self').length, 0);
+  assert.equal(peekMentionState(ctx.chatRoomId).mentions.length, 1);
+  clearMentions(ctx.chatRoomId);
+  assert.equal(peekMentionState(ctx.chatRoomId).mentions.length, 0);
+});
+
+test('intent 跟随当前 TaskQueue 执行保存', async () => {
+  const ctx = makeCtx([{ id: 'a1', name: '设计' }], 'self');
+  await invoke(createMentionTools(ctx), {
+    mentions: [{ agent: '设计', task: '出稿' }],
+    intent: '并行完成发布准备',
+  });
+  assert.equal(peekMentionState(ctx.chatRoomId).intent, '并行完成发布准备');
+  endMentionExecution(ctx.chatRoomId, 'self', ctx.chatRoomId);
+});
+
+test('连续 TaskQueue 执行不会互相读取或清空 mention buffer', async () => {
+  const chatRoomId = `mention-isolation-${roomSeq++}`;
+  const agents = new Map([['设计', { id: 'a1', name: '设计' }]]);
+  const ctx: MentionToolContext = {
+    chatRoomId,
+    selfAgentId: 'self',
+    resolveAgent: (name) => agents.get(name) ?? null,
+  };
+  beginMentionExecution(chatRoomId, 'self', 'task-1');
+  await invoke(createMentionTools(ctx), {
+    mentions: [{ agent: '设计', task: '第一轮' }],
+  });
+  beginMentionExecution(chatRoomId, 'self', 'task-2');
+  assert.equal(peekMentionState('task-2').mentions.length, 0);
+  assert.equal(peekMentionState('task-1').mentions[0]?.task, '第一轮');
+  endMentionExecution(chatRoomId, 'self', 'task-1');
+  await invoke(createMentionTools(ctx), {
+    mentions: [{ agent: '设计', task: '第二轮' }],
+  });
+  assert.equal(peekMentionState('task-2').mentions[0]?.task, '第二轮');
+  endMentionExecution(chatRoomId, 'self', 'task-2');
 });
 
 test('appendMentionBlock 生成行首 @名称 块', () => {
@@ -135,4 +171,13 @@ test('appendMentionBlock 生成行首 @名称 块', () => {
 
 test('appendMentionBlock 空 pending 原样返回', () => {
   assert.equal(appendMentionBlock('正文', []), '正文');
+});
+
+test('叶子 mention 块明确标记为建议', () => {
+  assert.equal(
+    appendMentionBlock('正文', [
+      { agentId: 'a1', agentName: '设计', task: '复核' },
+    ], { suggestion: true }),
+    '正文\n\n建议 @设计 复核',
+  );
 });

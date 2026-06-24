@@ -1,4 +1,5 @@
 import type { Message } from '../../../types/message.js';
+import type { HandoffContext, HandoffMention } from '../../../types/handoff.js';
 
 export type AgentTaskOutcome = 'completed' | 'failed' | 'cancelled';
 
@@ -8,6 +9,9 @@ export interface AgentTaskSettledEvent {
   agentId: string;
   status: AgentTaskOutcome;
   finalMessage?: Message;
+  handoffContext?: HandoffContext;
+  pendingMentions?: HandoffMention[];
+  mentionIntent?: string;
 }
 
 type AgentTaskSettledHandler = (

@@ -325,6 +325,7 @@ model TaskQueue {
   messageId      String
   messageContent String
   history        String? // JSON string of history messages at enqueue time
+  handoffContext String? // JSON HandoffContext for deterministic assistant handoff/recovery
   sessionDir     String? // 快速对话会话工作目录
   attachments    String? // JSON string of attachments (images with base64)
   status         String   @default("pending") // pending | executing | interrupted | cancelled

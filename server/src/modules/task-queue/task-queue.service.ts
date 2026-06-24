@@ -1,6 +1,7 @@
 import prisma from '../../lib/prisma.js';
 import type { TaskQueue } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import type { HandoffContext } from '../../types/handoff.js';
 
 export interface HistoryMessage {
   content: string;
@@ -29,6 +30,7 @@ export interface TaskQueueData {
   messageId: string;
   messageContent: string;
   history?: HistoryMessage[];
+  handoffContext?: HandoffContext;
   sessionDir?: string;  // 显式运行目录；快速对话未指定时留空，执行器使用群默认目录
   attachments?: AttachmentData[];  // 附件数据
 }
@@ -44,6 +46,7 @@ export const taskQueueService = {
         messageId: data.messageId,
         messageContent: data.messageContent,
         history: data.history ? JSON.stringify(data.history) : null,
+        handoffContext: data.handoffContext ? JSON.stringify(data.handoffContext) : null,
         sessionDir: data.sessionDir,
         attachments: data.attachments ? JSON.stringify(data.attachments) : null,
         status: 'pending',  // 新任务默认为 pending 状态
@@ -220,6 +223,33 @@ export const taskQueueService = {
     if (!task.history) return undefined;
     try {
       return JSON.parse(task.history);
+    } catch {
+      return undefined;
+    }
+  },
+
+  parseHandoffContext(task: TaskQueue): HandoffContext | undefined {
+    if (!task.handoffContext) return undefined;
+    try {
+      const parsed = JSON.parse(task.handoffContext) as Partial<HandoffContext>;
+      if (
+        typeof parsed.rootMessageId !== 'string' ||
+        !Array.isArray(parsed.lineage) ||
+        !parsed.lineage.every((item) => typeof item === 'string') ||
+        typeof parsed.depth !== 'number'
+      ) {
+        return undefined;
+      }
+      return {
+        rootMessageId: parsed.rootMessageId,
+        lineage: parsed.lineage,
+        depth: parsed.depth,
+        dispatchCount: typeof parsed.dispatchCount === 'number' ? parsed.dispatchCount : 0,
+        batchId: parsed.batchId,
+        convergenceOwnerId: parsed.convergenceOwnerId,
+        convergenceOwnerName: parsed.convergenceOwnerName,
+        isLeaf: parsed.isLeaf === true,
+      };
     } catch {
       return undefined;
     }

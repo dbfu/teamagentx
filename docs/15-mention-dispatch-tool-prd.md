@@ -1,6 +1,6 @@
 # 15. 助手 @ 派发改造 PRD：从「正则反推 prose」到「工具显式意图」
 
-> 状态：草案（待定稿）
+> 状态：**已实现**（2026-06-23）
 > 关联代码：`server/src/core/agent/agent-handler/handler.ts`、`server/src/core/agent/agent-handler/message-utils.ts`、`server/src/core/agent/tools/`、`apps/web/src/components/chat/mention-input.tsx`、`apps/web/src/lib/remark-mentions.ts`
 > 后续设计：`docs/13-unified-collaboration-mode-design.md`、`docs/14-agent-dispatch-flowcharts.md`
 
@@ -53,11 +53,14 @@
 - ✅ 轮末把派发意图拼成 `@助手名 task` 文本块追加到消息尾（纯展示，复用现有高亮）。
 - ✅ **保持 `@助手名` 纯文本格式不变**，所有显示用正则原样不动。
 
+实现位置：`mention.tools.ts` / `mention-buffer.ts` / `structured-handoff.service.ts` /
+`structured-handoff-runtime.ts` / `task-lifecycle.ts`。`HandoffContext` 随 `TaskQueue` 持久化；
+助手正文不再参与派发，协调器也不再重猜 `mention_agents` 已明确给出的目标。
+
 ### 2.3 非本期（后续迭代）
 
 - 人类侧 token（`@[名称](mention:agentId)`）方案。
-- 关闭 prose fallback 的「第二步」（彻底让 prose @ 失效）。
-- ACP 执行器（Claude SDK / Codex / 通用 ACP）的工具挂载适配。
+- 通用第三方 ACP 执行器适配（当前产品支持的 Claude / Codex 执行器均已挂载）。
 - 移动端（Flutter）展示与解析对齐。
 
 ---
@@ -73,6 +76,10 @@
 | 收敛 | 走向结论 + 收口 | 目标导向协议 + 「扇出者收口」 | 部分（收口者综合） |
 
 > 原「协调器」作为**猜意图的 LLM 仲裁者**退役（意图已由工具显式给出）；其**防环职责**改为机械规则；真正不可替代的只剩**并行分支收口**，且收口者就是「发起多 @ 的那个助手」，不再是独立实体。
+
+职责完成判定必须覆盖整个群任务，而不只是当前助手自己的分工：如果群规则、当前目标或成员职责定义了明确的下一阶段（例如开发完成后由测试助手独立验收），当前助手必须通过 `mention_agents` 交接。当前助手的自测、建议或正文说明不能替代专职助手的独立工作。
+
+processor 会先暂存业务助手的最终正文和流式正文，不立即落库或广播；待 mention buffer 确定后，再把“正文 + 交接展示块”作为同一条最终消息一次性发布。若首轮正常完成但没有登记任何 `mention_agents`，则在发布前复用同一助手会话执行**一次静默交接复核**：复核正文不进群，只保留工具登记结果；复核不会循环，默认 30 秒超时。仍无交接或复核失败时，才发布无交接块的正文并保留 180 秒 watchdog 异常救援，watchdog 不属于正常交接链路。
 
 ### 3.2 收敛规则（核心两条 + 两个兜底）
 

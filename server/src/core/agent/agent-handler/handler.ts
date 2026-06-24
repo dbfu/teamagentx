@@ -9,7 +9,6 @@ import { setGlobalCallbacks, setGlobalEmitReceivedMessage } from './status.js';
 import type { AgentStatus } from './status.js';
 import type { ToolCall } from '../executor.interface.js';
 import { parseKnownMentions } from './message-utils.js';
-import { takeMentions } from './mention-buffer.js';
 import { debugLog } from './debug.js';
 import { enqueueAgentTask } from './agent-dispatch.service.js';
 import { GROUP_COORDINATOR_ID } from '../system-assistant.constants.js';
@@ -33,12 +32,9 @@ import {
   markSerialUserIntervention,
 } from './serial-chain-tracker.js';
 import { setAgentTaskSettledHandler } from './task-lifecycle.js';
+import { settleStructuredHandoff } from './structured-handoff.service.js';
+import { markStructuredHandoffUserIntervention } from './structured-handoff-runtime.js';
 import { normalizeTriggerMode } from './trigger-mode.js';
-import {
-  resetCollaborationBudget,
-  registerHandoff,
-  notifyCollaborationBudgetExceeded,
-} from './collaboration-budget.js';
 
 // 消息接收事件接口
 interface ReceivedMessageEvent {
@@ -49,30 +45,6 @@ interface ReceivedMessageEvent {
     externalId: string;
     sourceMessageId?: string;
   };
-}
-
-export interface AssistantHandoffClassification {
-  kind: 'none' | 'single' | 'multiple';
-  names: string[];
-}
-
-/**
- * 业务助手消息的交接分类（智能协作模式）：
- * - none：无 @（或只 @ 了自己）→ 任务完成或交还用户，watchdog 兜底；
- * - single：恰好一个其他助手 → 快路径直接接力；
- * - multiple：≥2 个 → 歧义信号，升级协调器裁决，不再静默截断到第一个。
- */
-export function classifyAssistantHandoff(params: {
-  mentionNames: string[];
-  selfAgentId?: string | null;
-  agentIdByName: Map<string, string>;
-}): AssistantHandoffClassification {
-  const names = [...new Set(params.mentionNames)].filter((name) => {
-    const id = params.agentIdByName.get(name);
-    return !!id && id !== params.selfAgentId;
-  });
-  if (names.length === 0) return { kind: 'none', names };
-  return { kind: names.length === 1 ? 'single' : 'multiple', names };
 }
 
 // 唤起内置群调度助手裁决（智能协作模式的协调器介入点统一入口）
@@ -190,7 +162,10 @@ export function setupAIHandlers(
       event.finalMessage?.id ?? '',
       event.status,
     );
-    if (serialResult === 'none') return;
+    if (serialResult === 'none') {
+      await settleStructuredHandoff(event);
+      return;
+    }
     if (serialResult === 'advanced') return;
     if (serialResult === 'terminated') {
       debugLog('serialChainTerminated', {
@@ -279,8 +254,6 @@ export function setupAIHandlers(
       // 但如果房间刚刚被用户中断（手动停止任务），不触发 watchdog，防止群调度介入。
       if (message.isHuman) {
         resetStallWatchdog(chatRoomId);
-        // 用户介入 = 新协作回合：清零跳数/环路熔断计数
-        resetCollaborationBudget(chatRoomId);
         // 用户主动发言：终止卡住检测触发的「自动续跑」调度（含已派发的助手），让位于用户。
         abortWatchdogDispatch(chatRoomId);
         // 批次期间用户发言 = 用户接管：join 降级为静默收口，不再自动派发，
@@ -288,6 +261,7 @@ export function setupAIHandlers(
         if (!chatRoom?.isQuickChatRoom) {
           markBatchUserIntervention(chatRoomId);
           markSerialUserIntervention(chatRoomId);
+          markStructuredHandoffUserIntervention(chatRoomId);
         }
       } else if (
         isSmartMode &&
@@ -380,22 +354,16 @@ export function setupAIHandlers(
         // 'none'：不在批次里，继续正常流程
       }
 
-      // 解析 @mentions，判断是否有 @助手。
-      // - 人类消息：仍解析自由文本里的 @助手名（人类输入沿用纯文本格式）。
-      // - 助手消息：改由 mention_agents 工具登记的结构化 buffer 驱动，不再解析助手自由 prose，
-      //   从根上避免「交给 @UI设计 进行界面设计」这类叙述性文本被误派发。
-      //   （buffer 在 processor 任务开始时已清空，确保不会跨轮残留；助手须在产出收尾消息前调用工具。）
+      // 人类与内置协调器仍使用公开文本 @；业务助手的自由 prose 永远不参与派发。
+      // 业务助手通过 mention_agents 登记的结构化意图在 TaskQueue settled 后统一处理。
       const activeAgents = await agentService.findActive();
       const activeAgentByName = new Map(activeAgents.map((agent) => [agent.name, agent]));
       const isAssistantMessage =
         !message.isHuman &&
         !!message.agentId &&
         message.agentId !== GROUP_COORDINATOR_ID;
-      const pendingMentions = isAssistantMessage
-        ? takeMentions(chatRoomId, message.agentId!)
-        : [];
       const mentionNames = isAssistantMessage
-        ? pendingMentions.map((m) => m.agentName)
+        ? []
         : parseKnownMentions(
             message.content,
             activeAgents.map((agent) => agent.name),
@@ -453,78 +421,9 @@ export function setupAIHandlers(
         ? await agentService.findById(chatRoom.quickChatAgentId)
         : null;
 
-      // ===== 业务助手消息（智能协作模式；手动模式已在上方返回）=====
+      // 业务助手消息的结构化交接只在 TaskQueue settled 生命周期处理。
+      // 到达这里的正文（包括显示用 @ 块）永远不再触发任何助手。
       if (!message.isHuman && message.agentId !== GROUP_COORDINATOR_ID) {
-        const handoff = classifyAssistantHandoff({
-          mentionNames,
-          selfAgentId: message.agentId,
-          agentIdByName: new Map(activeAgents.map((agent) => [agent.name, agent.id])),
-        });
-
-        // 无 @（或仅 @自己 / @用户）：按交接协议视为任务完成或交还用户，watchdog 兜底
-        if (handoff.kind === 'none') {
-          return;
-        }
-
-        // 快速对话群没有协调器介入：保留旧行为，仅接力第一个被 @ 的助手
-        if (chatRoom?.isQuickChatRoom) {
-          const agent = activeAgentByName.get(handoff.names[0]);
-          if (agent && agent.isActive) {
-            await enqueueAgentTask(chatRoomId, message, agent, quickChatTargetAgent, { bridgeInfo });
-          }
-          return;
-        }
-
-        // 多 @ 歧义：不静默截断，升级协调器裁决（真并行 → 开批次；单一真交接 → 派一个；不明 → ask_owner）
-        if (handoff.kind === 'multiple') {
-          debugLog('assistantMultiMentionEscalated', {
-            chatRoomId,
-            messageId: message.id,
-            mentionNames: handoff.names,
-            pendingMentions,
-          });
-          await triggerCoordinatorAgentDispatch(chatRoomId, message, 'assistantMultiMention');
-          return;
-        }
-
-        const agent = activeAgentByName.get(handoff.names[0])!;
-        // 成员校验：被 @ 的助手不在群里 → 交协调器纠错，而非静默丢弃（系统级助手跳过成员检查）
-        if (agent.agentLevel !== 'system') {
-          const isMember = await chatRoomService.isAgentMember(chatRoomId, agent.id);
-          if (!isMember) {
-            debugLog('assistantInvalidMentionEscalated', {
-              chatRoomId,
-              messageId: message.id,
-              agentName: agent.name,
-              reason: 'notMember',
-            });
-            await triggerCoordinatorAgentDispatch(chatRoomId, message, 'assistantMentionNotMember');
-            return;
-          }
-        }
-
-        // 协作预算：跳数 / 环路熔断，超限则停止接力并 @群主 说明卡点
-        if (message.agentId) {
-          const verdict = registerHandoff(chatRoomId, message.agentId, agent.id);
-          if (verdict !== 'ok') {
-            await notifyCollaborationBudgetExceeded({
-              chatRoomId,
-              triggerMessage: message,
-              verdict,
-              sourceAgentName: message.agentName,
-              targetAgentName: agent.name,
-            });
-            return;
-          }
-        }
-
-        debugLog('assistantHandoffTrigger', {
-          chatRoomId,
-          agentId: agent.id,
-          agentName: agent.name,
-          triggerMessageId: message.id,
-        });
-        await enqueueAgentTask(chatRoomId, message, agent, null, { bridgeInfo });
         return;
       }
 
@@ -680,7 +579,7 @@ export function setupAIHandlers(
       // ===== 显式 @ 触发 =====
       const allowParallel = isSmartMode && !chatRoom?.isQuickChatRoom;
 
-      // 用户多 @：升级协调器裁决并行 / 串行（对称于助手侧 assistantMultiMention）。
+      // 用户多 @：仍由协调器裁决并行 / 串行；业务助手多目标交接走独立的结构化叶子批次。
       // 由协调器根据用户意图（"按顺序/依次/逐个"→串行，否则并行）决定执行方式与顺序，
       // 不再在 handler 里直接并行扇出。单 @ 仍走下方快路径直接派发，省一次协调器 LLM。
       if (message.isHuman && allowParallel && mentionNames.length > 1) {

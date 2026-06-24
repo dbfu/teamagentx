@@ -188,7 +188,7 @@ describe('ClaudeAgentSdkExecutor background idle finish', () => {
       assert.match(sdkSystemPrompt, /其他助手：HelperAgent/);
       assert.match(
         sdkSystemPrompt,
-        /当你需要给一个或多个助手发消息时/,
+        /必须调用 mention_agents/,
       );
       assert.doesNotMatch(sdkSystemPrompt, /Global memory applies\./);
       assert.doesNotMatch(fullMessage, /\[System Instructions\]/);
@@ -196,7 +196,7 @@ describe('ClaudeAgentSdkExecutor background idle finish', () => {
       assert.doesNotMatch(fullMessage, /\[群聊成员信息\]/);
       assert.doesNotMatch(
         fullMessage,
-        /当你需要给一个或多个助手发消息时/,
+        /必须调用 mention_agents/,
       );
       assert.doesNotMatch(fullMessage, /You are a careful coding assistant\./);
       assert.match(fullMessage, /\[Global Assistant Long-Term Memory\]/);

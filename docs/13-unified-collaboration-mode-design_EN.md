@@ -4,12 +4,17 @@
 > Date: proposed 2026-06-12 · landed 2026-06
 > Related: [11-agent-trigger-system_EN.md](./11-agent-trigger-system_EN.md) (the current trigger system, updated to this design)
 
+> 2026-06-23 evolution: business-agent handoffs now use structured `mention_agents`
+> dispatch. Descriptions below of prose-`@` fast paths, multi-`@` coordinator
+> adjudication, and the old two-breaker budget are retained only as historical design
+> background. Current behavior is defined by `15-mention-dispatch-tool-prd.md` and code.
+
 ## 0. Implementation status (updated 2026-06)
 
 This design has landed; chatroom user-facing modes have converged to **Smart Collaboration + Manual**. Key implementation locations:
 
 - Mode normalization: `server/src/core/agent/agent-handler/trigger-mode.ts` (`auto`/`coordinator` → normalized to `coordinator`, i.e. Smart Collaboration; `manual` unchanged)
-- Collaboration budget & triple breaker: `collaboration-budget.ts` (hops `AGENT_MAX_HANDOFF_HOPS`=20 / cycle `AGENT_HANDOFF_CYCLE_REPEAT_LIMIT`=3 / concurrency `AGENT_MAX_PARALLEL_DISPATCH`=3, see `config/index.ts`)
+- Structured assistant handoff and four guardrails: `structured-handoff.service.ts` / `structured-handoff-runtime.ts` (fan-out / depth / cascade budget / bounded revisits)
 - Parallel-batch fork-join: `parallel-batch-tracker.ts` (incl. user intervention during a batch, `markBatchUserIntervention`)
 - Stall fallback: `stall-watchdog.ts`; coordinator dispatch: `coordinator-dispatch.ts`, `internal-coordinator-agent.ts`
 - Unified message-flow entry: `agent-handler/handler.ts` (the 5 coordinator intervention points); handoff-protocol system prompt: `agent-system-prompt.ts`

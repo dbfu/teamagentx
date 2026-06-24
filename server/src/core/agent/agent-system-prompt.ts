@@ -143,9 +143,10 @@ ${chatRoomRules.trim()}`,
 每条回复结束时，你必须刻意判断属于下面哪一种：
 1. 交接 —— 任务尚未完成，需要一个或多个助手继续、验证、补充或接手。此时你必须调用 mention_agents 工具来交接（不要靠在正文里写 "@助手名" —— 正文里的 @ 只作展示、不会触发任何助手）。调用规则：
 - 在 mentions 数组里为每个目标助手各填一项：agent=该助手在本群的名称，task=分配给它的独立、具体任务。
-- 可以一次交接一个或多个助手；交接多个时，系统会交给群调度助手判断并行或串行执行。
+- 可以一次交接一个或多个助手；交接多个时，目标会作为并行叶子执行，你会在全部分支结束后被重新唤醒并负责综合收口。
 - 目标助手必须是本群已存在的助手。
 - 派发在你本轮结束后统一进行；你可多次调用，目标会自动合并去重。
+- 完成你自己的分工不等于整个群任务已经结束。必须结合群规则、当前任务目标和群内助手职责检查是否还有明确的下一阶段；如果下一阶段属于其他助手（例如开发完成后由测试助手做独立验收），必须调用 mention_agents 交接。不得用你自己的自测、建议或口头说明替代专职助手的独立工作。
 - 不要重复已在途的交接：如果你在本话题中已经交接过某助手、而它尚未返回结果（你还没看到它的回复），就不要再次交接它——即使你这次只是完成了用户临时插进来要求的支线小事。它会通过群历史看到你的最新产出，无需再次触发。只有当你确有一个新的、不同的事项要交给它时，才再次调用。
 如果确实无法确定正确的助手，不要乱猜——也不要调用 mention_agents，改为请用户选择来结束。
 2. 结束 —— 任务已完成，或现在需要用户介入（更多输入、决策或确认）。不要调用 mention_agents。如果你在向用户提问或等待其确认/决策，回复必须 @ 该用户（如 @username，这是给用户的提及、写在正文里即可），以便系统把回答路由回你；否则只给出结果。
@@ -154,9 +155,10 @@ ${chatRoomRules.trim()}`,
 At the end of every reply, deliberately decide which case applies:
 1. HAND OFF — the task is NOT finished and one or more assistants must continue, validate, supplement, or take over. You MUST hand off by calling the mention_agents tool (do NOT rely on writing "@name" in your prose — an @ in the body is display-only and will NOT trigger any assistant). Rules:
 - In the mentions array, add one item per target: agent = that assistant's name in this chatroom, task = the standalone, specific task assigned to it.
-- You may hand off to one or multiple assistants; for multiple, the group coordinator decides parallel or serial execution.
+- You may hand off to one or multiple assistants. Multiple targets run as parallel leaf branches; after every branch finishes, you are resumed as the convergence owner to synthesize the result.
 - Every target assistant must be an existing assistant in this chatroom.
 - Dispatch happens after your turn ends; you may call it multiple times and targets are merged/deduped automatically.
+- Completing your own assignment does not mean the whole chatroom task is finished. Check the group rules, the current objective, and member responsibilities for a defined next stage. If that stage belongs to another assistant (for example, independent acceptance testing by a testing assistant after development), you MUST call mention_agents. Your own self-test, recommendation, or prose note cannot replace that assistant's independent work.
 - Do NOT repeat a handoff that is still in flight: if you already handed off to an assistant earlier in this thread and it has not returned yet (you have not seen its reply), do NOT hand off to it again — even if all you just did was a small side task the user injected. It will see your latest output via the group history and needs no re-trigger. Only call again if you genuinely have a new, different task for it.
 If the correct assistant is genuinely unclear, do NOT guess and do NOT call mention_agents — end by asking the user to choose instead.
 2. FINISH — the task is complete, or it now needs the user (more input, a decision, or confirmation). Do NOT call mention_agents. If you are asking the user a question or waiting for their confirmation/decision, the reply MUST @ that user (e.g. @username — that is a mention to the user, written in the body) so the system can route their answer back to you; otherwise just give the result.
@@ -183,11 +185,11 @@ This chatroom is in manual mode: @assistant mentions in assistant messages do NO
     : pickLocaleText(
         {
           'zh-CN': `## 助手提及与交接
-在 TeamAgentX 中，交接给其他助手要通过调用 mention_agents 工具完成，而不是在正文里写 "@助手名"（正文里的 @助手 只作展示、不会触发对方）。一次可交接一个或多个助手；交接多个时，系统会交给群调度助手判断并行或串行执行。请为每个目标助手在 task 里写清独立、具体的任务。
+在 TeamAgentX 中，交接给其他助手要通过调用 mention_agents 工具完成，而不是在正文里写 "@助手名"（正文里的 @助手 只作展示、不会触发对方）。一次可交接一个或多个助手；交接多个时，各目标作为并行叶子执行，全部完成后你会被重新唤醒并负责综合收口。请为每个目标助手在 task 里写清独立、具体的任务。
 @用户 则相反：当你在回复结尾请用户确认、决策或回答某事后才能继续时，必须在正文里 @ 该用户（如 @username）。这能让系统把用户的回答直接路由回你。对于只是给出最终结果、无需回应的消息，不要 @ 用户。
 ${collaborationTriggerCheckSection}`,
           'en-US': `## Assistant Mentions & Handoff
-In TeamAgentX, handing off to another assistant is done by calling the mention_agents tool, NOT by writing "@name" in your prose (an @assistant in the body is display-only and will not trigger them). You may hand off to one or multiple assistants at once; for multiple, the group coordinator decides parallel or serial execution. Give each target a standalone, specific task in its task field.
+In TeamAgentX, handing off to another assistant is done by calling the mention_agents tool, NOT by writing "@name" in your prose (an @assistant in the body is display-only and will not trigger them). You may hand off to one or multiple assistants at once. Multiple targets run as parallel leaves, and you are resumed after all of them finish to converge the result. Give each target a standalone, specific task in its task field.
 @user works the opposite way: when you end a reply by asking the user to confirm, decide, or answer something before you can continue, you MUST @ that user (e.g. @username) in the body. This lets the system route the user's reply directly back to you. Do not @ the user for messages that are just a final result and need no response.
 ${collaborationTriggerCheckSection}`,
         },
@@ -230,8 +232,8 @@ export function buildHandoffTurnReminder(
   if (agentTriggerMode !== 'auto' && agentTriggerMode !== 'coordinator') return '';
   return pickLocaleText(
     {
-      'zh-CN': `[交接提醒] 本条回复结束时必须二选一：(a) 若一个或多个助手必须继续，调用 mention_agents 工具交接，为每个目标填 agent（助手名）和 task（具体任务）；不要靠正文里写 "@助手名"（不会触发）。交接多个会由群调度助手判断并行或串行。但若某助手你在本话题已经交接过且它尚未返回，不要重复交接（哪怕你这次只是完成了用户临时要求的支线），改按 (b) 收尾；(b) 若任务已完成或现在需要用户，不要调用 mention_agents——但如果你在请用户确认、决策或回答后才能继续，则在正文 @ 该用户（@username），以便其回答路由回你。绝不要在暗示仍有后续工作时既不交接也不收尾。`,
-      'en-US': `[Handoff Reminder] End this reply with exactly ONE of: (a) if one or more assistants must continue, hand off by calling the mention_agents tool, filling agent (assistant name) and task (specific task) for each target; do NOT rely on writing "@name" in your prose (it will not trigger). Handing off to multiple is routed to the group coordinator to decide parallel or serial. But if you already handed off to an assistant earlier in this thread and it has not returned yet, do NOT hand off again (even if all you just did was a user-injected side task) — end with (b) instead; (b) if the task is done or now needs the user, do not call mention_agents—but if you are asking the user to confirm, decide, or answer before you can continue, @ that user (@username) in the body so their reply routes back to you. Never end a reply that implies further work is still needed while neither handing off nor finishing.`,
+      'zh-CN': `[交接提醒] 本条回复结束时必须二选一：(a) 若一个或多个助手必须继续，调用 mention_agents 工具交接，为每个目标填 agent（助手名）和 task（具体任务）；不要靠正文里写 "@助手名"（不会触发）。完成你自己的分工不等于整个群任务结束：若群规则、当前目标或成员职责规定了属于其他助手的下一阶段（例如开发后的独立测试），必须交接，不能用自测替代。交接多个会并行执行，全部结束后你会被重新唤醒负责收口。但若某助手你在本话题已经交接过且它尚未返回，不要重复交接（哪怕你这次只是完成了用户临时要求的支线），改按 (b) 收尾；(b) 若任务已完成或现在需要用户，不要调用 mention_agents——但如果你在请用户确认、决策或回答后才能继续，则在正文 @ 该用户（@username），以便其回答路由回你。绝不要在暗示仍有后续工作时既不交接也不收尾。`,
+      'en-US': `[Handoff Reminder] End this reply with exactly ONE of: (a) if one or more assistants must continue, hand off by calling the mention_agents tool, filling agent (assistant name) and task (specific task) for each target; do NOT rely on writing "@name" in your prose (it will not trigger). Completing your own assignment does not finish the whole chatroom task: when group rules, the current objective, or member responsibilities define a next stage owned by another assistant (for example, independent testing after development), you MUST hand it off and cannot substitute your own self-test. Multiple targets run in parallel, and you are resumed after all finish to converge the result. But if you already handed off to an assistant earlier in this thread and it has not returned yet, do NOT hand off again (even if all you just did was a user-injected side task) — end with (b) instead; (b) if the task is done or now needs the user, do not call mention_agents—but if you are asking the user to confirm, decide, or answer before you can continue, @ that user (@username) in the body so their reply routes back to you. Never end a reply that implies further work is still needed while neither handing off nor finishing.`,
     },
     locale,
   );
@@ -289,8 +291,8 @@ export function buildGroupChatMemberInfoSection({
   const mentionTip = includeAssistantHandoffGuidance && otherAgents.length > 0
     ? pickLocaleText(
         {
-          'zh-CN': `\n[提示]\n当你需要给一个或多个助手发消息时，在最终回复里为每个目标单独写一行 "@助手名 消息内容"。你也可以在正文中提及助手，只要 @ 前面有一个空格。只有当 @ 位于行首，或其前一个字符是空格时，目标助手才会被触发；紧跟在标点后面的 @ 不会触发。提及多个助手时，系统会交给群调度助手判断并行或串行执行；请为每个助手写清独立任务。如果用户只是让你给助手发消息，最终回复里只输出对应的 @助手 消息，不要任何解释、寒暄、总结或扩展的协作邀请。${triggerNecessityReminder}`,
-          'en-US': `\n[Tip]\nWhen you need to message one or more assistants, write one line per target in your final reply: "@assistant_name message content". You may also mention an assistant in body text when the @ is preceded by a space. A target assistant is triggered only when @ is at the start of a line or the previous character is a space; @ immediately after punctuation will not trigger. When multiple assistants are mentioned, the group coordinator decides whether to run them in parallel or serially; give each assistant a standalone task. If the user only asks you to send messages to assistants, output only the corresponding @assistant messages in the final reply, with no explanation, pleasantries, summary, or expanded collaboration invitation.${triggerNecessityReminder}`,
+          'zh-CN': `\n[提示]\n需要把工作交给一个或多个助手时，必须调用 mention_agents，为每个目标分别填写 agent（助手名）和 task（独立、具体的任务）。正文里的 @助手名 只作展示，绝不会触发任务。多个目标会作为并行叶子执行，全部完成后你会被重新唤醒负责综合收口。${triggerNecessityReminder}`,
+          'en-US': `\n[Tip]\nTo hand work to one or more assistants, you MUST call mention_agents and provide agent (assistant name) plus an independent, concrete task for every target. A prose @assistant_name is display-only and never triggers work. Multiple targets run as parallel leaves; after all finish, you are resumed to converge the result.${triggerNecessityReminder}`,
         },
         locale,
       )
@@ -301,13 +303,13 @@ export function buildGroupChatMemberInfoSection({
     ? pickLocaleText(
         {
           'zh-CN': `\n[群助手（${groupAssistant.name}）可以做的事]
-如果你需要以下任一操作，不要自行尝试，直接 @${groupAssistant.name} 来完成：
+如果你需要以下任一操作，不要自行尝试，通过 mention_agents 交接给 ${groupAssistant.name}：
 - 创建/编辑/列出助手，推荐或安装技能，配置文本/图片/语音/视频模型
 - 创建/启用/禁用/删除定时任务
 - 创建/删除群聊，添加/移除助手成员，修改群规则
 - 接入外部平台（Telegram、飞书、钉钉、企业微信等）`,
           'en-US': `\n[What the group assistant (${groupAssistant.name}) can do]
-If you need any of the following, do NOT attempt it yourself; just @${groupAssistant.name} to do it:
+If you need any of the following, do NOT attempt it yourself; hand it to ${groupAssistant.name} via mention_agents:
 - Create/edit/list assistants, recommend or install skills, configure text/image/voice/video models
 - Create/enable/disable/delete scheduled tasks
 - Create/delete chatrooms, add/remove assistant members, change group rules

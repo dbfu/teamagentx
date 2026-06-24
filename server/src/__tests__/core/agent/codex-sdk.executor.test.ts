@@ -491,7 +491,7 @@ describe('Codex SDK Executor message context', () => {
       assert.match(developerInstructions, /其他助手：HelperAgent/);
       assert.match(
         developerInstructions,
-        /当你需要给一个或多个助手发消息时/,
+        /必须调用 mention_agents/,
       );
       assert.doesNotMatch(developerInstructions, /Global memory applies\./);
       assert.doesNotMatch(fullMessage, /\[System Instructions\]/);

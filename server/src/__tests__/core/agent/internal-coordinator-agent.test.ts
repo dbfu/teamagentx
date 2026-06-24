@@ -165,6 +165,7 @@ describe('internal coordinator no-dispatch handling', () => {
       messageId: 'message-1',
       messageContent: '收到',
       history: null,
+      handoffContext: null,
       sessionDir: null,
       attachments: null,
       status: 'pending',
