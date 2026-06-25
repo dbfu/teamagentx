@@ -301,7 +301,7 @@ Since 2026-06, system agents are consolidated from "several separate @agents" in
 | `AGENT_COORDINATOR_LLM_TIMEOUT_MS` | `120000` | Coordinator LLM decision timeout for the first attempt; retry attempts use 2x timeout |
 | `AGENT_COORDINATOR_LLM_RETRY_COUNT` | `1` | Coordinator LLM retry count; after the primary model fails, configured fallback models are tried in order |
 | `AGENT_EXECUTION_NO_ACTIVITY_TIMEOUT_MS` | `90000` | Agent no-activity retry timeout (0 disables) |
-| `AGENT_HANDOFF_FANOUT_MAX` | `3` | Structured-handoff fan-out cap |
+| `AGENT_HANDOFF_FANOUT_MAX` | `20` | Structured-handoff fan-out cap |
 | `AGENT_HANDOFF_DEPTH_MAX` | `100` | Structured-handoff lineage depth cap |
 | `AGENT_HANDOFF_BUDGET_MAX` | `20` | Total cascade dispatch budget per root message |
 | `AGENT_HANDOFF_REVISIT_MAX` | `1` | Per-agent revisit cap within one lineage |

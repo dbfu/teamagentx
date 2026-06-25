@@ -219,7 +219,13 @@ export function CreateGroupModal({ isOpen, onClose, onSuccess, ownerId }: Create
                       key={agent.id}
                       className="flex items-center gap-2 rounded-lg border border-input bg-background py-1.5 pl-2 pr-1"
                     >
-                      <AgentAvatarImage avatar={agent.avatar} className="size-6" />
+                      <AgentAvatarImage
+                        avatar={agent.avatar}
+                        agentId={agent.id}
+                        agentName={agent.name}
+                        agentLevel={agent.agentLevel}
+                        className="size-6"
+                      />
                       <span className="text-sm text-foreground">{agent.name}</span>
                       <button
                         type="button"

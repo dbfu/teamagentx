@@ -579,7 +579,13 @@ function TaskBoardCard({
       }}
     >
       <div className="mb-2 flex items-center gap-2">
-        <AgentAvatarImage avatar={agent?.avatar ?? null} className="size-6 shrink-0" />
+        <AgentAvatarImage
+          avatar={agent?.avatar ?? null}
+          agentId={agent?.id ?? task.agentId}
+          agentName={agent?.name ?? task.agentName}
+          agentLevel={agent?.agentLevel}
+          className="size-6 shrink-0"
+        />
         <div className="min-w-0 flex-1">
           <div className="truncate text-xs font-medium text-foreground">
             {agent?.name || task.agentName}

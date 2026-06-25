@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { createRequire } from 'module';
+import { findHostPathCodexBinary } from './codex-sdk.executor.js';
 
 // Local agent tool definitions. Only Claude and Codex are currently supported.
 export const ACP_TOOLS = [
@@ -233,6 +234,26 @@ function checkHostCliInstalled(checkCommand: string): { installed: boolean; vers
   }
 }
 
+/**
+ * 检测宿主机 CLI 是否「真的可用」。
+ *
+ * 对 codex：`codex --version` 在 Windows 上会经 shell 命中 `codex.cmd` shim 而通过，
+ * 但运行时是绕过 shell 直接 spawn 原生 `codex.exe`（见 codex-sdk.executor）。若 shim
+ * 解析不到可 spawn 的二进制，运行时必然失败。这里复用运行时同一套解析逻辑做二次确认，
+ * 避免「面板显示 CLI 已检测到、一执行就报 Unable to locate Codex CLI binaries」的假阳性——
+ * 解析不到时如实判 CLI 不可用，使 preferredRuntime 自动回退到应用本地 SDK。
+ */
+function checkHostCliUsable(toolId: string, checkCommand: string): { installed: boolean; version?: string } {
+  const result = checkHostCliInstalled(checkCommand);
+  if (!result.installed) return result;
+
+  if (toolId === 'codex' && !findHostPathCodexBinary()) {
+    return { installed: false };
+  }
+
+  return result;
+}
+
 function readPackageVersion(packageDir: string): string | undefined {
   try {
     const packageJsonPath = path.join(packageDir, 'package.json');
@@ -327,7 +348,7 @@ export function checkAllAcpTools(): AcpToolInfo[] {
     }
 
     const sdk = checkAppLocalSdkInstalled(tool.id);
-    const cli = checkHostCliInstalled(checkCmd);
+    const cli = checkHostCliUsable(tool.id, checkCmd);
     const installed = sdk.installed || cli.installed;
     return {
       id: tool.id,

@@ -286,6 +286,54 @@ export function RecordDetailPanel({ selectedRecord }: RecordDetailPanelProps) {
               )
             }
 
+            if (event.type === 'model' && event.data.type === 'handoff_audit') {
+              const auditStatus = event.data.status
+              const auditOutput = (typeof event.data.output === 'object' && event.data.output
+                ? event.data.output
+                : {}) as { registeredMentions?: number }
+              const registered = Number(auditOutput.registeredMentions ?? 0)
+              return (
+                <Collapsible key={`handoff-audit-${i}`} className={cn(
+                  'rounded border text-xs',
+                  auditStatus === 'error' ? 'border-red-500/30 bg-red-500/10' :
+                    auditStatus === 'completed' ? 'border-violet-500/30 bg-violet-500/10' :
+                      'border-sky-500/30 bg-sky-500/10'
+                )}>
+                  <CollapsibleTrigger asChild>
+                    <div className="group flex items-center gap-2 p-2 cursor-pointer hover:opacity-80 flex-nowrap">
+                      <CollapsibleStateIcon className="shrink-0" />
+                      <span className="inline-flex shrink-0 items-center rounded bg-violet-500/20 px-2 py-0.5 font-medium text-violet-700 dark:text-violet-400">
+                        🔁 {t('execution.handoffAudit')}
+                      </span>
+                      {auditStatus === 'in_progress' && (
+                        <span className="whitespace-nowrap text-sky-600 dark:text-sky-400">{t('execution.running')}</span>
+                      )}
+                      {auditStatus === 'completed' && (
+                        <span className="truncate text-violet-600 dark:text-violet-400">
+                          {registered > 0
+                            ? t('execution.handoffAuditRegistered', { count: registered })
+                            : t('execution.handoffAuditNone')}
+                        </span>
+                      )}
+                      {auditStatus === 'error' && (
+                        <span className="whitespace-nowrap text-red-600 dark:text-red-400">✗ {t('common.error')}</span>
+                      )}
+                    </div>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className="space-y-1 px-3 pb-3 text-xs text-muted-foreground">
+                      <div>{t('execution.handoffAuditDesc')}</div>
+                      {event.data.error && (
+                        <div className="whitespace-pre-wrap break-all rounded bg-red-500/10 p-2 text-red-600 dark:text-red-400">
+                          {event.data.error}
+                        </div>
+                      )}
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              )
+            }
+
             if (event.type === 'model') {
               const isSwitch = event.data.type === 'switch'
               const modelStatus = event.data.status

@@ -4,6 +4,8 @@ import { Star } from 'lucide-react'
 
 interface AgentAvatarProps {
   avatar: string | null
+  agentId?: string | null
+  agentName?: string | null
   avatarColor?: string | null
   agentLevel?: 'normal' | 'system'
   size?: 'sm' | 'md' | 'lg' | 'xl'
@@ -34,6 +36,8 @@ const iconSizeClasses = {
 
 export function AgentAvatar({
   avatar,
+  agentId,
+  agentName,
   agentLevel = 'normal',
   size = 'md',
   className,
@@ -43,6 +47,9 @@ export function AgentAvatar({
     <div className={cn('relative shrink-0', sizeClasses[size], className)}>
       <AgentAvatarImage
         avatar={avatar}
+        agentId={agentId}
+        agentName={agentName}
+        agentLevel={agentLevel}
         className="size-full"
       />
       {/* 系统助手标识 - 橙色星标 */}

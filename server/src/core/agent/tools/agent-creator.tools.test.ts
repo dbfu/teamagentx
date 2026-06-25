@@ -268,6 +268,83 @@ test('room-aware create_agent adds new agent to current room with group history 
   assert.equal(createdAgent?.acpTool, 'claude');
 });
 
+test('room-aware create_agent adds new agent to current room when group history option is omitted', async () => {
+  const chatRoom = await prisma.chatRoom.create({
+    data: {
+      id: 'agent-creator-tool-test-create-room-default-membership',
+      name: 'Agent Creator Tool Test Create Room Default Membership',
+      updatedAt: new Date(),
+    },
+  });
+
+  const tool = createAgentCreatorTools(chatRoom.id).find((item) => item.name === 'create_agent') as
+    | { invoke: (input: Record<string, unknown>) => Promise<unknown> }
+    | undefined;
+  assert.ok(tool);
+  const result = await tool.invoke({
+    name: 'Agent Creator Tool Test Create Room Default Membership Agent',
+    description: 'test description',
+    prompt: 'test prompt',
+  });
+  const parsed = JSON.parse(String(result));
+
+  assert.equal(parsed.success, true);
+  assert.deepEqual(parsed.roomMembership, {
+    chatRoomId: chatRoom.id,
+    injectGroupHistory: true,
+  });
+
+  const roomAgent = await prisma.chatRoomAgent.findUnique({
+    where: {
+      chatRoomId_agentId: {
+        chatRoomId: chatRoom.id,
+        agentId: parsed.agent.id,
+      },
+    },
+  });
+
+  assert.equal(roomAgent?.injectGroupHistory, true);
+});
+
+test('room-aware create_agent still adds new agent when group history access is disabled', async () => {
+  const chatRoom = await prisma.chatRoom.create({
+    data: {
+      id: 'agent-creator-tool-test-create-room-no-history',
+      name: 'Agent Creator Tool Test Create Room No History',
+      updatedAt: new Date(),
+    },
+  });
+
+  const tool = createAgentCreatorTools(chatRoom.id).find((item) => item.name === 'create_agent') as
+    | { invoke: (input: Record<string, unknown>) => Promise<unknown> }
+    | undefined;
+  assert.ok(tool);
+  const result = await tool.invoke({
+    name: 'Agent Creator Tool Test Create Room No History Agent',
+    description: 'test description',
+    prompt: 'test prompt',
+    injectGroupHistory: false,
+  });
+  const parsed = JSON.parse(String(result));
+
+  assert.equal(parsed.success, true);
+  assert.deepEqual(parsed.roomMembership, {
+    chatRoomId: chatRoom.id,
+    injectGroupHistory: false,
+  });
+
+  const roomAgent = await prisma.chatRoomAgent.findUnique({
+    where: {
+      chatRoomId_agentId: {
+        chatRoomId: chatRoom.id,
+        agentId: parsed.agent.id,
+      },
+    },
+  });
+
+  assert.equal(roomAgent?.injectGroupHistory, false);
+});
+
 test('create_agents binds the default OpenAI model and infers Codex', async () => {
   await prisma.llmProvider.updateMany({
     where: { modelType: 'text' },

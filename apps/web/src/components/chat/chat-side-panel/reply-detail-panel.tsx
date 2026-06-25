@@ -115,6 +115,8 @@ export function ReplyDetailPanel({ selectedReplyMessage, replies, mentionAgents 
           ) : (
             <AgentAvatarImage
               avatar={selectedReplyMessage.avatar ?? selectedReplyMessage.agent?.avatar ?? null}
+              agentId={selectedReplyMessage.agentId ?? selectedReplyMessage.agent?.id}
+              agentName={selectedReplyMessage.agent?.name ?? originalSenderName}
               className="size-8 shrink-0"
             />
           )}
@@ -160,6 +162,8 @@ export function ReplyDetailPanel({ selectedReplyMessage, replies, mentionAgents 
                 ) : (
                   <AgentAvatarImage
                     avatar={reply.avatar ?? reply.agent?.avatar ?? null}
+                    agentId={reply.agentId ?? reply.agent?.id}
+                    agentName={reply.agent?.name ?? replySenderName}
                     className="size-8 shrink-0"
                   />
                 )}

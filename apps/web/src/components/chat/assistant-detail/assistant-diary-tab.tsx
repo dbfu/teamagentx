@@ -143,6 +143,8 @@ export function AssistantDiaryTab({ agent }: AssistantDiaryTabProps) {
             <div className="mb-4 flex shrink-0 items-center gap-3 border-b border-border pb-4">
               <AgentAvatar
                 avatar={agent.avatar}
+                agentId={agent.id}
+                agentName={agent.name}
                 avatarColor={agent.avatarColor}
                 agentLevel={agent.agentLevel}
                 size="md"

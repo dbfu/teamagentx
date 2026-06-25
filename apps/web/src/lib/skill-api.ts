@@ -101,6 +101,7 @@ export interface ExternalSkill {
   sourceTool: string;    // 工具名称：claude | codex | openclaw | agent
   sourcePath: string;    // 完整路径
   existsInShared: boolean; // 是否已存在于共享目录
+  collection?: string;   // 所属合集名（如 superpowers 等插件的嵌套技能），顶层技能为空
 }
 
 // 外部技能导入结果

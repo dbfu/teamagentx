@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties, type HTMLAttributes } from 'react'
 import { ChatRoom, ChatRoomAgent, chatRoomApi, agentApi, Agent, AgentSpeechConfig, type AgentThinkingMode } from '@/lib/agent-api'
 import { cn } from '@/lib/utils'
-import { Bot, Crown, Plus, Trash2, Star, AtSign } from 'lucide-react'
+import { Bot, Crown, Plus, Trash2, Star, AtSign, Users } from 'lucide-react'
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -155,6 +155,8 @@ function AgentItem({
       {info.type === 'agent' ? (
         <AgentAvatar
           avatar={info.avatar ?? null}
+          agentId={info.id}
+          agentName={info.name}
           avatarColor={info.avatarColor}
           agentLevel={info.agentLevel as 'normal' | 'system' | undefined}
           size="sm"
@@ -245,20 +247,22 @@ export function AgentsPanel({ chatRoom, agentStatuses, onSelectAgent, onAgentSet
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
 
-  // 分类助手：群主、系统助手、普通助手
+  // 分类成员：人类用户（群主/成员）、系统助手、普通助手
   const categorizeAgents = (chatRoomAgents: ChatRoomAgent[] | undefined) => {
-    const owners: { info: AgentInfo; roomAgent: ChatRoomAgent }[] = []
+    const users: { info: AgentInfo; roomAgent: ChatRoomAgent }[] = []
     const systemAgents: { info: AgentInfo; roomAgent: ChatRoomAgent }[] = []
     const normalAgents: { info: AgentInfo; roomAgent: ChatRoomAgent }[] = []
 
-    if (!chatRoomAgents) return { owners, systemAgents, normalAgents }
+    if (!chatRoomAgents) return { users, systemAgents, normalAgents }
 
     for (const roomAgent of chatRoomAgents) {
       const info = getAgentInfo(roomAgent, t)
       if (!info) continue
 
-      if (info.type === 'user' && info.role === 'OWNER') {
-        owners.push({ info, roomAgent })
+      // 人类用户（无论群主还是普通成员）都归到顶部用户分组，
+      // 不与 AI 助手混排；具体角色由每行的描述（群主/成员）区分。
+      if (info.type === 'user') {
+        users.push({ info, roomAgent })
       } else if (info.type === 'agent' && info.agentLevel === 'system') {
         systemAgents.push({ info, roomAgent })
       } else {
@@ -266,10 +270,10 @@ export function AgentsPanel({ chatRoom, agentStatuses, onSelectAgent, onAgentSet
       }
     }
 
-    return { owners, systemAgents, normalAgents }
+    return { users, systemAgents, normalAgents }
   }
 
-  const { owners, systemAgents, normalAgents } = categorizeAgents(chatRoom.chatRoomAgents)
+  const { users, systemAgents, normalAgents } = categorizeAgents(chatRoom.chatRoomAgents)
   const sortableNormalAgents = normalAgents.filter(({ info }) => (
     info.type === 'agent' && info.agentLevel !== 'system'
   ))
@@ -498,12 +502,12 @@ export function AgentsPanel({ chatRoom, agentStatuses, onSelectAgent, onAgentSet
     )
   }
 
-  const totalMembers = owners.length + systemAgents.length + normalAgents.length
+  const totalMembers = users.length + systemAgents.length + normalAgents.length
 
   return (
     <>
       {/* 分组展示 */}
-      {renderGroup(t('chat.agentsPanel.ownerGroup'), owners, <Crown className="size-3.5 text-yellow-500" />)}
+      {renderGroup(t('chat.agentsPanel.usersGroup'), users, <Users className="size-3.5 text-blue-500" />)}
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={sortableNormalAgentIds} strategy={verticalListSortingStrategy}>
           {renderGroup(t('chat.agentsPanel.normalAgentsGroup'), orderedNormalAgents, <Bot className="size-3.5 text-primary" />, true)}

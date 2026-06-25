@@ -14,6 +14,7 @@ import {
   peekMentionState,
   takeMentionState,
   clearMentions,
+  recordMentions,
 } from '../agent-handler/mention-buffer.js';
 
 let roomSeq = 0;
@@ -105,6 +106,59 @@ test('多次调用并集去重，task 后写覆盖', async () => {
   assert.equal(pending.length, 2);
   const design = pending.find((p) => p.agentId === 'a1');
   assert.equal(design?.task, '终版');
+});
+
+test('单次调用记录为一个批次，默认 mode=parallel', async () => {
+  const ctx = makeCtx([{ id: 'a1', name: '设计' }, { id: 'a2', name: '前端' }], 'self');
+  const bundle = createMentionTools(ctx);
+
+  await invoke(bundle, {
+    mentions: [{ agent: '设计', task: 'x' }, { agent: '前端', task: 'y' }],
+  });
+
+  const state = peekMentionState(ctx.chatRoomId);
+  assert.equal(state.batches.length, 1);
+  assert.equal(state.batches[0]?.mode, 'parallel');
+  assert.deepEqual(state.batches[0]?.mentions.map((m) => m.agentId), ['a1', 'a2']);
+});
+
+test('mode=serial 写入批次', async () => {
+  const ctx = makeCtx([{ id: 'a1', name: '设计' }, { id: 'a2', name: '前端' }], 'self');
+
+  await invoke(createMentionTools(ctx), {
+    mentions: [{ agent: '设计', task: 'x' }, { agent: '前端', task: 'y' }],
+    mode: 'serial',
+  });
+
+  const state = peekMentionState(ctx.chatRoomId);
+  assert.equal(state.batches.length, 1);
+  assert.equal(state.batches[0]?.mode, 'serial');
+});
+
+test('多次调用保留为多个有序批次，拍平并集仍去重', async () => {
+  const ctx = makeCtx([{ id: 'a1', name: '设计' }, { id: 'a2', name: '前端' }], 'self');
+  const bundle = createMentionTools(ctx);
+
+  await invoke(bundle, { mentions: [{ agent: '设计', task: '1' }] });
+  await invoke(bundle, { mentions: [{ agent: '前端', task: '2' }] });
+
+  const state = peekMentionState(ctx.chatRoomId);
+  assert.equal(state.batches.length, 2);
+  assert.deepEqual(state.batches[0]?.mentions.map((m) => m.agentId), ['a1']);
+  assert.deepEqual(state.batches[1]?.mentions.map((m) => m.agentId), ['a2']);
+  assert.deepEqual(state.mentions.map((m) => m.agentId).sort(), ['a1', 'a2']);
+});
+
+test('只有 intent 无目标的登记不产生新批次', async () => {
+  const ctx = makeCtx([{ id: 'a1', name: '设计' }], 'self');
+  await invoke(createMentionTools(ctx), { mentions: [{ agent: '设计', task: 'x' }] });
+
+  // buffer 层直接登记一个无目标、仅 intent 的调用（工具 schema 要求 min(1)，此路径走内部）。
+  recordMentions(ctx.chatRoomId, 'self', [], 'parallel', '只更新意图');
+
+  const state = peekMentionState(ctx.chatRoomId);
+  assert.equal(state.batches.length, 1);
+  assert.equal(state.intent, '只更新意图');
 });
 
 test('takeMentionState 返回完整 pending 并清空当前 task buffer', async () => {

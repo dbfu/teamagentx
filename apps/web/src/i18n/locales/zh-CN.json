@@ -737,6 +737,7 @@
       "createdAndAdded": "助手已创建并添加到群聊",
       "createdButAddFailed": "助手已创建，但添加到群聊失败",
       "ownerGroup": "群主",
+      "usersGroup": "用户",
       "normalAgentsGroup": "普通助手",
       "systemAgentsGroup": "系统助手",
       "noMembers": "暂无群成员",
@@ -1424,6 +1425,7 @@
     "copyImport": "复制导入",
     "copyImportHint": "完全复制技能文件到本地，独立管理，不受外部更新影响。",
     "alreadyImported": "已导入",
+    "fromCollection": "来自 {{name}}",
     "importFailed": "导入失败"
   },
   "settings": {
@@ -2218,7 +2220,11 @@
     "errorChanged": "第二次错误与第一次不同，停止切换并标记失败。",
     "executionRecords": "执行记录",
     "viewDetails": "查看详情",
-    "refreshRecords": "刷新记录"
+    "refreshRecords": "刷新记录",
+    "handoffAudit": "交接复核",
+    "handoffAuditDesc": "本轮未登记交接，系统让该助手再做一次最终交接检查：若仍需其他助手继续则补登记交接，否则确认任务完成。",
+    "handoffAuditNone": "已复核 · 判定任务完成，无需交接",
+    "handoffAuditRegistered": "已复核 · 补登记 {{count}} 个交接"
   },
   "taskQueue": {
     "title": "任务队列",

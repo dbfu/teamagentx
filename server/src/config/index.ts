@@ -116,7 +116,7 @@ export const config = {
     handoffAuditEnabled: process.env.AGENT_HANDOFF_AUDIT_ENABLED !== 'false',
     handoffAuditTimeoutMs: parseInt(process.env.AGENT_HANDOFF_AUDIT_TIMEOUT_MS || '30000', 10),
     // 结构化助手交接护栏：分别限制单次扇出、单链深度、整条级联派发量和单链重访次数。
-    handoffFanoutMax: parseInt(process.env.AGENT_HANDOFF_FANOUT_MAX || '3', 10),
+    handoffFanoutMax: parseInt(process.env.AGENT_HANDOFF_FANOUT_MAX || '20', 10),
     handoffDepthMax: parseInt(process.env.AGENT_HANDOFF_DEPTH_MAX || '100', 10),
     handoffBudgetMax: parseInt(process.env.AGENT_HANDOFF_BUDGET_MAX || '20', 10),
     // 单链同一助手的重访上限。注意：这是"枢纽迭代协作"（如产品经理反复派活/收口）与

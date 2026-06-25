@@ -266,6 +266,8 @@ export function AgentCard({
       <div className="flex items-start gap-3">
         <AgentAvatar
           avatar={assistant.avatar}
+          agentId={assistant.id}
+          agentName={assistant.name}
           avatarColor={assistant.avatarColor}
           agentLevel={assistant.agentLevel}
           size="lg"

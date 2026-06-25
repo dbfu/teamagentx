@@ -322,7 +322,13 @@ export function GlobalSearchModal({ open, onClose, chatRooms }: GlobalSearchModa
                   onClick={() => openAgent(agent.id)}
                   className="flex w-full min-w-0 items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-accent"
                 >
-                  <AgentAvatarImage avatar={agent.avatar ?? null} className="size-10 rounded-full" />
+                  <AgentAvatarImage
+                    avatar={agent.avatar ?? null}
+                    agentId={agent.id}
+                    agentName={agent.name}
+                    agentLevel={agent.agentLevel}
+                    className="size-10 rounded-full"
+                  />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium text-foreground">{agent.name}</div>
                     <div className="truncate text-xs text-muted-foreground">

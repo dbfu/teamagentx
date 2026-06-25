@@ -88,6 +88,7 @@ export function CreateCronTaskModal({
       name: a.agent!.name,
       avatar: a.agent!.avatar,
       avatarColor: a.agent!.avatarColor,
+      agentLevel: a.agent!.agentLevel,
     }));
 
   // 是否选中了"所有助手"
@@ -346,7 +347,13 @@ export function CreateCronTaskModal({
                         )}>
                           {isSelected && <Check className="size-3" />}
                         </div>
-                        <AgentAvatarImage avatar={agent.avatar ?? null} className="size-6" />
+                        <AgentAvatarImage
+                          avatar={agent.avatar ?? null}
+                          agentId={agent.id}
+                          agentName={agent.name}
+                          agentLevel={agent.agentLevel}
+                          className="size-6"
+                        />
                         <span className="truncate">{agent.name}</span>
                       </button>
                     );

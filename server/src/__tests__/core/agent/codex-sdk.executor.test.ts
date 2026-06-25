@@ -331,7 +331,7 @@ describe('Codex SDK Executor session transcript extraction', () => {
 });
 
 describe('Codex SDK Executor builtin MCP servers', () => {
-  test('图片生成开启时注入 tax，并在 GitNexus 可用时注入 gitnexus', () => {
+  test('图片生成开启时注入 tax/teamagentx，并在 GitNexus 可用时注入 gitnexus', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-codex-mcp-'));
     const repoDir = path.join(tmpDir, 'repo');
     const binDir = path.join(tmpDir, 'bin');
@@ -366,6 +366,7 @@ describe('Codex SDK Executor builtin MCP servers', () => {
       assert.deepStrictEqual(mcpServers.gitnexus.args, ['mcp']);
       assert.strictEqual(mcpServers.tax.command, process.execPath);
       assert.deepStrictEqual(mcpServers.tax.args, ['/tmp/teamagentx-agent-tools-mcp.mjs']);
+      assert.deepStrictEqual(mcpServers.teamagentx, mcpServers.tax);
       assert.strictEqual(mcpServers.tax.env.TEAMAGENTX_SOURCE_AGENT_ID, 'agent-1');
       assert.strictEqual(
         mcpServers.tax.env.TEAMAGENTX_GENERATE_IMAGE_ENDPOINT,
@@ -416,6 +417,8 @@ describe('Codex SDK Executor builtin MCP servers', () => {
       assert.match(script, /search_room_messages/);
       assert.match(script, /get_room_message_detail/);
       assert.match(script, /buildRoomHistoryTools/);
+      assert.match(script, /capabilities: \{ tools: \{\}, resources: \{\} \}/);
+      assert.match(script, /method === "resources\/list"/);
     } finally {
       fs.rmSync(workDir, { recursive: true, force: true });
       fs.rmSync(
@@ -438,6 +441,7 @@ describe('Codex SDK Executor builtin MCP servers', () => {
 
       assert.strictEqual(mcpServers.gitnexus, undefined);
       assert.strictEqual(mcpServers.tax, undefined);
+      assert.strictEqual(mcpServers.teamagentx, undefined);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

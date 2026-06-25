@@ -146,7 +146,7 @@ agentTriggerMode = 'manual'
 
 | 熔断器 | 默认值 | 环境变量 | 触发后行为 |
 |--------|--------|---------|-----------|
-| 单次扇出 | 3 | `AGENT_HANDOFF_FANOUT_MAX` | 整次不派发，ask_owner |
+| 单次扇出 | 20 | `AGENT_HANDOFF_FANOUT_MAX` | 整次不派发，ask_owner |
 | 血缘 depth | 100 | `AGENT_HANDOFF_DEPTH_MAX` | 不触发下一跳，ask_owner |
 | 整棵级联总派发数 | 20 | `AGENT_HANDOFF_BUDGET_MAX` | 不触发下一跳，ask_owner |
 | 同一助手单链重访次数 | 1 | `AGENT_HANDOFF_REVISIT_MAX` | 不触发下一跳，ask_owner |

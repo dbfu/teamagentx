@@ -440,7 +440,8 @@ export function getGroupAssistantDefinition(
   return {
     id: GROUP_ASSISTANT_ID,
     name: '群助手',
-    avatar: 'Bot',
+    // 群助手头像写死为产品 Logo，前端 agent-avatars 识别该哨兵值渲染 app-logo.png
+    avatar: 'system-logo',
     avatarColor: 'bg-blue-500',
     description:
       '统一管理群聊系统能力：助手、技能、定时任务、群聊设置和外部平台接入。',

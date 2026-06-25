@@ -9,6 +9,7 @@ interface Agent {
   name: string
   avatar?: string | null
   avatarColor?: string | null
+  agentLevel?: string | null
   description?: string | null
 }
 
@@ -908,7 +909,13 @@ export const MentionInput = forwardRef<MentionInputRef, MentionInputProps>(funct
               )}
               onClick={() => handleSelectMention(agent)}
             >
-              <AgentAvatarImage avatar={agent.avatar ?? null} className="size-6" />
+              <AgentAvatarImage
+                avatar={agent.avatar ?? null}
+                agentId={agent.id}
+                agentName={agent.name}
+                agentLevel={agent.agentLevel}
+                className="size-6"
+              />
               <span className="text-sm">{agent.name}</span>
               <Bot className="ml-auto size-3 text-primary" />
             </div>

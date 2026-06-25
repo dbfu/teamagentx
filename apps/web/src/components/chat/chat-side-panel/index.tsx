@@ -239,7 +239,13 @@ export function ChatSidePanel({
       const recordAgent = findRoomAgent(executionDetailRecord.agentId)
       return (
         <>
-          <AgentAvatarImage avatar={recordAgent?.avatar ?? null} className="size-6" />
+          <AgentAvatarImage
+            avatar={recordAgent?.avatar ?? null}
+            agentId={recordAgent?.id ?? executionDetailRecord.agentId}
+            agentName={recordAgent?.name}
+            agentLevel={recordAgent?.agentLevel}
+            className="size-6"
+          />
           <Bot className="size-4 text-primary" />
         </>
       )
@@ -249,7 +255,13 @@ export function ChatSidePanel({
       const recordAgent = findRoomAgent(selectedRecord.agentId)
       return (
         <>
-          <AgentAvatarImage avatar={recordAgent?.avatar ?? null} className="size-6" />
+          <AgentAvatarImage
+            avatar={recordAgent?.avatar ?? null}
+            agentId={recordAgent?.id ?? selectedRecord.agentId}
+            agentName={recordAgent?.name}
+            agentLevel={recordAgent?.agentLevel}
+            className="size-6"
+          />
           <Bot className="size-4 text-primary" />
         </>
       )
@@ -258,7 +270,13 @@ export function ChatSidePanel({
     if (sidePanelMode === 'context' || sidePanelMode === 'history' || sidePanelMode === 'agent-detail') {
       return (
         <>
-          <AgentAvatarImage avatar={selectedRoomAgent?.avatar ?? null} className="size-6" />
+          <AgentAvatarImage
+            avatar={selectedRoomAgent?.avatar ?? null}
+            agentId={selectedRoomAgent?.id}
+            agentName={selectedRoomAgent?.name}
+            agentLevel={selectedRoomAgent?.agentLevel}
+            className="size-6"
+          />
           <Bot className="size-4 text-primary" />
         </>
       )

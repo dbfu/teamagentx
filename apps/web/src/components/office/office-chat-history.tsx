@@ -127,7 +127,12 @@ export function OfficeChatHistory({
                     className="size-6 shrink-0"
                   />
                 ) : (
-                  <AgentAvatarImage avatar={msg.agent?.avatar} className="size-6 shrink-0" />
+                  <AgentAvatarImage
+                    avatar={msg.agent?.avatar}
+                    agentId={msg.agentId ?? msg.agent?.id}
+                    agentName={msg.agent?.name ?? name}
+                    className="size-6 shrink-0"
+                  />
                 )}
                 <div className={`flex min-w-0 flex-1 flex-col ${isHuman ? 'items-end' : 'items-start'}`}>
                   <div className={`flex items-baseline gap-1.5 ${isHuman ? 'flex-row-reverse' : ''}`}>

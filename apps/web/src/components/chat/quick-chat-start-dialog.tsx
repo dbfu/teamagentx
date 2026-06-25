@@ -49,7 +49,13 @@ export function QuickChatStartDialog({
       onOpenChange={onOpenChange}
       title={
         <div className="flex items-center gap-3">
-          <AgentAvatarImage avatar={agent.avatar} className="size-9" />
+          <AgentAvatarImage
+            avatar={agent.avatar}
+            agentId={agent.id}
+            agentName={agent.name}
+            agentLevel={agent.agentLevel}
+            className="size-9"
+          />
           <div className="min-w-0">
             <div className="truncate">{t('chat.quickChatDialogTitle', { name: agent.name })}</div>
             <div className="mt-0.5 flex items-center gap-1 text-xs font-normal text-muted-foreground">

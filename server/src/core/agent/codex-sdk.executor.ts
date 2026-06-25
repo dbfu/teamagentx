@@ -101,6 +101,8 @@ const TEAMAGENTX_CODEX_PROVIDER_ID = 'teamagentx_openai';
 const INTERNAL_ORIGINATOR_ENV = 'CODEX_INTERNAL_ORIGINATOR_OVERRIDE';
 const TYPESCRIPT_SDK_ORIGINATOR = 'codex_sdk_ts';
 const CODEX_NPM_NAME = '@openai/codex';
+const TEAMAGENTX_CODEX_MCP_SERVER_NAME = 'teamagentx';
+const LEGACY_TEAMAGENTX_CODEX_MCP_SERVER_NAME = 'tax';
 const DEFAULT_CODEX_SDK_MAX_THREAD_TURNS = 8;
 const DEFAULT_CODEX_SDK_MAX_SESSION_BYTES = 2 * 1024 * 1024;
 const moduleRequire = createRequire(import.meta.url);
@@ -320,7 +322,7 @@ const BUILTIN_CODEX_MCP_SERVERS: CodexBuiltinMcpServerDefinition[] = [
     },
   },
   {
-    name: 'tax',
+    name: LEGACY_TEAMAGENTX_CODEX_MCP_SERVER_NAME,
     build: ({
       workDir,
       teamAgentXMcpServerPath,
@@ -369,6 +371,10 @@ export function buildBuiltinCodexMcpServerConfigs(
     if (config) {
       mcpServers[definition.name] = config;
     }
+  }
+  const teamAgentXConfig = mcpServers[LEGACY_TEAMAGENTX_CODEX_MCP_SERVER_NAME];
+  if (teamAgentXConfig) {
+    mcpServers[TEAMAGENTX_CODEX_MCP_SERVER_NAME] = teamAgentXConfig;
   }
   return mcpServers;
 }
@@ -528,12 +534,15 @@ function findLocalCodexBinary(): string | undefined {
   return undefined;
 }
 
-function findSpawnableCodexBinary(): string | undefined {
+/**
+ * 仅在宿主机 PATH 中查找「可直接 spawn」的 codex 原生二进制。
+ * 与运行时判定完全一致：Windows 上 PATH 命中的常是 `codex.cmd`/`.ps1` shim，
+ * 必须能被 resolveCodexSpawnCandidate 反解析回真实 `codex.exe` 才算可用。
+ * 检测层用它来判断「宿主机 CLI 是否真的能跑」，避免 `codex --version` 走 shell
+ * shim 通过、运行时却 spawn 失败的假阳性，从而让检测能正确回退到本地 SDK。
+ */
+export function findHostPathCodexBinary(): string | undefined {
   const isWindows = process.platform === 'win32';
-  const extension = isWindows ? '.exe' : '';
-  const tryPath = (candidate: string | undefined): string | undefined => resolveCodexSpawnCandidate(candidate, isWindows);
-
-  // 1. 优先使用宿主机 PATH 中的 codex CLI —— 让助手与用户终端里直接跑 codex 行为一致
   try {
     const which = isWindows ? 'where' : 'which';
     const result = execFileSync(which, ['codex'], {
@@ -550,6 +559,17 @@ function findSpawnableCodexBinary(): string | undefined {
   } catch {
     // PATH lookup is best-effort; the bundled SDK path may still work in dev.
   }
+  return undefined;
+}
+
+function findSpawnableCodexBinary(): string | undefined {
+  const isWindows = process.platform === 'win32';
+  const extension = isWindows ? '.exe' : '';
+  const tryPath = (candidate: string | undefined): string | undefined => resolveCodexSpawnCandidate(candidate, isWindows);
+
+  // 1. 优先使用宿主机 PATH 中的 codex CLI —— 让助手与用户终端里直接跑 codex 行为一致
+  const fromHostPath = findHostPathCodexBinary();
+  if (fromHostPath) return fromHostPath;
 
   // 2. 回退：TOOLS_DIR 内置（应用本地 SDK / @openai/codex）
   const toolsDir = process.env.TOOLS_DIR;
@@ -593,6 +613,21 @@ function getDefaultCodexAuthStatus(): { available: boolean; path: string } {
     return { available: hasApiKey || hasChatGptTokens, path: authPath };
   } catch {
     return { available: false, path: authPath };
+  }
+}
+
+/**
+ * 用户的 ~/.codex/config.toml 是否配置了自定义 model_provider（如中转站）。
+ * 这类用户的 base_url/鉴权全在 config.toml + 系统环境变量里，auth.json 可能为空。
+ */
+function hasDefaultCodexConfigToml(): boolean {
+  const configPath = path.join(os.homedir(), '.codex', 'config.toml');
+  try {
+    if (!fs.existsSync(configPath)) return false;
+    const content = fs.readFileSync(configPath, 'utf-8');
+    return /(^|\n)\s*model_provider\s*=/.test(content) || /\[model_providers\./.test(content);
+  } catch {
+    return false;
   }
 }
 
@@ -1111,6 +1146,56 @@ export class CodexSdkExecutor implements IAgentExecutor {
     }
   }
 
+  /**
+   * 纯本地配置模式（未绑定 LlmProvider）下，把用户的 ~/.codex/config.toml 链接进
+   * 自定义 CODEX_HOME，使中转站等自定义 model_provider 配置生效。绑定 provider 时
+   * 配置改由 CLI override 注入，需清理掉历史 symlink 以免脏配置干扰。
+   */
+  private ensureCodexConfigLink(): void {
+    const codexHome = this.getCodexHome();
+    const targetConfigPath = path.join(codexHome, 'config.toml');
+    const sourceConfigPath = path.join(os.homedir(), '.codex', 'config.toml');
+    const shouldLink = !this.llmProvider && fs.existsSync(sourceConfigPath);
+
+    let existingStat: fs.Stats | null = null;
+    try {
+      existingStat = fs.lstatSync(targetConfigPath);
+    } catch {
+      existingStat = null;
+    }
+
+    try {
+      if (!shouldLink) {
+        // 绑定 provider 或源文件不存在：只清理我们自己建立的 symlink，保留用户实体文件。
+        if (existingStat?.isSymbolicLink()) {
+          fs.rmSync(targetConfigPath, { force: true });
+        }
+        return;
+      }
+
+      fs.mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+
+      if (existingStat) {
+        if (existingStat.isSymbolicLink()) {
+          const existingTarget = fs.readlinkSync(targetConfigPath);
+          if (existingTarget === sourceConfigPath) return;
+        } else {
+          // 实体文件（用户或其它逻辑手动放置）优先，不覆盖。
+          return;
+        }
+      }
+
+      try {
+        fs.rmSync(targetConfigPath, { force: true });
+      } catch {
+        // 忽略删除失败，后续 symlink 会报出真实错误。
+      }
+      fs.symlinkSync(sourceConfigPath, targetConfigPath);
+    } catch (error) {
+      console.warn(`${this.name}: 链接 Codex config.toml 失败:`, error);
+    }
+  }
+
   private ensureInstalledSkillsDirectory(): void {
     if (!this.agentId) return;
 
@@ -1379,9 +1464,18 @@ async function handle(request) {
       id,
       result: {
         protocolVersion: params?.protocolVersion || "2024-11-05",
-        capabilities: { tools: {} },
+        capabilities: { tools: {}, resources: {} },
         serverInfo: { name: "tax", version: "1.0.0" },
       },
+    });
+    return;
+  }
+
+  if (method === "resources/list") {
+    write({
+      jsonrpc: "2.0",
+      id,
+      result: { resources: [] },
     });
     return;
   }
@@ -1761,22 +1855,32 @@ Output the summary only.`;
 
   private buildEnv(): Record<string, string> {
     if (!this.llmProvider) {
+      // 纯本地配置模式：auth.json 有 key/tokens，或 ~/.codex/config.toml 配了自定义
+      // model_provider（如中转站）都算可用，二者皆无才报错。
       const authStatus = getDefaultCodexAuthStatus();
-      if (!authStatus.available) {
-        throw new Error(`未检测到可用的本地 Codex auth.json: ${authStatus.path}`);
+      if (!authStatus.available && !hasDefaultCodexConfigToml()) {
+        throw new Error(
+          `未检测到可用的本地 Codex 配置（auth.json 或 config.toml）: ${path.dirname(authStatus.path)}`,
+        );
       }
     }
     this.ensureCodexAuthLink();
+    this.ensureCodexConfigLink();
 
     const cleanEnv = sanitizeEnv(process.env);
-    const keysToClear = [
-      'CODEX_API_KEY',
-      'OPENAI_API_KEY',
-      'OPENAI_BASE_URL',
-      'OPENAI_API_BASE',
-      'OPENAI_MODEL',
-    ];
-    keysToClear.forEach((key) => delete cleanEnv[key]);
+    if (this.llmProvider) {
+      // 绑定了 LlmProvider 时，鉴权/base_url 由 provider 注入，清掉宿主机的 OpenAI 相关
+      // 变量，避免劫持 provider 的配置。纯本地模式则保留它们，让 config.toml 里
+      // `env_key` 指向的系统环境变量（如 OPENAI_API_KEY）能被 codex 读到。
+      const keysToClear = [
+        'CODEX_API_KEY',
+        'OPENAI_API_KEY',
+        'OPENAI_BASE_URL',
+        'OPENAI_API_BASE',
+        'OPENAI_MODEL',
+      ];
+      keysToClear.forEach((key) => delete cleanEnv[key]);
+    }
 
     const providerEnv = this.llmProvider
       ? buildAcpProviderEnv('codex', this.llmProvider, this.agentId)

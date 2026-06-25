@@ -1,9 +1,19 @@
 import { cn } from '@/lib/utils'
 import { isElectron } from '@/lib/config'
+import { isGroupAssistantAgent } from '@/lib/system-agents'
 
 export const AGENT_AVATAR_COUNT = 30
 export const agentAvatarOptions = Array.from({ length: AGENT_AVATAR_COUNT }, (_, index) => index)
 const IMAGE_AVATAR_PATTERN = /^(data:image\/|blob:|https?:\/\/|file:\/\/|\/|\.{1,2}\/)/i
+
+// 系统助手（群助手）头像哨兵值：渲染为头像库中的固定头像。
+// 后端 system-agent-definitions 把群助手 avatar 写死为该值。
+export const SYSTEM_LOGO_AVATAR_VALUE = 'system-logo'
+
+function getSystemAssistantAvatarSrc() {
+  // Electron 打包后使用 file:// 协议，需要相对路径；Web 开发模式使用绝对路径。
+  return isElectron() ? './avatars/agent_16.png' : '/avatars/agent_16.png'
+}
 
 export function getRandomAgentAvatarValue() {
   return String(Math.floor(Math.random() * (AGENT_AVATAR_COUNT - 1)) + 1)
@@ -51,21 +61,41 @@ function getAvatarSrc(index: number) {
 
 interface AgentAvatarImageProps {
   avatar: string | number | null | undefined
+  agentId?: string | null
+  agentName?: string | null
+  agentLevel?: string | null
   className?: string
   alt?: string
 }
 
-export function AgentAvatarImage({ avatar, className, alt = '' }: AgentAvatarImageProps) {
-  const src = isCustomAgentAvatarValue(avatar)
-    ? String(avatar)
-    : getAvatarSrc(normalizeAgentAvatarIndex(avatar))
+export function AgentAvatarImage({
+  avatar,
+  agentId,
+  agentName,
+  agentLevel,
+  className,
+  alt = '',
+}: AgentAvatarImageProps) {
+  const shouldUseSystemAssistantAvatar =
+    avatar === SYSTEM_LOGO_AVATAR_VALUE ||
+    isGroupAssistantAgent({ id: agentId, name: agentName, agentLevel })
+
+  const src =
+    shouldUseSystemAssistantAvatar
+      ? getSystemAssistantAvatarSrc()
+      : isCustomAgentAvatarValue(avatar)
+        ? String(avatar)
+        : getAvatarSrc(normalizeAgentAvatarIndex(avatar))
 
   return (
     <img
       src={src}
       alt={alt || ''}
       draggable={false}
-      className={cn('block aspect-square shrink-0 select-none rounded-full object-cover', className)}
+      className={cn(
+        'block aspect-square shrink-0 select-none rounded-full object-cover',
+        className
+      )}
     />
   )
 }

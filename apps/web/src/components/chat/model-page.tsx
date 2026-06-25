@@ -1876,6 +1876,9 @@ export function ModelPage() {
                       <div className="flex items-center gap-2">
                         <AgentAvatarImage
                           avatar={agent.avatar}
+                          agentId={agent.id}
+                          agentName={agent.name}
+                          agentLevel={agent.agentLevel}
                           alt={agent.name}
                           className="size-6 rounded-full"
                         />

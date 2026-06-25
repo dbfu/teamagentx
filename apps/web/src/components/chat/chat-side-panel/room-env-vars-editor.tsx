@@ -145,11 +145,14 @@ export const RoomEnvVarsEditor = forwardRef<RoomEnvVarsEditorRef, RoomEnvVarsEdi
     }
 
     // 暴露方法给父组件
+    // 注意：handleSave 闭包捕获了 rows，必须把 rows 纳入依赖，
+    // 否则连续编辑（dirty 已为 true、hasErrors 不变）时 ref.save 会停留在旧快照，
+    // 点击保存只会持久化最早一次输入，表现为"保存后再次打开还是前面的值"。
     useImperativeHandle(ref, () => ({
       save: handleSave,
       addRow,
       getState: () => ({ dirty, hasErrors, saving }),
-    }), [dirty, hasErrors, saving])
+    }), [rows, dirty, hasErrors, saving])
 
   return (
     <div className="relative">

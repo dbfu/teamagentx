@@ -184,7 +184,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
         ?? createRootHandoffContext(task.messageId, task.agentId);
       restoreHandoffCascade(taskHandoffContext);
       beginMentionExecution(chatRoomId, task.agentId, task.id);
-      let settledMentionState: PendingMentionState = { mentions: [] };
+      let settledMentionState: PendingMentionState = { mentions: [], batches: [] };
       try {
         const taskPromptPolicy = parseTaskPromptPolicy(task.messageContent);
         // 创建 AbortController 用于中断执行
@@ -1205,6 +1205,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
             finalMessage: taskFinalMessage,
             handoffContext: taskHandoffContext,
             pendingMentions: settledMentionState.mentions,
+            pendingMentionBatches: settledMentionState.batches,
             mentionIntent: settledMentionState.intent,
           });
         } catch (error) {

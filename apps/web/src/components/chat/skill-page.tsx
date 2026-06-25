@@ -592,7 +592,13 @@ export function SkillPage() {
                                       key={name}
                                       className="flex items-center gap-1.5 rounded bg-primary/10 px-2 py-1 text-xs text-primary"
                                     >
-                                      <AgentAvatarImage avatar={agent?.avatar ?? null} className="size-4" />
+                                      <AgentAvatarImage
+                                        avatar={agent?.avatar ?? null}
+                                        agentId={agent?.id}
+                                        agentName={agent?.name ?? name}
+                                        agentLevel={agent?.agentLevel}
+                                        className="size-4"
+                                      />
                                       {name}
                                       {agent && (
                                         <button
@@ -832,7 +838,14 @@ export function SkillPage() {
                                   className="size-4 rounded border-gray-300 text-primary outline-none"
                                 />
                                 <div className="flex-1 min-w-0">
-                                  <div className="font-medium text-foreground text-sm">{skill.name}</div>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-medium text-foreground text-sm truncate">{skill.name}</span>
+                                    {skill.collection && (
+                                      <span className="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-500">
+                                        {t('skill.fromCollection', { name: skill.collection })}
+                                      </span>
+                                    )}
+                                  </div>
                                   <div className="text-xs text-muted-foreground truncate mt-0.5">
                                     {skill.description || t('skill.noDescription')}
                                   </div>

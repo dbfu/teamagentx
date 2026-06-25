@@ -114,7 +114,13 @@ export function SelectAgentsDialog({
         onClick={() => toggleAgent(agent.id)}
       >
         <div className="relative">
-          <AgentAvatarImage avatar={agent.avatar} className="size-10" />
+          <AgentAvatarImage
+            avatar={agent.avatar}
+            agentId={agent.id}
+            agentName={agent.name}
+            agentLevel={agent.agentLevel}
+            className="size-10"
+          />
           {/* 选中标记 */}
           {isSelected && (
             <div className="absolute -bottom-1 -right-1 flex size-5 items-center justify-center rounded-full bg-primary text-white">

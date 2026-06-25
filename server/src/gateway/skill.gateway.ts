@@ -1129,6 +1129,7 @@ ${content}`;
                       sourceTool: { type: 'string' },
                       sourcePath: { type: 'string' },
                       existsInShared: { type: 'boolean' },
+                      collection: { type: 'string' },
                     },
                   },
                 },

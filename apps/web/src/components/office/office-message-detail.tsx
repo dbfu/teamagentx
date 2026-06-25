@@ -58,7 +58,12 @@ export function OfficeMessageDetail({
           {message.isHuman ? (
             <UserAvatar avatar={message.user?.avatar ?? message.avatar ?? fallbackUserAvatar} className="size-8 shrink-0" />
           ) : (
-            <AgentAvatarImage avatar={message.agent?.avatar ?? message.avatar} className="size-8 shrink-0" />
+            <AgentAvatarImage
+              avatar={message.agent?.avatar ?? message.avatar}
+              agentId={message.agentId ?? message.agent?.id}
+              agentName={message.agent?.name ?? name}
+              className="size-8 shrink-0"
+            />
           )}
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-medium text-amber-900">{name}</div>

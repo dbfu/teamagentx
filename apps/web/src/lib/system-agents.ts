@@ -4,6 +4,17 @@ export const GROUP_COORDINATOR_ID = '6b375f6f-7fb7-4c7b-9f1b-70a88af1f1a0'
 const NON_DETAIL_SYSTEM_AGENT_NAMES = new Set(['群助手', '群调度助手'])
 const NON_DETAIL_SYSTEM_AGENT_IDS = new Set([GROUP_ASSISTANT_ID, GROUP_COORDINATOR_ID])
 
+export function isGroupAssistantAgent(agent?: {
+  id?: string | null
+  name?: string | null
+  agentLevel?: string | null
+} | null): boolean {
+  if (!agent) return false
+  if (agent.id === GROUP_ASSISTANT_ID) return true
+  if (agent.name !== '群助手') return false
+  return !agent.agentLevel || agent.agentLevel === 'system'
+}
+
 export function isSystemAssistantDetailBlocked(agent?: {
   id?: string | null
   name?: string | null

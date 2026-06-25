@@ -17,6 +17,7 @@ export interface OfficeAgentDef {
   id: string
   name: string
   avatar: string
+  agentLevel?: 'normal' | 'system'
   color: string
   task: string
   deskFurniture: Vec3
@@ -379,6 +380,7 @@ function mapChatRoomAgentsToOffice(chatRoomAgents: ChatRoomAgent[], t: ReturnTyp
       id: agent.id,
       name: agent.name,
       avatar,
+      agentLevel: agent.agentLevel,
       color,
       task: `@${agent.name} ${t('office.status.idleWaiting')}`,
       deskFurniture: [x, 0, z] as Vec3,

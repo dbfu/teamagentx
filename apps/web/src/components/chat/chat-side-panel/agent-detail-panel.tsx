@@ -129,7 +129,10 @@ export function AgentDetailPanel({
         <div className="relative">
           <AgentAvatar
             avatar={selectedRoomAgent?.avatar ?? null}
+            agentId={selectedRoomAgent?.id}
+            agentName={selectedRoomAgent?.name}
             avatarColor={selectedRoomAgent?.avatarColor}
+            agentLevel={selectedRoomAgent?.agentLevel as 'normal' | 'system' | undefined}
             size="lg"
           />
           {/* 状态指示器 */}

@@ -737,6 +737,7 @@
       "createdAndAdded": "Assistant created and added to the group",
       "createdButAddFailed": "Assistant created, but failed to add it to the group",
       "ownerGroup": "Owner",
+      "usersGroup": "Users",
       "normalAgentsGroup": "Normal Assistants",
       "systemAgentsGroup": "System Assistants",
       "noMembers": "No members",
@@ -1424,6 +1425,7 @@
     "copyImport": "Copy Import",
     "copyImportHint": "Fully copy skill files to local, independent management, not affected by external updates.",
     "alreadyImported": "Already imported",
+    "fromCollection": "from {{name}}",
     "importFailed": "Import failed"
   },
   "settings": {
@@ -2218,7 +2220,11 @@
     "errorChanged": "The second error changed, so fallback stops and the task is marked failed.",
     "executionRecords": "Execution Records",
     "viewDetails": "View Details",
-    "refreshRecords": "Refresh Records"
+    "refreshRecords": "Refresh Records",
+    "handoffAudit": "Handoff Audit",
+    "handoffAuditDesc": "No handoff was registered this turn, so the assistant ran one final handoff check: register handoffs if another assistant must continue, otherwise confirm the task is complete.",
+    "handoffAuditNone": "Audited · task judged complete, no handoff needed",
+    "handoffAuditRegistered": "Audited · registered {{count}} handoff(s)"
   },
   "taskQueue": {
     "title": "Task Queue",

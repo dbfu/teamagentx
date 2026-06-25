@@ -147,7 +147,13 @@ export function AddAgentDialog({
         disabled={isAddingThis || isAdding}
       >
         <div className="relative">
-          <AgentAvatarImage avatar={agent.avatar} className="size-10" />
+          <AgentAvatarImage
+            avatar={agent.avatar}
+            agentId={agent.id}
+            agentName={agent.name}
+            agentLevel={agent.agentLevel}
+            className="size-10"
+          />
           {/* 选中指示器 */}
           {isSelected && !isAddingThis && (
             <div className="absolute -top-1 -right-1 size-5 rounded-full bg-blue-500 flex items-center justify-center">

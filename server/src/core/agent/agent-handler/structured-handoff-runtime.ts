@@ -28,8 +28,42 @@ export interface HandoffBatch {
   userIntervened: boolean;
 }
 
+/** 一个串行阶段：1+ 个目标组成的并行收敛单元（单目标即退化为接力）。 */
+export interface SerialChainStage {
+  mentions: HandoffMention[];
+}
+
+/** 已完成阶段的产出，作为后续阶段的依赖输入（整条链累积）。 */
+export interface SerialChainOutput {
+  stageIndex: number;
+  agentName: string;
+  status: AgentTaskOutcome;
+  content: string;
+  finalMessageId?: string;
+}
+
+/**
+ * 串行链运行态：把「一轮内多次 mention_agents 调用 / serial 批」归一化成的
+ * 有序阶段队列，按 rootMessageId 绑定。每个阶段复用 HandoffBatch 并行收敛机制，
+ * 阶段间由派发层在收敛点推进，并把产出累积进 priorOutputs 向后传。
+ */
+export interface SerialChainState {
+  rootMessageId: string;
+  chatRoomId: string;
+  ownerAgentId: string;
+  ownerAgentName: string;
+  ownerContext: HandoffContext;
+  sourceMessage: Message;
+  remainingStages: SerialChainStage[];
+  priorOutputs: SerialChainOutput[];
+  completedStageCount: number;
+  /** 当前在跑阶段对应的 batchId，用于在 batch 收敛时识别归属链。 */
+  currentBatchId?: string;
+}
+
 const cascadeBudgets = new Map<string, CascadeBudget>();
 const batches = new Map<string, HandoffBatch>();
+const serialChains = new Map<string, SerialChainState>();
 const CASCADE_TTL_MS = 24 * 60 * 60 * 1000;
 
 function pruneExpiredCascades(now = Date.now()): void {
@@ -114,7 +148,51 @@ export function markStructuredHandoffUserIntervention(chatRoomId: string): void 
   }
 }
 
+/** 登记一条串行链（含首个阶段已出队后的剩余阶段）。 */
+export function startSerialChain(state: SerialChainState): void {
+  serialChains.set(state.rootMessageId, {
+    ...state,
+    remainingStages: state.remainingStages.map((stage) => ({ ...stage })),
+    priorOutputs: [...state.priorOutputs],
+  });
+}
+
+export function getSerialChain(rootMessageId: string): SerialChainState | undefined {
+  return serialChains.get(rootMessageId);
+}
+
+/** 记录当前在跑阶段的 batchId，供收敛时识别归属链。 */
+export function setSerialChainBatch(rootMessageId: string, batchId: string): void {
+  const chain = serialChains.get(rootMessageId);
+  if (chain) chain.currentBatchId = batchId;
+}
+
+/** 追加一个已完成阶段的产出到链的累积器。 */
+export function appendSerialChainOutputs(
+  rootMessageId: string,
+  outputs: SerialChainOutput[],
+): void {
+  const chain = serialChains.get(rootMessageId);
+  if (!chain) return;
+  chain.priorOutputs.push(...outputs);
+  chain.completedStageCount += 1;
+}
+
+/** 取出下一个待派阶段；队列空返回 undefined。 */
+export function dequeueSerialChainStage(
+  rootMessageId: string,
+): SerialChainStage | undefined {
+  const chain = serialChains.get(rootMessageId);
+  if (!chain) return undefined;
+  return chain.remainingStages.shift();
+}
+
+export function clearSerialChain(rootMessageId: string): void {
+  serialChains.delete(rootMessageId);
+}
+
 export function clearStructuredHandoffRuntime(): void {
   cascadeBudgets.clear();
   batches.clear();
+  serialChains.clear();
 }

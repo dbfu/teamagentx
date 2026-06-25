@@ -1358,7 +1358,13 @@ export function OfficePage() {
                       selectedId === agent.id ? 'bg-amber-100' : 'hover:bg-amber-100/60'
                     }`}
                   >
-                    <AgentAvatarImage avatar={agent.avatar} className="size-8 shrink-0" />
+                    <AgentAvatarImage
+                      avatar={agent.avatar}
+                      agentId={agent.id}
+                      agentName={agent.name}
+                      agentLevel={agent.agentLevel}
+                      className="size-8 shrink-0"
+                    />
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium text-amber-900">{agent.name}</div>
                       <div className="flex items-center gap-1">
@@ -1691,6 +1697,9 @@ export function OfficePage() {
             {greetingAgentsRef.current.length > 0 && (
               <AgentAvatarImage
                 avatar={agents.find(a => a.id === greetingAgentsRef.current[greetingAgentsRef.current.length - 1])?.avatar}
+                agentId={agents.find(a => a.id === greetingAgentsRef.current[greetingAgentsRef.current.length - 1])?.id}
+                agentName={agents.find(a => a.id === greetingAgentsRef.current[greetingAgentsRef.current.length - 1])?.name}
+                agentLevel={agents.find(a => a.id === greetingAgentsRef.current[greetingAgentsRef.current.length - 1])?.agentLevel}
                 className="ml-2 size-6"
               />
             )}

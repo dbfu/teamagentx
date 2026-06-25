@@ -119,6 +119,8 @@ function AssistantHeader({
         {/* 大头像 */}
         <AgentAvatar
           avatar={agent.avatar}
+          agentId={agent.id}
+          agentName={agent.name}
           avatarColor={agent.avatarColor}
           agentLevel={agent.agentLevel}
           size="xl"

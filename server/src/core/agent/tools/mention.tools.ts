@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { createSystemTool } from './system-tool.js';
 import { recordMentions } from '../agent-handler/mention-buffer.js';
-import type { HandoffMention } from '../../../types/handoff.js';
+import type { HandoffMention, MentionDispatchMode } from '../../../types/handoff.js';
 
 /**
  * 助手「显式派发意图」工具 mention_agents。
@@ -56,11 +56,16 @@ const MENTION_TOOL_NAME = 'mention_agents';
 const MENTION_TOOL_DESCRIPTION = [
   'Hand off the conversation to one or more other assistants in this chatroom.',
   'Call this ONLY when you actually want those assistants to act — do NOT rely on writing "@name" in your prose.',
-  'You may call it multiple times; targets are merged. Mentioning a single assistant relays the baton to it;',
-  'mentioning multiple assistants makes YOU the convergence owner who collects their results.',
+  'Each call is one dispatch stage. Within one call, `mode` controls how multiple targets run:',
+  'mode="parallel" (default) fans out to all targets at once and you collect their results;',
+  'mode="serial" runs the targets one after another, feeding each one the previous output (use when there is a dependency).',
+  'Calling this tool MULTIPLE TIMES in a turn always chains the calls serially, regardless of mode —',
+  'each later call only starts after the previous call (and its whole sub-tree) has finished, and receives all earlier outputs as input.',
+  'So: want parallel? one call with several targets + mode="parallel". Want a dependency chain? mode="serial", or split into multiple calls.',
   'Dispatch happens after your turn ends, not at call time.',
-  '说明（中文）：把任务交接给群内的其他助手。只有当你确实希望对方行动时才调用，不要靠在正文里写「@名字」来触发。',
-  '可多次调用，目标会合并；@ 单个=接力，@ 多个=你作为发起者负责收口。派发在你本轮结束后统一进行。',
+  '说明（中文）：把任务交接给群内其他助手。只有当你确实希望对方行动时才调用，不要靠在正文里写「@名字」来触发。',
+  '每次调用是一个派发阶段：同一次调用内 mode="parallel"（默认）并行扇出、你负责收口；mode="serial" 按顺序串行、把前一个产出喂给后一个（有依赖时用）。',
+  '一轮内多次调用恒串行：后一次调用要等前一次（及其子任务）全部结束才开始，并能拿到此前所有产出。想并行就一次 @ 多个 + parallel；想接力链就 serial 或分多次调用。派发在你本轮结束后统一进行。',
 ].join(' ');
 
 const mentionSchema = z.object({
@@ -79,6 +84,12 @@ const mentionSchema = z.object({
     )
     .min(1)
     .describe('本次要交接的目标助手列表。'),
+  mode: z
+    .enum(['serial', 'parallel'])
+    .default('parallel')
+    .describe(
+      '本次调用内多个目标的派发方式：parallel=并行扇出+收口（默认）；serial=按顺序串行接力（有依赖时用）。单个目标时无意义。',
+    ),
   intent: z
     .string()
     .optional()
@@ -121,11 +132,13 @@ export function createMentionTools(ctx: MentionToolContext): MentionToolsBundle 
         accepted.push({ agent: agent.name, agentId: agent.id });
       }
 
-      // 并集去重写入注册表（同一目标重复时 task 后写覆盖）。
+      // 把本次调用作为一个独立批次写入注册表（保留调用边界，供串行/并行归一化）；
+      // 批内按 agentId 去重（同一目标重复时 task 后写覆盖）。
       const recorded = recordMentions(
         ctx.chatRoomId,
         ctx.selfAgentId,
         pending,
+        (input.mode ?? 'parallel') as MentionDispatchMode,
         input.intent,
       );
       if (!recorded) {

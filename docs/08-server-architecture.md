@@ -301,7 +301,7 @@ Socket 连接时在 `auth.token` 传 JWT，服务端验证后将 user 挂到 `so
 | `AGENT_COORDINATOR_LLM_TIMEOUT_MS` | `120000` | 协调器 LLM 决策首轮超时；重试轮次使用 2 倍超时 |
 | `AGENT_COORDINATOR_LLM_RETRY_COUNT` | `1` | 协调器 LLM 重试次数；主模型失败后按助手备用模型继续尝试 |
 | `AGENT_EXECUTION_NO_ACTIVITY_TIMEOUT_MS` | `90000` | 助手无活动重试超时（0 关闭） |
-| `AGENT_HANDOFF_FANOUT_MAX` | `3` | 结构化交接单次扇出上限 |
+| `AGENT_HANDOFF_FANOUT_MAX` | `20` | 结构化交接单次扇出上限 |
 | `AGENT_HANDOFF_DEPTH_MAX` | `100` | 结构化交接血缘深度上限 |
 | `AGENT_HANDOFF_BUDGET_MAX` | `20` | 单个根消息的级联总派发预算 |
 | `AGENT_HANDOFF_REVISIT_MAX` | `1` | 同一助手在单条血缘中的重访上限 |

@@ -7,15 +7,21 @@ import {
 } from '../../../../types/handoff.js';
 import type { Message } from '../../../../types/message.js';
 import {
+  appendSerialChainOutputs,
   clearStructuredHandoffRuntime,
   completeStructuredHandoffBranch,
+  dequeueSerialChainStage,
+  getSerialChain,
   markStructuredHandoffUserIntervention,
   reserveHandoffDispatches,
+  setSerialChainBatch,
+  startSerialChain,
   startStructuredHandoffBatch,
 } from '../../../../core/agent/agent-handler/structured-handoff-runtime.js';
 import {
   buildConvergencePrompt,
   evaluateHandoffTargetGuardrail,
+  normalizeStages,
 } from '../../../../core/agent/agent-handler/structured-handoff.service.js';
 
 const sourceMessage: Message = {
@@ -104,6 +110,95 @@ test('用户介入会让结构化批次静默收口', () => {
   assert.equal(completeStructuredHandoffBranch('batch-user', {
     agentId: 'a', agentName: 'A', status: 'completed', suggestions: [],
   }).kind, 'silenced');
+});
+
+test('normalizeStages：单 parallel 批=单阶段', () => {
+  const stages = normalizeStages([
+    { mentions: [{ agentId: 'a', agentName: 'A', task: 'x' }, { agentId: 'b', agentName: 'B', task: 'y' }], mode: 'parallel' },
+  ]);
+  assert.equal(stages.length, 1);
+  assert.deepEqual(stages[0]?.mentions.map((m) => m.agentId), ['a', 'b']);
+});
+
+test('normalizeStages：serial 批多目标展开成多个单目标阶段', () => {
+  const stages = normalizeStages([
+    { mentions: [{ agentId: 'a', agentName: 'A', task: 'x' }, { agentId: 'b', agentName: 'B', task: 'y' }], mode: 'serial' },
+  ]);
+  assert.equal(stages.length, 2);
+  assert.deepEqual(stages.map((s) => s.mentions.map((m) => m.agentId)), [['a'], ['b']]);
+});
+
+test('normalizeStages：多次调用按顺序拼接，恒串行', () => {
+  const stages = normalizeStages([
+    { mentions: [{ agentId: 'a', agentName: 'A', task: 'x' }, { agentId: 'b', agentName: 'B', task: 'y' }], mode: 'parallel' },
+    { mentions: [{ agentId: 'c', agentName: 'C', task: 'z' }], mode: 'parallel' },
+  ]);
+  assert.equal(stages.length, 2);
+  assert.deepEqual(stages[0]?.mentions.map((m) => m.agentId), ['a', 'b']);
+  assert.deepEqual(stages[1]?.mentions.map((m) => m.agentId), ['c']);
+});
+
+test('串行链队列：出队、累积产出、按 batchId 归属', () => {
+  const ownerContext = createRootHandoffContext('root-chain', 'owner');
+  startSerialChain({
+    rootMessageId: 'root-chain',
+    chatRoomId: 'room-1',
+    ownerAgentId: 'owner',
+    ownerAgentName: '负责人',
+    ownerContext,
+    sourceMessage,
+    remainingStages: [{ mentions: [{ agentId: 'b', agentName: 'B', task: '第二步' }] }],
+    priorOutputs: [],
+    completedStageCount: 0,
+  });
+  setSerialChainBatch('root-chain', 'batch-stage-1');
+
+  let chain = getSerialChain('root-chain');
+  assert.equal(chain?.currentBatchId, 'batch-stage-1');
+  assert.equal(chain?.remainingStages.length, 1);
+
+  appendSerialChainOutputs('root-chain', [
+    { stageIndex: 1, agentName: 'A', status: 'completed', content: '第一步产出', finalMessageId: 'a-result' },
+  ]);
+  const next = dequeueSerialChainStage('root-chain');
+  assert.deepEqual(next?.mentions.map((m) => m.agentId), ['b']);
+
+  chain = getSerialChain('root-chain');
+  assert.equal(chain?.completedStageCount, 1);
+  assert.equal(chain?.priorOutputs[0]?.content, '第一步产出');
+  assert.equal(chain?.remainingStages.length, 0);
+  // 队列空再出队返回 undefined
+  assert.equal(dequeueSerialChainStage('root-chain'), undefined);
+});
+
+test('buildConvergencePrompt 超长分支「上下保留」截断', () => {
+  const ownerContext = createRootHandoffContext('root-trunc', 'owner');
+  const longContent = `HEAD_${'x'.repeat(20000)}_TAIL`;
+  startStructuredHandoffBatch({
+    id: 'batch-trunc',
+    chatRoomId: 'room-1',
+    rootMessageId: 'root-trunc',
+    ownerAgentId: 'owner',
+    ownerAgentName: '负责人',
+    ownerContext,
+    sourceMessage,
+    pendingAgentIds: new Set(['a']),
+    results: [],
+    userIntervened: false,
+  });
+  const completed = completeStructuredHandoffBranch('batch-trunc', {
+    agentId: 'a',
+    agentName: 'A',
+    status: 'completed',
+    finalMessage: { ...sourceMessage, id: 'a-result', content: longContent },
+    suggestions: [],
+  });
+  assert.equal(completed.kind, 'ready');
+  if (completed.kind !== 'ready') return;
+  const prompt = buildConvergencePrompt(completed.batch);
+  assert.match(prompt, /HEAD_/);
+  assert.match(prompt, /_TAIL/);
+  assert.match(prompt, /中间已截断/);
 });
 
 test('血缘重访与 depth 护栏按配置裁决', () => {

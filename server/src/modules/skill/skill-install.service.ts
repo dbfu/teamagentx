@@ -114,6 +114,7 @@ export interface ExternalSkill {
   sourceTool: string;    // 工具名称：claude | codex | openclaw | agent
   sourcePath: string;    // 完整路径
   existsInShared: boolean; // 是否已存在于共享目录
+  collection?: string;   // 所属合集名（来自 superpowers 这类插件的嵌套技能），顶层技能为空
 }
 
 // 外部技能导入结果
@@ -457,6 +458,30 @@ function generateSkillSlug(skillName: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '');
+}
+
+/**
+ * 若 sourcePath 是合集 / 插件内的嵌套技能（<tool>/skills/<collection>/skills/<skill>），
+ * 返回合集名（如 superpowers）；顶层技能（<tool>/skills/<skill>）返回 null。
+ */
+export function getNestedCollectionName(sourcePath: string): string | null {
+  const parentName = path.basename(path.dirname(sourcePath));
+  if (parentName !== 'skills') return null;
+  // 再上一级若是普通文件夹（非 .claude / .codex 等工具根目录），即为合集
+  const collectionName = path.basename(path.dirname(path.dirname(sourcePath)));
+  if (collectionName && !collectionName.startsWith('.')) return collectionName;
+  return null;
+}
+
+/**
+ * 解析外部技能在共享目录中的 slug（目录名）。
+ * 合集内嵌套技能用「合集名-技能名」做前缀，避免与顶层同名技能安装到同一目录而互相覆盖。
+ * discoverExternalSkills 与 importExternalSkill 都用它，保证两端 slug 一致。
+ */
+export function deriveExternalSkillSlug(sourcePath: string, skillName: string): string {
+  const baseSlug = generateSkillSlug(skillName);
+  const collection = getNestedCollectionName(sourcePath);
+  return collection ? `${generateSkillSlug(collection)}-${baseSlug}` : baseSlug;
 }
 
 function resolveKnownSkillInput(input: string): { source: string; skillName?: string } | null {
@@ -873,6 +898,35 @@ export const skillInstallService = {
 
       console.log(`[skillInstall] Scanning external tool directory: ${toolSkillsDir}`);
 
+      // 提取工具名称（从 path 中提取）
+      const sourceTool = tool.path.split('/')[0].replace('.', '');
+
+      // 解析某个目录下的 SKILL.md 并加入结果，成功返回 true
+      const pushSkill = (skillDir: string): boolean => {
+        const skillMdPath = path.join(skillDir, 'SKILL.md');
+        if (!fs.existsSync(skillMdPath)) return false;
+
+        const skill = parseSkillMd(skillMdPath);
+        if (!skill) return false;
+
+        // 生成 slug（嵌套合集技能会带上合集名前缀，避免与顶层同名技能冲突）
+        const slug = deriveExternalSkillSlug(skillDir, skill.name);
+
+        // 检查是否已存在于共享目录
+        const existsInShared = fs.existsSync(path.join(sharedSkillsDir, slug));
+
+        results.push({
+          name: skill.name,
+          description: skill.description,
+          slug,
+          sourceTool,
+          sourcePath: skillDir,
+          existsInShared,
+          collection: getNestedCollectionName(skillDir) ?? undefined,
+        });
+        return true;
+      };
+
       try {
         const entries = fs.readdirSync(toolSkillsDir, { withFileTypes: true });
 
@@ -884,31 +938,26 @@ export const skillInstallService = {
           if (entry.name.startsWith('.')) continue;
 
           const skillDir = path.join(toolSkillsDir, entry.name);
-          const skillMdPath = path.join(skillDir, 'SKILL.md');
 
-          if (!fs.existsSync(skillMdPath)) continue;
+          // 1) 目录本身就是单个技能（含顶层 SKILL.md）
+          if (pushSkill(skillDir)) continue;
 
-          // 解析 SKILL.md
-          const skill = parseSkillMd(skillMdPath);
-          if (!skill) continue;
+          // 2) 否则可能是技能合集 / 插件（如 superpowers），
+          //    其技能嵌套在 <dir>/skills/<name>/SKILL.md 中，需向下一层发现
+          const nestedSkillsDir = path.join(skillDir, 'skills');
+          if (!fs.existsSync(nestedSkillsDir)) continue;
 
-          // 生成 slug
-          const slug = generateSkillSlug(skill.name);
-
-          // 检查是否已存在于共享目录
-          const existsInShared = fs.existsSync(path.join(sharedSkillsDir, slug));
-
-          // 提取工具名称（从 path 中提取）
-          const sourceTool = tool.path.split('/')[0].replace('.', '');
-
-          results.push({
-            name: skill.name,
-            description: skill.description,
-            slug,
-            sourceTool,
-            sourcePath: skillDir,
-            existsInShared,
-          });
+          try {
+            const nestedEntries = fs.readdirSync(nestedSkillsDir, { withFileTypes: true });
+            for (const nested of nestedEntries) {
+              if (!nested.isDirectory() && !nested.isSymbolicLink()) continue;
+              if (nested.name.startsWith('.')) continue;
+              if (SKIP_DIRS.includes(nested.name)) continue;
+              pushSkill(path.join(nestedSkillsDir, nested.name));
+            }
+          } catch {
+            // 忽略嵌套目录读取错误
+          }
         }
       } catch (error) {
         console.error(`[skillInstall] Error scanning ${toolSkillsDir}:`, error);
@@ -957,7 +1006,7 @@ export const skillInstallService = {
       };
     }
 
-    const slug = generateSkillSlug(skill.name);
+    const slug = deriveExternalSkillSlug(sourcePath, skill.name);
     const targetPath = path.join(sharedSkillsDir, slug);
     let actualMethod: 'symlink' | 'copy' = method;
     let importMethodDetail: string = method;

@@ -146,7 +146,7 @@ In Smart Collaboration, agent handoff is a structured `mention_agents` intent pr
 
 | Breaker | Default | Env var | On trip |
 |---------|---------|---------|---------|
-| Fan-out per call | 3 | `AGENT_HANDOFF_FANOUT_MAX` | Reject the whole dispatch and ask_owner |
+| Fan-out per call | 20 | `AGENT_HANDOFF_FANOUT_MAX` | Reject the whole dispatch and ask_owner |
 | Lineage depth | 100 | `AGENT_HANDOFF_DEPTH_MAX` | Stop and ask_owner |
 | Total cascade dispatches | 20 | `AGENT_HANDOFF_BUDGET_MAX` | Stop and ask_owner |
 | Per-agent revisits in one lineage | 1 | `AGENT_HANDOFF_REVISIT_MAX` | Stop and ask_owner |

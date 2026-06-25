@@ -888,6 +888,8 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
             <div className="shrink-0 cursor-pointer" onClick={handleAvatarClick}>
               <AgentAvatar
                 avatar={message.avatar ?? message.agent?.avatar ?? null}
+                agentId={message.agentId ?? message.agent?.id}
+                agentName={message.agent?.name}
                 avatarColor={message.avatarColor ?? message.agent?.avatarColor}
                 size="md"
                 showSystemBadge={false}

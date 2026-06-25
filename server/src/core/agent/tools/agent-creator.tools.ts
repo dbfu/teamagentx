@@ -138,10 +138,9 @@ async function addCreatedAgentToRoom({
   defaultChatRoomId?: string;
   injectGroupHistory?: boolean;
 }): Promise<{ chatRoomId: string; injectGroupHistory: boolean } | null> {
-  if (injectGroupHistory === undefined) return null;
-
   const targetChatRoomId = chatRoomId || defaultChatRoomId;
   if (!targetChatRoomId) {
+    if (injectGroupHistory === undefined) return null;
     throw new Error('创建助手时设置群历史访问需要群聊上下文。群助手在群聊内调用时可直接设置 injectGroupHistory；外部调用请提供 chatRoomId。');
   }
 
@@ -149,7 +148,7 @@ async function addCreatedAgentToRoom({
     chatRoomId: targetChatRoomId,
     agentId,
     role: 'MEMBER',
-    injectGroupHistory,
+    injectGroupHistory: injectGroupHistory ?? true,
   });
   broadcastAgentsUpdated(targetChatRoomId);
 
@@ -441,7 +440,7 @@ export function createCreateAgentTool(defaultChatRoomId?: string) {
     },
     {
       name: 'create_agent',
-      description: '【必须用户确认后才能调用】创建一个新的AI助手；如设置 injectGroupHistory，会同时把新助手加入当前/指定群聊并保存群历史访问。⚠️ 重要：调用此工具前，必须先向用户展示助手配置（名称、描述、核心能力），并明确询问"是否确认创建？"等待用户回复确认后才能调用。如果用户提出修改，调整配置后再次确认。',
+      description: '【必须用户确认后才能调用】创建一个新的AI助手；在群助手上下文或传入 chatRoomId 时，会同时把新助手加入当前/指定群聊。injectGroupHistory 只控制该群内历史访问，默认 true，明确不允许访问群历史时传 false。⚠️ 重要：调用此工具前，必须先向用户展示助手配置（名称、描述、核心能力），并明确询问"是否确认创建？"等待用户回复确认后才能调用。如果用户提出修改，调整配置后再次确认。',
       schema: z.object({
         name: z.string().describe('助手名称，必须唯一'),
         description: z.string().describe('助手功能描述'),
@@ -463,8 +462,8 @@ export function createCreateAgentTool(defaultChatRoomId?: string) {
           .array(z.string())
           .optional()
           .describe('由模型根据 list_shared_skills 返回的共享技能列表自行选择要安装的技能名称或目录名。不要猜测；没有合适技能时传空数组或省略。'),
-        chatRoomId: z.string().optional().describe('要加入并设置群历史访问的群聊 ID；群助手在当前群聊内调用时可省略'),
-        injectGroupHistory: z.boolean().optional().describe('是否开启当前/指定群聊中的群历史访问；传此字段会把新助手加入该群聊'),
+        chatRoomId: z.string().optional().describe('要加入的群聊 ID；群助手在当前群聊内调用时可省略并自动加入当前群聊'),
+        injectGroupHistory: z.boolean().optional().describe('是否开启当前/指定群聊中的群历史访问；只控制历史访问开关，默认 true，明确不允许访问群历史时传 false'),
       }),
     },
   );
@@ -580,7 +579,7 @@ export function createCreateAgentsTool(defaultChatRoomId?: string) {
     },
     {
       name: 'create_agents',
-      description: '【必须用户确认后才能调用】批量创建多个AI助手；如设置 injectGroupHistory，会同时把新助手加入当前/指定群聊并保存群历史访问。⚠️ 重要：调用此工具前，必须先向用户展示所有助手配置（名称、描述、核心能力），并明确询问"是否确认创建这些助手？"等待用户回复确认后才能调用。如果用户提出修改，调整配置后再次确认。',
+      description: '【必须用户确认后才能调用】批量创建多个AI助手；在群助手上下文或传入 chatRoomId 时，会同时把新助手加入当前/指定群聊。injectGroupHistory 只控制该群内历史访问，默认 true，明确不允许访问群历史时传 false。⚠️ 重要：调用此工具前，必须先向用户展示所有助手配置（名称、描述、核心能力），并明确询问"是否确认创建这些助手？"等待用户回复确认后才能调用。如果用户提出修改，调整配置后再次确认。',
       schema: z.object({
         agents: z
           .array(
@@ -602,8 +601,8 @@ export function createCreateAgentsTool(defaultChatRoomId?: string) {
                 .array(z.string())
                 .optional()
                 .describe('由模型根据 list_shared_skills 返回的共享技能列表自行选择要安装的技能名称或目录名。不要猜测；没有合适技能时传空数组或省略。'),
-              chatRoomId: z.string().optional().describe('要加入并设置群历史访问的群聊 ID；群助手在当前群聊内调用时可省略'),
-              injectGroupHistory: z.boolean().optional().describe('是否开启当前/指定群聊中的群历史访问；传此字段会把新助手加入该群聊'),
+              chatRoomId: z.string().optional().describe('要加入的群聊 ID；群助手在当前群聊内调用时可省略并自动加入当前群聊'),
+              injectGroupHistory: z.boolean().optional().describe('是否开启当前/指定群聊中的群历史访问；只控制历史访问开关，默认 true，明确不允许访问群历史时传 false'),
             }),
           )
           .describe('助手配置数组'),
