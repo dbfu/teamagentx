@@ -314,7 +314,7 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
 
   const handleOpenTaskBoard = () => {
     setSelectedRoomAgent(null)
-    setSidePanelMode('task-board')
+    setSidePanelMode(useChatStore.getState().sidePanelMode === 'task-board' ? null : 'task-board')
   }
 
   const handleOpenMessageArchives = () => {

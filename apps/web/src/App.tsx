@@ -188,7 +188,7 @@ function MobileChatDetailPage({
   }
 
   const handleOpenTaskBoard = () => {
-    setSidePanelMode('task-board')
+    setSidePanelMode(useChatStore.getState().sidePanelMode === 'task-board' ? null : 'task-board')
   }
 
   const handleStopAllTasks = () => {

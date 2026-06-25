@@ -1036,9 +1036,6 @@ export async function processQueue(chatRoomId: string, agentId: string) {
             injectedRoomRulesCache.set(ruleReminderKey, roomRulesForReminder);
           }
 
-          // 清理 AbortController
-          abortControllers.delete(key);
-
           // 清除流式事件缓存（任务已完成，按 messageId_agentId 存储）
           const streamCacheKey = `${chatRoomId}_${task.messageId}_${task.agentId}`;
           streamEventsCache.delete(streamCacheKey);

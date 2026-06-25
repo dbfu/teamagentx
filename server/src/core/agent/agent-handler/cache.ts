@@ -97,12 +97,15 @@ export function stopAgentExecution(chatRoomId: string, agentId: string, locale?:
   const controller = abortControllers.get(key);
 
   if (controller) {
-    console.log(`[stopAgentExecution] 中止执行: ${key}`);
     if (locale) {
       abortLocales.set(key, locale);
     }
-    controller.abort();
-    abortControllers.delete(key);
+    if (!controller.signal.aborted) {
+      console.log(`[stopAgentExecution] 中止执行: ${key}`);
+      controller.abort(new DOMException('执行已被用户中断', 'AbortError'));
+    } else {
+      console.log(`[stopAgentExecution] 执行已在中止中: ${key}`);
+    }
     return true;
   }
 

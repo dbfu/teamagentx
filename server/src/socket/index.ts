@@ -700,9 +700,9 @@ export function setupSocket(io: Server) {
       try {
         const { chatRoomId, messageId, lang } = data;
         let { agentId } = data;
+        const activeTasks = await taskQueueService.getActiveTasks(chatRoomId);
 
         if (messageId) {
-          const activeTasks = await taskQueueService.getActiveTasks(chatRoomId);
           const matchedTask = activeTasks.find(task =>
             task.messageId === messageId && (!agentId || task.agentId === agentId)
           ) ?? activeTasks.find(task => task.messageId === messageId);
@@ -731,7 +731,15 @@ export function setupSocket(io: Server) {
           }
         }
 
-        if (!agentId) {
+        const targetAgentIds = agentId
+          ? [agentId]
+          : [...new Set(
+              activeTasks
+                .filter((task) => task.status === 'executing' || task.status === 'pending')
+                .map((task) => task.agentId),
+            )];
+
+        if (targetAgentIds.length === 0) {
           socket.emit('agent:stop-failed', {
             chatRoomId,
             messageId,
@@ -740,12 +748,35 @@ export function setupSocket(io: Server) {
           return;
         }
 
-        console.log(`[agent:stop] 收到停止请求: chatRoomId=${chatRoomId}, agentId=${agentId}, messageId=${messageId ?? '-'}`);
+        console.log(`[agent:stop] 收到停止请求: chatRoomId=${chatRoomId}, agentIds=${targetAgentIds.join(',')}, messageId=${messageId ?? '-'}`);
 
-        const stopped = stopAgentExecution(chatRoomId, agentId, lang);
+        const stoppedAgentIds = targetAgentIds.filter((targetAgentId) =>
+          stopAgentExecution(chatRoomId, targetAgentId, lang),
+        );
+        const pendingTasksToCancel = activeTasks.filter((task) =>
+          targetAgentIds.includes(task.agentId) &&
+          task.status === 'pending' &&
+          (!messageId || task.messageId === messageId),
+        );
 
-        if (stopped) {
-          flushAgentStreams(chatRoomId, agentId, messageId);
+        if (stoppedAgentIds.length > 0 || pendingTasksToCancel.length > 0) {
+          for (const stoppedAgentId of stoppedAgentIds) {
+            flushAgentStreams(chatRoomId, stoppedAgentId, messageId);
+          }
+          for (const task of pendingTasksToCancel) {
+            await taskQueueService.updateStatus(task.id, 'cancelled');
+            clearSerialChainForTask(
+              chatRoomId,
+              task.agentId,
+              task.id,
+            );
+            io.to(chatRoomId).emit('agent:task-cancelled', {
+              chatRoomId,
+              agentId: task.agentId,
+              taskId: task.id,
+              messageId: task.messageId,
+            });
+          }
           // 用户主动停止时无条件取消 watchdog 并标记中断，防止群调度介入。
           // 不能用 getActiveTasks 判断：被停止的任务在 executor 确认前仍处于
           // executing 状态，会导致竞态漏判。其他仍在运行的任务完成后会自行
@@ -755,9 +786,13 @@ export function setupSocket(io: Server) {
           // 又触发链推进、用旧内容派发下一个助手。
           clearSerialChain(chatRoomId);
           // 通知前端已停止
-          socket.emit('agent:stopped', { chatRoomId, agentId, messageId });
-          // 广播给群聊里的所有人
-          socket.to(chatRoomId).emit('agent:stopped', { chatRoomId, agentId, messageId });
+          for (const stoppedAgentId of stoppedAgentIds) {
+            const payload = { chatRoomId, agentId: stoppedAgentId, messageId };
+            socket.emit('agent:stopped', payload);
+            // 广播给群聊里的所有人
+            socket.to(chatRoomId).emit('agent:stopped', payload);
+          }
+          broadcastAgentStatus(chatRoomId, targetAgentIds);
         } else {
           socket.emit('agent:stop-failed', {
             chatRoomId,
