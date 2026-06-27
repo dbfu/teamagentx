@@ -8,6 +8,7 @@ import { formatUnreadCount } from './conversation-list-item'
 interface ConversationPinnedGridProps {
   rooms: ChatRoom[]
   selectedId: string | null
+  contextMenuRoomId?: string | null
   unreadCounts: Record<string, number>
   executingChatRooms: Set<string>
   pendingOwnerMentionRoomIds: Set<string>
@@ -22,6 +23,7 @@ interface ConversationPinnedGridProps {
 export function ConversationPinnedGrid({
   rooms,
   selectedId,
+  contextMenuRoomId,
   unreadCounts,
   pendingOwnerMentionRoomIds,
   isMobile,
@@ -56,7 +58,9 @@ export function ConversationPinnedGrid({
               'flex cursor-pointer flex-col items-center gap-1 rounded-lg px-2 py-1 transition-colors',
               selectedId === room.id
                 ? 'bg-primary/10 ring-1 ring-primary/20'
-                : 'bg-muted/50 hover:bg-accent'
+                : contextMenuRoomId === room.id
+                  ? 'bg-accent'
+                  : 'bg-muted/50 hover:bg-accent'
             )}
           >
             <div className={cn("relative shrink-0", isMobile ? "" : "scale-90")}>

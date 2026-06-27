@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next'
 interface ConversationListItemProps {
   room: ChatRoom
   selected: boolean
+  contextMenuActive?: boolean
   unreadCount: number
   isExecuting: boolean
   hasOwnerMention: boolean
@@ -29,6 +30,7 @@ function formatUnreadCount(count: number): string | null {
 export function ConversationListItem({
   room,
   selected,
+  contextMenuActive,
   unreadCount,
   isExecuting,
   hasOwnerMention,
@@ -48,7 +50,7 @@ export function ConversationListItem({
       className={cn(
         'mx-2 flex cursor-pointer items-start gap-3 rounded-lg transition-colors',
         isMobile ? 'px-4 py-4' : 'px-3 py-3',
-        selected ? 'bg-primary/10' : 'hover:bg-accent'
+        selected ? 'bg-primary/10' : contextMenuActive ? 'bg-accent' : 'hover:bg-accent'
       )}
     >
       <div className="relative">

@@ -329,6 +329,7 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
       <ConversationPinnedGrid
         rooms={chatRooms}
         selectedId={selectedId}
+        contextMenuRoomId={contextMenu?.room.id ?? null}
         unreadCounts={unreadCounts}
         executingChatRooms={executingChatRooms}
         pendingOwnerMentionRoomIds={pendingOwnerMentionRoomIds}
@@ -354,6 +355,7 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
               key={room.id}
               room={room}
               selected={selectedId === room.id}
+              contextMenuActive={contextMenu?.room.id === room.id}
               unreadCount={unreadCounts[room.id] || 0}
               isExecuting={executingChatRooms.has(room.id)}
               hasOwnerMention={(unreadCounts[room.id] || 0) > 0 && pendingOwnerMentionRoomIds.has(room.id)}
@@ -383,6 +385,7 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
                   key={room.id}
                   room={room}
                   selected={selectedId === room.id}
+                  contextMenuActive={contextMenu?.room.id === room.id}
                   unreadCount={unreadCounts[room.id] || 0}
                   isExecuting={executingChatRooms.has(room.id)}
                   hasOwnerMention={(unreadCounts[room.id] || 0) > 0 && pendingOwnerMentionRoomIds.has(room.id)}

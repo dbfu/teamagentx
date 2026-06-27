@@ -70,14 +70,15 @@ export const ChatInputArea = memo(function ChatInputArea({
   const isMountedRef = useRef(true)   // #31: 组件挂载状态跟踪
   const isMobile = useIsMobile()
 
-  // 切换群聊时自动聚焦输入框
+  // 切换群聊时自动聚焦输入框（移动端不自动聚焦，避免进入群聊即弹出键盘）
   useEffect(() => {
+    if (isMobile) return
     // 延迟聚焦，等待 DOM 更新完成
     const timer = setTimeout(() => {
       mentionInputRef.current?.focus()
     }, 100)
     return () => clearTimeout(timer)
-  }, [chatRoomId])
+  }, [chatRoomId, isMobile])
 
   // 加载群聊自定义指令（用于 / 斜杠下拉）
   useEffect(() => {
@@ -380,8 +381,10 @@ export const ChatInputArea = memo(function ChatInputArea({
       if (!current.trim() && lastSent) {
         setInputValue(lastSent, chatRoomId)
       }
-      // 重新获取焦点（回填触发的重渲染后再聚焦）
-      requestAnimationFrame(() => mentionInputRef.current?.focus())
+      // 重新获取焦点（回填触发的重渲染后再聚焦）；移动端不自动聚焦，避免发完消息后键盘一直弹出
+      if (!isMobile) {
+        requestAnimationFrame(() => mentionInputRef.current?.focus())
+      }
       return
     }
     handleKeyDown(e)

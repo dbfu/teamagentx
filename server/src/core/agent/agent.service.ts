@@ -6,6 +6,7 @@ import {
   serializeAgentSpeechConfig,
 } from '../../modules/speech/speech-config.js';
 import { invalidateSystemAgentsCache } from '../../modules/chatroom/system-agents-cache.js';
+import { clearExecutorCacheEntries } from './agent-handler/cache.js';
 import { normalizeAgentProxyConfig } from './proxy-config.js';
 import { GROUP_ASSISTANT_ID, GROUP_COORDINATOR_ID, HIDDEN_SYSTEM_AGENT_IDS } from './system-assistant.constants.js';
 import {
@@ -434,7 +435,7 @@ export const agentService = {
     const processedThinkingMode = normalizeAgentThinkingMode(thinkingMode);
     const currentAgent = await prisma.agent.findUnique({
       where: { id },
-      select: { type: true, acpTool: true, llmProviderId: true },
+      select: { type: true, acpTool: true, llmProviderId: true, name: true },
     });
     if (!currentAgent) {
       const error = new Error('助手不存在') as Error & { code?: string };
@@ -483,6 +484,13 @@ export const agentService = {
         include: agentInclude,
       });
     });
+    // 助手运行时配置（如 acpTool / 模型 / 供应商 / 提示词等）变更后，
+    // 需清空已缓存的执行器，否则会继续使用旧执行器（例如改成 codex 仍跑 claude），导致「改了不生效」。
+    clearExecutorCacheEntries(currentAgent.name);
+    if (result.name !== currentAgent.name) {
+      clearExecutorCacheEntries(result.name);
+    }
+
     // 系统助手字段变更可能影响群聊列表展示，主动清空缓存
     if (existingAgent.agentLevel === 'system') {
       invalidateSystemAgentsCache();

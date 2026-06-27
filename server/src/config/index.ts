@@ -99,9 +99,13 @@ export const config = {
     memoryCandidateTtlDays: parseInt(process.env.AGENT_MEMORY_CANDIDATE_TTL_DAYS || '14', 10),
     // 智能协作模式下的「卡住检测」兜底：助手发完消息、房间内无在跑/排队任务且
     // 超过该延迟无新活动时，唤醒群调度助手裁决任务是否真的结束。
-    stallWatchdogDelayMs: parseInt(process.env.AGENT_STALL_WATCHDOG_DELAY_MS || '180000', 10),
+    // 该值同时作为空闲轮询间隔：每过一轮无变化就按此延迟再查一次（默认 1 分钟）。
+    stallWatchdogDelayMs: parseInt(process.env.AGENT_STALL_WATCHDOG_DELAY_MS || '60000', 10),
     // 连续救援上限：两次人类发言之间，watchdog 最多自动唤醒调度助手的次数，防止死循环。
     stallWatchdogMaxConsecutive: parseInt(process.env.AGENT_STALL_WATCHDOG_MAX_CONSECUTIVE || '5', 10),
+    // 空闲轮询暂停阈值：群内消息无变化、连续这么多轮都「无需调度/被跳过」即暂停轮询，
+    // 直到有新消息进来再重置计数并恢复轮询。默认 3 轮。
+    stallWatchdogMaxNoActivity: parseInt(process.env.AGENT_STALL_WATCHDOG_MAX_NO_ACTIVITY || '3', 10),
     // 群调度助手 LLM 决策调用的超时与重试。首轮使用该超时，重试轮次使用 2 倍超时；
     // 超时后仅重试该次 LLM 决策，不重复执行已完成的派发动作。
     coordinatorLlmTimeoutMs: parseInt(process.env.AGENT_COORDINATOR_LLM_TIMEOUT_MS || '120000', 10),

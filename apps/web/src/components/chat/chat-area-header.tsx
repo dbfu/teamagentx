@@ -513,7 +513,12 @@ export function ChatAreaHeader({
                 <TooltipTrigger asChild>
                   <DropdownMenuTrigger asChild>
                     <button
-                      className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                      className={cn(
+                        'rounded-lg p-2 transition-colors',
+                        moreMenuOpen
+                          ? 'bg-accent text-foreground'
+                          : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+                      )}
                       type="button"
                       onBlur={handleMoreTriggerPointerLeave}
                       onPointerLeave={handleMoreTriggerPointerLeave}

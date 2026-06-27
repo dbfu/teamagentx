@@ -13,6 +13,7 @@ import { llmProviderService } from '../../modules/llm-provider/llm-provider.serv
 import { agentMemoryService } from '../../modules/agent-memory/agent-memory.service.js';
 import { buildRoomMessageIndexSection } from '../../modules/message/room-message-index.service.js';
 import { skillInstallService } from '../../modules/skill/skill-install.service.js';
+import { createSkillDirectoryLink } from '../../modules/skill/skill-link.js';
 import type { AttachmentData } from '../../modules/task-queue/task-queue.service.js';
 import {
   buildAgentLongTermMemoryContentSection,
@@ -1217,14 +1218,11 @@ export class CodexSdkExecutor implements IAgentExecutor {
           if (!fs.existsSync(path.join(sourceSkillPath, 'SKILL.md'))) continue;
 
           const targetSkillPath = path.join(codexSkillsDir, entry.name);
-          try {
-            fs.symlinkSync(sourceSkillPath, targetSkillPath);
-          } catch {
-            fs.cpSync(sourceSkillPath, targetSkillPath, {
-              recursive: true,
-              dereference: true,
-            });
-          }
+          // 用 createSkillDirectoryLink 正确处理 Windows junction（无需管理员权限），
+          // 失败时自动降级为目录复制。
+          createSkillDirectoryLink(sourceSkillPath, targetSkillPath, {
+            overwrite: true,
+          });
         }
       }
     } catch (error) {

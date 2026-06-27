@@ -53,4 +53,19 @@ describe('skill directory links', () => {
     assert.equal(fs.existsSync(path.join(targetDir, 'old.txt')), false);
     assert.equal(fs.existsSync(path.join(targetDir, 'SKILL.md')), true);
   });
+
+  test('falls back to copying when directory linking fails', () => {
+    const root = makeTempDir();
+    const sourceDir = createSourceSkill(root, 'source-skill');
+    const targetDir = path.join(root, 'target-skill');
+    fs.writeFileSync(targetDir, 'blocking file', 'utf-8');
+
+    const result = createSkillDirectoryLink(sourceDir, targetDir, {
+      copyFallback: true,
+    });
+
+    assert.equal(result.method, 'copy');
+    assert.equal(fs.existsSync(path.join(targetDir, 'SKILL.md')), true);
+    assert.equal(fs.readFileSync(path.join(targetDir, 'SKILL.md'), 'utf-8'), '---\nname: test\n---\n');
+  });
 });

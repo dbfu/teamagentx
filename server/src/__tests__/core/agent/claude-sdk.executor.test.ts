@@ -10,6 +10,7 @@ import {
 import {
   ensureAgentLongTermMemoryFile,
 } from '../../../core/agent/agent-long-term-memory.js';
+import { skillInstallService } from '../../../modules/skill/skill-install.service.js';
 
 describe('ClaudeAgentSdkExecutor background idle finish', () => {
   test('uses a conservative default background idle finish timeout', () => {
@@ -108,6 +109,65 @@ describe('ClaudeAgentSdkExecutor background idle finish', () => {
       );
     } finally {
       fs.rmSync(workDir, {recursive: true, force: true});
+    }
+  });
+
+  test('exposes installed skills under the per-agent Claude config dir', () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-claude-skills-home-'));
+    const originalHome = process.env.HOME;
+    const originalUserProfile = process.env.USERPROFILE;
+    process.env.HOME = tempHome;
+    process.env.USERPROFILE = tempHome;
+
+    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-claude-skills-workdir-'));
+    const agentId = 'agent-skills-test';
+    const globalSkillsRoot = skillInstallService.getGlobalAgentSkillsDir(agentId);
+    const sourceSkillDir = path.join(globalSkillsRoot, 'browser-use');
+    fs.mkdirSync(sourceSkillDir, {recursive: true});
+    fs.writeFileSync(
+      path.join(sourceSkillDir, 'SKILL.md'),
+      '---\nname: browser-use\n---\nbody',
+      'utf-8',
+    );
+
+    const executor = new ClaudeAgentSdkExecutor(
+      'claude',
+      'test prompt',
+      'room-skills-test',
+      workDir,
+      true,
+      agentId,
+    );
+
+    try {
+      (executor as any).ensureSkillsSymlink();
+
+      const configSkillMdPath = path.join(
+        tempHome,
+        '.teamagentx',
+        'acp-config',
+        agentId,
+        'skills',
+        'browser-use',
+        'SKILL.md',
+      );
+      assert.equal(
+        fs.readFileSync(configSkillMdPath, 'utf-8'),
+        '---\nname: browser-use\n---\nbody',
+      );
+    } finally {
+      if (originalHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
+      if (originalUserProfile === undefined) {
+        delete process.env.USERPROFILE;
+      } else {
+        process.env.USERPROFILE = originalUserProfile;
+      }
+      fs.rmSync(workDir, {recursive: true, force: true});
+      fs.rmSync(tempHome, {recursive: true, force: true});
     }
   });
 

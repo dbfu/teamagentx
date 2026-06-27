@@ -14,6 +14,24 @@ function resolveSkillsDir(
   return skillsDirOverride || skillInstallService.getGlobalAgentSkillsDir(agentId);
 }
 
+/**
+ * 判断目录项是否为「可进入的目录」。
+ *
+ * Windows 上 junction（mklink /J，无需管理员，最常用）在 readdir 的 Dirent 里
+ * isDirectory() 与 isSymbolicLink() 都为 false（类型 UV_DIRENT_UNKNOWN），会被漏判跳过；
+ * 因此种别不明确时统一用 statSync（跟随链接/junction）兜底，跨平台识别真实目录、
+ * 目录软链与 junction。指向文件的软链会被判为非目录而正确跳过。
+ */
+function isDirectoryEntry(parentDir: string, entry: fs.Dirent): boolean {
+  if (entry.isDirectory()) return true;
+  if (entry.isSymbolicLink()) return true;
+  try {
+    return fs.statSync(path.join(parentDir, entry.name)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 function readSkillEntries(skillsDir: string): Array<{ slug: string; skillMdPath: string }> | null {
   if (!fs.existsSync(skillsDir)) {
     return [];
@@ -29,7 +47,7 @@ function readSkillEntries(skillsDir: string): Array<{ slug: string; skillMdPath:
   const skills: Array<{ slug: string; skillMdPath: string }> = [];
   for (const entry of entries) {
     if (entry.name.startsWith('.')) continue;
-    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+    if (!isDirectoryEntry(skillsDir, entry)) continue;
 
     const skillPath = path.join(skillsDir, entry.name);
     const skillMdPath = path.join(skillPath, 'SKILL.md');

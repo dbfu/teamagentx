@@ -23,10 +23,13 @@ import type { Message } from '../../../types/message.js';
  * 关键时序说明见下方注释；连续救援次数有上限，遇到人类发言清零，防止死循环。
  */
 
-// 每个房间一个防抖定时器；助手每发一条消息就重置，链在推进时永不触发。
+// 每个房间一个防抖/轮询定时器；助手每发一条消息就重置，链在推进时永不触发。
 const watchdogTimers = new Map<string, NodeJS.Timeout>();
 // 两次人类发言之间，watchdog 连续自动唤醒调度助手的次数，超过上限即停止。
 const consecutiveDispatches = new Map<string, number>();
+// 空闲轮询计数：群内消息无变化时，连续「无需调度/被跳过」的轮数。
+// 达到 stallWatchdogMaxNoActivity 即暂停轮询；任何新消息（助手或人类）都会清零并恢复。
+const consecutiveNoActivity = new Map<string, number>();
 // 记录刚刚被用户中断的房间，这些房间不应该触发 watchdog（用户主动介入）
 const interruptedRooms = new Set<string>();
 // 正在进行中的「卡住检测自动调度」中止控制器（按房间）：watchdog 唤醒群调度后持有，
@@ -41,6 +44,8 @@ const watchdogDispatchedAgents = new Map<string, Set<string>>();
  */
 export function resetStallWatchdog(chatRoomId: string): void {
   consecutiveDispatches.delete(chatRoomId);
+  // 人类发言属于「消息有变化」：清零空闲轮询计数，让轮询从头开始。
+  consecutiveNoActivity.delete(chatRoomId);
   // 用户重新介入，清除中断标志，避免残留标志在新一轮对话中误跳 watchdog
   interruptedRooms.delete(chatRoomId);
 }
@@ -65,8 +70,9 @@ export function cancelStallWatchdog(chatRoomId: string): void {
   if (clearStallWatchdogTimer(chatRoomId)) {
     console.log(`[stall-watchdog] ${chatRoomId} 用户手动停止，取消防抖定时器`);
   }
-  // 同时清零连续救援计数
+  // 同时清零连续救援计数与空闲轮询计数
   consecutiveDispatches.delete(chatRoomId);
+  consecutiveNoActivity.delete(chatRoomId);
   // 标记房间被用户中断，防止后续的中断消息重新触发 watchdog
   interruptedRooms.add(chatRoomId);
 }
@@ -133,6 +139,16 @@ async function stopWatchdogDispatchedAgents(chatRoomId: string, agentIds: string
  * 只应在 auto 模式、非快速对话群里调用（由调用方判断）。
  */
 export function scheduleStallWatchdog(chatRoomId: string): void {
+  // 助手发来新消息 = 群内消息有变化：清零空闲轮询计数并重新开始轮询。
+  consecutiveNoActivity.delete(chatRoomId);
+  armWatchdogTimer(chatRoomId);
+}
+
+/**
+ * 仅设置（重置）房间定时器，不触碰任何计数。
+ * scheduleStallWatchdog（消息变化）与空闲轮询的自我续命都复用它。
+ */
+function armWatchdogTimer(chatRoomId: string): void {
   const delay = config.agent.stallWatchdogDelayMs;
   if (!Number.isFinite(delay) || delay <= 0) return;
 
@@ -151,6 +167,28 @@ export function scheduleStallWatchdog(chatRoomId: string): void {
   watchdogTimers.set(chatRoomId, timer);
 }
 
+/**
+ * 登记一轮「无活动」（无需调度 / 被跳过）：计数 +1。
+ * 未达暂停阈值则按轮询间隔再查一次；达到阈值即暂停轮询，等待新消息（scheduleStallWatchdog/
+ * resetStallWatchdog 会清零计数并恢复）。
+ */
+function registerNoActivityRound(chatRoomId: string, reason: string): void {
+  const count = (consecutiveNoActivity.get(chatRoomId) ?? 0) + 1;
+  consecutiveNoActivity.set(chatRoomId, count);
+
+  if (count >= config.agent.stallWatchdogMaxNoActivity) {
+    console.log(
+      `[stall-watchdog] ${chatRoomId} 连续 ${count} 轮无变化(${reason})，暂停轮询，等待新消息`,
+    );
+    debugLog('stallWatchdogPaused', { chatRoomId, reason, noActivity: count });
+    return;
+  }
+
+  debugLog('stallWatchdogNoActivity', { chatRoomId, reason, noActivity: count });
+  // 群内仍无变化：按轮询间隔再查一轮（计数保留，不清零）。
+  armWatchdogTimer(chatRoomId);
+}
+
 async function runStallWatchdog(chatRoomId: string): Promise<void> {
   const chatRoom = await chatRoomService.findById(chatRoomId);
   // 仅在智能协作模式、非快速对话群兜底；手动模式无自动接力，无需救援。
@@ -158,11 +196,14 @@ async function runStallWatchdog(chatRoomId: string): Promise<void> {
     return;
   }
 
+  // 以下「跳过」分支均视为一轮无活动：计数 +1 并按轮询间隔再查；连续达阈值即暂停。
+
   // 房间必须真正空闲：没有任何 pending/executing 任务。
   // 防抖延迟已给「正常 @交接的异步入队」留出了完成时间，这里再确认一次。
   const activeTasks = await taskQueueService.getActiveTasks(chatRoomId);
   if (activeTasks.length > 0) {
     debugLog('stallWatchdogSkipped', { chatRoomId, reason: 'roomBusy', activeTasks: activeTasks.length });
+    registerNoActivityRound(chatRoomId, 'roomBusy');
     return;
   }
 
@@ -171,14 +212,17 @@ async function runStallWatchdog(chatRoomId: string): Promise<void> {
   const last = latest[0];
   if (!last || last.isHuman) {
     debugLog('stallWatchdogSkipped', { chatRoomId, reason: 'lastNotAgentMessage' });
+    registerNoActivityRound(chatRoomId, 'lastNotAgentMessage');
     return;
   }
   if (last.agentId === GROUP_COORDINATOR_ID) {
     debugLog('stallWatchdogSkipped', { chatRoomId, reason: 'lastIsCoordinator' });
+    registerNoActivityRound(chatRoomId, 'lastIsCoordinator');
     return;
   }
   if (await messageMentionsRoomUser(chatRoomId, last.content)) {
     debugLog('stallWatchdogSkipped', { chatRoomId, reason: 'lastMentionsUser' });
+    registerNoActivityRound(chatRoomId, 'lastMentionsUser');
     return;
   }
 
@@ -212,10 +256,14 @@ async function runStallWatchdog(chatRoomId: string): Promise<void> {
   watchdogDispatchControllers.set(chatRoomId, controller);
   watchdogDispatchedAgents.delete(chatRoomId);
 
+  // 本轮是否真正派发出助手：用于区分「无需调度/失败」（无活动）与「真派发」（有活动）。
+  let dispatchedAny = false;
+
   try {
     await runCoordinatorDispatch(chatRoomId, triggerMessage, coordinatorAgent, {
       signal: controller.signal,
       onAgentsDispatched: (ids) => {
+        if (ids.length > 0) dispatchedAny = true;
         const set = watchdogDispatchedAgents.get(chatRoomId) ?? new Set<string>();
         for (const id of ids) set.add(id);
         watchdogDispatchedAgents.set(chatRoomId, set);
@@ -226,7 +274,7 @@ async function runStallWatchdog(chatRoomId: string): Promise<void> {
           triggerMessageId: last.id,
           reason,
         });
-        scheduleStallWatchdog(chatRoomId);
+        // 调度失败 = 本轮没推进任何事，按无活动处理（下面统一登记/续命）。
       },
     });
   } finally {
@@ -235,6 +283,14 @@ async function runStallWatchdog(chatRoomId: string): Promise<void> {
     if (watchdogDispatchControllers.get(chatRoomId) === controller) {
       watchdogDispatchControllers.delete(chatRoomId);
     }
+  }
+
+  if (dispatchedAny) {
+    // 真正派发出助手 = 群内即将有新消息：清零空闲轮询计数（派发助手的消息也会重新计时）。
+    consecutiveNoActivity.delete(chatRoomId);
+  } else {
+    // 协调器判定「无需调度」或调度失败：本轮无变化，登记一轮无活动并按需续命/暂停。
+    registerNoActivityRound(chatRoomId, 'coordinatorNoDispatch');
   }
 }
 

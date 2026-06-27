@@ -349,6 +349,24 @@ function parseSkillMd(skillMdPath: string): DiscoveredSkill | null {
 }
 
 /**
+ * 判断目录项是否为「可进入的目录」。
+ *
+ * Windows 上 junction（mklink /J，无需管理员，最常用）在 readdir 的 Dirent 里
+ * isDirectory() 与 isSymbolicLink() 都为 false（类型 UV_DIRENT_UNKNOWN），会被漏判跳过；
+ * 因此种别不明确时统一用 statSync（跟随链接/junction）兜底，跨平台识别真实目录、
+ * 目录软链与 junction。指向文件的软链会被判为非目录而正确跳过。
+ */
+function isDirectoryEntry(parentDir: string, entry: fs.Dirent): boolean {
+  if (entry.isDirectory()) return true;
+  if (entry.isSymbolicLink()) return true;
+  try {
+    return fs.statSync(path.join(parentDir, entry.name)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
  * 在目录中查找所有 SKILL.md 文件
  */
 function discoverSkillsInDir(baseDir: string, subpath?: string): DiscoveredSkill[] {
@@ -380,8 +398,8 @@ function discoverSkillsInDir(baseDir: string, subpath?: string): DiscoveredSkill
     try {
       const entries = fs.readdirSync(dirPath, { withFileTypes: true });
       for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
         if (SKIP_DIRS.includes(entry.name)) continue;
+        if (!isDirectoryEntry(dirPath, entry)) continue;
 
         const skillDir = path.join(dirPath, entry.name);
         const skillMdPath = path.join(skillDir, 'SKILL.md');
@@ -426,8 +444,8 @@ function findSkillDirsDeep(
     const entries = fs.readdirSync(dir, { withFileTypes: true });
 
     for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
       if (SKIP_DIRS.includes(entry.name)) continue;
+      if (!isDirectoryEntry(dir, entry)) continue;
 
       const subDir = path.join(dir, entry.name);
       const skillMdPath = path.join(subDir, 'SKILL.md');
@@ -461,16 +479,36 @@ function generateSkillSlug(skillName: string): string {
 }
 
 /**
- * 若 sourcePath 是合集 / 插件内的嵌套技能（<tool>/skills/<collection>/skills/<skill>），
- * 返回合集名（如 superpowers）；顶层技能（<tool>/skills/<skill>）返回 null。
+ * 若 sourcePath 是合集 / 插件内的嵌套技能，返回合集名（如 superpowers）；
+ * 顶层技能（<tool>/skills/<skill>）返回 null。
+ *
+ * 同时兼容两种合集布局：
+ *   - 插件布局：<tool>/skills/<collection>/skills/<skill>
+ *   - 扁平布局：<tool>/skills/<collection>/<skill>
+ * 做法：定位「工具技能根目录」(形如 <.tool>/skills 的那个 skills 段)，
+ * 其后的第一层目录即合集名；技能若就在工具根的直接下一层则视为顶层技能。
+ * 用正则按 / 与 \ 同时切分，兼容 Windows 路径。
  */
 export function getNestedCollectionName(sourcePath: string): string | null {
-  const parentName = path.basename(path.dirname(sourcePath));
-  if (parentName !== 'skills') return null;
-  // 再上一级若是普通文件夹（非 .claude / .codex 等工具根目录），即为合集
-  const collectionName = path.basename(path.dirname(path.dirname(sourcePath)));
-  if (collectionName && !collectionName.startsWith('.')) return collectionName;
-  return null;
+  const segments = sourcePath.split(/[\\/]+/).filter(Boolean);
+
+  // 从后往前找形如 <.tool>/skills 的工具技能根目录（前一段以 . 开头，如 .claude/.codex）。
+  let toolSkillsIdx = -1;
+  for (let i = segments.length - 1; i >= 1; i--) {
+    if (segments[i] === 'skills' && segments[i - 1].startsWith('.')) {
+      toolSkillsIdx = i;
+      break;
+    }
+  }
+  if (toolSkillsIdx === -1) return null;
+
+  // 技能目录是最后一段；工具根与技能之间若只有 0~1 层则是顶层技能，无合集。
+  const afterCount = segments.length - 1 - toolSkillsIdx;
+  if (afterCount <= 1) return null;
+
+  const collection = segments[toolSkillsIdx + 1];
+  if (!collection || collection.startsWith('.')) return null;
+  return collection;
 }
 
 /**
@@ -717,9 +755,8 @@ export const skillInstallService = {
       if (entry.name.startsWith('.')) continue;
 
       // 检查是否是目录或符号链接（symlink 安装的技能）
-      const isDir = entry.isDirectory();
-      const isSymlink = entry.isSymbolicLink();
-      if (!isDir && !isSymlink) continue;
+      // Windows junction 需要用 statSync 判断
+      if (!isDirectoryEntry(targetDir, entry)) continue;
 
       const skillDir = path.join(targetDir, entry.name);
       const skillMdPath = path.join(skillDir, 'SKILL.md');
@@ -857,7 +894,7 @@ export const skillInstallService = {
     const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
 
     for (const entry of entries) {
-      if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+      if (!isDirectoryEntry(skillsDir, entry)) continue;
       if (entry.name.startsWith('.')) continue; // 跳过 .git 等隐藏目录
 
       const skillDir = path.join(skillsDir, entry.name);
@@ -901,6 +938,24 @@ export const skillInstallService = {
       // 提取工具名称（从 path 中提取）
       const sourceTool = tool.path.split('/')[0].replace('.', '');
 
+      // 扫描合集容器目录的直接子目录，把其中的技能逐个登记。
+      // 用于两种合集布局：插件布局 <dir>/skills/* 与扁平布局 <dir>/*。
+      const scanCollectionChildren = (containerDir: string): void => {
+        if (!fs.existsSync(containerDir)) return;
+        let children: fs.Dirent[];
+        try {
+          children = fs.readdirSync(containerDir, { withFileTypes: true });
+        } catch {
+          return;
+        }
+        for (const child of children) {
+          if (child.name.startsWith('.')) continue;
+          if (SKIP_DIRS.includes(child.name)) continue;
+          if (!isDirectoryEntry(containerDir, child)) continue;
+          pushSkill(path.join(containerDir, child.name));
+        }
+      };
+
       // 解析某个目录下的 SKILL.md 并加入结果，成功返回 true
       const pushSkill = (skillDir: string): boolean => {
         const skillMdPath = path.join(skillDir, 'SKILL.md');
@@ -931,33 +986,21 @@ export const skillInstallService = {
         const entries = fs.readdirSync(toolSkillsDir, { withFileTypes: true });
 
         for (const entry of entries) {
-          // 跳过非目录和非软连接
-          const isDir = entry.isDirectory();
-          const isSymlink = entry.isSymbolicLink();
-          if (!isDir && !isSymlink) continue;
+          // 跳过非目录项（实目录 / 目录软链 / Windows junction 都算目录）
           if (entry.name.startsWith('.')) continue;
+          if (!isDirectoryEntry(toolSkillsDir, entry)) continue;
 
           const skillDir = path.join(toolSkillsDir, entry.name);
 
           // 1) 目录本身就是单个技能（含顶层 SKILL.md）
           if (pushSkill(skillDir)) continue;
 
-          // 2) 否则可能是技能合集 / 插件（如 superpowers），
-          //    其技能嵌套在 <dir>/skills/<name>/SKILL.md 中，需向下一层发现
-          const nestedSkillsDir = path.join(skillDir, 'skills');
-          if (!fs.existsSync(nestedSkillsDir)) continue;
-
-          try {
-            const nestedEntries = fs.readdirSync(nestedSkillsDir, { withFileTypes: true });
-            for (const nested of nestedEntries) {
-              if (!nested.isDirectory() && !nested.isSymbolicLink()) continue;
-              if (nested.name.startsWith('.')) continue;
-              if (SKIP_DIRS.includes(nested.name)) continue;
-              pushSkill(path.join(nestedSkillsDir, nested.name));
-            }
-          } catch {
-            // 忽略嵌套目录读取错误
-          }
+          // 2) 否则视为技能合集 / 插件（如 superpowers），技能可能位于：
+          //    - 插件布局：<dir>/skills/<name>/SKILL.md
+          //    - 扁平布局：<dir>/<name>/SKILL.md
+          //    两种布局都扫；扫扁平层时会顺带尝试 <dir>/skills，但其下无 SKILL.md 故无副作用。
+          scanCollectionChildren(path.join(skillDir, 'skills'));
+          scanCollectionChildren(skillDir);
         }
       } catch (error) {
         console.error(`[skillInstall] Error scanning ${toolSkillsDir}:`, error);

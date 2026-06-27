@@ -150,6 +150,12 @@ export function SkillPage() {
     setSelectedLocalFolder(null);
   };
 
+  // 打开导入弹框时重新扫描外部技能，避免显示挂载时的旧缓存
+  const openImportModal = () => {
+    setImportModalOpen(true);
+    loadExternalSkills();
+  };
+
   const handleCopyPath = async () => {
     try {
       await navigator.clipboard.writeText(skillsPath);
@@ -403,7 +409,7 @@ export function SkillPage() {
             style={window.electronAPI?.isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
           >
             <button
-              onClick={() => setImportModalOpen(true)}
+              onClick={openImportModal}
               className="ta-button-primary h-8 px-3 text-xs"
             >
               <Import className="size-4" />
@@ -432,7 +438,7 @@ export function SkillPage() {
               <p className="text-lg">{t('skill.noSkills')}</p>
               <p className="mt-2 text-sm">{t('skill.createInChatroom')}</p>
               <button
-                onClick={() => setImportModalOpen(true)}
+                onClick={openImportModal}
                 className="ta-button-primary mt-4"
               >
                 <Import className="size-4" />

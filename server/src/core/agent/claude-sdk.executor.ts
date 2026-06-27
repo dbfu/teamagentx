@@ -23,6 +23,7 @@ import { agentMemoryService } from '../../modules/agent-memory/agent-memory.serv
 import { buildRoomMessageIndexSection } from '../../modules/message/room-message-index.service.js';
 import { quickChatSessionService } from '../../modules/quick-chat-session/quick-chat-session.service.js';
 import { skillInstallService } from '../../modules/skill/skill-install.service.js';
+import { createSkillDirectoryLink } from '../../modules/skill/skill-link.js';
 import type { AttachmentData } from '../../modules/task-queue/task-queue.service.js';
 import { backgroundCommandService } from '../shell/background-command.service.js';
 import { getDefaultShell } from '../shell/default-shell.js';
@@ -868,23 +869,21 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
         if (existingTarget === globalSkillsDir) return;
       }
     } catch {
-      // 不是 symlink，继续重建。
-    }
-
-    try {
-      fs.rmSync(configSkillsDir, {recursive: true, force: true});
-    } catch {
-      // 忽略删除失败。
+      // 不是 symlink/junction，继续重建。
     }
 
     fs.mkdirSync(claudeConfigDir, {recursive: true});
     try {
-      fs.symlinkSync(globalSkillsDir, configSkillsDir);
+      // 用 createSkillDirectoryLink 正确处理跨平台：POSIX 走目录 symlink，
+      // Windows 优先 junction（无需管理员权限），失败再降级为目录复制。
+      const result = createSkillDirectoryLink(globalSkillsDir, configSkillsDir, {
+        overwrite: true,
+      });
       console.log(
-        `${this.name}: Skills symlink 已创建 ${configSkillsDir} → ${globalSkillsDir}`,
+        `${this.name}: Skills link 已创建 (${result.method}) ${configSkillsDir} → ${globalSkillsDir}`,
       );
     } catch (error) {
-      console.error(`${this.name}: 创建 Skills symlink 失败:`, error);
+      console.error(`${this.name}: 创建 Skills 目录链接失败:`, error);
     }
   }
 
