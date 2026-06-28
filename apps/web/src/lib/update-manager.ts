@@ -79,7 +79,7 @@ function normalizeDownloadProgress(
 export function createUpdateManager(options: CreateUpdateManagerOptions = {}) {
   const getElectronAPI = options.getElectronAPI ?? (() => window.electronAPI)
   const now = options.now ?? (() => Date.now())
-  const runtimeCheckIntervalMs = options.runtimeCheckIntervalMs ?? 30 * 60 * 1000
+  const runtimeCheckIntervalMs = options.runtimeCheckIntervalMs ?? 60 * 1000
   const listeners = new Set<() => void>()
   let state: UpdateManagerState = { ...initialState }
   let inFlight: Promise<unknown> | null = null

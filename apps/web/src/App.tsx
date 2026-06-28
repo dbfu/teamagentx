@@ -829,10 +829,10 @@ function AppContent() {
     window.addEventListener('online', checkOnOnline)
     document.addEventListener('visibilitychange', checkOnVisibilityChange)
 
-    // 每 30 分钟定时检查一次更新
+    // 每 1 分钟定时检查一次更新
     const intervalId = window.setInterval(() => {
       updateManager.checkForUpdates({ silent: true, reason: 'interval' })
-    }, 30 * 60 * 1000)
+    }, 60 * 1000)
 
     return () => {
       window.removeEventListener('focus', checkOnFocus)

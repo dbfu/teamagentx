@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils'
 import { toVoicePanelConfig, type AgentVoicePanelConfig } from '@/lib/agent-speech'
 import { deleteTtsCache, loadRoomTtsCache, normalizeSpeechText, prewarmTts, speakText, stopSpeechPlayback, supportsSpeechPlayback } from '@/lib/browser-speech'
 import { buildTtsCacheKey, PREWARM_MAX_TEXT_LENGTH } from '@/speech/tts-prefetch-cache'
-import { ArrowDown, Check, CheckSquare, Loader2, Trash2, X } from 'lucide-react'
+import { ArrowDown, CheckSquare, Loader2, Trash2, X } from 'lucide-react'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { toast } from 'sonner'
 
@@ -353,11 +353,6 @@ const MessageRow = memo(function MessageRow({
         isSelected={isSelected}
         copyOnlyContextMenu={copyOnlyContextMenu}
       />
-      {isMultiSelectMode && (
-        <div className="pointer-events-none absolute left-3 top-4 z-30 flex size-5 items-center justify-center rounded-full border border-blue-500 bg-background text-blue-500 shadow-sm">
-          {isSelected && <Check className="size-3.5" />}
-        </div>
-      )}
     </div>
   )
 })
@@ -512,6 +507,19 @@ export const ChatMessagesList = memo(function ChatMessagesList({
     setIsMultiSelectMode(false)
     setSelectedMessageIds(new Set())
   }, [])
+
+  // 多选模式下按 Esc 退出
+  useEffect(() => {
+    if (!isMultiSelectMode) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        exitMultiSelect()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isMultiSelectMode, exitMultiSelect])
 
   const startMultiSelect = useCallback((messageId: string) => {
     if (readOnly) return

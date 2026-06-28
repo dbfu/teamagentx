@@ -1567,6 +1567,8 @@
     "updateAvailable": "发现新版本",
     "updateAvailableHint": "发现新版本 {{version}}，已在侧边栏显示更新入口",
     "noUpdate": "当前已是最新版本",
+    "noUpdateWithVersion": "当前已是最新版本（{{version}}）",
+    "latestVersion": "最新版本",
     "updateSupportOnlyDesktop": "仅桌面客户端支持检查更新",
     "checkUpdateFailed": "检查更新失败",
     "downloadUpdate": "下载更新",

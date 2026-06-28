@@ -47,13 +47,28 @@ export function UpdateNotification() {
   }, [])
 
   const handleDownload = async () => {
-    if (!update || !window.electronAPI?.downloadUpdate) return
+    const api = window.electronAPI
+    if (!update || !api?.downloadUpdate) return
+
+    // 下载前强制重新检查一次，避免下载到被节流缓存住的旧版本（连续发版时会"更新两次"）
+    let target = update
+    if (api.checkForUpdates) {
+      try {
+        const fresh = await api.checkForUpdates()
+        if (fresh.success && fresh.data?.hasUpdate && fresh.data.update) {
+          target = fresh.data.update
+          updateManager.applyAvailableUpdate(fresh.data.currentVersion, fresh.data.update, true, notificationPlacement)
+        }
+      } catch {
+        // 重新检查失败就用已知的 update 继续下载，不阻塞流程
+      }
+    }
 
     updateManager.setStatus('downloading')
     updateManager.resetDownload()
 
     try {
-      const result = await window.electronAPI.downloadUpdate(update)
+      const result = await api.downloadUpdate(target)
       if (result.success && result.filePath) {
         updateManager.setDownloaded(result.filePath)
       } else {

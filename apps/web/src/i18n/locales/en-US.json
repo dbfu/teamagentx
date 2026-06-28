@@ -1567,6 +1567,8 @@
     "updateAvailable": "New version available",
     "updateAvailableHint": "New version {{version}} found and shown in the sidebar",
     "noUpdate": "Already up to date",
+    "noUpdateWithVersion": "Already up to date ({{version}})",
+    "latestVersion": "Latest version",
     "updateSupportOnlyDesktop": "Only desktop client supports checking updates",
     "checkUpdateFailed": "Check update failed",
     "downloadUpdate": "Download Update",

@@ -821,6 +821,18 @@
   }
 }
 
+/* 消息 hover 工具条图标点击反馈动画 */
+@keyframes toolbar-icon-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(0.78); }
+  70% { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+
+.toolbar-icon-pop {
+  animation: toolbar-icon-pop 0.32s ease-out;
+}
+
 /* Custom thin scrollbar */
 .scrollbar-thin {
   scrollbar-width: thin;

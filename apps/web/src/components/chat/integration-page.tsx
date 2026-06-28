@@ -35,6 +35,11 @@ import { useTranslation } from 'react-i18next'
 import { BotEditorForm } from './integration/BotEditorForm'
 import { BotListCard } from './integration/BotListCard'
 import { useBridgeData } from './integration/useBridgeData'
+import telegramIcon from '@/assets/platform-icons/telegram.svg'
+import feishuIcon from '@/assets/platform-icons/feishu.svg'
+import dingtalkIcon from '@/assets/platform-icons/dingtalk.svg'
+import wecomIcon from '@/assets/platform-icons/wecom.svg'
+import qqIcon from '@/assets/platform-icons/qq.svg'
 
 const ELECTRON_DRAG_STYLE = window.electronAPI?.isElectron
   ? { WebkitAppRegion: 'drag' as const }
@@ -66,12 +71,13 @@ function platformLabel(platforms: BridgePlatformDefinition[], platform: Platform
   return platforms.find((item) => item.key === platform)?.label ?? platform
 }
 
+// 平台图标改为本地 SVG，避免依赖外部 CDN（离线/受限网络也能显示）
 const PLATFORM_ICON_URLS: Record<Platform, string> = {
-  telegram: 'https://cdn.simpleicons.org/telegram/0088cc',
-  feishu: 'https://cdn.jsdelivr.net/gh/callback-io/allogo@main/public/logos/feishu/icon.svg',
-  dingtalk: 'https://api.iconify.design/ant-design:dingtalk-outlined.svg?color=%231675FF',
-  wecom: 'https://api.iconify.design/tdesign:logo-wecom.svg?color=%2307C160',
-  qq: 'https://cdn.simpleicons.org/qq/12B7F5',
+  telegram: telegramIcon,
+  feishu: feishuIcon,
+  dingtalk: dingtalkIcon,
+  wecom: wecomIcon,
+  qq: qqIcon,
 }
 
 export function IntegrationPage() {
@@ -435,9 +441,10 @@ export function IntegrationPage() {
               aria-selected={activePlatform === platform.key}
               onClick={() => setActivePlatform(platform.key)}
               className={cn(
-                'inline-flex items-center gap-1.5 rounded-t-lg border border-b-0 px-4 py-2 text-sm font-medium',
+                'relative inline-flex items-center gap-1.5 rounded-t-lg border border-b-0 px-4 py-2 text-sm font-medium',
                 activePlatform === platform.key
-                  ? 'border-border bg-background text-foreground'
+                  // -mb-px 让选中 tab 向下盖住 tablist 的底部边框，与下方内容连成一体
+                  ? '-mb-px border-border bg-background text-foreground'
                   : 'border-transparent text-muted-foreground hover:text-foreground',
               )}
               style={NO_DRAG_STYLE}

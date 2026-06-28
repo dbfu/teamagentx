@@ -16,6 +16,7 @@ export function SoftwareSection() {
   const { t } = useTranslation()
   const { terminalOpenTarget, setTerminalOpenTarget } = useUIStore()
   const [appVersion, setAppVersion] = useState<string | null>(null)
+  const [latestVersion, setLatestVersion] = useState<string | null>(null)
   const [checkingUpdate, setCheckingUpdate] = useState(false)
 
   const isElectron = window.electronAPI?.isElectron ?? false
@@ -37,19 +38,28 @@ export function SoftwareSection() {
 
     setCheckingUpdate(true)
     try {
+      // 每次点击都实时调用接口，拿服务端最新版本号
       const result = await api.checkForUpdates()
       if (!result.success) {
         toast.error(t('settings.checkUpdateFailed'))
         return
       }
 
+      // update.version 是服务端 update.json 里的最新版本号（无论是否有更新都会返回）
+      const serverLatest = result.data?.update?.version ?? result.data?.currentVersion ?? null
+      setLatestVersion(serverLatest)
+
       if (result.data?.hasUpdate && result.data.update) {
-        updateManager.applyAvailableUpdate(result.data.currentVersion, result.data.update)
-        toast.success(t('settings.updateAvailableHint', { version: result.data.update.version }))
+        // 有更新：直接在左侧弹出更新面板（sidebar 位置）
+        updateManager.applyAvailableUpdate(result.data.currentVersion, result.data.update, true, 'sidebar')
         return
       }
 
-      toast.success(t('settings.noUpdate'))
+      toast.success(
+        serverLatest
+          ? t('settings.noUpdateWithVersion', { version: serverLatest })
+          : t('settings.noUpdate'),
+      )
     } finally {
       setCheckingUpdate(false)
     }
@@ -98,6 +108,11 @@ export function SoftwareSection() {
               <p className="mt-1 text-xs text-muted-foreground">
                 {t('settings.currentVersion')} {appVersion || t('settings.versionUnknown')}
               </p>
+              {latestVersion && (
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {t('settings.latestVersion')} {latestVersion}
+                </p>
+              )}
             </div>
             <Download className="size-4 text-primary" />
           </div>

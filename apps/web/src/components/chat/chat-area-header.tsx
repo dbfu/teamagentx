@@ -4,6 +4,7 @@ import { chatRoomApi, ChatRoom, Message, type PackageScriptsResult } from '@/lib
 import { AgentAvatarImage } from '@/lib/agent-avatars';
 import { GroupAvatarImage } from '@/lib/group-avatars';
 import { cn } from '@/lib/utils';
+import { Z_INDEX } from '@/lib/z-index';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Box, Camera, ClipboardList, Clock, Eraser, History, KeyRound, Loader2, MessagesSquare, MoreHorizontal, Play, Scroll, Settings, Square, TerminalSquare, UserPlus, Users, Workflow } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -333,8 +334,11 @@ export function ChatAreaHeader({
 
   return (
     <div
-      className="flex items-center border-b border-border/80 bg-[var(--surface-raised)] px-6 py-3 shadow-[var(--control-shadow)]"
-      style={isElectron ? { WebkitAppRegion: 'drag' } as React.CSSProperties : {}}
+      className="relative flex items-center border-b border-border/80 bg-[var(--surface-raised)] px-6 py-3 shadow-[var(--control-shadow)]"
+      style={{
+        zIndex: Z_INDEX.chatHeader,
+        ...(isElectron ? { WebkitAppRegion: 'drag' } : {}),
+      } as React.CSSProperties}
     >
       {/* Left content */}
       <div

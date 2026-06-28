@@ -437,8 +437,10 @@ export async function processQueue(chatRoomId: string, agentId: string) {
             await handoffOutputBuffer.flush();
           };
 
-          // 仅记录回调：把工具调用之前的中间文本段写入执行详情，但不发群消息、不广播。
-          // 用于在执行详情里完整保留 agent 在多次工具调用之间产生的每一段文字。
+          let currentStreamOutputSegment = '';
+
+          // 记录工具调用前的中间文本段到执行详情；若该段没走过 token 流，也补到流式面板。
+          // 不通过 publishOutputCallback 发群消息，避免把中间过程当最终回复发出去。
           const recordCallback = (content: string) => {
             if (!content || !content.trim()) return;
             markExecutionActivity();
@@ -448,6 +450,9 @@ export async function processQueue(chatRoomId: string, agentId: string) {
               data: { content, type: 'message' },
             });
             lastRecordedSegmentContent = content;
+            if (currentStreamOutputSegment.trim() !== content.trim()) {
+              streamCallback(content);
+            }
           };
 
           // 流式内容回调
@@ -463,6 +468,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
             if (lastEvent?.type === 'output') {
               // 在同一个 output 事件内累加内容
               lastEvent.content = (lastEvent.content || '') + content;
+              currentStreamOutputSegment += content;
             } else {
               // 创建新的 output 事件
               const now = Date.now();
@@ -473,10 +479,11 @@ export async function processQueue(chatRoomId: string, agentId: string) {
                 content,
                 timestamp: now,
               });
+              currentStreamOutputSegment = content;
             }
             streamEventsCache.set(cacheKey, events);
 
-            if (globalEmitStream && !deferHandoffOutput) {
+            if (globalEmitStream) {
               globalEmitStream(
                 { messageId: task.messageId, agentId: task.agentId, agentName: task.agentName, content },
                 chatRoomId,
@@ -524,6 +531,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
                 timestamp: now,
               });
             }
+            currentStreamOutputSegment = '';
             streamEventsCache.set(cacheKey, events);
 
             if (globalEmitThinking) {
@@ -574,6 +582,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
             );
 
             const now = Date.now();
+            currentStreamOutputSegment = '';
             if (cachedEventIndex >= 0) {
               // 更新现有工具调用
               events[cachedEventIndex] = {
@@ -926,6 +935,11 @@ export async function processQueue(chatRoomId: string, agentId: string) {
                 agentId: task.agentId,
                 agentName: task.agentName,
               });
+              streamCallback(
+                (roomForReminder?.owner as { preferredLanguage?: string } | undefined)?.preferredLanguage === 'en-US'
+                  ? '\n\nReviewing whether another assistant should take over...\n'
+                  : '\n\n正在复核是否需要交接给其他助手...\n',
+              );
 
               try {
                 const auditResult = await runSilentHandoffAudit({

@@ -85,6 +85,42 @@ describe('ClaudeAgentSdkExecutor background idle finish', () => {
     );
   });
 
+  test('emits stream text from complete assistant messages when deltas are absent', () => {
+    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-claude-stream-fallback-'));
+    const executor = new ClaudeAgentSdkExecutor(
+      'claude',
+      'test prompt',
+      'room-stream-fallback-test',
+      workDir,
+      true,
+      'agent-stream-fallback-test',
+    );
+    const chunks: string[] = [];
+
+    try {
+      (executor as any).emitStream = (content: string) => chunks.push(content);
+      (executor as any).handleAssistantMessage({
+        message: {
+          content: [{type: 'text', text: 'hello from assistant'}],
+          stop_reason: 'end_turn',
+        },
+      });
+
+      assert.deepEqual(chunks, ['hello from assistant']);
+
+      (executor as any).handleAssistantMessage({
+        message: {
+          content: [{type: 'text', text: 'hello from assistant'}],
+          stop_reason: 'end_turn',
+        },
+      });
+
+      assert.deepEqual(chunks, ['hello from assistant']);
+    } finally {
+      fs.rmSync(workDir, {recursive: true, force: true});
+    }
+  });
+
   test('passes the per-agent Claude config dir to MCP shell commands', async () => {
     const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-claude-mcp-env-'));
     const agentId = 'agent-env-test';

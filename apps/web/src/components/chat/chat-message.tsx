@@ -2,11 +2,13 @@ import { Message, THINKING_MODE_I18N_KEY } from '@/lib/agent-api'
 import { tokenUsageApi } from '@/lib/token-usage-api'
 import { cn, formatDateTime } from '@/lib/utils'
 import { copyToClipboard } from '@/lib/copy-utils'
-import { Bot, CheckSquare, MessageSquareMore, Info, Copy, XCircle, Trash2, Volume2, ChevronDown, ChevronUp, Clock } from 'lucide-react'
-import { memo, useEffect, useState, useCallback, useMemo, type SyntheticEvent } from 'react'
+import { Bot, Check, CheckSquare, MessageSquareMore, Info, Copy, XCircle, Trash2, Volume2, ChevronDown, ChevronUp, Clock } from 'lucide-react'
+import { memo, useEffect, useRef, useState, useCallback, useMemo, type SyntheticEvent } from 'react'
 import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
 import { FloatingMenu } from '@/components/ui/floating-menu'
+import { MessageHoverToolbar } from '@/components/ui/message-hover-toolbar'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { ImageViewerModal } from './image-viewer-modal'
 import { AudioMessagePlayer } from './audio-message-player'
 import { AgentAvatar } from './agent-avatar'
@@ -19,6 +21,7 @@ import { normalizeSpeechText, prewarmTts, speakText, stopSpeechPlayback, support
 import { resolveAssetUrl } from '@/lib/asset-url'
 import { MarkdownContent } from './markdown-content'
 import { isStreamViewBlocked } from '@/lib/system-agents'
+import { Z_INDEX } from '@/lib/z-index'
 
 function logManualVoice(event: string, details: Record<string, unknown>): void {
   console.debug(`[voice-manual] ${event}`, details)
@@ -213,10 +216,16 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
   const shouldHideContent = hasAudioAttachment && message.content.trim() === VOICE_MESSAGE_PLACEHOLDER
   // 纯语音消息：只有音频附件、无文字内容，气泡样式退化为透明
   const isAudioOnly = hasAudioAttachment && shouldHideContent && (message.attachments?.every((att) => getAttachmentType(att) === 'audio') ?? false)
-  // 右键菜单状态
+  // 右键菜单状态（移动端长按仍使用浮动菜单）
   const [showContextMenu, setShowContextMenu] = useState(false)
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 })
   const [longPressTimer, setLongPressTimer] = useState<ReturnType<typeof setTimeout> | null>(null)
+  // 桌面端 hover 工具条状态
+  const [showToolbar, setShowToolbar] = useState(false)
+  const bubbleRef = useRef<HTMLDivElement>(null)
+  const closeToolbarTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // 工具条图标点击反馈动画：记录当前播放动画的按钮，nonce 用于每次点击重启动画
+  const [toolbarPop, setToolbarPop] = useState<{ key: string; nonce: number } | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [isContentExpanded, setIsContentExpanded] = useState(false)
@@ -228,13 +237,61 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
   const [viewerImage, setViewerImage] = useState<{ url: string; name: string } | null>(null)
   // isSpeaking = isCurrentlyPlaying（通过 store 统一管理，手动和自动播放图标一致）
 
-  // 处理右键菜单（桌面端）
-  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+  // 关闭移动端长按浮动菜单。桌面端 hover 工具条点击后保持显示，仅在鼠标离开时关闭。
+  const closeMessageMenu = useCallback(() => {
+    setShowContextMenu(false)
+  }, [])
+
+  const clearCloseToolbarTimer = useCallback(() => {
+    if (closeToolbarTimerRef.current) {
+      clearTimeout(closeToolbarTimerRef.current)
+      closeToolbarTimerRef.current = null
+    }
+  }, [])
+
+  const scheduleCloseToolbar = useCallback(() => {
+    clearCloseToolbarTimer()
+    // 留出延时，便于鼠标在气泡与工具条之间移动时不闪烁
+    closeToolbarTimerRef.current = setTimeout(() => setShowToolbar(false), 120)
+  }, [clearCloseToolbarTimer])
+
+  // 鼠标在消息气泡上移动（桌面端）→ 显示右上角工具条。
+  // 用 mousemove 而不是 mouseenter：滚动时鼠标静止只会触发 mouseenter 不会触发 mousemove，
+  // 这样滚动过程中工具条不会乱闪，滚动结束后需要鼠标真正移动一下才重新显示。
+  const handleBubbleMouseMove = useCallback(() => {
+    if (isMobile || selectionMode) return
+    clearCloseToolbarTimer()
+    setShowToolbar(true)
+  }, [isMobile, selectionMode, clearCloseToolbarTimer])
+
+  const handleBubbleMouseLeave = useCallback(() => {
     if (isMobile) return
-    e.preventDefault()
-    setContextMenuPos({ x: e.clientX, y: e.clientY })
-    setShowContextMenu(true)
-  }, [isMobile])
+    scheduleCloseToolbar()
+  }, [isMobile, scheduleCloseToolbar])
+
+  // 鼠标进入工具条本身时保持显示
+  const handleToolbarMouseEnter = useCallback(() => {
+    clearCloseToolbarTimer()
+  }, [clearCloseToolbarTimer])
+
+  const handleToolbarMouseLeave = useCallback(() => {
+    scheduleCloseToolbar()
+  }, [scheduleCloseToolbar])
+
+  // 卸载时清理延时关闭定时器
+  useEffect(() => () => clearCloseToolbarTimer(), [clearCloseToolbarTimer])
+
+  // 滚动时立即移除 hover 工具条（仅在显示时挂监听，避免大量消息各自常驻监听）。
+  // 捕获阶段监听以接收内部滚动容器的 scroll 事件。
+  useEffect(() => {
+    if (!showToolbar) return
+    const handleScroll = () => {
+      clearCloseToolbarTimer()
+      setShowToolbar(false)
+    }
+    window.addEventListener('scroll', handleScroll, true)
+    return () => window.removeEventListener('scroll', handleScroll, true)
+  }, [showToolbar, clearCloseToolbarTimer])
 
   // 处理长按开始（移动端）
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
@@ -265,16 +322,16 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
     } else {
       toast.error(t('common.copyFailed'))
     }
-    setShowContextMenu(false)
-  }, [message.content, t])
+    closeMessageMenu()
+  }, [message.content, t, closeMessageMenu])
 
   // 回复助手消息：等同于在输入框 @ 该助手，不创建回复关系
   const handleReplyToAgent = useCallback(() => {
     if (!message.isHuman && message.agentId && message.agent?.name) {
       onMentionAgent?.(message.agentId, message.agent.name)
     }
-    setShowContextMenu(false)
-  }, [message.isHuman, message.agentId, message.agent?.name, onMentionAgent])
+    closeMessageMenu()
+  }, [message.isHuman, message.agentId, message.agent?.name, onMentionAgent, closeMessageMenu])
 
   // 删除消息
   const handleDelete = useCallback(async () => {
@@ -293,14 +350,14 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
   }, [message.id, onDeleteMessage, t])
 
   const openDeleteDialog = useCallback(() => {
-    setShowContextMenu(false)
+    closeMessageMenu()
     setDeleteDialogOpen(true)
-  }, [])
+  }, [closeMessageMenu])
 
   const handleStartMultiSelect = useCallback(() => {
-    setShowContextMenu(false)
+    closeMessageMenu()
     onStartMultiSelect?.(message.id)
-  }, [message.id, onStartMultiSelect])
+  }, [message.id, onStartMultiSelect, closeMessageMenu])
 
   const handleSelectionClickCapture = useCallback((e: React.MouseEvent) => {
     if (!selectionMode) return
@@ -742,6 +799,74 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
     )
   }
 
+  // 桌面端 hover 工具条（右上角图标按钮）
+  const renderHoverToolbar = () => {
+    if (isMobile) return null
+
+    const iconButtonClass =
+      'flex items-center justify-center rounded-md p-1.5 text-popover-foreground transition-colors hover:bg-accent'
+
+    const renderToolbarButton = (
+      key: string,
+      label: string,
+      icon: React.ReactNode,
+      onClick: () => void,
+      buttonClass: string,
+    ) => {
+      const isPopping = toolbarPop?.key === key
+      const handleClick = () => {
+        // 每次点击递增 nonce 以重启动画（即使连续点击同一按钮）
+        setToolbarPop((prev) => ({ key, nonce: (prev?.key === key ? prev.nonce : 0) + 1 }))
+        onClick()
+      }
+      return (
+        <Tooltip key={key}>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={handleClick}
+              className={buttonClass}
+              aria-label={label}
+            >
+              <span
+                key={isPopping ? `${key}-${toolbarPop?.nonce}` : key}
+                className={cn('inline-flex', isPopping && 'toolbar-icon-pop')}
+              >
+                {icon}
+              </span>
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{label}</TooltipContent>
+        </Tooltip>
+      )
+    }
+
+    return (
+      <MessageHoverToolbar
+        open={showToolbar}
+        anchorRef={bubbleRef}
+        onMouseEnter={handleToolbarMouseEnter}
+        onMouseLeave={handleToolbarMouseLeave}
+        // 低于 header（Z_INDEX.chatHeader）：气泡溢出到顶部时由 header 盖住，不浮在 header 之上
+        zIndex={copyOnlyContextMenu ? Z_INDEX.readonlyCopyMenu : Z_INDEX.messageHoverToolbar}
+      >
+        {renderToolbarButton('copy', t('chat.copyContent'), <Copy className="size-4" />, handleCopy, iconButtonClass)}
+        {!copyOnlyContextMenu && !message.isHuman && message.agentId && message.agent?.name &&
+          renderToolbarButton('reply', t('chat.reply'), <MessageSquareMore className="size-4" />, handleReplyToAgent, iconButtonClass)}
+        {!copyOnlyContextMenu && onStartMultiSelect &&
+          renderToolbarButton('multiSelect', t('chat.multiSelect'), <CheckSquare className="size-4" />, handleStartMultiSelect, iconButtonClass)}
+        {!copyOnlyContextMenu && onDeleteMessage &&
+          renderToolbarButton(
+            'delete',
+            t('chat.deleteMessage'),
+            <Trash2 className="size-4" />,
+            openDeleteDialog,
+            'flex items-center justify-center rounded-md p-1.5 text-red-600 transition-colors hover:bg-red-50 dark:hover:bg-red-950/30',
+          )}
+      </MessageHoverToolbar>
+    )
+  }
+
   const renderContentToggleButton = (isCollapsed: boolean) => (
     <button
       type="button"
@@ -807,10 +932,26 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
     )
   }
 
+  // 多选模式下消息气泡左上角的选中框
+  const renderSelectionCheckbox = () => {
+    if (!selectionMode) return null
+    return (
+      <div
+        className={cn(
+          'pointer-events-none absolute right-full top-0.5 z-30 mr-4 flex size-5 items-center justify-center rounded-full border bg-background shadow-sm transition-colors',
+          isSelected ? 'border-blue-500 text-blue-500' : 'border-gray-300 text-transparent dark:border-gray-600',
+        )}
+      >
+        <Check className="size-3.5" />
+      </div>
+    )
+  }
+
   if (isRight) {
     return (
       <>
         {renderContextMenuLayer()}
+        {renderHoverToolbar()}
         <div
           className={cn("flex justify-end py-2", isMobile ? "px-2" : "px-6")}
           onClickCapture={handleSelectionClickCapture}
@@ -823,21 +964,26 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
                 <span className="font-medium text-foreground text-sm">{senderName}</span>
               </div>
               {renderReplyPreview()}
-              <div
-                className={cn(
-                  "text-foreground cursor-text w-fit max-w-full overflow-hidden",
-                  isAudioOnly
-                    ? ""
-                    : "rounded-lg bg-primary/15 border border-primary/20 dark:bg-primary/20 dark:border-primary/30",
-                  isMobile ? "select-none" : "select-text",
-                  selectionMode && "cursor-pointer select-none",
-                  isSelected && "ring-2 ring-blue-500 ring-offset-2 ring-offset-background"
-                )}
-                onContextMenu={handleContextMenu}
-                onTouchStart={handleTouchStart}
-                onTouchEnd={handleTouchEnd}
-              >
-                {renderMessageBody(isAudioOnly ? "" : "px-4 py-2")}
+              <div className="relative w-fit max-w-full">
+                {renderSelectionCheckbox()}
+                <div
+                  className={cn(
+                    "text-foreground cursor-text w-fit max-w-full overflow-hidden",
+                    isAudioOnly
+                      ? ""
+                      : "rounded-lg bg-primary/15 border border-primary/20 dark:bg-primary/20 dark:border-primary/30",
+                    isMobile ? "select-none" : "select-text",
+                    selectionMode && "cursor-pointer select-none",
+                    isSelected && "ring-2 ring-blue-500 ring-offset-2 ring-offset-background"
+                  )}
+                  ref={bubbleRef}
+                  onMouseMove={handleBubbleMouseMove}
+                  onMouseLeave={handleBubbleMouseLeave}
+                  onTouchStart={handleTouchStart}
+                  onTouchEnd={handleTouchEnd}
+                >
+                  {renderMessageBody(isAudioOnly ? "" : "px-4 py-2")}
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <TypingAgentsIndicator
@@ -877,6 +1023,7 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
   return (
     <>
       {renderContextMenuLayer()}
+      {renderHoverToolbar()}
       <div
         className={cn("py-2", isMobile ? "px-2" : "px-6")}
         onClickCapture={handleSelectionClickCapture}
@@ -923,21 +1070,26 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
               <span className="text-xs text-muted-foreground">{formatDateTime(message.createdAt)}</span>
             </div>
             {renderReplyPreview()}
-            <div
-              className={cn(
-                "text-foreground cursor-text max-w-full overflow-hidden",
-                isAudioOnly
-                  ? ""
-                  : "rounded-lg bg-muted/50 border border-border/50 dark:bg-muted/40 dark:border-border",
-                isMobile ? "select-none" : "select-text",
-                selectionMode && "cursor-pointer select-none",
-                isSelected && "ring-2 ring-blue-500 ring-offset-2 ring-offset-background"
-              )}
-              onContextMenu={handleContextMenu}
-              onTouchStart={handleTouchStart}
-              onTouchEnd={handleTouchEnd}
-            >
-              {renderMessageBody(isAudioOnly ? "" : "px-4 py-3")}
+            <div className="relative">
+              {renderSelectionCheckbox()}
+              <div
+                className={cn(
+                  "text-foreground cursor-text max-w-full overflow-hidden",
+                  isAudioOnly
+                    ? ""
+                    : "rounded-lg bg-muted/50 border border-border/50 dark:bg-muted/40 dark:border-border",
+                  isMobile ? "select-none" : "select-text",
+                  selectionMode && "cursor-pointer select-none",
+                  isSelected && "ring-2 ring-blue-500 ring-offset-2 ring-offset-background"
+                )}
+                ref={bubbleRef}
+                onMouseMove={handleBubbleMouseMove}
+                onMouseLeave={handleBubbleMouseLeave}
+                onTouchStart={handleTouchStart}
+                onTouchEnd={handleTouchEnd}
+              >
+                {renderMessageBody(isAudioOnly ? "" : "px-4 py-3")}
+              </div>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <TypingAgentsIndicator

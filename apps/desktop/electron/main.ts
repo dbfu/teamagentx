@@ -255,6 +255,12 @@ let serverProcess: UtilityProcess | null = null;
 let serverPort: number | null = null;
 let lastServerError: string | null = null;
 let lastServerStderr = '';
+let serverStartPromise: Promise<void> | null = null;
+let serverRestartTimer: ReturnType<typeof setTimeout> | null = null;
+let serverRestartTimestamps: number[] = [];
+let serverHealthCheckTimer: ReturnType<typeof setInterval> | null = null;
+let serverHealthCheckInFlight = false;
+let serverHealthFailureCount = 0;
 let mobileWebServer: http.Server | null = null;
 let mobileWebPort: number | null = null;
 let isQuitting = false;
@@ -266,6 +272,13 @@ let hasActiveAgentTasks = false;
 let activeAgentTaskRoomCount = 0;
 const NOTIFICATION_ONBOARDING_FILE = 'notification-onboarding.json';
 const WINDOW_STATE_FILE = 'window-state.json';
+const SERVER_RESTART_WINDOW_MS = 5 * 60 * 1000;
+const SERVER_RESTART_MAX_ATTEMPTS = 5;
+const SERVER_RESTART_BASE_DELAY_MS = 1000;
+const SERVER_RESTART_MAX_DELAY_MS = 30000;
+const SERVER_HEALTH_CHECK_INTERVAL_MS = 15000;
+const SERVER_HEALTH_CHECK_TIMEOUT_MS = 3000;
+const SERVER_HEALTH_FAILURE_THRESHOLD = 3;
 
 type WindowState = {
   width: number;
@@ -1922,6 +1935,8 @@ async function shutdownBackend(): Promise<void> {
   if (shutdownPromise) return shutdownPromise;
 
   shutdownPromise = (async () => {
+    clearServerRestartTimer();
+    stopServerHealthWatch();
     await stopMobileWebServerAsync();
     await stopServerProcessAsync();
     shutdownCompleted = true;
@@ -2296,6 +2311,150 @@ function buildFallbackPath(): string {
   ].filter(Boolean).join(separator);
 }
 
+function isBackendShutdownExpected(): boolean {
+  return isQuitting || shutdownCompleted || quitRequestedByInstaller;
+}
+
+function clearServerRestartTimer(): void {
+  if (!serverRestartTimer) return;
+  clearTimeout(serverRestartTimer);
+  serverRestartTimer = null;
+}
+
+function getRecentServerRestartCount(now = Date.now()): number {
+  serverRestartTimestamps = serverRestartTimestamps.filter(
+    (timestamp) => now - timestamp <= SERVER_RESTART_WINDOW_MS,
+  );
+  return serverRestartTimestamps.length;
+}
+
+function getServerRestartDelay(attempt: number): number {
+  return Math.min(
+    SERVER_RESTART_BASE_DELAY_MS * 2 ** Math.max(0, attempt - 1),
+    SERVER_RESTART_MAX_DELAY_MS,
+  );
+}
+
+function stopServerHealthWatch(): void {
+  if (serverHealthCheckTimer) {
+    clearInterval(serverHealthCheckTimer);
+    serverHealthCheckTimer = null;
+  }
+  serverHealthCheckInFlight = false;
+  serverHealthFailureCount = 0;
+}
+
+function checkServerHealth(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const req = http.request(
+      {
+        hostname: '127.0.0.1',
+        port,
+        path: '/health',
+        method: 'GET',
+        timeout: SERVER_HEALTH_CHECK_TIMEOUT_MS,
+      },
+      (res) => {
+        res.resume();
+        resolve(Boolean(res.statusCode && res.statusCode >= 200 && res.statusCode < 300));
+      },
+    );
+
+    req.on('timeout', () => {
+      req.destroy(new Error('health check timeout'));
+    });
+    req.on('error', () => resolve(false));
+    req.end();
+  });
+}
+
+function scheduleServerRestart(reason: string): void {
+  if (isBackendShutdownExpected()) {
+    writeLog(`[Supervisor] skip server restart because shutdown is expected: ${reason}`);
+    return;
+  }
+
+  if (serverProcess || serverStartPromise || serverRestartTimer) {
+    writeLog(`[Supervisor] skip duplicate server restart request: ${reason}`);
+    return;
+  }
+
+  const now = Date.now();
+  const recentRestartCount = getRecentServerRestartCount(now);
+  if (recentRestartCount >= SERVER_RESTART_MAX_ATTEMPTS) {
+    const message = `服务连续异常退出，已停止自动重启（5 分钟内 ${recentRestartCount} 次）。详细日志：${getLogPath()}`;
+    writeLog(`[Supervisor] ${message}. Last reason: ${reason}`);
+    lastServerError = message;
+    mainWindow?.webContents.send('server-error', message);
+    return;
+  }
+
+  const attempt = recentRestartCount + 1;
+  const delay = getServerRestartDelay(attempt);
+  serverRestartTimestamps.push(now);
+  lastServerError = `服务正在自动重启：${reason}`;
+
+  writeLog(`[Supervisor] scheduling server restart #${attempt} in ${delay}ms: ${reason}`);
+  mainWindow?.webContents.send('server-restarting', {
+    reason,
+    attempt,
+    maxAttempts: SERVER_RESTART_MAX_ATTEMPTS,
+    delayMs: delay,
+  });
+
+  serverRestartTimer = setTimeout(() => {
+    serverRestartTimer = null;
+    if (isBackendShutdownExpected()) {
+      writeLog('[Supervisor] restart timer fired after shutdown started, skip');
+      return;
+    }
+    startServerInBackground();
+  }, delay);
+}
+
+function handleUnexpectedServerExit(reason: string): void {
+  stopServerHealthWatch();
+  stopMobileWebServer();
+  serverPort = null;
+  scheduleServerRestart(reason);
+}
+
+function startServerHealthWatch(port: number): void {
+  stopServerHealthWatch();
+  serverHealthCheckTimer = setInterval(() => {
+    if (serverHealthCheckInFlight || serverPort !== port || isBackendShutdownExpected()) {
+      return;
+    }
+
+    serverHealthCheckInFlight = true;
+    checkServerHealth(port)
+      .then((healthy) => {
+        if (healthy) {
+          serverHealthFailureCount = 0;
+          return;
+        }
+
+        serverHealthFailureCount += 1;
+        writeLog(`[Supervisor] server health check failed ${serverHealthFailureCount}/${SERVER_HEALTH_FAILURE_THRESHOLD}`);
+
+        if (serverHealthFailureCount < SERVER_HEALTH_FAILURE_THRESHOLD) {
+          return;
+        }
+
+        writeLog('[Supervisor] server health check threshold reached, killing server process for restart');
+        stopServerHealthWatch();
+        if (serverProcess) {
+          serverProcess.kill();
+        } else {
+          handleUnexpectedServerExit('health check failed and server process is missing');
+        }
+      })
+      .finally(() => {
+        serverHealthCheckInFlight = false;
+      });
+  }, SERVER_HEALTH_CHECK_INTERVAL_MS);
+}
+
 async function startServer(): Promise<number> {
   writeLog('startServer called');
   lastServerStderr = '';
@@ -2414,12 +2573,19 @@ async function startServer(): Promise<number> {
       writeLog(`Server process exited with code: ${code}`);
       const wasReady = serverPort !== null;
       serverProcess = null;
+      serverPort = null;
+      stopServerHealthWatch();
       if (!wasReady) {
         const tail = lastServerStderr.trim().split(/\r?\n/).slice(-15).join('\n');
         const detail = tail ? `\n\n最后的错误输出：\n${tail}` : '';
         settle(() => reject(new Error(
           `server 进程退出，退出码 ${code}（端口尚未就绪）${detail}\n\n详细日志：${getLogPath()}`,
         )));
+        return;
+      }
+
+      if (!isBackendShutdownExpected()) {
+        handleUnexpectedServerExit(`server 进程退出，退出码 ${code ?? 'unknown'}`);
       }
     });
 
@@ -2441,13 +2607,14 @@ async function startServer(): Promise<number> {
  */
 function startServerInBackground(): void {
   // 防止重复启动
-  if (serverProcess) {
+  if (serverProcess || serverStartPromise) {
     writeLog('Server already starting, skip duplicate startServerInBackground call');
     return;
   }
 
+  clearServerRestartTimer();
   writeLog('Starting server in background...');
-  startServer()
+  serverStartPromise = startServer()
     .then(async (port) => {
       serverPort = port;
       lastServerError = null;
@@ -2455,14 +2622,26 @@ function startServerInBackground(): void {
       if (app.isPackaged) {
         await startMobileWebServer(port);
       }
+      startServerHealthWatch(port);
       mainWindow?.webContents.send('server-ready', port);
     })
     .catch((error) => {
       const msg = error instanceof Error ? error.message : String(error);
       writeLog(`Server startup failed: ${msg}`);
       console.error('Server startup failed:', error);
+      stopServerHealthWatch();
+      serverStartPromise = null;
+
+      if (getRecentServerRestartCount() > 0 && !isBackendShutdownExpected()) {
+        scheduleServerRestart(`server 启动失败：${msg}`);
+        return;
+      }
+
       lastServerError = msg;
       mainWindow?.webContents.send('server-error', msg);
+    })
+    .finally(() => {
+      serverStartPromise = null;
     });
 }
 
@@ -3012,7 +3191,7 @@ app.whenReady().then(async () => {
     let error: string | null = null;
     // 只有当不是「正在准备运行环境」、且没有进程在跑、也没有端口时才算失败。
     // 否则前端会在解压阶段误判为「服务启动失败」。
-    if (serverPort === null && !serverProcess && runtimePhase !== 'preparing') {
+    if (serverPort === null && !serverProcess && !serverRestartTimer && runtimePhase !== 'preparing') {
       if (lastServerError) {
         error = lastServerError;
       } else if (runtimePhase === 'failed') {
@@ -3024,6 +3203,7 @@ app.whenReady().then(async () => {
       ready: serverPort !== null,
       port: serverPort,
       error,
+      restarting: serverRestartTimer !== null,
       logPath: getLogPath(),
       runtime: {
         phase: runtimePhase,

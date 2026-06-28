@@ -1780,10 +1780,20 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
     this.waitingForAssistantAfterToolResult = false;
     const stopReason = message.message?.stop_reason;
 
-    // 确保 this.content 已包含本条消息的文本（流式可能尚未累积）
-    if (!this.content) {
-      const text = extractTextFromContent(content);
-      if (text) this.content = text;
+    // 确保 this.content 和流式面板都包含本条消息的文本。
+    // 某些 Claude SDK/CLI 版本可能只返回完整 assistant 消息，不发送 text_delta。
+    const text = extractTextFromContent(content);
+    if (text) {
+      if (!this.content) {
+        this.content = text;
+        this.emitStream?.(text);
+      } else if (text.startsWith(this.content)) {
+        const delta = text.slice(this.content.length);
+        if (delta) {
+          this.content = text;
+          this.emitStream?.(delta);
+        }
+      }
     }
 
     // 工具调用会在 tool_result 到来时清空 this.content（只保留最后一段最终回答），
@@ -2015,6 +2025,8 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
         // 始终禁用 plan 计划模式工具：ExitPlanMode（进入/退出 plan 计划模式）
         disallowedTools: [
           'ExitPlanMode',
+          'CronDelete',
+          'CronList',
           ...(allowedTaxTools.length > 0
             ? [
                 'Bash',
