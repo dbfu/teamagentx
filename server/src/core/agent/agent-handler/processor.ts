@@ -124,6 +124,18 @@ function collectExecutionModels(
   return models.length > 0 ? models.join(' / ') : null;
 }
 
+export function shouldStreamRecordedOutput(
+  events: Array<{ type: string; content?: string }>,
+  content: string,
+): boolean {
+  const normalizedContent = content.trim();
+  if (!normalizedContent) return false;
+
+  return !events.some(
+    (event) => event.type === 'output' && (event.content || '').trim() === normalizedContent,
+  );
+}
+
 // 处理队列中的任务
 export async function processQueue(chatRoomId: string, agentId: string) {
   const key = `${chatRoomId}_${agentId}`;
@@ -450,7 +462,11 @@ export async function processQueue(chatRoomId: string, agentId: string) {
               data: { content, type: 'message' },
             });
             lastRecordedSegmentContent = content;
-            if (currentStreamOutputSegment.trim() !== content.trim()) {
+            const cachedEvents = streamEventsCache.get(`${chatRoomId}_${task.messageId}_${task.agentId}`) || [];
+            if (
+              shouldStreamRecordedOutput(cachedEvents, content) &&
+              currentStreamOutputSegment.trim() !== content.trim()
+            ) {
               streamCallback(content);
             }
           };
