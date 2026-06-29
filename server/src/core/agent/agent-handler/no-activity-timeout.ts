@@ -8,6 +8,7 @@ export class NoActivityTimeoutError extends Error {
 export interface NoActivityMonitor {
   start(): void;
   markActivity(): void;
+  markInternalActivity(): void;
   stop(): void;
   didTimeout(): boolean;
   getError(): NoActivityTimeoutError;
@@ -19,6 +20,7 @@ export function createNoActivityMonitor(
   label: string,
 ): NoActivityMonitor {
   let timer: NodeJS.Timeout | null = null;
+  let started = false;
   let timedOut = false;
   let hasActivity = false;
   const safeTimeoutMs = Number.isFinite(timeoutMs) ? Math.max(0, timeoutMs) : 0;
@@ -33,22 +35,34 @@ export function createNoActivityMonitor(
     }
   };
 
+  const armTimer = () => {
+    clearTimer();
+    if (safeTimeoutMs <= 0 || hasActivity || timedOut) return;
+    timer = setTimeout(() => {
+      timer = null;
+      timedOut = true;
+      onTimeout(error);
+    }, safeTimeoutMs);
+    if (typeof timer.unref === 'function') timer.unref();
+  };
+
   return {
     start() {
-      if (safeTimeoutMs <= 0 || timer || hasActivity) return;
-      timer = setTimeout(() => {
-        timer = null;
-        timedOut = true;
-        onTimeout(error);
-      }, safeTimeoutMs);
-      if (typeof timer.unref === 'function') timer.unref();
+      if (safeTimeoutMs <= 0 || timer || hasActivity || timedOut) return;
+      started = true;
+      armTimer();
     },
     markActivity() {
       if (hasActivity) return;
       hasActivity = true;
       clearTimer();
     },
+    markInternalActivity() {
+      if (!started || hasActivity || timedOut) return;
+      armTimer();
+    },
     stop() {
+      started = false;
       clearTimer();
     },
     didTimeout() {

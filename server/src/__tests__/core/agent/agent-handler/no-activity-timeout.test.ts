@@ -36,6 +36,26 @@ test('no-activity monitor is cancelled by first activity', async () => {
   assert.equal(monitor.didTimeout(), false);
 });
 
+test('no-activity monitor internal activity extends but does not cancel timeout', async () => {
+  let fired = false;
+  const monitor = createNoActivityMonitor(100, () => {
+    fired = true;
+  }, 'assistant');
+
+  monitor.start();
+  await wait(40);
+  monitor.markInternalActivity();
+  await wait(70);
+
+  assert.equal(fired, false);
+  assert.equal(monitor.didTimeout(), false);
+
+  await wait(60);
+
+  assert.equal(fired, true);
+  assert.equal(monitor.didTimeout(), true);
+});
+
 test('no-activity retry sleep observes abort signal', async () => {
   const controller = new AbortController();
   const pending = sleepForNoActivityRetry(50, controller.signal);

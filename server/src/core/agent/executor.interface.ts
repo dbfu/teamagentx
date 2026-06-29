@@ -93,6 +93,7 @@ export interface AgentExecResult {
 export interface AgentExecOptions {
   suppressFailureMessage?: boolean;
   suppressAssistantHandoff?: boolean;
+  onInternalActivity?: (label: string) => void;
 }
 
 export type AgentSessionSnapshot =

@@ -296,6 +296,9 @@ function isSessionUnusableError(message: string): boolean {
 }
 
 const DEFAULT_BACKGROUND_IDLE_FINISH_MS = 60 * 1000;
+const DEFAULT_AUTO_COMPACT_INTERNAL_ACTIVITY_INTERVAL_MS = 15 * 1000;
+const DEFAULT_AUTO_COMPACT_INTERNAL_ACTIVITY_MAX_MS = 3 * 60 * 1000;
+
 function getBackgroundIdleFinishMs(): number {
   const rawValue = process.env.CLAUDE_AGENT_BACKGROUND_IDLE_FINISH_MS;
   if (!rawValue) return DEFAULT_BACKGROUND_IDLE_FINISH_MS;
@@ -306,6 +309,38 @@ function getBackgroundIdleFinishMs(): number {
   }
 
   return parsed;
+}
+
+function getPositiveIntegerEnv(
+  envName: string,
+  defaultValue: number,
+  minValue: number,
+): number {
+  const rawValue = process.env[envName];
+  if (!rawValue) return defaultValue;
+
+  const parsed = Number.parseInt(rawValue, 10);
+  if (!Number.isFinite(parsed) || parsed < minValue) {
+    return defaultValue;
+  }
+
+  return parsed;
+}
+
+function getClaudeAutoCompactInternalActivityIntervalMs(): number {
+  return getPositiveIntegerEnv(
+    'CLAUDE_AUTO_COMPACT_INTERNAL_ACTIVITY_INTERVAL_MS',
+    DEFAULT_AUTO_COMPACT_INTERNAL_ACTIVITY_INTERVAL_MS,
+    1000,
+  );
+}
+
+function getClaudeAutoCompactInternalActivityMaxMs(): number {
+  return getPositiveIntegerEnv(
+    'CLAUDE_AUTO_COMPACT_INTERNAL_ACTIVITY_MAX_MS',
+    DEFAULT_AUTO_COMPACT_INTERNAL_ACTIVITY_MAX_MS,
+    0,
+  );
 }
 
 function shouldApplyBackgroundIdleFinish(state: {
@@ -327,6 +362,8 @@ function getClaudeSettingSources(hasLlmProvider: boolean): SettingSource[] {
 export const __claudeSdkTestUtils = {
   getClaudeSettingSources,
   getBackgroundIdleFinishMs,
+  getClaudeAutoCompactInternalActivityIntervalMs,
+  getClaudeAutoCompactInternalActivityMaxMs,
   shouldApplyBackgroundIdleFinish,
   getClaudeAutoCompactWindow,
 };
@@ -569,6 +606,7 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
   private lastResponse: string | null = null;
   private lastInvokeResult: string | null = null;
   private lastClaudeStderr = '';
+  private stopAutoCompactInternalActivity: (() => void) | null = null;
   // 懒解析：每次访问都查一次（几次 fs.existsSync，开销极小），避免实例化时
   // 用户尚未装 claude，后续装好仍因为缓存了 undefined 而继续报错。
   private get claudeCodeExecutable(): string | undefined {
@@ -1879,7 +1917,60 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
     }
   }
 
+  private startAutoCompactInternalActivity(params: {
+    enabled: boolean;
+    onInternalActivity?: (label: string) => void;
+  }): void {
+    this.stopAutoCompactInternalActivity?.();
+    this.stopAutoCompactInternalActivity = null;
+
+    const {enabled, onInternalActivity} = params;
+    if (!enabled || !onInternalActivity) return;
+
+    const maxMs = getClaudeAutoCompactInternalActivityMaxMs();
+    if (maxMs <= 0) return;
+
+    const intervalMs = Math.min(
+      getClaudeAutoCompactInternalActivityIntervalMs(),
+      maxMs,
+    );
+    let stopped = false;
+    let interval: NodeJS.Timeout | null = null;
+    let maxTimer: NodeJS.Timeout | null = null;
+
+    const stop = () => {
+      if (stopped) return;
+      stopped = true;
+      if (interval) clearInterval(interval);
+      if (maxTimer) clearTimeout(maxTimer);
+      interval = null;
+      maxTimer = null;
+    };
+
+    const mark = () => {
+      if (stopped) return;
+      try {
+        onInternalActivity('claude-auto-compact');
+      } catch (error) {
+        console.warn('[ClaudeSDK] auto-compact internal activity callback failed', {
+          agentName: this.name,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    };
+
+    mark();
+    interval = setInterval(mark, intervalMs);
+    maxTimer = setTimeout(stop, maxMs);
+    if (typeof interval.unref === 'function') interval.unref();
+    if (typeof maxTimer.unref === 'function') maxTimer.unref();
+    this.stopAutoCompactInternalActivity = stop;
+  }
+
   private handleSdkMessage(message: SDKMessage): TokenUsage | undefined {
+    this.stopAutoCompactInternalActivity?.();
+    this.stopAutoCompactInternalActivity = null;
+
     debugLog('claudeSdkEvent', {
       agentName: this.name,
       eventType: message.type,
@@ -1983,6 +2074,7 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
     signal: AbortSignal | undefined,
     abortController: AbortController,
     suppressAssistantHandoff = false,
+    onInternalActivity?: (label: string) => void,
   ): Promise<TokenUsage | undefined> {
     const env = this.buildEnv();
     const maxTurns = getClaudeMaxTurns();
@@ -1992,6 +2084,7 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
     this.logQueryStart(env);
     const settingSources = getClaudeSettingSources(Boolean(this.llmProvider));
     const autoCompactWindow = getClaudeAutoCompactWindow(this.llmProvider);
+    const isResumingSession = this.hasStartedSession;
     const allowedTaxTools = this.getAllowedTaxTools();
     // 加载并合并用户启用的连接器（MCP server）
     const connectors = await getAgentConnectors(this.agentId);
@@ -2061,56 +2154,65 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
     let tokenUsage: TokenUsage | undefined;
     const iterator = q[Symbol.asyncIterator]();
     const idleFinishMs = getBackgroundIdleFinishMs();
+    this.startAutoCompactInternalActivity({
+      enabled: Boolean(isResumingSession && autoCompactWindow && onInternalActivity),
+      onInternalActivity,
+    });
 
-    while (true) {
-      if (signal?.aborted) {
-        throw new DOMException('执行已被用户中断', 'AbortError');
+    try {
+      while (true) {
+        if (signal?.aborted) {
+          throw new DOMException('执行已被用户中断', 'AbortError');
+        }
+
+        const nextMessage = iterator.next();
+        const result =
+          shouldApplyBackgroundIdleFinish({
+            hasBackgroundedLongRunningCommand:
+              this.hasBackgroundedLongRunningCommand,
+            waitingForTaskOutput: this.waitingForTaskOutput,
+            waitingForAssistantAfterToolResult:
+              this.waitingForAssistantAfterToolResult,
+          })
+            ? await Promise.race([
+                nextMessage,
+                new Promise<{done: true; value: undefined; timedOut: true}>(
+                  (resolve) => {
+                    setTimeout(
+                      () =>
+                        resolve({done: true, value: undefined, timedOut: true}),
+                      idleFinishMs,
+                    );
+                  },
+                ),
+              ])
+            : await nextMessage;
+
+        if ('timedOut' in result) {
+          nextMessage.catch(() => undefined);
+          console.warn(
+            `${this.name}: Claude SDK 后台任务空闲 ${idleFinishMs}ms，主动结束本轮对话`,
+          );
+          abortController.abort('background-idle-finish');
+          return tokenUsage;
+        }
+
+        if (result.done) break;
+
+        const sdkMessage = result.value;
+        const usage = this.handleSdkMessage(sdkMessage);
+        if (usage) tokenUsage = usage;
+
+        if (this.receivedAssistantEndTurn && this.content.trim()) {
+          abortController.abort('assistant-end-turn');
+          return tokenUsage;
+        }
       }
-
-      const nextMessage = iterator.next();
-      const result =
-        shouldApplyBackgroundIdleFinish({
-          hasBackgroundedLongRunningCommand:
-            this.hasBackgroundedLongRunningCommand,
-          waitingForTaskOutput: this.waitingForTaskOutput,
-          waitingForAssistantAfterToolResult:
-            this.waitingForAssistantAfterToolResult,
-        })
-          ? await Promise.race([
-              nextMessage,
-              new Promise<{done: true; value: undefined; timedOut: true}>(
-                (resolve) => {
-                  setTimeout(
-                    () =>
-                      resolve({done: true, value: undefined, timedOut: true}),
-                    idleFinishMs,
-                  );
-                },
-              ),
-            ])
-          : await nextMessage;
-
-      if ('timedOut' in result) {
-        nextMessage.catch(() => undefined);
-        console.warn(
-          `${this.name}: Claude SDK 后台任务空闲 ${idleFinishMs}ms，主动结束本轮对话`,
-        );
-        abortController.abort('background-idle-finish');
-        return tokenUsage;
-      }
-
-      if (result.done) break;
-
-      const sdkMessage = result.value;
-      const usage = this.handleSdkMessage(sdkMessage);
-      if (usage) tokenUsage = usage;
-
-      if (this.receivedAssistantEndTurn && this.content.trim()) {
-        abortController.abort('assistant-end-turn');
-        return tokenUsage;
-      }
+      return tokenUsage;
+    } finally {
+      this.stopAutoCompactInternalActivity?.();
+      this.stopAutoCompactInternalActivity = null;
     }
-    return tokenUsage;
   }
 
   async exec(
@@ -2177,6 +2279,7 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
           signal,
           abortController,
           suppressAssistantHandoff,
+          options?.onInternalActivity,
         );
       } catch (error) {
         const message = error instanceof Error ? error.message : '';
@@ -2222,6 +2325,7 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
           signal,
           abortController,
           suppressAssistantHandoff,
+          options?.onInternalActivity,
         );
       }
 

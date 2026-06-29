@@ -1,5 +1,5 @@
 import type { ToolCall } from '../executor.interface.js';
-import type { AgentExecResult, IAgentExecutor } from '../executor.interface.js';
+import type { AgentExecOptions, AgentExecResult, IAgentExecutor } from '../executor.interface.js';
 import { coerceThinkingText } from '../executor.interface.js';
 import type { LlmProvider } from '@prisma/client';
 import { taskQueueService, type HistoryMessage } from '../../../modules/task-queue/task-queue.service.js';
@@ -682,6 +682,14 @@ export async function processQueue(chatRoomId: string, agentId: string) {
             );
             activeNoActivityMonitor = monitor;
             monitor.start();
+            const execOptions: AgentExecOptions = {
+              onInternalActivity: () => monitor.markInternalActivity(),
+            };
+            if (shouldUseModelFallback || taskPromptPolicy.suppressAssistantHandoff) {
+              execOptions.suppressFailureMessage = shouldUseModelFallback;
+              execOptions.suppressAssistantHandoff =
+                taskPromptPolicy.suppressAssistantHandoff;
+            }
             try {
               return await candidateExecutor.exec(
                 taskPromptPolicy.content +
@@ -699,13 +707,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
                 abortController.signal,
                 attachments,  // 传递图片附件
                 recordCallback,  // 记录工具调用前的中间文本段到执行详情
-                shouldUseModelFallback || taskPromptPolicy.suppressAssistantHandoff
-                  ? {
-                      suppressFailureMessage: shouldUseModelFallback,
-                      suppressAssistantHandoff:
-                        taskPromptPolicy.suppressAssistantHandoff,
-                    }
-                  : undefined,
+                execOptions,
               );
             } catch (error) {
               if (monitor.didTimeout()) {
