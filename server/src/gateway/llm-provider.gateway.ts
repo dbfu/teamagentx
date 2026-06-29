@@ -69,6 +69,28 @@ const llmProviderWithCountResponseSchema = {
   },
 };
 
+const llmProviderDetailResponseSchema = {
+  type: 'object',
+  properties: {
+    ...llmProviderResponseSchema.properties,
+    agents: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          name: { type: 'string' },
+          avatar: { type: 'string', nullable: true },
+          avatarColor: { type: 'string', nullable: true },
+          description: { type: 'string', nullable: true },
+          agentLevel: { type: 'string', nullable: true },
+          isActive: { type: 'boolean' },
+        },
+      },
+    },
+  },
+};
+
 const createLlmProviderBodySchema = {
   type: 'object',
   required: ['name', 'apiKey', 'model'],
@@ -285,39 +307,7 @@ export async function llmProviderGateway(app: FastifyInstance) {
             type: 'object',
             properties: {
               success: { type: 'boolean' },
-              data: {
-                type: 'object',
-                properties: {
-                  id: { type: 'string' },
-                  name: { type: 'string' },
-                  type: { type: 'string', enum: LLM_PROVIDER_TYPES },
-                  modelType: { type: 'string', enum: LLM_MODEL_TYPES },
-                  apiProtocol: { type: 'string', enum: ['anthropic', 'openai'] },
-                  apiUrl: { type: 'string', nullable: true },
-                  apiKey: { type: 'string' },
-                  model: { type: 'string' },
-                  imageProvider: { type: 'string', nullable: true },
-                  imageApiType: { type: 'string', enum: [...IMAGE_GEN_API_TYPES, null], nullable: true },
-                  isActive: { type: 'boolean' },
-                  isDefault: { type: 'boolean' },
-                  createdAt: { type: 'string' },
-                  updatedAt: { type: 'string' },
-                  agents: {
-                    type: 'array',
-                    items: {
-                      type: 'object',
-                      properties: {
-                        id: { type: 'string' },
-                        name: { type: 'string' },
-                        avatar: { type: 'string', nullable: true },
-                        avatarColor: { type: 'string', nullable: true },
-                        description: { type: 'string', nullable: true },
-                        isActive: { type: 'boolean' },
-                      },
-                    },
-                  },
-                },
-              },
+              data: llmProviderDetailResponseSchema,
             },
           },
           404: {
@@ -340,8 +330,8 @@ export async function llmProviderGateway(app: FastifyInstance) {
         return reply.code(404).send({ success: false, error: 'LLM 供应商不存在' });
       }
 
-      // #4: API Key 掩码
-      return reply.send({ success: true, data: { ...(provider as any), apiKey: maskApiKey((provider as any).apiKey) } });
+      // 详情接口用于编辑/复制模型配置，需要返回完整 API Key；列表接口仍然脱敏。
+      return reply.send({ success: true, data: provider });
     }
   );
 

@@ -313,6 +313,19 @@ export function ModelPage() {
     }
   }
 
+  const loadProviderForForm = async (provider: LlmProvider): Promise<LlmProvider | null> => {
+    try {
+      const response = await llmProviderApi.getById(provider.id)
+      if (response.success && response.data) {
+        return response.data
+      }
+    } catch {
+      // fall through to the shared error toast
+    }
+    toast.error(t('model.loadFailed'))
+    return null
+  }
+
   // 自动填充音频模型名：当 apiUrl 匹配已知供应商时，填入推荐模型名
   const autoFilledUrlRef = useRef<string | null>(null)
   useEffect(() => {
@@ -431,49 +444,56 @@ export function ModelPage() {
   }
 
   // 打开编辑对话框
-  const openEditDialog = (provider: LlmProvider) => {
-    const imageProvider = provider.imageProvider || 'openai'
-    const apiUrl = provider.apiUrl || ((provider.modelType || 'text') === 'image' ? imageProviderBaseUrl(imageProvider) : '')
-    setEditingProvider(provider)
+  const openEditDialog = async (provider: LlmProvider) => {
+    const providerForForm = await loadProviderForForm(provider)
+    if (!providerForForm) return
+
+    const imageProvider = providerForForm.imageProvider || 'openai'
+    const apiUrl = providerForForm.apiUrl || ((providerForForm.modelType || 'text') === 'image' ? imageProviderBaseUrl(imageProvider) : '')
+    setEditingProvider(providerForForm)
     setFormData({
-      name: provider.name,
+      name: providerForForm.name,
       type: 'custom',
-      modelType: provider.modelType || 'text',
-      apiProtocol: provider.apiProtocol || 'anthropic',
-      codexWireApi: provider.codexWireApi || 'responses',
+      modelType: providerForForm.modelType || 'text',
+      apiProtocol: providerForForm.apiProtocol || 'anthropic',
+      codexWireApi: providerForForm.codexWireApi || 'responses',
       apiUrl,
-      apiKey: '',
-      model: provider.model,
-      contextLength: provider.contextLength ?? 1000000,
-      sttModel: provider.sttModel ?? null,
-      audioUsage: ((provider as any).audioUsage ?? 'both') as AudioUsage,
+      apiKey: providerForForm.apiKey,
+      model: providerForForm.model,
+      contextLength: providerForForm.contextLength ?? 1000000,
+      sttModel: providerForForm.sttModel ?? null,
+      audioUsage: ((providerForForm as any).audioUsage ?? 'both') as AudioUsage,
       imageProvider,
-      imageApiType: provider.imageApiType || 'sync',
-      isActive: provider.isActive,
-      isDefault: provider.isDefault,
+      imageApiType: providerForForm.imageApiType || 'sync',
+      isActive: providerForForm.isActive,
+      isDefault: providerForForm.isDefault,
     })
     setIsDialogOpen(true)
   }
 
   // 复制模型配置（创建副本）
   const handleCopy = async (provider: LlmProvider) => {
-    const imageProvider = provider.imageProvider || 'openai'
-    const apiUrl = provider.apiUrl || ((provider.modelType || 'text') === 'image' ? imageProviderBaseUrl(imageProvider) : '')
+    const providerForForm = await loadProviderForForm(provider)
+    if (!providerForForm) return
+
+    const imageProvider = providerForForm.imageProvider || 'openai'
+    const apiUrl = providerForForm.apiUrl || ((providerForForm.modelType || 'text') === 'image' ? imageProviderBaseUrl(imageProvider) : '')
     // 打开创建对话框，预填充原数据
     setEditingProvider(null)
     setFormData({
-      name: `${provider.name} ${t('model.copySuffix')}`,
+      name: `${providerForForm.name} ${t('model.copySuffix')}`,
       type: 'custom',
-      modelType: provider.modelType || 'text',
-      apiProtocol: provider.apiProtocol || 'anthropic',
-      codexWireApi: provider.codexWireApi || 'responses',
+      modelType: providerForForm.modelType || 'text',
+      apiProtocol: providerForForm.apiProtocol || 'anthropic',
+      codexWireApi: providerForForm.codexWireApi || 'responses',
       apiUrl,
-      apiKey: provider.apiKey,
-      model: provider.model,
-      sttModel: provider.sttModel ?? null,
-      audioUsage: ((provider as any).audioUsage ?? 'both') as AudioUsage,
+      apiKey: providerForForm.apiKey,
+      model: providerForForm.model,
+      contextLength: providerForForm.contextLength ?? 1000000,
+      sttModel: providerForForm.sttModel ?? null,
+      audioUsage: ((providerForForm as any).audioUsage ?? 'both') as AudioUsage,
       imageProvider,
-      imageApiType: provider.imageApiType || 'sync',
+      imageApiType: providerForForm.imageApiType || 'sync',
       isActive: true,
       isDefault: false, // 副本不设为默认
     })

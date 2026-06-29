@@ -211,7 +211,7 @@ export function InstallSkillModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-[520px] rounded-2xl bg-card shadow-xl">
+      <div className="max-h-[calc(100vh-2rem)] w-full max-w-3xl overflow-hidden rounded-2xl bg-card shadow-xl">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <div className="flex items-center gap-2">
@@ -256,7 +256,7 @@ export function InstallSkillModal({
         </div>
 
         {/* Content */}
-        <div className="p-6">
+        <div className="max-h-[calc(100vh-12rem)] overflow-y-auto p-6">
           <p className="mb-4 text-sm text-muted-foreground">
             {t('skill.installSkillFor', { name: agentName })}
           </p>

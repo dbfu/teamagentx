@@ -1996,84 +1996,20 @@ async function installDownloadedUpdate(filePath?: string): Promise<{ success: bo
     await shutdownBackend();
 
     if (process.platform === 'win32') {
-      // 不能先卸载旧版再装新版——新版安装失败会让用户两头落空。
-      // 正确做法：用 /S（静默模式）直接运行新安装包，旧版文件在安装成功后才被替换。
-      //
-      // NSIS 检测"应用占用"看的是**文件锁**而不是窗口：只要 resources\server\ 下
-      // 的 .node / .dll 还被任何进程的句柄持有，安装就会一直失败，重试多少次都没用。
-      // 而 server 经常派生 node.exe / cmd.exe / npm 子进程（claude/codex/shell/npm install），
-      // 这些孤儿子进程在主进程退出后仍然驻留并持有文件句柄。
-      //
-      // 流程：等主进程退出 → 反复杀掉所有从安装目录启动的进程 → 等文件句柄释放 → /S 静默安装
-      const safeInstallerPath = installerPath.replace(/'/g, "''");
-      const installDir = path.dirname(app.getPath('exe'));
-      const safeInstallDir = installDir.replace(/'/g, "''");
+      // Windows 静默安装在部分机器上会被权限、PowerShell 策略或安全软件吞掉，
+      // 且失败发生在主进程退出之后，前端无法展示错误。直接打开可见安装器，
+      // 让 UAC、路径选择、文件占用提示都交给安装器显性处理。
+      writeLog(`[Update] Windows 打开可见安装器：${installerPath}`);
+      const errorMessage = await shell.openPath(installerPath);
+      if (errorMessage) {
+        writeLog(`[Update] Windows 安装器启动失败：${errorMessage}`);
+        quitRequestedByInstaller = false;
+        return { success: false, error: errorMessage };
+      }
 
-      // 注意：PowerShell 脚本中字符串字面量用单引号包围，
-      // 字符串里的单引号通过两次单引号转义（上面的 .replace 已处理）。
-      const scriptLines = [
-        `$ErrorActionPreference = 'SilentlyContinue'`,
-        `$installDir = '${safeInstallDir}'`,
-        `$installerPath = '${safeInstallerPath}'`,
-        ``,
-        `# 等当前 TeamAgentX 主进程从内存中退出`,
-        `Start-Sleep -Milliseconds 800`,
-        ``,
-        `# 按"可执行文件路径在安装目录下"为准杀进程，能抓到 utilityProcess、`,
-        `# ACP 子进程、npm 子进程等任何 server 派生出来的孤儿进程。`,
-        `function Kill-ProcessesInDir {`,
-        `  param([string]$Dir)`,
-        `  $count = 0`,
-        `  try {`,
-        `    $procs = Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {`,
-        `      $_.ExecutablePath -and $_.ExecutablePath.StartsWith($Dir, [StringComparison]::OrdinalIgnoreCase)`,
-        `    }`,
-        `    foreach ($p in $procs) {`,
-        `      Stop-Process -Id $p.ProcessId -Force`,
-        `      $count++`,
-        `    }`,
-        `  } catch {}`,
-        `  return $count`,
-        `}`,
-        ``,
-        `# 反复杀直到连续两轮 0 个，避免子进程链来不及全部死掉。最多 10 轮（约 3s）。`,
-        `$emptyRounds = 0`,
-        `for ($i = 0; $i -lt 10; $i++) {`,
-        `  $killed = Kill-ProcessesInDir -Dir $installDir`,
-        `  if ($killed -eq 0) {`,
-        `    $emptyRounds++`,
-        `    if ($emptyRounds -ge 2) { break }`,
-        `  } else {`,
-        `    $emptyRounds = 0`,
-        `  }`,
-        `  Start-Sleep -Milliseconds 300`,
-        `}`,
-        ``,
-        `# 兜底：按进程名再杀一次（防止有进程因权限读不到 ExecutablePath 而漏网）`,
-        `Stop-Process -Name 'TeamAgentX' -Force`,
-        ``,
-        `# 进程死掉 ≠ 文件句柄立即释放。Windows 上 .node / .dll 句柄常有 ~1s 的延迟，`,
-        `# 这里多等 1.5s，否则 NSIS 仍可能命中残留句柄报"程序正在运行"。`,
-        `Start-Sleep -Milliseconds 1500`,
-        ``,
-        `$installProcess = Start-Process -FilePath $installerPath -ArgumentList '/S' -Wait -PassThru`,
-        `if ($installProcess -and $installProcess.ExitCode -eq 0) {`,
-        `  Remove-Item -LiteralPath $installerPath -Force`,
-        `}`,
-      ];
-
-      const scriptPath = path.join(app.getPath('temp'), 'teamagentx-update.ps1');
-      fs.writeFileSync(scriptPath, scriptLines.join('\r\n'), 'utf8');
-      writeLog(`[Update] 写入静默安装脚本：${scriptPath}，installDir=${installDir}`);
-
-      spawn(
-        'powershell',
-        ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', scriptPath],
-        { detached: true, stdio: 'ignore' },
-      ).unref();
-
-      writeLog('[Update] 主进程立即退出，PowerShell 脚本接管进程清理与静默安装');
-      process.exit(0);
+      writeLog('[Update] Windows 安装器已启动，退出当前进程');
+      setTimeout(() => process.exit(0), 500);
+      return { success: true };
     }
 
     // macOS：DMG 无法像 Windows NSIS 那样静默安装。

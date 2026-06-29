@@ -1,6 +1,6 @@
 import { Agent } from '@/lib/agent-api'
 import { AgentAvatarImage } from '@/lib/agent-avatars'
-import { Check, ChevronDown, ChevronRight, Folder, FolderOpen, Loader2, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Folder, FolderOpen, Loader2, Search, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -27,6 +27,7 @@ export function SelectAgentsDialog({
   const dialogTitle = title || t('chat.selectAgentsDialogTitle')
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set())
   const [localSelectedIds, setLocalSelectedIds] = useState<Set<string>>(new Set())
+  const [searchQuery, setSearchQuery] = useState('')
 
   // 当对话框打开时，重置并展开所有分类
   useEffect(() => {
@@ -42,18 +43,33 @@ export function SelectAgentsDialog({
       setExpandedCategories(categoryIds)
       // 初始化已选中的助手
       setLocalSelectedIds(new Set(selectedAgentIds))
+      setSearchQuery('')
     } else {
       // 关闭时清空选中状态
       setLocalSelectedIds(new Set())
+      setSearchQuery('')
     }
   }, [open, agents, selectedAgentIds])
+
+  const filteredAgents = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    if (!query) return agents
+
+    return agents.filter((agent) => {
+      return [
+        agent.name,
+        agent.description,
+        agent.category?.name,
+      ].some((value) => value?.toLowerCase().includes(query))
+    })
+  }, [agents, searchQuery])
 
   // 对助手进行分组
   const groupedAgents = useMemo(() => {
     const categories = new Map<string, { id: string; name: string; agents: Agent[] }>()
     const uncategorized: Agent[] = []
 
-    for (const agent of agents) {
+    for (const agent of filteredAgents) {
       if (agent.categoryId && agent.category) {
         const existing = categories.get(agent.categoryId)
         if (existing) {
@@ -74,7 +90,7 @@ export function SelectAgentsDialog({
       categories: Array.from(categories.values()),
       uncategorized,
     }
-  }, [agents])
+  }, [filteredAgents])
 
   const toggleCategory = (categoryId: string) => {
     setExpandedCategories((prev) => {
@@ -136,11 +152,11 @@ export function SelectAgentsDialog({
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-12">
-      <div className="flex max-h-full w-96 flex-col overflow-hidden rounded-2xl bg-card shadow-xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 sm:p-8">
+      <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-card shadow-xl sm:max-h-[calc(100vh-4rem)]">
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-border px-6 py-4">
-          <h2 className="text-lg font-semibold text-foreground">{dialogTitle}</h2>
+          <h2 className="min-w-0 truncate text-lg font-semibold text-foreground">{dialogTitle}</h2>
           <button
             onClick={onClose}
             className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -149,10 +165,28 @@ export function SelectAgentsDialog({
           </button>
         </div>
 
+        {/* Search */}
+        {agents.length > 0 && (
+          <div className="shrink-0 border-b border-border px-6 py-4">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder={t('chat.searchAssistantPlaceholder')}
+                className="w-full rounded-lg border border-border bg-background py-2 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+              />
+            </div>
+          </div>
+        )}
+
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6">
           {agents.length === 0 ? (
             <div className="text-sm text-muted-foreground py-4 text-center">{t('assistant.noAssistants')}</div>
+          ) : filteredAgents.length === 0 ? (
+            <div className="text-sm text-muted-foreground py-4 text-center">{t('chat.noMatchingAssistants')}</div>
           ) : (
             <div className="space-y-3">
               {/* 分类助手 */}
@@ -177,7 +211,7 @@ export function SelectAgentsDialog({
                     <span className="text-muted-foreground text-xs">({category.agents.length})</span>
                   </button>
                   {expandedCategories.has(category.id) && (
-                    <div className="grid grid-cols-5 gap-1 mt-1">{category.agents.map(renderAgent)}</div>
+                    <div className="grid grid-cols-3 gap-2 mt-1 sm:grid-cols-5 md:grid-cols-7">{category.agents.map(renderAgent)}</div>
                   )}
                 </div>
               ))}
@@ -204,7 +238,7 @@ export function SelectAgentsDialog({
                     <span className="text-muted-foreground text-xs">({groupedAgents.uncategorized.length})</span>
                   </button>
                   {expandedCategories.has('__uncategorized__') && (
-                    <div className="grid grid-cols-5 gap-1 mt-1">{groupedAgents.uncategorized.map(renderAgent)}</div>
+                    <div className="grid grid-cols-3 gap-2 mt-1 sm:grid-cols-5 md:grid-cols-7">{groupedAgents.uncategorized.map(renderAgent)}</div>
                   )}
                 </div>
               )}
