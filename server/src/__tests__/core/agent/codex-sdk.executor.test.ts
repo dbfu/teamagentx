@@ -1,5 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert';
+import { spawn } from 'node:child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -83,6 +84,52 @@ function writeCodexPlatformBinary(codexPackageDir: string) {
   fs.mkdirSync(path.dirname(binaryPath), { recursive: true });
   fs.writeFileSync(binaryPath, '');
   return binaryPath;
+}
+
+function requestMcpToolsList(
+  serverPath: string,
+  env: Record<string, string>,
+): Promise<{ tools: Array<{ name?: string }> }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [serverPath], {
+      env: { ...process.env, ...env },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    const timeout = setTimeout(() => {
+      child.kill();
+      reject(new Error(`MCP tools/list timed out. stderr=${stderr}`));
+    }, 2000);
+
+    child.stdout.on('data', (chunk) => {
+      stdout += String(chunk);
+      const line = stdout.split(/\r?\n/).find(Boolean);
+      if (!line) return;
+      clearTimeout(timeout);
+      child.kill();
+      try {
+        const payload = JSON.parse(line);
+        resolve(payload.result as { tools: Array<{ name?: string }> });
+      } catch (error) {
+        reject(error);
+      }
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += String(chunk);
+    });
+    child.on('error', (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+
+    child.stdin.write(JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/list',
+      params: {},
+    }) + '\n');
+  });
 }
 
 describe('Codex SDK Executor provider config', () => {
@@ -386,6 +433,7 @@ describe('Codex SDK Executor builtin MCP servers', () => {
         'http://127.0.0.1:3001/internal/agent-tools/system-tools/call',
       );
       assert.strictEqual(mcpServers.tax.env.TEAMAGENTX_ROOM_HISTORY_TOOLS_ENABLED, '1');
+      assert.strictEqual(mcpServers.tax.env.TEAMAGENTX_MENTION_AGENTS_FALLBACK_ENABLED, '1');
       assert.ok(mcpServers.tax.env.TEAMAGENTX_INTERNAL_TOOL_TOKEN);
     } finally {
       if (originalPath === undefined) {
@@ -417,12 +465,49 @@ describe('Codex SDK Executor builtin MCP servers', () => {
       assert.match(script, /search_room_messages/);
       assert.match(script, /get_room_message_detail/);
       assert.match(script, /buildRoomHistoryTools/);
+      assert.match(script, /buildMentionAgentsFallbackTool/);
+      assert.match(script, /TEAMAGENTX_TOOL_FETCH_TIMEOUT_MS/);
+      assert.match(script, /\[TeamAgentX MCP\]/);
       assert.match(script, /capabilities: \{ tools: \{\}, resources: \{\} \}/);
       assert.match(script, /method === "resources\/list"/);
     } finally {
       fs.rmSync(workDir, { recursive: true, force: true });
       fs.rmSync(
         path.join(os.homedir(), '.teamagentx', 'acp-config', 'agent-room-history-tool-test'),
+        { recursive: true, force: true },
+      );
+    }
+  });
+
+  test('生成的 MCP server 在动态工具列表不可用时仍暴露 mention_agents fallback', async () => {
+    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-codex-mention-fallback-'));
+    const agentId = 'agent-mention-fallback-test';
+    const executor = new CodexSdkExecutor(
+      'CodexAgent',
+      'test prompt',
+      'room-mention-fallback-test',
+      workDir,
+      false,
+      agentId,
+    );
+
+    try {
+      const serverPath = (executor as any).ensureTeamAgentXMcpServerFile();
+      const result = await requestMcpToolsList(serverPath, {
+        TEAMAGENTX_MENTION_AGENTS_FALLBACK_ENABLED: '1',
+        TEAMAGENTX_SYSTEM_TOOLS_CALL_ENDPOINT: 'http://127.0.0.1:9/internal/agent-tools/system-tools/call',
+        TEAMAGENTX_SOURCE_AGENT_ID: agentId,
+        TEAMAGENTX_CHAT_ROOM_ID: 'room-mention-fallback-test',
+        TEAMAGENTX_WORK_DIR: workDir,
+        TEAMAGENTX_INTERNAL_TOOL_TOKEN: 'token',
+        TEAMAGENTX_TOOL_FETCH_TIMEOUT_MS: '10',
+      });
+
+      assert.ok(result.tools.some((tool) => tool.name === 'mention_agents'));
+    } finally {
+      fs.rmSync(workDir, { recursive: true, force: true });
+      fs.rmSync(
+        path.join(os.homedir(), '.teamagentx', 'acp-config', agentId),
         { recursive: true, force: true },
       );
     }

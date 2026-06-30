@@ -47,6 +47,7 @@ import {
   DEFAULT_AGENT_THINKING_MODE,
   type AgentThinkingMode,
 } from './thinking-mode.js';
+import { GROUP_COORDINATOR_ID } from './system-assistant.constants.js';
 import { getContextResetCommand } from './context-reset-command.js';
 import type {
   AgentDebugInfo,
@@ -356,6 +357,8 @@ const BUILTIN_CODEX_MCP_SERVERS: CodexBuiltinMcpServerDefinition[] = [
           TEAMAGENTX_BACKGROUND_COMMAND_STOP_ENDPOINT: backgroundCommandStopEndpoint,
           TEAMAGENTX_BACKGROUND_COMMAND_LIST_ENDPOINT: backgroundCommandListEndpoint,
           TEAMAGENTX_ROOM_HISTORY_TOOLS_ENABLED: roomHistoryToolsEnabled ? '1' : '',
+          TEAMAGENTX_MENTION_AGENTS_FALLBACK_ENABLED:
+            agentId && agentId !== GROUP_COORDINATOR_ID ? '1' : '',
           TEAMAGENTX_INTERNAL_TOOL_TOKEN: getInternalAgentToolToken(),
         },
       };
@@ -1249,9 +1252,16 @@ const sourceAgentId = process.env.TEAMAGENTX_SOURCE_AGENT_ID;
 const chatRoomId = process.env.TEAMAGENTX_CHAT_ROOM_ID;
 const workDir = process.env.TEAMAGENTX_WORK_DIR;
 const roomHistoryToolsEnabled = process.env.TEAMAGENTX_ROOM_HISTORY_TOOLS_ENABLED === "1";
+const mentionAgentsFallbackEnabled = process.env.TEAMAGENTX_MENTION_AGENTS_FALLBACK_ENABLED === "1";
+const fetchTimeoutMs = Number.parseInt(process.env.TEAMAGENTX_TOOL_FETCH_TIMEOUT_MS || "5000", 10);
 
 function write(message) {
   process.stdout.write(JSON.stringify(message) + "\\n");
+}
+
+function warn(message, detail) {
+  const suffix = detail === undefined ? "" : " " + stringifyPayload(detail);
+  process.stderr.write("[TeamAgentX MCP] " + message + suffix + "\\n");
 }
 
 function toolResult(text, structuredContent, isError = false) {
@@ -1271,6 +1281,26 @@ function stringifyPayload(value) {
   }
 }
 
+async function postJson(endpoint, body) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Number.isFinite(fetchTimeoutMs) ? fetchTimeoutMs : 5000);
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer " + token,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    const payload = await response.json().catch(() => ({}));
+    return { response, payload };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function callGenerateImage(args) {
   if (!generateImageEndpoint || !token || !sourceAgentId) {
     return toolResult("The current assistant does not have image generation enabled.", {}, true);
@@ -1286,22 +1316,14 @@ async function callGenerateImage(args) {
   }
 
   try {
-    const response = await fetch(generateImageEndpoint, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: "Bearer " + token,
-      },
-      body: JSON.stringify({
-        sourceAgentId,
-        prompt,
-        size: typeof args?.size === "string" ? args.size : undefined,
-        n,
-        filename: typeof args?.filename === "string" ? args.filename : undefined,
-        extraJson: args?.extraJson && typeof args.extraJson === "object" ? args.extraJson : undefined,
-      }),
+    const { response, payload } = await postJson(generateImageEndpoint, {
+      sourceAgentId,
+      prompt,
+      size: typeof args?.size === "string" ? args.size : undefined,
+      n,
+      filename: typeof args?.filename === "string" ? args.filename : undefined,
+      extraJson: args?.extraJson && typeof args.extraJson === "object" ? args.extraJson : undefined,
     });
-    const payload = await response.json().catch(() => ({}));
     if (!response.ok || payload.success === false) {
       return toolResult(payload.error || "Image generation failed.", payload, true);
     }
@@ -1315,21 +1337,20 @@ async function callGenerateImage(args) {
 }
 
 async function listSystemTools() {
-  if (!systemToolsListEndpoint || !token || !sourceAgentId || !chatRoomId) return [];
+  if (!systemToolsListEndpoint || !token || !sourceAgentId || !chatRoomId) {
+    warn("system tools list skipped: missing endpoint, token, sourceAgentId, or chatRoomId");
+    return [];
+  }
 
   try {
-    const response = await fetch(systemToolsListEndpoint, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: "Bearer " + token,
-      },
-      body: JSON.stringify({ sourceAgentId, chatRoomId }),
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || payload.success === false) return [];
+    const { response, payload } = await postJson(systemToolsListEndpoint, { sourceAgentId, chatRoomId });
+    if (!response.ok || payload.success === false) {
+      warn("system tools list failed", { status: response.status, error: payload.error });
+      return [];
+    }
     return Array.isArray(payload.data?.tools) ? payload.data.tools : [];
-  } catch {
+  } catch (error) {
+    warn("system tools list request failed", error instanceof Error ? error.message : String(error));
     return [];
   }
 }
@@ -1340,15 +1361,7 @@ async function callSystemTool(name, args) {
   }
 
   try {
-    const response = await fetch(systemToolsCallEndpoint, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: "Bearer " + token,
-      },
-      body: JSON.stringify({ sourceAgentId, chatRoomId, name, args }),
-    });
-    const payload = await response.json().catch(() => ({}));
+    const { response, payload } = await postJson(systemToolsCallEndpoint, { sourceAgentId, chatRoomId, name, args });
     if (!response.ok || payload.success === false) {
       return toolResult(payload.error || "Tool execution failed.", payload, true);
     }
@@ -1357,6 +1370,54 @@ async function callSystemTool(name, args) {
   } catch (error) {
     return toolResult(error instanceof Error ? error.message : "Tool execution failed.", {}, true);
   }
+}
+
+function buildMentionAgentsFallbackTool() {
+  if (!mentionAgentsFallbackEnabled) return null;
+
+  return {
+    name: "mention_agents",
+    description: "Hand off the conversation to one or more other assistants in this chatroom. Call this only when you actually want those assistants to act; dispatch happens after your turn ends. Use mode=parallel for independent targets and mode=serial for ordered handoff.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        mentions: {
+          type: "array",
+          minItems: 1,
+          description: "Assistants to hand off to in this call.",
+          items: {
+            type: "object",
+            properties: {
+              agent: {
+                type: "string",
+                minLength: 1,
+                description: "Visible assistant name in this chatroom, without @ or internal IDs.",
+              },
+              task: {
+                type: "string",
+                default: "",
+                description: "Concrete task or remaining work for this assistant.",
+              },
+            },
+            required: ["agent"],
+            additionalProperties: false,
+          },
+        },
+        mode: {
+          type: "string",
+          enum: ["serial", "parallel"],
+          default: "parallel",
+          description: "parallel runs targets together; serial runs them in order.",
+        },
+        intent: {
+          type: "string",
+          description: "Optional overall handoff intent for audit and result collection.",
+        },
+      },
+      required: ["mentions"],
+      additionalProperties: false,
+    },
+  };
 }
 
 function buildRoomHistoryTools() {
@@ -1554,6 +1615,10 @@ async function handle(request) {
         description: systemTool.description || systemTool.name,
         inputSchema: systemTool.inputSchema || { type: "object", additionalProperties: true },
       });
+    }
+    const mentionFallbackTool = buildMentionAgentsFallbackTool();
+    if (mentionFallbackTool && !tools.some((tool) => tool.name === mentionFallbackTool.name)) {
+      tools.push(mentionFallbackTool);
     }
     write({
       jsonrpc: "2.0",
