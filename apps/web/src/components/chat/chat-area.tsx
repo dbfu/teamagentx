@@ -314,7 +314,18 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
 
   const handleOpenTaskBoard = () => {
     setSelectedRoomAgent(null)
-    setSidePanelMode(useChatStore.getState().sidePanelMode === 'task-board' ? null : 'task-board')
+    const nextMode = useChatStore.getState().sidePanelMode === 'task-board' ? null : 'task-board'
+    if (nextMode === 'task-board') setShowDispatchRules(false)
+    setSidePanelMode(nextMode)
+  }
+
+  const handleOpenDispatchRules = () => {
+    const nextOpen = !showDispatchRules
+    if (nextOpen) {
+      setSelectedRoomAgent(null)
+      setSidePanelMode(null)
+    }
+    setShowDispatchRules(nextOpen)
   }
 
   const handleOpenMessageArchives = () => {
@@ -427,9 +438,10 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
   }
 
   const isTaskBoardOpen = sidePanelMode === 'task-board'
+  const isDispatchRulesOpen = showDispatchRules
 
   return (
-    <div className={cn("flex flex-1 flex-col bg-background", isMobile ? "min-h-0" : "")}>
+    <div className={cn("flex min-w-0 flex-1 flex-col overflow-hidden bg-background", isMobile ? "min-h-0" : "")}>
       {/* Header - 移动端不显示，由 MobileChatDetailPage 提供 */}
       {!isMobile && (
         <ChatAreaHeader
@@ -443,10 +455,11 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
           onOpenTaskBoard={handleOpenTaskBoard}
           onOpenMessageArchives={handleOpenMessageArchives}
           taskBoardActive={isTaskBoardOpen}
+          dispatchRulesActive={isDispatchRulesOpen}
           hasActiveTasks={activeTaskAgentIds.length > 0}
           onStopAllTasks={handleStopAllTasks}
           onOpenRoomRules={() => setShowRoomRules(true)}
-          onOpenDispatchRules={() => setShowDispatchRules(true)}
+          onOpenDispatchRules={handleOpenDispatchRules}
           onOpenEnvVars={() => setShowEnvVars(true)}
           onOpenCustomCommands={() => setShowCustomCommands(true)}
           onScreenshot={() => setShowScreenshot(true)}
@@ -456,9 +469,9 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
       )}
 
       {/* Messages, Input and Side Panel */}
-      <div className={cn("flex flex-1", isMobile ? "min-h-0" : "overflow-hidden")}>
+      <div className={cn("relative flex min-w-0 flex-1", isMobile ? "min-h-0" : "overflow-hidden")}>
         {/* Messages and Input area */}
-        {!isTaskBoardOpen && (
+        {!isTaskBoardOpen && !isDispatchRulesOpen && (
           <div className="relative flex flex-1 flex-col min-w-0 bg-background">
             {ownerMentionTodo && (
               <div className="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2">
@@ -552,6 +565,15 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
           isMobile={isMobile}
           onInsertMention={handleMentionAgent}
         />
+
+        {isDispatchRulesOpen && (
+          <RoomDispatchRulesDialog
+            isOpen={showDispatchRules}
+            onClose={() => setShowDispatchRules(false)}
+            chatRoom={chatRoom}
+            onChatRoomChange={onChatRoomChange || (() => {})}
+          />
+        )}
       </div>
 
       {/* Add Agent Dialog */}
@@ -598,14 +620,6 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
       <RoomRulesDialog
         isOpen={showRoomRules}
         onClose={() => setShowRoomRules(false)}
-        chatRoom={chatRoom}
-        onChatRoomChange={onChatRoomChange || (() => {})}
-      />
-
-      {/* Room Dispatch Rules Dialog */}
-      <RoomDispatchRulesDialog
-        isOpen={showDispatchRules}
-        onClose={() => setShowDispatchRules(false)}
         chatRoom={chatRoom}
         onChatRoomChange={onChatRoomChange || (() => {})}
       />

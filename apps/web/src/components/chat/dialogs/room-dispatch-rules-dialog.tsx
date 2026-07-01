@@ -1,10 +1,12 @@
 import { ChatRoom, chatRoomApi } from '@/lib/agent-api'
-import { AlertTriangle, Code2, Loader2, Workflow, X } from 'lucide-react'
+import { AlertTriangle, Code2, GitBranch, Loader2, Workflow } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
 import { parseDispatchRulesYaml } from '@/lib/dispatch-rules/schema'
-import { DispatchRulesFlow } from './dispatch-rules-flow'
+import { cn } from '@/lib/utils'
+import { DispatchRulesBuilder } from './dispatch-rules-builder'
+import type { DispatchRulesBuilderAgent } from './dispatch-rules-builder-model'
 
 interface RoomDispatchRulesDialogProps {
   isOpen: boolean
@@ -13,7 +15,7 @@ interface RoomDispatchRulesDialogProps {
   onChatRoomChange: () => void
 }
 
-type ViewMode = 'flow' | 'source'
+type ViewMode = 'builder' | 'source'
 
 export function RoomDispatchRulesDialog({
   isOpen,
@@ -23,9 +25,11 @@ export function RoomDispatchRulesDialog({
 }: RoomDispatchRulesDialogProps) {
   const { t } = useTranslation()
   const [yamlText, setYamlText] = useState(chatRoom.dispatchRules || '')
-  const [view, setView] = useState<ViewMode>('flow')
+  const [view, setView] = useState<ViewMode>('builder')
   const [isSaving, setIsSaving] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [isPanelFullscreen, setIsPanelFullscreen] = useState(false)
+  const [builderResetKey, setBuilderResetKey] = useState(0)
   // 群助手可能刚更新过调度规则，每次打开都拉一次最新群聊，避免用本地缓存的旧数据
   const [latestRoom, setLatestRoom] = useState<ChatRoom>(chatRoom)
 
@@ -38,9 +42,10 @@ export function RoomDispatchRulesDialog({
       setLatestRoom(room)
       const initial = room.dispatchRules || ''
       setYamlText(initial)
-      // 有内容且能解析则默认流程图视图，否则进源码视图
+      setBuilderResetKey((key) => key + 1)
+      // 有内容且能解析则进入拖拽编排；解析失败才切到源码视图。
       const parsed = parseDispatchRulesYaml(initial)
-      setView(initial.trim() && parsed.ok ? 'flow' : 'source')
+      setView(initial.trim() && !parsed.ok ? 'source' : 'builder')
     }
 
     // 先用当前缓存渲染，再异步取最新覆盖
@@ -62,17 +67,49 @@ export function RoomDispatchRulesDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, chatRoom.id])
 
-  // 群内真实存在的业务助手名称，用于标红不存在的引用
-  const validAgentNames = useMemo(() => {
-    const names: string[] = []
+  useEffect(() => {
+    if (!isOpen) {
+      setIsPanelFullscreen(false)
+      return
+    }
+    if (!isPanelFullscreen) return
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setIsPanelFullscreen(false)
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [isOpen, isPanelFullscreen])
+
+  const builderAgents = useMemo<DispatchRulesBuilderAgent[]>(() => {
+    const agents: DispatchRulesBuilderAgent[] = []
     for (const cra of latestRoom.chatRoomAgents ?? []) {
       const agent = cra.agent
-      if (agent && agent.agentLevel !== 'system') names.push(agent.name)
+      if (agent && agent.agentLevel !== 'system') {
+        agents.push({
+          name: agent.name,
+          role: agent.description?.trim() || cra.role || t('chat.dispatchRules.builderDefaultRole'),
+          avatar: agent.avatar,
+          avatarColor: agent.avatarColor,
+          agentLevel: agent.agentLevel,
+        })
+      }
     }
-    return names
-  }, [latestRoom.chatRoomAgents])
+    return agents
+  }, [latestRoom.chatRoomAgents, t])
 
   const parsed = useMemo(() => parseDispatchRulesYaml(yamlText), [yamlText])
+
+  const openBuilder = () => {
+    if (view !== 'builder') setBuilderResetKey((key) => key + 1)
+    setView('builder')
+  }
+
+  const handleClose = () => {
+    setIsPanelFullscreen(false)
+    onClose()
+  }
 
   const handleSave = async () => {
     const trimmed = yamlText.trim()
@@ -90,7 +127,7 @@ export function RoomDispatchRulesDialog({
       if (response.success) {
         toast.success(t('chat.dispatchRules.saved'))
         onChatRoomChange()
-        onClose()
+        handleClose()
       } else {
         toast.error(response.error || t('toast.saveFailed'))
       }
@@ -102,80 +139,74 @@ export function RoomDispatchRulesDialog({
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-8">
-      <div className="flex h-[80vh] w-full max-w-3xl flex-col rounded-2xl bg-card shadow-2xl">
+    <div
+      className={cn(
+        'flex min-w-0 flex-1 flex-col overflow-hidden bg-background',
+        isPanelFullscreen && 'fixed inset-0 z-[60] h-screen w-screen',
+      )}
+    >
+      <div className="flex h-full min-w-0 w-full flex-col overflow-hidden bg-card">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-border px-6 py-4">
-          <div className="flex items-center gap-2">
-            <Workflow className="size-5 text-primary" />
-            <h2 className="text-lg font-semibold text-foreground">{t('chat.groupDispatchRules')}</h2>
+        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 border-b border-border px-4 py-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <Workflow className="size-4 text-primary" />
+            <h2 className="truncate text-base font-semibold text-foreground">{t('chat.groupDispatchRules')}</h2>
             {isLoading && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
           </div>
-          <div className="flex items-center gap-2">
-            {/* 视图切换 */}
-            <div className="flex rounded-lg border border-border p-0.5">
-              <button
-                type="button"
-                onClick={() => setView('flow')}
-                className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs ${
-                  view === 'flow' ? 'bg-primary text-white' : 'text-muted-foreground hover:bg-accent'
-                }`}
-              >
-                <Workflow className="size-3.5" />
-                {t('chat.dispatchRules.viewFlow')}
-              </button>
-              <button
-                type="button"
-                onClick={() => setView('source')}
-                className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs ${
-                  view === 'source' ? 'bg-primary text-white' : 'text-muted-foreground hover:bg-accent'
-                }`}
-              >
-                <Code2 className="size-3.5" />
-                {t('chat.dispatchRules.viewSource')}
-              </button>
-            </div>
+          {/* 视图切换 */}
+          <div className="flex justify-self-center rounded-lg border border-border p-0.5">
             <button
-              onClick={onClose}
-              className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+              type="button"
+              onClick={openBuilder}
+              className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-xs ${
+                view === 'builder' ? 'bg-primary text-white' : 'text-muted-foreground hover:bg-accent'
+              }`}
             >
-              <X className="size-5" />
+              <GitBranch className="size-3.5" />
+              {t('chat.dispatchRules.viewBuilder')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setView('source')}
+              className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-xs ${
+                view === 'source' ? 'bg-primary text-white' : 'text-muted-foreground hover:bg-accent'
+              }`}
+            >
+              <Code2 className="size-3.5" />
+              {t('chat.dispatchRules.viewSource')}
+            </button>
+          </div>
+          <div className="flex min-w-0 justify-end gap-2">
+            <button
+              type="button"
+              onClick={handleClose}
+              className="rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent"
+            >
+              {t('common.cancel')}
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={isSaving || (!!yamlText.trim() && !parsed.ok)}
+              className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs text-white hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isSaving && <Loader2 className="size-3.5 animate-spin" />}
+              {t('common.save')}
             </button>
           </div>
         </div>
 
-        {/* Description */}
-        <div className="border-b border-border bg-muted px-6 py-3">
-          <p className="text-sm text-muted-foreground">{t('chat.dispatchRules.hint')}</p>
-        </div>
-
         {/* Body */}
-        <div className="flex-1 overflow-auto p-6">
-          {view === 'flow' ? (
-            yamlText.trim() && parsed.ok && parsed.data ? (
-              <DispatchRulesFlow data={parsed.data} validAgentNames={validAgentNames} />
-            ) : yamlText.trim() && !parsed.ok ? (
-              <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
-                <AlertTriangle className="size-8 text-amber-500" />
-                <p className="text-sm text-muted-foreground">{t('chat.dispatchRules.parseFailed')}</p>
-                <p className="max-w-md text-xs text-red-500">{parsed.error}</p>
-                <button
-                  type="button"
-                  onClick={() => setView('source')}
-                  className="mt-2 rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent"
-                >
-                  {t('chat.dispatchRules.viewSource')}
-                </button>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
-                <Workflow className="size-8 text-muted-foreground/40" />
-                <p className="text-sm text-muted-foreground">{t('chat.dispatchRules.empty')}</p>
-                <p className="max-w-md text-xs text-muted-foreground">
-                  {t('chat.dispatchRules.emptyTip')}
-                </p>
-              </div>
-            )
+        <div className={view === 'builder' ? 'min-h-0 flex-1 overflow-hidden p-3' : 'min-h-0 flex-1 overflow-auto p-4'}>
+          {view === 'builder' ? (
+            <DispatchRulesBuilder
+              initialData={parsed.ok ? parsed.data : undefined}
+              resetKey={builderResetKey}
+              roomAgents={builderAgents}
+              onYamlChange={setYamlText}
+              isFullscreen={isPanelFullscreen}
+              onToggleFullscreen={() => setIsPanelFullscreen((fullscreen) => !fullscreen)}
+            />
           ) : (
             <div className="flex h-full flex-col gap-2">
               <textarea
@@ -195,25 +226,6 @@ export function RoomDispatchRulesDialog({
           )}
         </div>
 
-        {/* Actions */}
-        <div className="flex justify-end gap-3 border-t border-border px-6 py-4">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg border border-border px-4 py-2 text-sm text-muted-foreground hover:bg-accent"
-          >
-            {t('common.cancel')}
-          </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={isSaving || (!!yamlText.trim() && !parsed.ok)}
-            className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm text-white hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isSaving && <Loader2 className="size-4 animate-spin" />}
-            {t('common.save')}
-          </button>
-        </div>
       </div>
     </div>
   )

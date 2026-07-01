@@ -26,6 +26,7 @@ interface ChatAreaHeaderProps {
   onOpenTaskBoard?: () => void
   onOpenMessageArchives?: () => void
   taskBoardActive?: boolean
+  dispatchRulesActive?: boolean
   hasActiveTasks?: boolean
   onStopAllTasks?: () => void
   onOpenRoomRules?: () => void
@@ -48,6 +49,7 @@ export function ChatAreaHeader({
   onOpenTaskBoard,
   onOpenMessageArchives,
   taskBoardActive,
+  dispatchRulesActive,
   hasActiveTasks,
   onStopAllTasks,
   onOpenRoomRules,
@@ -99,6 +101,7 @@ export function ChatAreaHeader({
       || chatRoom.name.trim().toLowerCase() === 'codex'
     )
     && Boolean(onOpenCodexLocalSessions)
+  const shouldShowDispatchRulesButton = chatRoom?.agentTriggerMode !== 'manual' && Boolean(onOpenDispatchRules)
 
   const loadPackageScripts = useCallback(async (options?: { reset?: boolean; showLoading?: boolean }) => {
     const requestId = packageScriptsRequestRef.current + 1
@@ -427,6 +430,24 @@ export function ChatAreaHeader({
               </TooltipTrigger>
               <TooltipContent side="bottom">{t('chat.taskBoardTitle')}</TooltipContent>
             </Tooltip>
+            {shouldShowDispatchRulesButton && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    className={cn(
+                      'rounded-lg p-2 transition-colors',
+                      dispatchRulesActive
+                        ? 'bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:text-primary-foreground'
+                        : 'text-muted-foreground hover:text-primary hover:bg-primary/10'
+                    )}
+                    onClick={onOpenDispatchRules}
+                  >
+                    <Workflow className="size-5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">{t('chat.groupDispatchRules')}</TooltipContent>
+              </Tooltip>
+            )}
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -513,6 +534,24 @@ export function ChatAreaHeader({
               </TooltipTrigger>
               <TooltipContent side="bottom">{t('chat.taskBoardTitle')}</TooltipContent>
             </Tooltip>
+            {shouldShowDispatchRulesButton && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    className={cn(
+                      'rounded-lg p-2 transition-colors',
+                      dispatchRulesActive
+                        ? 'bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:text-primary-foreground'
+                        : 'text-muted-foreground hover:text-primary hover:bg-primary/10'
+                    )}
+                    onClick={onOpenDispatchRules}
+                  >
+                    <Workflow className="size-5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">{t('chat.groupDispatchRules')}</TooltipContent>
+              </Tooltip>
+            )}
             {/* 更多按钮 */}
             <DropdownMenu open={moreMenuOpen} onOpenChange={handleMoreMenuOpenChange}>
               <Tooltip
@@ -564,15 +603,6 @@ export function ChatAreaHeader({
                   <Scroll className="size-4 text-current" />
                   {t('chat.groupRules')}
                 </DropdownMenuItem>
-                {chatRoom?.agentTriggerMode !== 'manual' && (
-                  <DropdownMenuItem
-                    className="hover:bg-primary/10 hover:text-primary hover:[&_svg]:text-primary focus:bg-primary/10 focus:text-primary focus:[&_svg]:text-primary"
-                    onClick={onOpenDispatchRules}
-                  >
-                    <Workflow className="size-4 text-current" />
-                    {t('chat.groupDispatchRules')}
-                  </DropdownMenuItem>
-                )}
                 <DropdownMenuItem
                   className="hover:bg-primary/10 hover:text-primary hover:[&_svg]:text-primary focus:bg-primary/10 focus:text-primary focus:[&_svg]:text-primary"
                   onClick={onOpenEnvVars}
