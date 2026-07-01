@@ -268,7 +268,12 @@ export function ChatAreaHeader({
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
             <button
-              className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary disabled:opacity-50"
+              className={cn(
+                'rounded-lg p-2 transition-colors disabled:opacity-50',
+                packageScriptsMenuOpen
+                  ? 'bg-primary/10 text-primary'
+                  : 'text-muted-foreground hover:bg-primary/10 hover:text-primary',
+              )}
               type="button"
               disabled={runningScript !== null}
               onBlur={handlePackageScriptsTriggerPointerLeave}

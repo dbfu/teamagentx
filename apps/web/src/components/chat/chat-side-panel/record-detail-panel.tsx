@@ -29,11 +29,36 @@ function CollapsibleStateIcon({ className }: { className?: string }) {
   )
 }
 
+function collapseSupersededHandoffAuditEvents(events: ExecutionEvent[]): ExecutionEvent[] {
+  let hasLaterTerminalAudit = false
+  const collapsed: ExecutionEvent[] = []
+
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const event = events[i]
+    const isHandoffAudit = event.type === 'model' && event.data.type === 'handoff_audit'
+    const isTerminalAudit = isHandoffAudit && event.data.status !== 'in_progress'
+
+    if (isHandoffAudit && event.data.status === 'in_progress' && hasLaterTerminalAudit) {
+      continue
+    }
+
+    if (isTerminalAudit) {
+      hasLaterTerminalAudit = true
+    }
+
+    collapsed.push(event)
+  }
+
+  return collapsed.reverse()
+}
+
 // 将执行记录转换为按时间排序的事件列表
 function buildExecutionEvents(record: ExecutionRecord): ExecutionEvent[] {
   // 直接使用新的 events 字段
   if (record.events && record.events.length > 0) {
-    return [...record.events].sort((a, b) => a.timestamp - b.timestamp)
+    return collapseSupersededHandoffAuditEvents(
+      [...record.events].sort((a, b) => a.timestamp - b.timestamp)
+    )
   }
 
   // 兼容旧数据：从旧字段构建事件

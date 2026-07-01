@@ -118,7 +118,7 @@ export const config = {
     executionNoActivityRetryDelayMs: parseInt(process.env.AGENT_EXECUTION_NO_ACTIVITY_RETRY_DELAY_MS || '1000', 10),
     // 正常执行未登记 mention_agents 时，由同一助手追加一次静默交接复核；失败后仍由 watchdog 兜底。
     handoffAuditEnabled: process.env.AGENT_HANDOFF_AUDIT_ENABLED !== 'false',
-    handoffAuditTimeoutMs: parseInt(process.env.AGENT_HANDOFF_AUDIT_TIMEOUT_MS || '30000', 10),
+    handoffAuditTimeoutMs: parseInt(process.env.AGENT_HANDOFF_AUDIT_TIMEOUT_MS || '60000', 10),
     // 结构化助手交接护栏：分别限制单次扇出、单链深度、整条级联派发量和单链重访次数。
     handoffFanoutMax: parseInt(process.env.AGENT_HANDOFF_FANOUT_MAX || '20', 10),
     handoffDepthMax: parseInt(process.env.AGENT_HANDOFF_DEPTH_MAX || '100', 10),

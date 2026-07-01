@@ -255,6 +255,16 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
     closeToolbarTimerRef.current = setTimeout(() => setShowToolbar(false), 120)
   }, [clearCloseToolbarTimer])
 
+  // 桌面端右键仍打开完整浮动菜单；hover 工具条只是快捷入口。
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    if (isMobile || selectionMode) return
+    e.preventDefault()
+    clearCloseToolbarTimer()
+    setShowToolbar(false)
+    setContextMenuPos({ x: e.clientX, y: e.clientY })
+    setShowContextMenu(true)
+  }, [isMobile, selectionMode, clearCloseToolbarTimer])
+
   // 鼠标在消息气泡上移动（桌面端）→ 显示右上角工具条。
   // 用 mousemove 而不是 mouseenter：滚动时鼠标静止只会触发 mouseenter 不会触发 mousemove，
   // 这样滚动过程中工具条不会乱闪，滚动结束后需要鼠标真正移动一下才重新显示。
@@ -977,6 +987,7 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
                     isSelected && "ring-2 ring-blue-500 ring-offset-2 ring-offset-background"
                   )}
                   ref={bubbleRef}
+                  onContextMenu={handleContextMenu}
                   onMouseMove={handleBubbleMouseMove}
                   onMouseLeave={handleBubbleMouseLeave}
                   onTouchStart={handleTouchStart}
@@ -1083,6 +1094,7 @@ export const ChatMessage = memo(function ChatMessage({ message, isVoicePlayed = 
                   isSelected && "ring-2 ring-blue-500 ring-offset-2 ring-offset-background"
                 )}
                 ref={bubbleRef}
+                onContextMenu={handleContextMenu}
                 onMouseMove={handleBubbleMouseMove}
                 onMouseLeave={handleBubbleMouseLeave}
                 onTouchStart={handleTouchStart}

@@ -70,6 +70,8 @@ import {
 import type { Message } from '../../../types/message.js';
 import { parseTaskPromptPolicy } from '../task-prompt-policy.js';
 import { messageMentionsRoomUser } from './user-mention-utils.js';
+import { getContextResetCommand } from '../context-reset-command.js';
+import { prependReplyContextSection } from './reply-context.js';
 import {
   buildHandoffAuditPrompt,
   createHandoffOutputBuffer,
@@ -198,7 +200,32 @@ export async function processQueue(chatRoomId: string, agentId: string) {
       beginMentionExecution(chatRoomId, task.agentId, task.id);
       let settledMentionState: PendingMentionState = { mentions: [], batches: [] };
       try {
-        const taskPromptPolicy = parseTaskPromptPolicy(task.messageContent);
+        const baseTaskPromptPolicy = parseTaskPromptPolicy(task.messageContent);
+        let taskPromptContent = baseTaskPromptPolicy.content;
+        if (!getContextResetCommand(taskPromptContent)) {
+          const triggerMessage = await messageService.findById(task.messageId);
+          if (
+            triggerMessage?.chatRoomId === chatRoomId &&
+            triggerMessage.replyMessageId
+          ) {
+            const replyTargetMessage = await messageService.findById(
+              triggerMessage.replyMessageId,
+            );
+            if (
+              replyTargetMessage?.chatRoomId === chatRoomId &&
+              !replyTargetMessage.archiveId
+            ) {
+              taskPromptContent = prependReplyContextSection(
+                taskPromptContent,
+                replyTargetMessage,
+              );
+            }
+          }
+        }
+        const taskPromptPolicy = {
+          ...baseTaskPromptPolicy,
+          content: taskPromptContent,
+        };
         // 创建 AbortController 用于中断执行
         let abortController = new AbortController();
         abortControllers.set(key, abortController);

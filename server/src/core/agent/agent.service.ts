@@ -49,6 +49,7 @@ export type CreateAgentInput = {
   fallbackLlmProviderIds?: string[] | null;
   imageGeneration?: AgentCapabilityInput;
   speechConfig?: AgentSpeechConfig | null;
+  diaryEnabled?: boolean;
 };
 
 export type UpdateAgentInput = Partial<CreateAgentInput> & {
@@ -308,6 +309,7 @@ export const agentService = {
           llmProviderId,
           fallbackLlmProviderIds: serializeFallbackLlmProviderIds(fallbackLlmProviderIds),
           speechConfig: serializeAgentSpeechConfig(data.speechConfig),
+          diaryEnabled: data.diaryEnabled ?? false,
           sortOrder: (currentFirstAgent?.sortOrder ?? 0) + AGENT_SORT_ORDER_STEP,
           updatedAt: now,
         },
@@ -370,6 +372,7 @@ export const agentService = {
     // 任何不在白名单中的字段（包括未来新增的字段）都会被拦截，避免字段保护失效
     const SYSTEM_AGENT_UPDATABLE_FIELDS = [
       'speechConfig',
+      'diaryEnabled',
       ...([GROUP_ASSISTANT_ID, GROUP_COORDINATOR_ID].includes(id)
         ? [
             'type',

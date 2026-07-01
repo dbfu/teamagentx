@@ -1,0 +1,1 @@
+ALTER TABLE "Agent" ADD COLUMN "diaryEnabled" BOOLEAN NOT NULL DEFAULT true;

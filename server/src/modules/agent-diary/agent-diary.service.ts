@@ -17,7 +17,6 @@ import {
 } from '../../core/agent/agent-diary.js';
 import { createLlmClient } from '../../lib/llm-client.js';
 import prisma from '../../lib/prisma.js';
-import { appSettingService } from '../app-setting/app-setting.service.js';
 import { llmProviderService } from '../llm-provider/llm-provider.service.js';
 
 type MessageWithSender = Message & {
@@ -247,6 +246,11 @@ export const agentDiaryService = {
     agent: AgentForDiary,
     dateKey: string = shanghaiDateKey(),
   ): Promise<DiaryGenerationResult | null> {
+    if (agent.diaryEnabled === false) {
+      console.log(`[AgentDiary] 助手 ${agent.name} 已关闭日记，跳过`);
+      return null;
+    }
+
     const provider = agent.llmProvider ?? (await llmProviderService.findDefault());
     if (!provider) {
       console.warn(`[AgentDiary] 助手 ${agent.name} 无可用 LLM 供应商，跳过日记生成`);
@@ -328,16 +332,11 @@ export const agentDiaryService = {
   },
 
   /**
-   * 为所有活跃助手生成指定日期的日记。受全局开关控制；单个失败不影响其它。
+   * 为所有已开启日记的活跃助手生成指定日期的日记；单个失败不影响其它。
    */
   async generateDiariesForAllAgents(dateKey: string = shanghaiDateKey()): Promise<void> {
-    if (!(await appSettingService.isDiaryEnabled())) {
-      console.log('[AgentDiary] 日记功能未开启，跳过本次批量生成');
-      return;
-    }
-
     const agents = await prisma.agent.findMany({
-      where: { isActive: true },
+      where: { isActive: true, diaryEnabled: true },
       include: { llmProvider: true },
     });
 

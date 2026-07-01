@@ -26,7 +26,6 @@ import {
   shanghaiDateKey,
 } from '../core/agent/agent-diary.js';
 import { agentDiaryService } from '../modules/agent-diary/agent-diary.service.js';
-import { appSettingService } from '../modules/app-setting/app-setting.service.js';
 import * as fs from 'fs';
 
 // 所有支持的 LLM 供应商类型（与 Prisma 保持一致）
@@ -65,13 +64,14 @@ function isAgentValidationError(error: unknown): error is Error {
   ].some((prefix) => error.message.startsWith(prefix));
 }
 
-function serializeAgentForResponse<T extends { speechConfig?: string | null; fallbackLlmProviderIds?: string | null }>(
+function serializeAgentForResponse<T extends { speechConfig?: string | null; fallbackLlmProviderIds?: string | null; diaryEnabled?: boolean | null }>(
   agent: T,
-): Omit<T, 'speechConfig' | 'fallbackLlmProviderIds'> & { speechConfig: unknown | null; fallbackLlmProviderIds: string[] } {
-  const { speechConfig, fallbackLlmProviderIds, ...rest } = agent;
+): Omit<T, 'speechConfig' | 'fallbackLlmProviderIds' | 'diaryEnabled'> & { speechConfig: unknown | null; fallbackLlmProviderIds: string[]; diaryEnabled: boolean } {
+  const { speechConfig, fallbackLlmProviderIds, diaryEnabled, ...rest } = agent;
   if (!agent.speechConfig) {
     return {
       ...rest,
+      diaryEnabled: diaryEnabled ?? false,
       fallbackLlmProviderIds: parseFallbackLlmProviderIds(fallbackLlmProviderIds),
       speechConfig: null,
     };
@@ -79,6 +79,7 @@ function serializeAgentForResponse<T extends { speechConfig?: string | null; fal
 
   return {
     ...rest,
+    diaryEnabled: diaryEnabled ?? false,
     fallbackLlmProviderIds: parseFallbackLlmProviderIds(fallbackLlmProviderIds),
     speechConfig: deserializeAgentSpeechConfig(speechConfig),
   };
@@ -138,6 +139,7 @@ const agentResponseSchema = {
         },
       },
     },
+    diaryEnabled: { type: 'boolean' },
     isActive: { type: 'boolean' },
     categoryId: { type: 'string', nullable: true },
     category: {
@@ -250,6 +252,7 @@ const createAgentBodySchema = {
         },
       },
     },
+    diaryEnabled: { type: 'boolean', description: '助手日记开关；全局开启时可按助手关闭' },
     categoryId: { type: 'string', description: '分类 ID' },
     llmProviderId: { type: 'string', nullable: true, description: 'LLM 供应商 ID（builtin 直接使用；acp 目前仅支持 claude/codex 最小闭环）' },
     fallbackLlmProviderIds: {
@@ -320,6 +323,7 @@ const updateAgentBodySchema = {
         },
       },
     },
+    diaryEnabled: { type: 'boolean' },
     isActive: { type: 'boolean' },
     categoryId: { type: 'string', description: '分类 ID，设为 null 移除分类' },
     llmProviderId: { type: 'string', nullable: true, description: 'LLM 供应商 ID，设为 null 移除供应商' },
@@ -362,6 +366,7 @@ interface CreateAgentBody {
   claudeModel?: string | null;
   thinkingMode?: AgentThinkingMode | null;
   speechConfig?: UpdateAgentInput['speechConfig'];
+  diaryEnabled?: boolean;
   categoryId?: string;
   llmProviderId?: string;
   fallbackLlmProviderIds?: string[] | null;
@@ -383,6 +388,7 @@ interface UpdateAgentBody {
   claudeModel?: string | null;
   thinkingMode?: AgentThinkingMode | null;
   speechConfig?: UpdateAgentInput['speechConfig'];
+  diaryEnabled?: boolean;
   isActive?: boolean;
   categoryId?: string | null;
   llmProviderId?: string | null;
@@ -743,7 +749,7 @@ export async function agentGateway(app: FastifyInstance) {
       },
     },
     async (request, reply) => {
-      const {name, avatar, avatarColor, description, prompt, type, acpTool, workDir, proxyConfig, codexModel, codexFastMode, claudeModel, thinkingMode, speechConfig, categoryId, llmProviderId, fallbackLlmProviderIds, imageGeneration} = request.body;
+      const {name, avatar, avatarColor, description, prompt, type, acpTool, workDir, proxyConfig, codexModel, codexFastMode, claudeModel, thinkingMode, speechConfig, diaryEnabled, categoryId, llmProviderId, fallbackLlmProviderIds, imageGeneration} = request.body;
 
       try {
         const agent = await agentService.create({
@@ -761,6 +767,7 @@ export async function agentGateway(app: FastifyInstance) {
           claudeModel,
           thinkingMode,
           speechConfig,
+          diaryEnabled,
           categoryId,
           llmProviderId,
           fallbackLlmProviderIds,
@@ -1893,7 +1900,7 @@ export async function agentGateway(app: FastifyInstance) {
     '/agents/:agentId/diary/generate',
     {
       schema: {
-        description: '手动生成助手日记（受全局开关控制）',
+        description: '手动生成助手日记（受助手开关控制）',
         tags: ['Agents'],
         params: { type: 'object', properties: { agentId: { type: 'string' } } },
         body: {
@@ -1907,8 +1914,8 @@ export async function agentGateway(app: FastifyInstance) {
       const agent = await agentService.findById(agentId);
       if (!agent) return reply.code(404).send({ success: false, error: '助手不存在' });
 
-      if (!(await appSettingService.isDiaryEnabled())) {
-        return reply.send({ success: true, data: null, message: 'diary_disabled' });
+      if (agent.diaryEnabled === false) {
+        return reply.send({ success: true, data: null, message: 'diary_agent_disabled' });
       }
 
       const date = request.body?.date && isValidDiaryDate(request.body.date)

@@ -33,6 +33,8 @@ interface AgentInfo {
   type: 'agent' | 'user'
   agentType?: string
   agentLevel?: string
+  llmProvider?: NonNullable<ChatRoomAgent['agent']>['llmProvider']
+  capabilities?: NonNullable<ChatRoomAgent['agent']>['capabilities']
   injectGroupHistory?: boolean
   chatRoomAgentId?: string
 }
@@ -50,6 +52,8 @@ function getAgentInfo(roomAgent: ChatRoomAgent, t: (key: string) => string): Age
       type: 'agent' as const,
       agentType: roomAgent.agent.type,
       agentLevel: roomAgent.agent.agentLevel,
+      llmProvider: roomAgent.agent.llmProvider,
+      capabilities: roomAgent.agent.capabilities,
       injectGroupHistory: roomAgent.injectGroupHistory,
       chatRoomAgentId: roomAgent.id,
     }
@@ -86,11 +90,41 @@ function StatusIndicator({ status, t }: { status: AgentStatus; t: (key: string) 
   const config = statusConfig[status]
 
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex shrink-0 items-center gap-1">
       <div className={cn('size-2 rounded-full', config.color)} />
       <span className="text-xs text-muted-foreground">{config.label}</span>
     </div>
   )
+}
+
+function formatProviderConfig(provider?: NonNullable<AgentInfo['llmProvider']> | null): string | null {
+  if (!provider) return null
+  return provider.name
+}
+
+function getCapabilityLabel(capabilityType: string, t: (key: string) => string): string {
+  if (capabilityType === 'video') return t('chat.agentsPanel.capabilityVideo')
+  if (capabilityType === 'image') return t('chat.agentsPanel.capabilityImage')
+  if (capabilityType === 'audio') return t('chat.agentsPanel.capabilityAudio')
+  return capabilityType
+}
+
+function getModelConfigText(info: AgentInfo, t: (key: string) => string): string | null {
+  const parts: string[] = []
+  const primaryConfig = formatProviderConfig(info.llmProvider)
+  if (primaryConfig) {
+    parts.push(primaryConfig)
+  }
+
+  for (const capability of info.capabilities ?? []) {
+    if (!capability.enabled) continue
+    const providerConfig = formatProviderConfig(capability.llmProvider)
+    if (!providerConfig) continue
+    parts.push(`${getCapabilityLabel(capability.capabilityType, t)}: ${providerConfig}`)
+  }
+
+  if (parts.length === 0) return null
+  return `${t('chat.agentsPanel.modelConfigPrefix')}${parts.join(' / ')}`
 }
 
 interface AgentItemProps {
@@ -126,6 +160,7 @@ function AgentItem({
   dragStyle,
 }: AgentItemProps) {
   const blocksDetail = info.type === 'agent' && isStreamViewBlocked(info)
+  const modelConfigText = info.type === 'agent' ? getModelConfigText(info, t) : null
 
   return (
     <div
@@ -174,10 +209,18 @@ function AgentItem({
             <Star className="size-3 text-orange-500 shrink-0 fill-orange-500" />
           )}
         </div>
-        {/* Status text for AI agents */}
-        {info.type === 'agent' && agentStatus && (
-          <StatusIndicator status={agentStatus} t={t} />
-        )}
+        {(info.type === 'agent' && agentStatus) || modelConfigText ? (
+          <div className="flex min-w-0 items-center gap-2">
+            {info.type === 'agent' && agentStatus && (
+              <StatusIndicator status={agentStatus} t={t} />
+            )}
+            {modelConfigText && (
+              <span className="min-w-0 truncate text-xs text-muted-foreground/80" title={modelConfigText}>
+                {modelConfigText}
+              </span>
+            )}
+          </div>
+        ) : null}
       </div>
       {/* @ 提及按钮 */}
       {info.type === 'agent' && (

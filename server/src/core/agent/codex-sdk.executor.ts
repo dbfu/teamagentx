@@ -164,6 +164,19 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(',')}]`;
+  }
+  if (isPlainObject(value)) {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'undefined';
+}
+
 const TOML_BARE_KEY = /^[A-Za-z0-9_-]+$/;
 
 function formatTomlKey(key: string): string {
@@ -977,6 +990,7 @@ export class CodexSdkExecutor implements IAgentExecutor {
   private agentId: string | null = null;
   private threadId: string | null;
   private lastInjectedSkillsSignature?: string;
+  private lastMcpToolsSignature?: string;
   private acpProviderInfo?: AcpProviderInfo;
   private currentAbortController: AbortController | null = null;
   private thread: TeamAgentXCodexThread | null = null;
@@ -1077,6 +1091,7 @@ export class CodexSdkExecutor implements IAgentExecutor {
     this.ensureWorkDirectory();
     this.threadId = this.stateless ? null : this.loadThreadId();
     this.lastInjectedSkillsSignature = this.stateless ? undefined : this.loadSkillsSignature();
+    this.lastMcpToolsSignature = this.stateless ? undefined : this.loadMcpToolsSignature();
   }
 
   get lastInjectedMessageId(): string | undefined {
@@ -1737,6 +1752,17 @@ process.stdin.on("data", (chunk) => {
     }
   }
 
+  private loadMcpToolsSignature(): string | undefined {
+    try {
+      const statePath = this.getSessionStatePath();
+      if (!fs.existsSync(statePath)) return undefined;
+      const state = JSON.parse(fs.readFileSync(statePath, 'utf-8'));
+      return typeof state.mcpToolsSignature === 'string' ? state.mcpToolsSignature : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   private saveThreadId(): void {
     if (this.stateless) return;
 
@@ -1755,6 +1781,7 @@ process.stdin.on("data", (chunk) => {
             version: CODEX_THREAD_STATE_VERSION,
             threadId: this.threadId,
             skillsSignature: this.lastInjectedSkillsSignature,
+            mcpToolsSignature: this.lastMcpToolsSignature,
             updatedAt: new Date().toISOString(),
           },
           null,
@@ -1773,6 +1800,7 @@ process.stdin.on("data", (chunk) => {
     this.thread = null;
     this.threadId = null;
     this.lastInjectedSkillsSignature = undefined;
+    this.lastMcpToolsSignature = undefined;
     this.saveThreadId();
     debugLog('codexSdkThreadReset', {
       agentName: this.name,
@@ -2061,18 +2089,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
 ${buildInstalledSkillsInstructions(this.agentId)}`;
   }
 
-  private resetCollectors(): void {
-    this.content = '';
-    this.thinking = '';
-    this.toolCalls = [];
-    this.toolCalledSinceContent = false;
-  }
-
-  private getCodexRunner(
-    suppressAssistantHandoff = false,
-  ): TeamAgentXCodexRunner {
-    const env = this.buildEnv();
-    const mcpServerPath = this.ensureTeamAgentXMcpServerFile();
+  private buildBuiltinMcpServerContext(teamAgentXMcpServerPath: string): CodexBuiltinMcpServerContext {
     const generateImageEndpoint = this.imageGenerationProvider
       ? `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/generate-image`
       : undefined;
@@ -2082,9 +2099,10 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     const backgroundCommandReadEndpoint = `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/background-command/read`;
     const backgroundCommandStopEndpoint = `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/background-command/stop`;
     const backgroundCommandListEndpoint = `http://127.0.0.1:${appConfig.server.port}/internal/agent-tools/background-command/list`;
-    const builtinMcpServers = buildBuiltinCodexMcpServerConfigs({
+
+    return {
       workDir: this.workDir,
-      teamAgentXMcpServerPath: mcpServerPath,
+      teamAgentXMcpServerPath,
       chatRoomId: this.chatRoomId,
       agentId: this.agentId || undefined,
       agentName: this.name,
@@ -2097,7 +2115,76 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       backgroundCommandStopEndpoint,
       backgroundCommandListEndpoint,
       roomHistoryToolsEnabled: this.injectGroupHistory,
-    });
+    };
+  }
+
+  private buildMcpToolsSignature(teamAgentXMcpServerPath: string): string {
+    const mcpServerScriptHash = fs.existsSync(teamAgentXMcpServerPath)
+      ? createHash('sha256').update(fs.readFileSync(teamAgentXMcpServerPath)).digest('hex')
+      : null;
+    const builtinMcpServers = buildBuiltinCodexMcpServerConfigs(
+      this.buildBuiltinMcpServerContext(teamAgentXMcpServerPath),
+    );
+    const roomAgents = this.chatRoomAgents
+      .map((agent) => ({
+        agentId: agent.agentId,
+        name: agent.name,
+        workDir: agent.workDir || null,
+        customWorkDir: agent.customWorkDir || null,
+      }))
+      .sort((a, b) => `${a.agentId}:${a.name}`.localeCompare(`${b.agentId}:${b.name}`));
+
+    return createHash('sha256')
+      .update(
+        stableStringify({
+          version: 1,
+          agentId: this.agentId,
+          chatRoomId: this.chatRoomId,
+          workDir: this.workDir,
+          injectGroupHistory: this.injectGroupHistory,
+          imageGenerationProviderId: this.imageGenerationProvider?.id || null,
+          builtinMcpServers,
+          connectorMcpServers: this.connectorMcpServers,
+          roomAgents,
+          mcpServerScriptHash,
+        }),
+      )
+      .digest('hex');
+  }
+
+  private resetThreadIfMcpToolsChanged(): void {
+    if (this.stateless) return;
+
+    const mcpServerPath = this.ensureTeamAgentXMcpServerFile();
+    const currentSignature = this.buildMcpToolsSignature(mcpServerPath);
+    if (this.threadId && this.lastMcpToolsSignature !== currentSignature) {
+      this.resetThreadState('mcpToolsChanged', {
+        previousThreadId: this.threadId,
+        previousMcpToolsSignature: this.lastMcpToolsSignature,
+        currentMcpToolsSignature: currentSignature,
+      });
+    }
+    this.lastMcpToolsSignature = currentSignature;
+    if (this.threadId) {
+      this.saveThreadId();
+    }
+  }
+
+  private resetCollectors(): void {
+    this.content = '';
+    this.thinking = '';
+    this.toolCalls = [];
+    this.toolCalledSinceContent = false;
+  }
+
+  private getCodexRunner(
+    suppressAssistantHandoff = false,
+  ): TeamAgentXCodexRunner {
+    const env = this.buildEnv();
+    const mcpServerPath = this.ensureTeamAgentXMcpServerFile();
+    const builtinMcpServers = buildBuiltinCodexMcpServerConfigs(
+      this.buildBuiltinMcpServerContext(mcpServerPath),
+    );
     const config = {
       developer_instructions: this.buildDeveloperInstructions(
         suppressAssistantHandoff,
@@ -2375,6 +2462,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     this.threadId = null;
     this._lastInjectedMessageId = undefined;
     this.lastInjectedSkillsSignature = undefined;
+    this.lastMcpToolsSignature = undefined;
     if (this.agentId) {
       await agentMemoryService.clear(this.chatRoomId, this.agentId);
     }
@@ -2409,6 +2497,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     this.connectorMcpServers = toCodexMcpServers(
       await getAgentConnectors(this.agentId),
     );
+    this.resetThreadIfMcpToolsChanged();
     const thread = this.getThread(suppressAssistantHandoff);
     const { events } = await thread.runStreamed(input, { signal: abortController.signal });
 

@@ -70,6 +70,7 @@ export interface Agent {
   claudeModel: string | null
   thinkingMode: AgentThinkingMode
   speechConfig: AgentSpeechConfig | null
+  diaryEnabled: boolean
   isActive: boolean
   categoryId: string | null
   category: AgentCategory | null
@@ -90,22 +91,25 @@ export interface Agent {
   updatedAt: string
 }
 
+export interface AgentModelConfigProvider {
+  id: string
+  name: string
+  type: string
+  apiProtocol?: 'anthropic' | 'openai' | 'custom'
+  apiUrl: string | null
+  model: string
+  modelType?: 'text' | 'image' | 'video' | 'audio'
+  isActive: boolean
+  isDefault: boolean
+}
+
 export interface AgentCapability {
   id: string
   agentId: string
   capabilityType: 'image' | 'video' | 'audio'
   enabled: boolean
   llmProviderId: string | null
-  llmProvider?: {
-    id: string
-    name: string
-    type: string
-    apiUrl: string | null
-    model: string
-    modelType?: 'text' | 'image' | 'video' | 'audio'
-    isActive: boolean
-    isDefault: boolean
-  } | null
+  llmProvider?: AgentModelConfigProvider | null
   config?: Record<string, unknown> | null
 }
 
@@ -142,6 +146,7 @@ export interface CreateAgentRequest {
   claudeModel?: string | null
   thinkingMode?: AgentThinkingMode | null
   speechConfig?: AgentSpeechConfig | null
+  diaryEnabled?: boolean
   categoryId?: string
   llmProviderId?: string | null
   fallbackLlmProviderIds?: string[] | null
@@ -165,6 +170,7 @@ export interface UpdateAgentRequest {
   claudeModel?: string | null
   thinkingMode?: AgentThinkingMode | null
   speechConfig?: AgentSpeechConfig | null
+  diaryEnabled?: boolean
   categoryId?: string | null
   llmProviderId?: string | null
   fallbackLlmProviderIds?: string[] | null
@@ -296,6 +302,11 @@ export interface ChatRoomAgent {
     acpTool?: string | null
     agentLevel?: 'normal' | 'system'
     workDir?: string | null
+    codexModel?: string | null
+    claudeModel?: string | null
+    llmProviderId?: string | null
+    llmProvider?: AgentModelConfigProvider | null
+    capabilities?: AgentCapability[]
     speechConfig?: AgentSpeechConfig | null
   }
   user?: {
@@ -1444,7 +1455,7 @@ export const agentApi = {
     return request<DiaryEntry>(`/agents/${agentId}/diary/${date}`)
   },
 
-  // 手动生成助手日记（受全局开关控制；关闭或无聊天记录时 data 为 null）
+  // 手动生成助手日记（受助手开关控制；关闭或无聊天记录时 data 为 null）
   async generateDiary(agentId: string, date?: string): Promise<ApiResponse<DiaryEntry | null>> {
     return request<DiaryEntry | null>(`/agents/${agentId}/diary/generate`, {
       method: 'POST',

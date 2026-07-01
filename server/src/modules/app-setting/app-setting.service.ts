@@ -26,6 +26,19 @@ export const appSettingService = {
     });
   },
 
+  async setDiaryEnabled(enabled: boolean): Promise<void> {
+    await prisma.$transaction([
+      prisma.appSetting.upsert({
+        where: { key: 'diaryEnabled' },
+        update: { value: enabled ? 'true' : 'false' },
+        create: { key: 'diaryEnabled', value: enabled ? 'true' : 'false' },
+      }),
+      prisma.agent.updateMany({
+        data: { diaryEnabled: enabled },
+      }),
+    ]);
+  },
+
   async isSetupCompleted(): Promise<boolean> {
     const value = await this.get('setupCompleted');
     return value === 'true';

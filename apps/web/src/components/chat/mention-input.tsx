@@ -103,6 +103,54 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\\/]/g, '\\$&')
 }
 
+function serializePlainText(root: Node): string {
+  const walk = (node: Node, isFirstInBlock: boolean = true): string => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return node.textContent || ''
+    }
+
+    if (node.nodeName === 'BR') {
+      return '\n'
+    }
+
+    if (node.nodeName === 'DIV' || node.nodeName === 'P') {
+      let result = ''
+      if (!isFirstInBlock) {
+        result += '\n'
+      }
+      let childIsFirst = true
+      node.childNodes.forEach(child => {
+        result += walk(child, childIsFirst)
+        childIsFirst = false
+      })
+      return result
+    }
+
+    let result = ''
+    node.childNodes.forEach(child => {
+      result += walk(child, isFirstInBlock)
+    })
+    return result
+  }
+
+  let result = ''
+  let isFirstBlock = true
+  root.childNodes.forEach(child => {
+    if (child.nodeName === 'DIV' || child.nodeName === 'P') {
+      if (!isFirstBlock) {
+        result += '\n'
+      }
+      result += walk(child, true)
+      isFirstBlock = false
+    } else {
+      result += walk(child, isFirstBlock)
+      if (result.length > 0) isFirstBlock = false
+    }
+  })
+
+  return result
+}
+
 export interface MentionInputRef {
   focus: () => void
 }
@@ -121,10 +169,12 @@ export const MentionInput = forwardRef<MentionInputRef, MentionInputProps>(funct
   const [showMentions, setShowMentions] = useState(false)
   const [mentionQuery, setMentionQuery] = useState('')
   const [mentionLeft, setMentionLeft] = useState(0)
+  const [mentionTop, setMentionTop] = useState(0)
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [showSlashCommands, setShowSlashCommands] = useState(false)
   const [slashQuery, setSlashQuery] = useState('')
   const [slashLeft, setSlashLeft] = useState(0)
+  const [slashTop, setSlashTop] = useState(0)
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0)
   const editorRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -412,60 +462,27 @@ export const MentionInput = forwardRef<MentionInputRef, MentionInputProps>(funct
   // textContent 不会将 <div> 边界转换为 \n，需要手动处理
   const getPlainText = useCallback(() => {
     if (!editorRef.current) return ''
+    return serializePlainText(editorRef.current)
+  }, [])
 
-    // 遍历 DOM 并正确处理块级元素和换行符
-    const walk = (node: Node, isFirstInBlock: boolean = true): string => {
-      if (node.nodeType === Node.TEXT_NODE) {
-        return node.textContent || ''
-      }
+  const getCursorOffset = useCallback(() => {
+    if (!editorRef.current) return 0
 
-      if (node.nodeName === 'BR') {
-        return '\n'
-      }
-
-      // 块级元素（div, p）需要在前后添加换行符
-      if (node.nodeName === 'DIV' || node.nodeName === 'P') {
-        let result = ''
-        // 如果不是第一个块级元素，前面加换行符
-        if (!isFirstInBlock) {
-          result += '\n'
-        }
-        // 遍历子节点
-        let childIsFirst = true
-        node.childNodes.forEach(child => {
-          const childText = walk(child, childIsFirst)
-          result += childText
-          childIsFirst = false
-        })
-        return result
-      }
-
-      // 其他元素（如 span），遍历子节点但不添加换行符
-      let result = ''
-      node.childNodes.forEach(child => {
-        result += walk(child, isFirstInBlock)
-      })
-      return result
+    const selection = window.getSelection()
+    if (!selection || selection.rangeCount === 0) {
+      return getPlainText().length
     }
 
-    // 根元素遍历，每个顶级 div/p 是一个段落
-    let result = ''
-    let isFirstBlock = true
-    editorRef.current.childNodes.forEach(child => {
-      if (child.nodeName === 'DIV' || child.nodeName === 'P') {
-        if (!isFirstBlock) {
-          result += '\n'
-        }
-        result += walk(child, true)
-        isFirstBlock = false
-      } else {
-        result += walk(child, isFirstBlock)
-        if (result.length > 0) isFirstBlock = false
-      }
-    })
+    const range = selection.getRangeAt(0)
+    if (!editorRef.current.contains(range.startContainer)) {
+      return getPlainText().length
+    }
 
-    return result
-  }, [])
+    const preRange = document.createRange()
+    preRange.selectNodeContents(editorRef.current)
+    preRange.setEnd(range.startContainer, range.startOffset)
+    return serializePlainText(preRange.cloneContents()).length
+  }, [getPlainText])
 
   // 同步编辑器内容与 value
   useEffect(() => {
@@ -501,17 +518,22 @@ export const MentionInput = forwardRef<MentionInputRef, MentionInputProps>(funct
   // 计算光标位置（用于下拉菜单定位）
   const getCaretCoordinates = useCallback(() => {
     const selection = window.getSelection()
-    if (!selection || selection.rangeCount === 0 || !editorRef.current) return 0
+    if (!selection || selection.rangeCount === 0 || !editorRef.current || !containerRef.current) {
+      return { left: 0, top: 0 }
+    }
 
     const range = selection.getRangeAt(0).cloneRange()
     range.collapse(true)
 
-    const rect = range.getClientRects()[0]
-    const editorRect = editorRef.current.getBoundingClientRect()
+    const rect = range.getClientRects()[0] ?? range.getBoundingClientRect()
+    const containerRect = containerRef.current.getBoundingClientRect()
 
-    if (!rect) return 0
+    if (!rect) return { left: 0, top: 0 }
 
-    return rect.left - editorRect.left
+    return {
+      left: Math.max(0, rect.left - containerRect.left),
+      top: Math.max(0, rect.top - containerRect.top - 6),
+    }
   }, [])
 
   // 选择提及
@@ -521,9 +543,10 @@ export const MentionInput = forwardRef<MentionInputRef, MentionInputProps>(funct
     const selection = window.getSelection()
     if (!selection) return
 
-    // 找到 @ 的位置
     const plainText = getPlainText()
-    const atPos = plainText.lastIndexOf('@', plainText.length)
+    const cursorOffset = getCursorOffset()
+    const atPos = plainText.lastIndexOf('@', cursorOffset)
+    if (atPos === -1) return
 
     // 构建新文本
     const before = plainText.slice(0, atPos)
@@ -545,22 +568,13 @@ export const MentionInput = forwardRef<MentionInputRef, MentionInputProps>(funct
         renderEditorContent(newText, newCursorPos)
       }
     }, 0)
-  }, [mentionQuery, onChange, getPlainText, pushHistory, renderEditorContent])
+  }, [mentionQuery, onChange, getPlainText, getCursorOffset, pushHistory, renderEditorContent])
 
   const handleSelectSlashCommand = useCallback((item: SlashCommand) => {
     if (!editorRef.current) return
 
     const plainText = getPlainText()
-    const selection = window.getSelection()
-    const cursorOffset = selection?.rangeCount
-      ? (() => {
-          const range = selection.getRangeAt(0)
-          const preRange = document.createRange()
-          preRange.selectNodeContents(editorRef.current!)
-          preRange.setEnd(range.startContainer, range.startOffset)
-          return preRange.toString().length
-        })()
-      : plainText.length
+    const cursorOffset = getCursorOffset()
 
     const slashPos = plainText.lastIndexOf('/', cursorOffset)
     const before = slashPos >= 0 ? plainText.slice(0, slashPos) : ''
@@ -583,7 +597,7 @@ export const MentionInput = forwardRef<MentionInputRef, MentionInputProps>(funct
         renderEditorContent(newText, newCursorPos)
       }
     }, 0)
-  }, [getPlainText, onChange, pushHistory, renderEditorContent, slashQuery])
+  }, [getPlainText, getCursorOffset, onChange, pushHistory, renderEditorContent, slashQuery])
 
   // 删除整个 mention
   const deleteMention = useCallback((mentionId: string) => {
@@ -605,14 +619,7 @@ export const MentionInput = forwardRef<MentionInputRef, MentionInputProps>(funct
     const selection = window.getSelection()
     if (!selection || selection.rangeCount === 0) return
 
-    const range = selection.getRangeAt(0)
-    let cursorOffset = 0
-
-    // 计算光标偏移量
-    const preRange = document.createRange()
-    preRange.selectNodeContents(editorRef.current)
-    preRange.setEnd(range.startContainer, range.startOffset)
-    cursorOffset = preRange.toString().length
+    const cursorOffset = getCursorOffset()
 
     // 检查光标是否在 mention 内
     for (const mention of mentions) {
@@ -642,7 +649,7 @@ export const MentionInput = forwardRef<MentionInputRef, MentionInputProps>(funct
         }
       }
     }
-  }, [mentions])
+  }, [getCursorOffset, mentions])
 
   // 键盘事件处理
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -684,16 +691,7 @@ export const MentionInput = forwardRef<MentionInputRef, MentionInputProps>(funct
       return
     }
 
-    const range = selection.getRangeAt(0)
-    let cursorOffset = 0
-
-    // 计算光标偏移量
-    if (editorRef.current) {
-      const preRange = document.createRange()
-      preRange.selectNodeContents(editorRef.current)
-      preRange.setEnd(range.startContainer, range.startOffset)
-      cursorOffset = preRange.toString().length
-    }
+    const cursorOffset = getCursorOffset()
 
     // Backspace 处理
     if (e.key === 'Backspace') {
@@ -775,7 +773,7 @@ export const MentionInput = forwardRef<MentionInputRef, MentionInputProps>(funct
     }
 
     onKeyDown?.(e)
-  }, [mentions, showSlashCommands, filteredCommands, selectedCommandIndex, handleSelectSlashCommand, showMentions, filteredAgents, selectedIndex, handleSelectMention, onKeyDown, deleteMention, undo, redo, renderEditorContent])
+  }, [mentions, showSlashCommands, filteredCommands, selectedCommandIndex, handleSelectSlashCommand, showMentions, filteredAgents, selectedIndex, handleSelectMention, onKeyDown, deleteMention, undo, redo, renderEditorContent, getCursorOffset])
 
   // 输入事件处理
   const handleInput = useCallback(() => {
@@ -784,15 +782,7 @@ export const MentionInput = forwardRef<MentionInputRef, MentionInputProps>(funct
     const plainText = getPlainText()
 
     // 检测 @ 提及
-    const cursorOffset = window.getSelection()?.rangeCount
-      ? (() => {
-          const range = window.getSelection()!.getRangeAt(0)
-          const preRange = document.createRange()
-          preRange.selectNodeContents(editorRef.current!)
-          preRange.setEnd(range.startContainer, range.startOffset)
-          return preRange.toString().length
-        })()
-      : plainText.length
+    const cursorOffset = getCursorOffset()
 
     const lastSlashIndex = plainText.lastIndexOf('/', cursorOffset)
     if (lastSlashIndex !== -1) {
@@ -800,8 +790,9 @@ export const MentionInput = forwardRef<MentionInputRef, MentionInputProps>(funct
       const previousChar = lastSlashIndex > 0 ? plainText[lastSlashIndex - 1] : ''
       const startsCommand = lastSlashIndex === 0 || /\s/.test(previousChar)
       if (startsCommand && !query.includes(' ') && !query.includes('\n')) {
-        const left = getCaretCoordinates()
+        const { left, top } = getCaretCoordinates()
         setSlashLeft(left)
+        setSlashTop(top)
         setShowSlashCommands(true)
         setSlashQuery(query)
         setSelectedCommandIndex(0)
@@ -816,9 +807,10 @@ export const MentionInput = forwardRef<MentionInputRef, MentionInputProps>(funct
     const lastAtIndex = plainText.lastIndexOf('@', cursorOffset)
     if (lastAtIndex !== -1) {
       const query = plainText.slice(lastAtIndex + 1, cursorOffset)
-      if (!query.includes(' ') && !mentions.some(m => lastAtIndex >= m.start && lastAtIndex < m.end)) {
-        const left = getCaretCoordinates()
+      if (!query.includes(' ') && !query.includes('\n') && !mentions.some(m => lastAtIndex >= m.start && lastAtIndex < m.end)) {
+        const { left, top } = getCaretCoordinates()
         setMentionLeft(left)
+        setMentionTop(top)
         setShowMentions(true)
         setMentionQuery(query)
         setSelectedIndex(0)
@@ -832,7 +824,7 @@ export const MentionInput = forwardRef<MentionInputRef, MentionInputProps>(funct
 
     pushHistory(plainText, cursorOffset)
     onChange(plainText)
-  }, [getPlainText, getCaretCoordinates, mentions, onChange, pushHistory])
+  }, [getPlainText, getCursorOffset, getCaretCoordinates, mentions, onChange, pushHistory])
 
   // 中文输入法处理
   const handleCompositionStart = useCallback(() => {
@@ -896,8 +888,8 @@ export const MentionInput = forwardRef<MentionInputRef, MentionInputProps>(funct
       {showMentions && filteredAgents.length > 0 && (
         <div
           ref={dropdownRef}
-          className="absolute bottom-full z-20 mb-1 w-64 rounded-lg border border-border bg-popover shadow-lg animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-2 duration-200"
-          style={{ left: `${mentionLeft}px` }}
+          className="absolute z-20 w-64 -translate-y-full rounded-lg border border-border bg-popover shadow-lg animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-2 duration-200"
+          style={{ left: `${mentionLeft}px`, top: `${mentionTop}px` }}
         >
           {filteredAgents.map((agent, index) => (
             <div
@@ -927,8 +919,8 @@ export const MentionInput = forwardRef<MentionInputRef, MentionInputProps>(funct
       {showSlashCommands && filteredCommands.length > 0 && (
         <div
           ref={commandDropdownRef}
-          className="absolute bottom-full z-20 mb-1 w-80 rounded-lg border border-border bg-popover shadow-lg animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-2 duration-200"
-          style={{ left: `${slashLeft}px` }}
+          className="absolute z-20 w-80 -translate-y-full rounded-lg border border-border bg-popover shadow-lg animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-2 duration-200"
+          style={{ left: `${slashLeft}px`, top: `${slashTop}px` }}
         >
           {filteredCommands.map((item, index) => (
             <div

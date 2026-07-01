@@ -2,8 +2,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { BookOpen, Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { agentApi, settingsApi, type Agent } from '@/lib/agent-api'
+import { agentApi, type Agent } from '@/lib/agent-api'
 import { Badge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import { AgentAvatar } from '../agent-avatar'
 import { MarkdownContent } from '../markdown-content'
@@ -25,7 +26,8 @@ function parseMood(content: string): { mood: string | null; body: string } {
 
 export function AssistantDiaryTab({ agent }: AssistantDiaryTabProps) {
   const { t } = useTranslation()
-  const [enabled, setEnabled] = useState<boolean | null>(null)
+  const [agentDiaryEnabled, setAgentDiaryEnabled] = useState(agent.diaryEnabled ?? false)
+  const [savingAgentDiary, setSavingAgentDiary] = useState(false)
   const [dates, setDates] = useState<string[]>([])
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const [content, setContent] = useState('')
@@ -53,17 +55,17 @@ export function AssistantDiaryTab({ agent }: AssistantDiaryTabProps) {
     }
   }, [agent.id, t])
 
-  // 初始化：读全局开关 + 日期列表
+  useEffect(() => {
+    setAgentDiaryEnabled(agent.diaryEnabled ?? false)
+  }, [agent.id, agent.diaryEnabled])
+
+  // 初始化：按当前助手开关读取日期列表
   useEffect(() => {
     let cancelled = false
     const init = async () => {
       setLoading(true)
       try {
-        const settingRes = await settingsApi.get('diaryEnabled')
-        const isEnabled = settingRes.success && settingRes.data?.value === 'true'
-        if (cancelled) return
-        setEnabled(isEnabled)
-        if (isEnabled) {
+        if (agentDiaryEnabled) {
           const list = await loadDates()
           if (cancelled) return
           if (list.length > 0) {
@@ -79,7 +81,30 @@ export function AssistantDiaryTab({ agent }: AssistantDiaryTabProps) {
     return () => {
       cancelled = true
     }
-  }, [agent.id, loadDates, loadContent])
+  }, [agent.id, agentDiaryEnabled, loadDates, loadContent])
+
+  const handleToggleAgentDiary = async (next: boolean) => {
+    const prev = agentDiaryEnabled
+    setAgentDiaryEnabled(next)
+    setSavingAgentDiary(true)
+    try {
+      const response = await agentApi.update(agent.id, { diaryEnabled: next })
+      if (!response.success) throw new Error(response.error || 'update_failed')
+      toast.success(t('assistant.diarySettingSaved'))
+      if (next) {
+        const list = await loadDates()
+        if (list.length > 0) {
+          setSelectedDate(list[0])
+          await loadContent(list[0])
+        }
+      }
+    } catch {
+      setAgentDiaryEnabled(prev)
+      toast.error(t('assistant.diarySettingSaveFailed'))
+    } finally {
+      setSavingAgentDiary(false)
+    }
+  }
 
   const handleSelectDate = (date: string) => {
     setSelectedDate(date)
@@ -95,14 +120,36 @@ export function AssistantDiaryTab({ agent }: AssistantDiaryTabProps) {
     )
   }
 
-  // 全局开关关闭
-  if (!enabled) {
+  const diarySwitch = (
+    <div className="flex items-center justify-between gap-4 rounded-lg border border-border bg-background px-3 py-3">
+      <div className="min-w-0">
+        <div className="text-sm font-medium text-foreground">{t('assistant.diaryAgentSwitch')}</div>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {t('assistant.diaryAgentSwitchDesc')}
+        </p>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        {savingAgentDiary && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
+        <Switch
+          checked={agentDiaryEnabled}
+          disabled={savingAgentDiary}
+          onCheckedChange={handleToggleAgentDiary}
+          aria-label={t('assistant.diaryAgentSwitch')}
+        />
+      </div>
+    </div>
+  )
+
+  if (!agentDiaryEnabled) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 text-center max-w-md mx-auto">
-        <div className="size-16 rounded-full bg-muted flex items-center justify-center mb-4">
-          <BookOpen className="size-8 text-muted-foreground" />
+      <div className="flex h-full min-h-0 w-full flex-1 flex-col gap-4">
+        {diarySwitch}
+        <div className="flex flex-col items-center justify-center py-16 text-center max-w-md mx-auto">
+          <div className="size-16 rounded-full bg-muted flex items-center justify-center mb-4">
+            <BookOpen className="size-8 text-muted-foreground" />
+          </div>
+          <p className="text-sm text-muted-foreground">{t('assistant.diaryAgentDisabledHint')}</p>
         </div>
-        <p className="text-sm text-muted-foreground">{t('assistant.diaryDisabledHint')}</p>
       </div>
     )
   }
@@ -111,6 +158,7 @@ export function AssistantDiaryTab({ agent }: AssistantDiaryTabProps) {
 
   return (
     <div className="flex h-full min-h-0 w-full flex-1 flex-col gap-4">
+      {diarySwitch}
       {dates.length === 0 ? (
         <div className="flex h-full min-h-0 flex-col items-center justify-center text-center">
           <div className="size-16 rounded-full bg-muted flex items-center justify-center mb-4">

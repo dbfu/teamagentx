@@ -6,6 +6,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { ChatRoom } from '@/lib/agent-api'
+import { cn } from '@/lib/utils'
 import { useUIStore } from '@/stores'
 import { FolderOpen } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -107,7 +108,12 @@ export function ChatRoomOpenMenu({ chatRoom, isElectron }: ChatRoomOpenMenuProps
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
             <button
-              className="rounded-lg p-2 text-muted-foreground hover:bg-blue-500/10 hover:text-blue-500"
+              className={cn(
+                'rounded-lg p-2 transition-colors',
+                menuOpen
+                  ? 'bg-blue-500/10 text-blue-500'
+                  : 'text-muted-foreground hover:bg-blue-500/10 hover:text-blue-500',
+              )}
               type="button"
               onBlur={handleTriggerPointerLeave}
               onPointerLeave={handleTriggerPointerLeave}

@@ -51,8 +51,13 @@ export async function appSettingGateway(app: FastifyInstance) {
       if (!ALLOWED_KEYS.has(key)) {
         return reply.code(400).send({ success: false, error: '不支持的设置项' });
       }
-      await appSettingService.set(key, request.body.value);
-      return reply.send({ success: true, data: { key, value: request.body.value } });
+      const value = request.body.value;
+      if (key === 'diaryEnabled') {
+        await appSettingService.setDiaryEnabled(value === 'true');
+      } else {
+        await appSettingService.set(key, value);
+      }
+      return reply.send({ success: true, data: { key, value } });
     },
   );
 }
