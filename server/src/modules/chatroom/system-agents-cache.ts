@@ -12,6 +12,7 @@ export type SystemAgentInfo = {
   type: string;
   acpTool: string | null;
   agentLevel: string;
+  isActive: boolean;
   workDir: string | null;
   speechConfig: string | null;
 };
@@ -44,6 +45,7 @@ export async function getSystemAgentsCached(): Promise<SystemAgentInfo[]> {
       type: true,
       acpTool: true,
       agentLevel: true,
+      isActive: true,
       workDir: true,
       speechConfig: true,
     },

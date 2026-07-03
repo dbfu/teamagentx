@@ -111,6 +111,7 @@ export type AgentSessionSnapshot =
 export interface ChatRoomAgentInfo {
   name: string;
   agentId: string;  // 助手 ID（用于计算默认工作目录）
+  description?: string | null;  // 助手功能描述（用于群成员提示词）
   workDir?: string | null;  // 助手配置的工作目录
   customWorkDir?: string | null;  // 群聊中的自定义工作目录
 }

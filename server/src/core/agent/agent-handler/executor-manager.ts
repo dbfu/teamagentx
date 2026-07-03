@@ -126,6 +126,7 @@ export async function getExecutor(
     .map((cra) => ({
       name: cra.agent?.name || '',
       agentId: cra.agent?.id || '',
+      description: cra.agent?.description,
       workDir: cra.agent?.workDir,
       customWorkDir: chatRoomWorkDir,
     }))

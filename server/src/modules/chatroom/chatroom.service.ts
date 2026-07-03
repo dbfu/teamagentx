@@ -225,6 +225,7 @@ function addVirtualSystemAgents<T extends { id: string; chatRoomAgents: any[] }>
         type: agent.type,
         acpTool: agent.acpTool,
         agentLevel: agent.agentLevel,
+        isActive: agent.isActive,
         workDir: agent.workDir,
         speechConfig: agent.speechConfig,
       },

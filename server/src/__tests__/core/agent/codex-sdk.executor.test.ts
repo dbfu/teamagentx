@@ -555,8 +555,8 @@ describe('Codex SDK Executor message context', () => {
       undefined,
       undefined,
       [
-        { name: 'CodexAgent', agentId },
-        { name: 'HelperAgent', agentId: 'helper-agent' },
+        { name: 'CodexAgent', agentId, description: '负责实现与代码修改' },
+        { name: 'HelperAgent', agentId: 'helper-agent', description: '负责测试验证' },
       ],
     );
 
@@ -575,9 +575,9 @@ describe('Codex SDK Executor message context', () => {
       assert.match(developerInstructions, /\[群聊成员信息\]/);
       assert.match(
         developerInstructions,
-        /当前群聊中的助手：CodexAgent, HelperAgent/,
+        /当前群聊中的助手：CodexAgent: 负责实现与代码修改, HelperAgent: 负责测试验证/,
       );
-      assert.match(developerInstructions, /其他助手：HelperAgent/);
+      assert.match(developerInstructions, /其他助手：HelperAgent: 负责测试验证/);
       assert.match(
         developerInstructions,
         /必须调用 mention_agents/,

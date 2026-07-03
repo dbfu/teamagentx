@@ -7,6 +7,9 @@ import {
   GROUP_ASSISTANT_ID,
 } from '../../../core/agent/system-assistant.constants.js';
 import { getSystemAssistantTools } from '../../../core/agent/tools/system-assistant.tools.js';
+import { beginMentionExecution, endMentionExecution, peekMentionState } from '../../../core/agent/agent-handler/mention-buffer.js';
+import { getGroupAssistantDefinition } from '../../../scripts/system-agent-definitions.js';
+import { syncSystemAgent } from '../../../scripts/system-agent-sync.js';
 
 describe('System assistant tools', () => {
   const schemaOf = (schema: unknown) => schema as z.ZodTypeAny;
@@ -55,6 +58,41 @@ describe('System assistant tools', () => {
     assert.ok(!groupToolNames.includes('get_recent_room_messages'));
     assert.ok(!groupToolNames.includes('search_room_messages'));
     assert.ok(groupToolNames.includes('create_agent'));
+  });
+
+  test('普通助手可以通过 mention_agents 交接给群助手', async () => {
+    const chatRoomId = 'system-tools-mention-group-room';
+    const selfAgentId = 'normal-agent-for-group-handoff';
+    const taskId = `${chatRoomId}-task`;
+
+    await syncSystemAgent(getGroupAssistantDefinition());
+    beginMentionExecution(chatRoomId, selfAgentId, taskId);
+
+    try {
+      const tool = getSystemAssistantTools(selfAgentId, chatRoomId, {
+        includeRoomContextTools: false,
+      }).find((item) => item.name === 'mention_agents');
+      assert.ok(tool);
+
+      const result = await tool.invoke({
+        mentions: [{ agent: '群助手', task: '检查群规则配置' }],
+      }) as {
+        ok: boolean;
+        accepted: Array<{ agent: string; agentId: string }>;
+        rejected: Array<{ agent: string; reason: string }>;
+      };
+
+      assert.equal(result.ok, true);
+      assert.deepEqual(result.rejected, []);
+      assert.deepEqual(result.accepted, [{ agent: '群助手', agentId: GROUP_ASSISTANT_ID }]);
+      assert.deepEqual(peekMentionState(taskId).mentions, [{
+        agentId: GROUP_ASSISTANT_ID,
+        agentName: '群助手',
+        task: '检查群规则配置',
+      }]);
+    } finally {
+      endMentionExecution(chatRoomId, selfAgentId, taskId);
+    }
   });
 
   test('群助手创建群聊时沿用当前群主', async () => {

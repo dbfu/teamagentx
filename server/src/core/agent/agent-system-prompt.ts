@@ -260,6 +260,17 @@ interface BuildGroupChatMemberInfoSectionOptions {
   locale?: string;
 }
 
+function truncateAgentDescription(description?: string | null): string {
+  const text = description?.trim();
+  if (!text) return '';
+  return text.length > 50 ? `${text.slice(0, 50)}...` : text;
+}
+
+function formatAgentSummary(agent: ChatRoomAgentInfo): string {
+  const description = truncateAgentDescription(agent.description);
+  return description ? `${agent.name}: ${description}` : agent.name;
+}
+
 export function buildGroupChatMemberInfoSection({
   chatRoomAgents,
   agentName,
@@ -272,9 +283,9 @@ export function buildGroupChatMemberInfoSection({
     return '';
   }
 
-  const agentsInfo = chatRoomAgents.map((agent) => agent.name).join(', ');
+  const agentsInfo = chatRoomAgents.map(formatAgentSummary).join(', ');
   const otherAgents = chatRoomAgents.filter((agent) => agent.name !== agentName);
-  const otherAgentsList = otherAgents.map((agent) => agent.name).join(', ');
+  const otherAgentsList = otherAgents.map(formatAgentSummary).join(', ');
   const noneText = pickLocaleText({ 'zh-CN': '无', 'en-US': 'none' }, locale);
   const othersInfo = otherAgents.length > 0 ? otherAgentsList : noneText;
 

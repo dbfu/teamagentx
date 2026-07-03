@@ -102,17 +102,43 @@ describe('createExecutor', () => {
 
     const memberInfo = buildGroupChatMemberInfoSection({
       chatRoomAgents: [
-        { agentId: 'agent-a', name: '架构师' },
-        { agentId: 'agent-b', name: 'UI设计' },
+        { agentId: 'agent-a', name: '架构师', description: '负责技术方案设计' },
+        { agentId: 'agent-b', name: 'UI设计', description: '负责界面视觉与交互体验设计，输出高保真原型和组件规范，并评审实现一致性。' },
         { agentId: 'agent-c', name: '测试' },
       ],
       agentName: '产品经理',
       workDir: '/tmp/teamagentx',
       locale: 'zh-CN',
     });
+    assert.match(memberInfo, /架构师: 负责技术方案设计/);
+    assert.match(memberInfo, /UI设计: 负责界面视觉与交互体验设计，输出高保真原型和组件规范，并评审实现一致性。/);
     assert.match(memberInfo, /必须调用 mention_agents/);
     assert.match(memberInfo, /并行叶子执行/);
     assert.doesNotMatch(memberInfo, /最多包含一个可触发的 @助手 提及/);
+  });
+
+  test('群成员信息注入助手描述并将描述截断到 50 字', () => {
+    const memberInfo = buildGroupChatMemberInfoSection({
+      chatRoomAgents: [
+        {
+          agentId: 'agent-a',
+          name: '长描述助手',
+          description: '一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一',
+        },
+        { agentId: 'agent-b', name: '无描述助手' },
+      ],
+      agentName: '长描述助手',
+      workDir: '/tmp/teamagentx',
+      locale: 'zh-CN',
+      includeAssistantHandoffGuidance: false,
+    });
+
+    assert.match(
+      memberInfo,
+      /长描述助手: 一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十\.\.\./,
+    );
+    assert.doesNotMatch(memberInfo, /一二三四五六七八九十一$/);
+    assert.match(memberInfo, /无描述助手/);
   });
 
   test('非自由协作模式不注入交接意图自检提示', () => {

@@ -52,12 +52,14 @@ export const RoomEnvVarsEditor = forwardRef<RoomEnvVarsEditorRef, RoomEnvVarsEdi
     const { t } = useTranslation()
     const [rows, setRows] = useState<EnvVarRow[]>(() => parseRows(envVars))
     const [revealed, setRevealed] = useState<Record<number, boolean>>({})
+    const [touchedRows, setTouchedRows] = useState<Record<number, boolean>>({})
     const [saving, setSaving] = useState(false)
     const [dirty, setDirty] = useState(false)
 
     useEffect(() => {
       setRows(parseRows(envVars))
       setRevealed({})
+      setTouchedRows({})
       setDirty(false)
     }, [chatRoomId, envVars])
 
@@ -85,6 +87,17 @@ export const RoomEnvVarsEditor = forwardRef<RoomEnvVarsEditorRef, RoomEnvVarsEdi
     }, [rows, t])
 
     const hasErrors = Object.keys(keyErrors).length > 0
+    const visibleKeyErrors = useMemo(() => {
+      const errors: Record<number, string> = {}
+      rows.forEach((row, index) => {
+        if (!keyErrors[index]) return
+        const hasRowContent = Boolean(row.key.trim() || row.value || row.description.trim())
+        if (touchedRows[index] || hasRowContent) {
+          errors[index] = keyErrors[index]
+        }
+      })
+      return errors
+    }, [keyErrors, rows, touchedRows])
 
     // 状态变化回调
     useEffect(() => {
@@ -93,6 +106,7 @@ export const RoomEnvVarsEditor = forwardRef<RoomEnvVarsEditorRef, RoomEnvVarsEdi
 
     const updateRow = (index: number, patch: Partial<EnvVarRow>) => {
       setRows((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)))
+      setTouchedRows((prev) => ({ ...prev, [index]: true }))
       setDirty(true)
     }
 
@@ -106,6 +120,15 @@ export const RoomEnvVarsEditor = forwardRef<RoomEnvVarsEditorRef, RoomEnvVarsEdi
       setRevealed((prev) => {
         const next = { ...prev }
         delete next[index]
+        return next
+      })
+      setTouchedRows((prev) => {
+        const next: Record<number, boolean> = {}
+        Object.entries(prev).forEach(([rawIndex, touched]) => {
+          const rowIndex = Number(rawIndex)
+          if (rowIndex < index) next[rowIndex] = touched
+          if (rowIndex > index) next[rowIndex - 1] = touched
+        })
         return next
       })
       setDirty(true)
@@ -176,8 +199,8 @@ export const RoomEnvVarsEditor = forwardRef<RoomEnvVarsEditorRef, RoomEnvVarsEdi
                       disabled={saving}
                       spellCheck={false}
                     />
-                    {keyErrors[index] && (
-                      <span className="mt-1 block text-xs text-red-500">{keyErrors[index]}</span>
+                    {visibleKeyErrors[index] && (
+                      <span className="mt-1 block text-xs text-red-500">{visibleKeyErrors[index]}</span>
                     )}
                   </div>
                   <div className="relative">
