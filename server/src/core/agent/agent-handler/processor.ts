@@ -693,6 +693,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
             ? 0
             : Math.max(0, configuredNoActivityRetryCount);
           const noActivityRetryDelayMs = Math.max(0, configuredNoActivityRetryDelayMs);
+          const noActivityTimeoutSeconds = Math.ceil(noActivityTimeoutMs / 1000);
 
           const runExecutor = async (
             candidateExecutor: IAgentExecutor,
@@ -710,7 +711,9 @@ export async function processQueue(chatRoomId: string, agentId: string) {
             activeNoActivityMonitor = monitor;
             monitor.start();
             const execOptions: AgentExecOptions = {
-              onInternalActivity: () => monitor.markInternalActivity(),
+              // "No activity" means no user-visible return: output, stream, thinking, or tool event.
+              // Internal executor housekeeping must not keep a silent attempt alive indefinitely.
+              onInternalActivity: () => undefined,
             };
             if (shouldUseModelFallback || taskPromptPolicy.suppressAssistantHandoff) {
               execOptions.suppressFailureMessage = shouldUseModelFallback;
@@ -788,6 +791,8 @@ export async function processQueue(chatRoomId: string, agentId: string) {
                 });
 
                 resetAbortController();
+                const retryMessage = `\n\n> 系统：${noActivityTimeoutSeconds} 秒没有响应，正在第 ${noActivityAttempt} 次重试。\n\n`;
+                streamCallback(retryMessage);
                 await sleepForNoActivityRetry(noActivityRetryDelayMs, abortController.signal);
               }
             }

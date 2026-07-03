@@ -2,7 +2,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { ExecutionEvent, ExecutionRecord, ThinkingRecord } from '@/lib/agent-api'
 import { tokenUsageApi } from '@/lib/token-usage-api'
 import { cn, coerceThinkingText, formatDateTime, truncateToolName } from '@/lib/utils'
-import { CheckCircle, ChevronDown, ChevronRight, CircleStop, XCircle } from 'lucide-react'
+import { CheckCircle, ChevronDown, ChevronRight, CircleStop, RefreshCw, XCircle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { MarkdownContent } from '../markdown-content'
 import { CodeEditToolContent, CodeReadToolOutput, isCodeEditTool, isCodeReadTool, renderToolValue } from './tool-call-content'
@@ -350,6 +350,44 @@ export function RecordDetailPanel({ selectedRecord }: RecordDetailPanelProps) {
                       <div>{t('execution.handoffAuditDesc')}</div>
                       {event.data.error && (
                         <div className="whitespace-pre-wrap break-all rounded bg-red-500/10 p-2 text-red-600 dark:text-red-400">
+                          {event.data.error}
+                        </div>
+                      )}
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              )
+            }
+
+            if (event.type === 'model' && event.data.type === 'retry') {
+              return (
+                <Collapsible key={`model-retry-${i}`} className="rounded border border-amber-500/30 bg-amber-500/10 text-xs">
+                  <CollapsibleTrigger asChild>
+                    <div className="group flex items-center gap-2 p-2 cursor-pointer hover:opacity-80 flex-nowrap">
+                      <CollapsibleStateIcon className="shrink-0" />
+                      <span className="inline-flex shrink-0 items-center gap-1 rounded bg-amber-500/20 px-2 py-0.5 font-medium text-amber-700 dark:text-amber-400">
+                        <RefreshCw className="size-3" />
+                        {t('execution.modelRetry')}
+                      </span>
+                      {event.data.attempt && (
+                        <span className="whitespace-nowrap text-muted-foreground">
+                          {t('execution.attemptNumber', { count: event.data.attempt })}
+                        </span>
+                      )}
+                      <span className="truncate text-amber-700 dark:text-amber-400">
+                        {t('execution.retryingAfterNoOutput')}
+                      </span>
+                    </div>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className="space-y-2 px-3 pb-3 text-xs">
+                      {event.data.providerName && (
+                        <div className="text-foreground">
+                          <span className="text-muted-foreground">{t('execution.modelUsed')}</span> {event.data.providerName}
+                        </div>
+                      )}
+                      {event.data.error && (
+                        <div className="whitespace-pre-wrap break-all rounded bg-amber-500/10 p-2 text-amber-700 dark:text-amber-400">
                           {event.data.error}
                         </div>
                       )}

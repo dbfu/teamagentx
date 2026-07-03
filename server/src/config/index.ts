@@ -111,10 +111,10 @@ export const config = {
     coordinatorLlmTimeoutMs: parseInt(process.env.AGENT_COORDINATOR_LLM_TIMEOUT_MS || '120000', 10),
     coordinatorLlmRetryCount: parseInt(process.env.AGENT_COORDINATOR_LLM_RETRY_COUNT || '1', 10),
     coordinatorLlmRetryDelayMs: parseInt(process.env.AGENT_COORDINATOR_LLM_RETRY_DELAY_MS || '1000', 10),
-    // 普通助手执行启动后若 1 分钟没有任何输出/流/思考/工具事件，认为本次 attempt 卡住并重试/切换备用模型。
+    // 普通助手执行启动后若 30 秒没有任何输出/流/思考/工具事件，认为本次 attempt 卡住并重试/切换备用模型。
     // 设置 timeout 为 0 可关闭；只在首次活动前生效，已有活动的长任务不会被该计时器中断。
-    executionNoActivityTimeoutMs: parseInt(process.env.AGENT_EXECUTION_NO_ACTIVITY_TIMEOUT_MS || '60000', 10),
-    executionNoActivityRetryCount: parseInt(process.env.AGENT_EXECUTION_NO_ACTIVITY_RETRY_COUNT || '1', 10),
+    executionNoActivityTimeoutMs: parseInt(process.env.AGENT_EXECUTION_NO_ACTIVITY_TIMEOUT_MS || '30000', 10),
+    executionNoActivityRetryCount: parseInt(process.env.AGENT_EXECUTION_NO_ACTIVITY_RETRY_COUNT || '2', 10),
     executionNoActivityRetryDelayMs: parseInt(process.env.AGENT_EXECUTION_NO_ACTIVITY_RETRY_DELAY_MS || '1000', 10),
     // 正常执行未登记 mention_agents 时，由同一助手追加一次静默交接复核；失败后仍由 watchdog 兜底。
     handoffAuditEnabled: process.env.AGENT_HANDOFF_AUDIT_ENABLED !== 'false',
