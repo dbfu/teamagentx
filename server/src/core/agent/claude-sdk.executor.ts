@@ -2031,7 +2031,7 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
     onInternalActivity?.('claude-auto-compact');
     if (!this.compactStreamNoticeEmitted) {
       this.compactStreamNoticeEmitted = true;
-      this.emitStream?.('\n\n> 系统：正在压缩上下文，请稍候。\n\n');
+      this.emitStream?.('\n\n系统：正在压缩上下文，请稍候。\n\n');
     }
     if (options?.keepAlive) {
       this.startAutoCompactInternalActivity({
