@@ -1,5 +1,5 @@
-import { CheckCircle2, Download, Loader2, RefreshCw, X } from 'lucide-react'
-import { useEffect, useSyncExternalStore } from 'react'
+import { CheckCircle2, Download, FolderOpen, Loader2, RefreshCw, X } from 'lucide-react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import { updateManager } from '@/lib/update-manager'
 
@@ -12,6 +12,7 @@ function formatBytes(bytes: number) {
 
 export function UpdateNotification() {
   const { t } = useTranslation()
+  const [showInstallFallback, setShowInstallFallback] = useState(false)
   const { visible, notificationPlacement, status, currentVersion, update, progress, filePath, error } = useSyncExternalStore(
     updateManager.subscribe,
     updateManager.getSnapshot,
@@ -72,7 +73,7 @@ export function UpdateNotification() {
       if (result.success && result.filePath) {
         updateManager.setDownloaded(result.filePath)
       } else {
-        updateManager.setError(t('settings.downloadFailedNetwork'))
+        updateManager.setError(result.error || t('settings.downloadFailedNetwork'))
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -83,15 +84,30 @@ export function UpdateNotification() {
   const handleInstall = async () => {
     if (!window.electronAPI?.installUpdate) return
 
+    setShowInstallFallback(false)
     updateManager.setStatus('installing')
     try {
       const result = await window.electronAPI.installUpdate(filePath || undefined)
       if (!result.success) {
-        updateManager.setError(t('settings.installFailedStart'))
+        updateManager.setError(result.error || t('settings.installFailedStart'))
+        return
       }
+
+      window.setTimeout(() => {
+        const snapshot = updateManager.getSnapshot()
+        if (snapshot.status === 'installing' && snapshot.filePath) {
+          setShowInstallFallback(true)
+        }
+      }, 12_000)
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
       updateManager.setError(t('settings.installFailedWithMsg', { message: msg }))
+    }
+  }
+
+  const handleShowPackage = () => {
+    if (filePath) {
+      window.electronAPI?.showUpdateInFolder?.(filePath)
     }
   }
 
@@ -153,10 +169,17 @@ export function UpdateNotification() {
       )}
 
       {status === 'installing' && (
-        <div className="mt-4 flex items-center gap-2 rounded-lg bg-blue-500/10 px-3 py-2 text-xs text-blue-600">
-          <Loader2 className="size-4 shrink-0 animate-spin" />
-          {t('settings.installingPleaseWait')}
-        </div>
+        <>
+          <div className="mt-4 flex items-center gap-2 rounded-lg bg-blue-500/10 px-3 py-2 text-xs text-blue-600">
+            <Loader2 className="size-4 shrink-0 animate-spin" />
+            {t('settings.installingPleaseWait')}
+          </div>
+          {showInstallFallback && (
+            <div className="mt-3 rounded-lg bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-700">
+              {t('settings.installerFallbackHint')}
+            </div>
+          )}
+        </>
       )}
 
       {status === 'error' && (
@@ -182,18 +205,37 @@ export function UpdateNotification() {
           </>
         )}
         {status === 'downloaded' && (
-          <button
-            onClick={handleInstall}
-            className="inline-flex items-center gap-2 rounded-lg bg-blue-500 px-3 py-2 text-sm text-white hover:bg-blue-600"
-          >
-            {t('settings.updateNow')}
-          </button>
+          <>
+            <button
+              onClick={handleShowPackage}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
+            >
+              <FolderOpen className="size-4" />
+              {t('settings.openInstallerFolder')}
+            </button>
+            <button
+              onClick={handleInstall}
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-500 px-3 py-2 text-sm text-white hover:bg-blue-600"
+            >
+              {t('settings.updateNow')}
+            </button>
+          </>
         )}
         {status === 'installing' && (
-          <button disabled className="inline-flex items-center gap-2 rounded-lg bg-blue-500 px-3 py-2 text-sm text-white opacity-80">
-            <Loader2 className="size-4 animate-spin" />
-            {t('settings.startingInstall')}
-          </button>
+          showInstallFallback ? (
+            <button
+              onClick={handleShowPackage}
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-500 px-3 py-2 text-sm text-white hover:bg-blue-600"
+            >
+              <Download className="size-4" />
+              {t('settings.showInstallerInFolder')}
+            </button>
+          ) : (
+            <button disabled className="inline-flex items-center gap-2 rounded-lg bg-blue-500 px-3 py-2 text-sm text-white opacity-80">
+              <Loader2 className="size-4 animate-spin" />
+              {t('settings.startingInstall')}
+            </button>
+          )
         )}
         {status === 'error' && (
           <button

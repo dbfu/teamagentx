@@ -176,6 +176,10 @@ describe('createExecutor', () => {
         manualExecutor.getDebugInfo().systemPrompt,
         /End-of-Turn Handoff Protocol \(MANDATORY\)/,
       );
+      assert.doesNotMatch(
+        manualExecutor.getDebugInfo().systemPrompt,
+        /必须调用 mention_agents/,
+      );
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

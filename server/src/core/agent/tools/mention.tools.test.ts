@@ -220,7 +220,7 @@ test('appendMentionBlock 生成行首 @名称 块', () => {
     { agentId: 'a1', agentName: '设计', task: '出视觉稿' },
     { agentId: 'a2', agentName: '前端', task: '实现交互' },
   ]);
-  assert.equal(out, '我已经完成方案设计。\n\n@设计 出视觉稿\n@前端 实现交互');
+  assert.equal(out, '我已经完成方案设计。\n\n@设计 出视觉稿  \n@前端 实现交互');
 });
 
 test('appendMentionBlock 空 pending 原样返回', () => {

@@ -410,6 +410,15 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
   void handleInstallSkill
   void handleUninstallSkill
 
+  const handleAcpToolChange = (nextTool: string) => {
+    if (nextTool !== formAcpTool) {
+      setLlmProviderId('')
+      setFallbackLlmProviderIds([])
+      setProviderSelectionTouched(true)
+    }
+    setAcpTool(nextTool)
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!name.trim() || isSubmitting) return
@@ -494,7 +503,7 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
               <label className="mb-1.5 block text-sm font-medium text-foreground">
                 {t('assistant.acpTool')} <span className="text-red-500">*</span>
               </label>
-              <Select value={formAcpTool} onValueChange={setAcpTool}>
+              <Select value={formAcpTool} onValueChange={handleAcpToolChange}>
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder={t('assistant.selectAgent')}>
                     {selectedAcpToolLabel || t('assistant.selectAgent')}

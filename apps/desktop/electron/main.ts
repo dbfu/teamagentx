@@ -1245,16 +1245,46 @@ async function checkForUpdate(): Promise<{ hasUpdate: boolean; currentVersion: s
 }
 
 function getDownloadFileName(downloadUrl: string): string {
+  const expectedExt = process.platform === 'win32' ? '.exe' : process.platform === 'darwin' ? '.dmg' : '.AppImage';
   try {
     const parsed = new URL(downloadUrl);
-    const basename = path.basename(parsed.pathname);
-    if (basename && basename.includes('.')) return basename;
+    const basename = decodeURIComponent(path.basename(parsed.pathname));
+    if (basename && basename.toLowerCase().endsWith(expectedExt.toLowerCase())) {
+      return basename;
+    }
   } catch {
     // fall through
   }
 
-  const ext = process.platform === 'win32' ? '.exe' : process.platform === 'darwin' ? '.dmg' : '.AppImage';
-  return `TeamAgentX-${Date.now()}${ext}`;
+  return `TeamAgentX-${Date.now()}${expectedExt}`;
+}
+
+function validateDownloadedInstaller(filePath: string): void {
+  const stats = fs.statSync(filePath);
+  if (!stats.isFile() || stats.size <= 0) {
+    throw new Error('下载的安装包为空，请重新下载');
+  }
+
+  if (process.platform !== 'win32') return;
+
+  if (path.extname(filePath).toLowerCase() !== '.exe') {
+    throw new Error(`Windows 更新包必须是 .exe 文件，当前文件：${path.basename(filePath)}`);
+  }
+
+  const fd = fs.openSync(filePath, 'r');
+  try {
+    const header = Buffer.alloc(2);
+    fs.readSync(fd, header, 0, 2, 0);
+    if (header.toString('ascii') !== 'MZ') {
+      throw new Error('下载的 Windows 更新包不是有效 EXE，可能下载到了网页或被网络拦截，请重新下载');
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function sendUpdateProgress(progress: DownloadProgress): void {
@@ -1358,6 +1388,7 @@ async function downloadUpdate(update: UpdateInfo): Promise<{ success: true; file
       }
       const filePath = path.join(app.getPath('userData'), UPDATE_DOWNLOAD_DIR, getDownloadFileName(downloadUrl));
       const result = await downloadFile(downloadUrl, filePath);
+      validateDownloadedInstaller(result.filePath);
       downloadedUpdatePath = result.filePath;
       // 更新包下载成功后异步上报「更新」类型事件，失败不影响更新
       reportUpdateDownloadEvent(originalDownloadUrl, update.version);
@@ -1945,6 +1976,39 @@ async function shutdownBackend(): Promise<void> {
   return shutdownPromise;
 }
 
+function launchWindowsInstaller(installerPath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const command = `start "" "${installerPath.replace(/"/g, '""')}"`;
+    const child = spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', command], {
+      cwd: path.dirname(installerPath),
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+
+    let settled = false;
+    const settle = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      if (error) reject(error);
+      else resolve();
+    };
+
+    child.once('error', (error) => settle(error instanceof Error ? error : new Error(String(error))));
+    child.once('exit', (code) => {
+      if (code && code !== 0) {
+        settle(new Error(`cmd start 退出码 ${code}`));
+      } else {
+        settle();
+      }
+    });
+    setTimeout(() => {
+      child.unref();
+      settle();
+    }, 1500);
+  });
+}
+
 async function requestAppQuit(): Promise<void> {
   if (!quitRequestedByInstaller && hasActiveAgentTasks) {
     if (isQuitConfirmationOpen) return;
@@ -1991,26 +2055,39 @@ async function installDownloadedUpdate(filePath?: string): Promise<{ success: bo
   }
 
   try {
+    validateDownloadedInstaller(installerPath);
     quitRequestedByInstaller = true;
     isQuitting = true;
-    await shutdownBackend();
 
     if (process.platform === 'win32') {
-      // Windows 静默安装在部分机器上会被权限、PowerShell 策略或安全软件吞掉，
-      // 且失败发生在主进程退出之后，前端无法展示错误。直接打开可见安装器，
-      // 让 UAC、路径选择、文件占用提示都交给安装器显性处理。
-      writeLog(`[Update] Windows 打开可见安装器：${installerPath}`);
-      const errorMessage = await shell.openPath(installerPath);
-      if (errorMessage) {
-        writeLog(`[Update] Windows 安装器启动失败：${errorMessage}`);
-        quitRequestedByInstaller = false;
-        return { success: false, error: errorMessage };
+      // Windows 上先启动可见安装器，再关闭当前进程。否则部分机器在关闭
+      // utilityProcess / 子进程树时会卡住数秒，用户点击后看起来没有任何反应。
+      // 安装器内 installer.nsh 仍会 taskkill 旧进程，保证覆盖安装前释放文件锁。
+      writeLog(`[Update] Windows 启动可见安装器：${installerPath}`);
+      try {
+        await launchWindowsInstaller(installerPath);
+      } catch (launchError) {
+        const launchMsg = getErrorMessage(launchError);
+        writeLog(`[Update] Windows cmd start 启动失败，尝试 shell.openPath：${launchMsg}`);
+        const errorMessage = await shell.openPath(installerPath);
+        if (errorMessage) {
+          writeLog(`[Update] Windows 安装器启动失败：${errorMessage}`);
+          quitRequestedByInstaller = false;
+          isQuitting = false;
+          return { success: false, error: `${launchMsg}; ${errorMessage}` };
+        }
       }
 
-      writeLog('[Update] Windows 安装器已启动，退出当前进程');
-      setTimeout(() => process.exit(0), 500);
+      writeLog('[Update] Windows 安装器已启动，准备退出当前进程');
+      setTimeout(() => {
+        shutdownBackend()
+          .catch((error) => writeLog(`[Update] Windows 退出前关闭后端失败：${getErrorMessage(error)}`))
+          .finally(() => process.exit(0));
+      }, 500);
       return { success: true };
     }
+
+    await shutdownBackend();
 
     // macOS：DMG 无法像 Windows NSIS 那样静默安装。
     // 关键：把"慢"和"快"拆开，避免出现"窗口已关、新版未起"的长时间黑屏空窗期：

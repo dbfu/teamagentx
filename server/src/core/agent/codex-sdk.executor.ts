@@ -144,6 +144,7 @@ interface CodexBuiltinMcpServerContext {
   chatRoomId: string;
   agentId?: string;
   agentName: string;
+  agentTriggerMode?: AgentTriggerMode;
   chatRoomAgents: ChatRoomAgentInfo[];
   generateImageEndpoint?: string;
   systemToolsListEndpoint?: string;
@@ -343,6 +344,7 @@ const BUILTIN_CODEX_MCP_SERVERS: CodexBuiltinMcpServerDefinition[] = [
       teamAgentXMcpServerPath,
       chatRoomId,
       agentId,
+      agentTriggerMode,
       generateImageEndpoint,
       systemToolsListEndpoint,
       systemToolsCallEndpoint,
@@ -371,7 +373,7 @@ const BUILTIN_CODEX_MCP_SERVERS: CodexBuiltinMcpServerDefinition[] = [
           TEAMAGENTX_BACKGROUND_COMMAND_LIST_ENDPOINT: backgroundCommandListEndpoint,
           TEAMAGENTX_ROOM_HISTORY_TOOLS_ENABLED: roomHistoryToolsEnabled ? '1' : '',
           TEAMAGENTX_MENTION_AGENTS_FALLBACK_ENABLED:
-            agentId && agentId !== GROUP_COORDINATOR_ID ? '1' : '',
+            agentId && agentId !== GROUP_COORDINATOR_ID && agentTriggerMode !== 'manual' ? '1' : '',
           TEAMAGENTX_INTERNAL_TOOL_TOKEN: getInternalAgentToolToken(),
         },
       };
@@ -2061,7 +2063,7 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
         chatRoomAgents: this.chatRoomAgents,
         agentName: this.name,
         workDir: this.workDir,
-        includeAssistantHandoffGuidance: !suppressAssistantHandoff,
+        includeAssistantHandoffGuidance: !suppressAssistantHandoff && this.agentTriggerMode !== 'manual',
         locale: this.locale,
       }),
       getResponseStyleInstruction(this.locale),
@@ -2106,6 +2108,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       chatRoomId: this.chatRoomId,
       agentId: this.agentId || undefined,
       agentName: this.name,
+      agentTriggerMode: this.agentTriggerMode,
       chatRoomAgents: this.chatRoomAgents,
       generateImageEndpoint,
       systemToolsListEndpoint,

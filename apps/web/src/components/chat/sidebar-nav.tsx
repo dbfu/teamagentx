@@ -15,7 +15,7 @@ import { updateManager } from '@/lib/update-manager'
 import { cn } from '@/lib/utils'
 import { useAuthStore, useChatRoomStore, useSocketStore } from '@/stores'
 import { useChatStore } from '@/stores/chat-store'
-import { BookOpenText, Bot, Check, CircleArrowUp, Cpu, Globe, LayoutDashboard, MessageSquare, MoreHorizontal, Package, Plug, Search, Settings } from 'lucide-react'
+import { BookOpenText, Bot, Check, CircleArrowUp, Cpu, Globe, LayoutDashboard, MessageSquare, MoreHorizontal, Package, PanelLeftClose, PanelLeftOpen, Plug, Search, Settings } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
@@ -34,6 +34,8 @@ import { useTranslation } from 'react-i18next'
 
 interface SidebarNavProps {
   messageBadge?: number
+  isMessageListCollapsed?: boolean
+  onToggleMessageList?: () => void
 }
 
 type MainNavTab = 'message' | 'workbench' | 'assistant' | 'skill' | 'model' | 'connectors' | 'integration'
@@ -57,7 +59,7 @@ const areSameTabs = (a: OptionalNavTab[], b: OptionalNavTab[]) => (
   a.length === b.length && a.every((tab, index) => tab === b[index])
 )
 
-export function SidebarNav({ messageBadge }: SidebarNavProps) {
+export function SidebarNav({ messageBadge, isMessageListCollapsed = false, onToggleMessageList }: SidebarNavProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const location = useLocation()
@@ -149,6 +151,11 @@ export function SidebarNav({ messageBadge }: SidebarNavProps) {
   const hiddenMenuTabs = navTabs.filter((tab) => hiddenNavTabSet.has(tab.id))
 
   const handleTabChange = (tab: MainNavTab) => {
+    if (tab === 'message' && activeTab === 'message' && onToggleMessageList) {
+      onToggleMessageList()
+      return
+    }
+
     // 切换 Tab 时关闭侧拉框
     setSidePanelMode(null)
     if (tab === 'message') {
@@ -290,6 +297,17 @@ export function SidebarNav({ messageBadge }: SidebarNavProps) {
                   onClick={() => handleTabChange(navId)}
                   isElectron={isElectron}
                   badge={navId === 'message' ? messageBadge : undefined}
+                  activeHoverIcon={navId === 'message' ? (isMessageListCollapsed ? PanelLeftOpen : PanelLeftClose) : undefined}
+                  activeHoverLabel={
+                    navId === 'message'
+                      ? (isMessageListCollapsed ? t('common.expand') : t('common.collapse'))
+                      : undefined
+                  }
+                  title={
+                    navId === 'message' && activeTab === 'message'
+                      ? (isMessageListCollapsed ? t('common.expand') : t('common.collapse'))
+                      : config.label
+                  }
                 />
               )
             })}

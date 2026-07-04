@@ -258,6 +258,14 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
 
   if (!isOpen) return null
 
+  const handleAcpToolChange = (nextTool: string) => {
+    if (nextTool !== acpTool) {
+      setLlmProviderId('')
+      setFallbackLlmProviderIds([])
+    }
+    setAcpTool(nextTool)
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!name.trim() || isSubmitting) return
@@ -355,7 +363,7 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
                 {t('assistant.acpTool')} <span className="text-red-500">*</span>
               </label>
               <div className="flex gap-2">
-                <Select value={acpTool} onValueChange={setAcpTool}>
+                <Select value={acpTool} onValueChange={handleAcpToolChange}>
                   <SelectTrigger className="flex-1">
                     <SelectValue placeholder={t('assistant.selectAgent')} />
                   </SelectTrigger>

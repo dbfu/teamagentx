@@ -3,7 +3,7 @@ import { cn, coerceThinkingText, truncateToolName } from '@/lib/utils';
 import type { StreamEvent } from '@/stores/socket-store';
 import * as ScrollAreaPrimitive from '@radix-ui/react-scroll-area';
 import { Bot, CheckCircle, ChevronDown, ChevronRight, Clock, Square } from 'lucide-react';
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { MarkdownContent } from '../markdown-content';
 import { CodeEditToolContent, CodeReadToolOutput, isCodeEditTool, isCodeReadTool, renderToolValue } from './tool-call-content';
@@ -317,6 +317,8 @@ export function StreamPanel({
   const { t } = useTranslation()
   const prevTotalContentRef = useRef('')
   const [showNewMessageHint, setShowNewMessageHint] = useState(false)  // 显示新消息提示
+  const [pendingStopKey, setPendingStopKey] = useState<string | null>(null)
+  const stopResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const scrollThreshold = 50  // 判断是否在底部的阈值（像素）
 
   // 贴底意图 ref：是否停留在底部（用于控制自动滚动）。
@@ -365,6 +367,26 @@ export function StreamPanel({
   // 获取当前 messageId_agentId 的 events
   const streamKey = streamingViewAgent ? `${streamingViewAgent.messageId}_${streamingViewAgent.agentId}` : ''
   const events = streamingViewAgent ? (streamEvents.get(streamKey) || []) : []
+  const isStopPending = pendingStopKey === streamKey
+
+  const clearStopResetTimer = useCallback(() => {
+    if (stopResetTimerRef.current) {
+      clearTimeout(stopResetTimerRef.current)
+      stopResetTimerRef.current = null
+    }
+  }, [])
+
+  const handleStopClick = () => {
+    if (!streamingViewAgent || !onStop || isStopPending) return
+
+    setPendingStopKey(streamKey)
+    clearStopResetTimer()
+    stopResetTimerRef.current = setTimeout(() => {
+      setPendingStopKey((current) => current === streamKey ? null : current)
+      stopResetTimerRef.current = null
+    }, 3000)
+    onStop(streamingViewAgent.agentId, streamingViewAgent.messageId)
+  }
 
   // 提取 todo 工具数据（用于底部固定显示）
   const todosEvent = events.find(e => e.type === 'tool_call' && e.toolCall?.name && ['write_todos', 'TodoWrite'].includes(e.toolCall.name))
@@ -385,6 +407,17 @@ export function StreamPanel({
       todosContainerRef.current.scrollTop = 0
     }
   }, [streamKey])
+
+  useEffect(() => {
+    if (!isExecuting || pendingStopKey !== streamKey) {
+      setPendingStopKey(null)
+      clearStopResetTimer()
+    }
+  }, [clearStopResetTimer, isExecuting, pendingStopKey, streamKey])
+
+  useEffect(() => {
+    return () => clearStopResetTimer()
+  }, [clearStopResetTimer])
 
   // 当正在执行的任务变化时，滚动到该任务使其可见
   useEffect(() => {
@@ -517,8 +550,14 @@ export function StreamPanel({
             </div>
             {isExecuting && onStop && chatRoomId && (
               <button
-                onClick={() => onStop(streamingViewAgent!.agentId, streamingViewAgent!.messageId)}
-                className="flex items-center gap-1.5 rounded-lg bg-red-500 px-2.5 py-1.5 text-xs text-white hover:bg-red-600 transition-colors"
+                onClick={handleStopClick}
+                disabled={isStopPending}
+                className={cn(
+                  'flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-white transition-colors',
+                  isStopPending
+                    ? 'cursor-not-allowed bg-red-400 opacity-70'
+                    : 'bg-red-500 hover:bg-red-600'
+                )}
                 title={t('chat.stopExecution')}
               >
                 <Square className="size-3" />

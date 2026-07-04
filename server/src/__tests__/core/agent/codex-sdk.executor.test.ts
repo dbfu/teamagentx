@@ -435,6 +435,24 @@ describe('Codex SDK Executor builtin MCP servers', () => {
       assert.strictEqual(mcpServers.tax.env.TEAMAGENTX_ROOM_HISTORY_TOOLS_ENABLED, '1');
       assert.strictEqual(mcpServers.tax.env.TEAMAGENTX_MENTION_AGENTS_FALLBACK_ENABLED, '1');
       assert.ok(mcpServers.tax.env.TEAMAGENTX_INTERNAL_TOOL_TOKEN);
+
+      const manualMcpServers = buildBuiltinCodexMcpServerConfigs({
+        workDir: repoDir,
+        teamAgentXMcpServerPath: '/tmp/teamagentx-agent-tools-mcp.mjs',
+        chatRoomId: 'room-1',
+        agentId: 'agent-1',
+        agentName: 'Codex',
+        agentTriggerMode: 'manual',
+        chatRoomAgents: [
+          { agentId: 'agent-2', name: 'Claude' },
+        ],
+        systemToolsListEndpoint: 'http://127.0.0.1:3001/internal/agent-tools/system-tools/list',
+        systemToolsCallEndpoint: 'http://127.0.0.1:3001/internal/agent-tools/system-tools/call',
+      }) as Record<string, any>;
+      assert.strictEqual(
+        manualMcpServers.tax.env.TEAMAGENTX_MENTION_AGENTS_FALLBACK_ENABLED,
+        '',
+      );
     } finally {
       if (originalPath === undefined) {
         delete process.env.PATH;

@@ -59,14 +59,16 @@ function createMentionToolsForAgent(
 export function getSystemAssistantTools(
   agentId: string | undefined | null,
   chatRoomId: string,
-  options?: { includeRoomContextTools?: boolean },
+  options?: { includeRoomContextTools?: boolean; agentTriggerMode?: string | null },
 ): SystemTool[] {
   const roomContextTools = options?.includeRoomContextTools === false
     ? []
     : createChatHistorySearchTools(chatRoomId);
 
-  // mention_agents 是助手互相接力的统一入口，所有业务助手都应具备（与群历史开关无关）。
-  const mentionTools = createMentionToolsForAgent(chatRoomId, agentId);
+  // mention_agents 是智能协作模式下助手互相接力的统一入口；手动模式禁止助手派发。
+  const mentionTools = options?.agentTriggerMode === 'manual'
+    ? []
+    : createMentionToolsForAgent(chatRoomId, agentId);
   const baseTools = [...roomContextTools, ...mentionTools];
 
   if (agentId !== GROUP_ASSISTANT_ID) return dedupeTools(baseTools);

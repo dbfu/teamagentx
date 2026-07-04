@@ -229,6 +229,15 @@ export function SystemAssistantModelModal({
 
   if (!isOpen || !assistant) return null
 
+  const handleAcpToolChange = (nextTool: string) => {
+    if (nextTool !== acpTool) {
+      setSelectedProviderId('')
+      setFallbackLlmProviderIds([])
+      setProviderSelectionTouched(true)
+    }
+    setAcpTool(nextTool)
+  }
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     if (isSubmitting) return
@@ -280,7 +289,7 @@ export function SystemAssistantModelModal({
               <label className="mb-1.5 block text-sm font-medium text-foreground">
                 Agent <span className="text-red-500">*</span>
               </label>
-              <Select value={acpTool} onValueChange={setAcpTool} disabled={isLoading}>
+              <Select value={acpTool} onValueChange={handleAcpToolChange} disabled={isLoading}>
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder={t('assistant.selectAgentPlaceholder')}>
                     {selectedAcpToolLabel}

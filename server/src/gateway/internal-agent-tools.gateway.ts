@@ -146,11 +146,15 @@ export async function internalAgentToolsGateway(app: FastifyInstance) {
       request.body.chatRoomId,
       request.body.sourceAgentId,
     );
+    const chatRoom = await prisma.chatRoom.findUnique({
+      where: { id: request.body.chatRoomId },
+      select: { agentTriggerMode: true },
+    });
 
     const tools = getSystemAssistantTools(
       request.body.sourceAgentId,
       request.body.chatRoomId,
-      { includeRoomContextTools },
+      { includeRoomContextTools, agentTriggerMode: chatRoom?.agentTriggerMode },
     ).map((tool) => ({
       name: tool.name,
       description: tool.description || tool.name,
@@ -185,11 +189,15 @@ export async function internalAgentToolsGateway(app: FastifyInstance) {
       request.body.chatRoomId,
       request.body.sourceAgentId,
     );
+    const chatRoom = await prisma.chatRoom.findUnique({
+      where: { id: request.body.chatRoomId },
+      select: { agentTriggerMode: true },
+    });
 
     const tool = getSystemAssistantTools(
       request.body.sourceAgentId,
       request.body.chatRoomId,
-      { includeRoomContextTools },
+      { includeRoomContextTools, agentTriggerMode: chatRoom?.agentTriggerMode },
     ).find((item) => item.name === request.body.name);
 
     if (!tool) {

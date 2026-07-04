@@ -101,4 +101,34 @@ describe('update manager', () => {
       total: null,
     })
   })
+
+  test('keeps downloaded installer when a silent check finds the same update again', async () => {
+    const update = { version: '1.1.0', url: 'https://example.com/app.dmg' }
+    const manager = createUpdateManager({
+      getElectronAPI: () => ({
+        isElectron: true,
+        checkForUpdates: async () => ({
+          success: true,
+          data: {
+            hasUpdate: true,
+            currentVersion: '1.0.0',
+            update,
+          },
+        }),
+      }),
+      now: () => 1000,
+    })
+
+    manager.applyAvailableUpdate('1.0.0', update, true, 'sidebar')
+    manager.setDownloaded('/tmp/TeamAgentX-1.1.0-x64.dmg')
+
+    await manager.checkForUpdates({ force: true, silent: true, reason: 'test' })
+
+    const state = manager.getSnapshot()
+    assert.equal(state.visible, true)
+    assert.equal(state.notificationPlacement, 'sidebar')
+    assert.equal(state.status, 'downloaded')
+    assert.equal(state.filePath, '/tmp/TeamAgentX-1.1.0-x64.dmg')
+    assert.equal(state.update?.version, '1.1.0')
+  })
 })

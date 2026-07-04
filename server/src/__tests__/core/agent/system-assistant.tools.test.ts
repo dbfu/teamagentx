@@ -60,6 +60,21 @@ describe('System assistant tools', () => {
     assert.ok(groupToolNames.includes('create_agent'));
   });
 
+  test('手动模式不暴露助手交接工具', () => {
+    const legacyToolNames = getSystemAssistantTools(AGENT_CREATOR_ID, 'room-1', {
+      includeRoomContextTools: false,
+      agentTriggerMode: 'manual',
+    }).map((tool) => tool.name);
+    const groupToolNames = getSystemAssistantTools(GROUP_ASSISTANT_ID, 'room-1', {
+      includeRoomContextTools: false,
+      agentTriggerMode: 'manual',
+    }).map((tool) => tool.name);
+
+    assert.deepStrictEqual(legacyToolNames, []);
+    assert.ok(!groupToolNames.includes('mention_agents'));
+    assert.ok(groupToolNames.includes('create_agent'));
+  });
+
   test('普通助手可以通过 mention_agents 交接给群助手', async () => {
     const chatRoomId = 'system-tools-mention-group-room';
     const selfAgentId = 'normal-agent-for-group-handoff';

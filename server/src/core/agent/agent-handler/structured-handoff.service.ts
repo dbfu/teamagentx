@@ -725,6 +725,18 @@ export async function settleStructuredHandoff(event: AgentTaskSettledEvent): Pro
     return;
   }
 
+  const chatRoom = await chatRoomService.findById(event.chatRoomId);
+  if (chatRoom?.agentTriggerMode === 'manual') {
+    debugLog('structuredHandoffSkippedInManualMode', {
+      chatRoomId: event.chatRoomId,
+      taskId: event.taskId,
+      agentId: event.agentId,
+      pendingMentionCount: event.pendingMentions?.length ?? 0,
+    });
+    finishHandoffCascade(context.rootMessageId);
+    return;
+  }
+
   debugLog('structuredHandoffSettled', {
     chatRoomId: event.chatRoomId,
     taskId: event.taskId,

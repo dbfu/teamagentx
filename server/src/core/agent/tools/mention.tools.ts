@@ -181,7 +181,7 @@ export function appendMentionBlock(
       const mention = m.task ? `@${m.agentName} ${m.task}` : `@${m.agentName}`;
       return options?.suggestion ? `建议 ${mention}` : mention;
     })
-    .join('\n');
+    .join('  \n');
   const base = content.trimEnd();
   return base ? `${base}\n\n${block}` : block;
 }

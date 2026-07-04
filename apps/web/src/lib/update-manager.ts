@@ -76,6 +76,10 @@ function normalizeDownloadProgress(
   return { percent, transferred, total }
 }
 
+function isActiveDownloadStatus(status: UpdateStatus) {
+  return status === 'downloading' || status === 'downloaded' || status === 'installing'
+}
+
 export function createUpdateManager(options: CreateUpdateManagerOptions = {}) {
   const getElectronAPI = options.getElectronAPI ?? (() => window.electronAPI)
   const now = options.now ?? (() => Date.now())
@@ -99,6 +103,18 @@ export function createUpdateManager(options: CreateUpdateManagerOptions = {}) {
     visible = false,
     notificationPlacement: UpdateNotificationPlacement = 'top-right',
   ) => {
+    const isSameUpdate = state.update?.version === update.version
+    if (isSameUpdate && isActiveDownloadStatus(state.status)) {
+      setState({
+        currentVersion,
+        update,
+        visible: visible ? true : state.visible,
+        notificationPlacement: visible ? notificationPlacement : state.notificationPlacement,
+        error: '',
+      })
+      return
+    }
+
     setState({
       visible,
       notificationPlacement,

@@ -705,29 +705,37 @@ export function setupSocket(io: Server) {
         if (messageId) {
           const matchedTask = activeTasks.find(task =>
             task.messageId === messageId && (!agentId || task.agentId === agentId)
-          ) ?? activeTasks.find(task => task.messageId === messageId);
+          );
 
-          if (matchedTask) {
-            agentId = matchedTask.agentId;
+          if (!matchedTask) {
+            socket.emit('agent:stop-failed', {
+              chatRoomId,
+              agentId,
+              messageId,
+              message: '未找到正在执行的任务'
+            });
+            return;
+          }
 
-            // pending 任务尚未执行，不能通过 AbortController 取消（否则会误停正在执行的任务）。
-            // 直接在 DB 标记为 cancelled 并走 agent:task-cancelled 通道。
-            if (matchedTask.status === 'pending') {
-              await taskQueueService.updateStatus(matchedTask.id, 'cancelled');
-              clearSerialChainForTask(
-                chatRoomId,
-                matchedTask.agentId,
-                matchedTask.id,
-              );
-              io.to(chatRoomId).emit('agent:task-cancelled', {
-                chatRoomId,
-                agentId: matchedTask.agentId,
-                taskId: matchedTask.id,
-                messageId: matchedTask.messageId,
-              });
-              broadcastAgentStatus(chatRoomId);
-              return;
-            }
+          agentId = matchedTask.agentId;
+
+          // pending 任务尚未执行，不能通过 AbortController 取消（否则会误停正在执行的任务）。
+          // 直接在 DB 标记为 cancelled 并走 agent:task-cancelled 通道。
+          if (matchedTask.status === 'pending') {
+            await taskQueueService.updateStatus(matchedTask.id, 'cancelled');
+            clearSerialChainForTask(
+              chatRoomId,
+              matchedTask.agentId,
+              matchedTask.id,
+            );
+            io.to(chatRoomId).emit('agent:task-cancelled', {
+              chatRoomId,
+              agentId: matchedTask.agentId,
+              taskId: matchedTask.id,
+              messageId: matchedTask.messageId,
+            });
+            broadcastAgentStatus(chatRoomId);
+            return;
           }
         }
 

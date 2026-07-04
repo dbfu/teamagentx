@@ -334,6 +334,7 @@ function DesktopMessagePage({
   chatRooms,
   chatRoomsLoading,
   selectedRoomId,
+  isMessageListCollapsed,
   onSelectRoom,
   onChatRoomChange,
   unreadCounts,
@@ -346,6 +347,7 @@ function DesktopMessagePage({
   chatRooms: ChatRoom[]
   chatRoomsLoading: boolean
   selectedRoomId: string | null
+  isMessageListCollapsed: boolean
   onSelectRoom: (id: string) => void
   onChatRoomChange: () => void
   unreadCounts: Record<string, number>
@@ -360,18 +362,25 @@ function DesktopMessagePage({
   return (
     <>
       {/* Conversation list */}
-      <ConversationList
-        chatRooms={chatRooms}
-        selectedId={selectedRoomId}
-        onSelect={onSelectRoom}
-        unreadCounts={unreadCounts}
-        executingChatRooms={executingChatRooms}
-        onRefresh={onRefresh}
-        isRefreshing={isRefreshing}
-        isLoading={chatRoomsLoading}
-        onDeleteChatRoom={onDeleteChatRoom}
-        onCreateChatRoom={onCreateChatRoom}
-      />
+      <div
+        className={cn(
+          "h-full shrink-0 overflow-hidden transition-[width,opacity] duration-200 ease-out",
+          isMessageListCollapsed ? "w-0 opacity-0" : "w-72 opacity-100",
+        )}
+      >
+        <ConversationList
+          chatRooms={chatRooms}
+          selectedId={selectedRoomId}
+          onSelect={onSelectRoom}
+          unreadCounts={unreadCounts}
+          executingChatRooms={executingChatRooms}
+          onRefresh={onRefresh}
+          isRefreshing={isRefreshing}
+          isLoading={chatRoomsLoading}
+          onDeleteChatRoom={onDeleteChatRoom}
+          onCreateChatRoom={onCreateChatRoom}
+        />
+      </div>
 
       {/* Main chat area */}
       <ChatArea
@@ -388,6 +397,7 @@ function AppContent() {
   const navigate = useNavigate()
   const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
+  const [isMessageListCollapsed, setIsMessageListCollapsed] = useState(false)
   const isMobile = useIsMobile()
   const { t } = useTranslation()
   const chatRooms = useChatRoomStore((s) => s.chatRooms)
@@ -857,6 +867,8 @@ function AppContent() {
       {!isMobile && !location.pathname.startsWith('/office/') && (
         <SidebarNav
           messageBadge={totalUnreadCount}
+          isMessageListCollapsed={isMessageListCollapsed}
+          onToggleMessageList={() => setIsMessageListCollapsed((collapsed) => !collapsed)}
         />
       )}
 
@@ -879,6 +891,7 @@ function AppContent() {
               chatRooms={chatRooms}
               chatRoomsLoading={chatRoomsLoading}
               selectedRoomId={selectedRoomId}
+              isMessageListCollapsed={isMessageListCollapsed}
               onSelectRoom={selectRoomAndClearUnread}
               onChatRoomChange={loadChatRooms}
               unreadCounts={unreadCounts}

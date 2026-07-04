@@ -41,7 +41,7 @@ export function SoftwareSection() {
       // 每次点击都实时调用接口，拿服务端最新版本号
       const result = await api.checkForUpdates()
       if (!result.success) {
-        toast.error(t('settings.checkUpdateFailed'))
+        toast.error(result.error ? `${t('settings.checkUpdateFailed')}: ${result.error}` : t('settings.checkUpdateFailed'))
         return
       }
 

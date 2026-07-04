@@ -1171,7 +1171,7 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
       agentName: this.name,
       workDir: this.workDir,
       includeAssistantTriggerNecessityReminder: true,
-      includeAssistantHandoffGuidance: !suppressAssistantHandoff,
+      includeAssistantHandoffGuidance: !suppressAssistantHandoff && this.agentTriggerMode !== 'manual',
       locale: this.locale,
     });
   }
@@ -1300,6 +1300,7 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
   private getSystemAssistantTools(): any[] {
     return getSystemAssistantTools(this.agentId, this.chatRoomId, {
       includeRoomContextTools: this.injectGroupHistory,
+      agentTriggerMode: this.agentTriggerMode,
     });
   }
 

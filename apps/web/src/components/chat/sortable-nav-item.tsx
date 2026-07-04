@@ -7,11 +7,14 @@ import type { MainNavTab } from '@/stores/ui-store'
 interface SortableNavItemProps {
   id: MainNavTab
   icon: LucideIcon
+  activeHoverIcon?: LucideIcon
+  activeHoverLabel?: string
   label: string
   isActive: boolean
   onClick: () => void
   isElectron: boolean
   badge?: number
+  title?: string
 }
 
 /**
@@ -21,11 +24,14 @@ interface SortableNavItemProps {
 export function SortableNavItem({
   id,
   icon: Icon,
+  activeHoverIcon: ActiveHoverIcon,
+  activeHoverLabel,
   label,
   isActive,
   onClick,
   isElectron,
   badge,
+  title,
 }: SortableNavItemProps) {
   const {
     attributes,
@@ -54,16 +60,31 @@ export function SortableNavItem({
       {...listeners}
       onClick={onClick}
       className={cn(
-        'relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
+        'group relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-lg border border-transparent py-2 transition-colors',
         isDragging && 'opacity-50 scale-105 z-50',
         isActive
           ? 'border border-[var(--nav-active-border)] bg-[var(--nav-active)] text-primary shadow-[var(--control-shadow)]'
           : 'text-muted-foreground hover:bg-sidebar-accent'
       )}
-      title={label}
+      title={title ?? label}
     >
-      <Icon className="size-5" />
-      <span className="text-xs">{label}</span>
+      {isActive && ActiveHoverIcon ? (
+        <span className="relative flex h-10 w-full items-center justify-center">
+          <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 transition-opacity duration-150 group-hover:opacity-0">
+            <Icon className="size-5" />
+            <span className="text-xs">{label}</span>
+          </span>
+          <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+            <ActiveHoverIcon className="size-5" />
+            <span className="text-xs">{activeHoverLabel ?? label}</span>
+          </span>
+        </span>
+      ) : (
+        <>
+          <Icon className="size-5" />
+          <span className="text-xs">{label}</span>
+        </>
+      )}
       {!!badge && badge > 0 && (
         <span className="absolute right-3 top-0.5 flex size-4 items-center justify-center rounded-full bg-red-500 text-[10px] text-white">
           {badge > 99 ? '99' : badge}
