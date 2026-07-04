@@ -97,21 +97,6 @@ export function shouldPublishFinalFailureMessage(params: {
   return params.shouldUseModelFallback || params.generatedMessageCount === 0;
 }
 
-export function shouldAttemptContextCompactionAfterNoActivityRetry(params: {
-  error: unknown;
-  noActivityAttempt: number;
-  maxNoActivityAttempts: number;
-  compactionAttempted: boolean;
-  canCompactContext: boolean;
-}): boolean {
-  return (
-    params.error instanceof NoActivityTimeoutError &&
-    params.noActivityAttempt >= params.maxNoActivityAttempts &&
-    !params.compactionAttempted &&
-    params.canCompactContext
-  );
-}
-
 async function resolveFallbackLlmProviders(
   fallbackLlmProviderIdsJson: string | null | undefined,
   primaryProviderId?: string | null,
@@ -784,95 +769,10 @@ export async function processQueue(chatRoomId: string, agentId: string) {
             attempt: number,
           ): Promise<AgentExecResult> => {
             const maxNoActivityAttempts = noActivityRetryCount + 1;
-            let compactionAttempted = false;
             for (let noActivityAttempt = 1; noActivityAttempt <= maxNoActivityAttempts; noActivityAttempt += 1) {
               try {
                 return await runExecutor(candidateExecutor, providerLabel, attempt, noActivityAttempt);
               } catch (error) {
-                if (shouldAttemptContextCompactionAfterNoActivityRetry({
-                  error,
-                  noActivityAttempt,
-                  maxNoActivityAttempts,
-                  compactionAttempted,
-                  canCompactContext: typeof candidateExecutor.compactContextForRetry === 'function',
-                })) {
-                  compactionAttempted = true;
-                  resetAbortController();
-                  const compactMessage = `\n\n> 系统：连续 ${maxNoActivityAttempts} 次没有响应，正在压缩上下文后重试。\n\n`;
-                  streamCallback(compactMessage);
-                  executionEvents.push({
-                    type: 'model',
-                    timestamp: Date.now(),
-                    data: {
-                      type: 'context_compaction',
-                      providerName: providerLabel,
-                      attempt,
-                      status: 'in_progress',
-                      reason: 'no_activity_timeout',
-                    },
-                  });
-
-                  let compacted = false;
-                  try {
-                    const result = await candidateExecutor.compactContextForRetry!({
-                      reason: 'no_activity_timeout',
-                      errorMessage: error instanceof Error ? error.message : String(error),
-                    });
-                    compacted = result.compacted;
-                    executionEvents.push({
-                      type: 'model',
-                      timestamp: Date.now(),
-                      data: {
-                        type: 'context_compaction',
-                        providerName: providerLabel,
-                        attempt,
-                        status: 'completed',
-                        output: {
-                          compacted: result.compacted,
-                          summaryLength: result.summaryLength,
-                          message: result.message,
-                        },
-                      },
-                    });
-                  } catch (compactError) {
-                    executionEvents.push({
-                      type: 'model',
-                      timestamp: Date.now(),
-                      data: {
-                        type: 'context_compaction',
-                        providerName: providerLabel,
-                        attempt,
-                        status: 'error',
-                        error: compactError instanceof Error ? compactError.message : String(compactError),
-                      },
-                    });
-                    console.warn('[processor] 上下文压缩失败，继续按原重试失败处理', {
-                      chatRoomId,
-                      agentId: task.agentId,
-                      agentName: task.agentName,
-                      provider: providerLabel,
-                      attempt,
-                      error: compactError instanceof Error ? compactError.message : String(compactError),
-                    });
-                  }
-
-                  if (compacted) {
-                    try {
-                      return await runExecutor(
-                        candidateExecutor,
-                        providerLabel,
-                        attempt,
-                        maxNoActivityAttempts + 1,
-                      );
-                    } catch (compactRetryError) {
-                      if (compactRetryError instanceof NoActivityTimeoutError) {
-                        resetAbortController();
-                      }
-                      throw compactRetryError;
-                    }
-                  }
-                }
-
                 if (!(error instanceof NoActivityTimeoutError) || noActivityAttempt >= maxNoActivityAttempts) {
                   if (error instanceof NoActivityTimeoutError) {
                     resetAbortController();

@@ -6,12 +6,8 @@ import {
   type AgentTaskSettledEvent,
 } from '../../../../core/agent/agent-handler/task-lifecycle.js';
 import {
-  shouldAttemptContextCompactionAfterNoActivityRetry,
   shouldPublishFinalFailureMessage,
 } from '../../../../core/agent/agent-handler/processor.js';
-import {
-  NoActivityTimeoutError,
-} from '../../../../core/agent/agent-handler/no-activity-timeout.js';
 
 test.afterEach(() => {
   setAgentTaskSettledHandler(null);
@@ -60,65 +56,6 @@ test('final failure message is not duplicated when executor already emitted one'
     shouldPublishFinalFailureMessage({
       shouldUseModelFallback: false,
       generatedMessageCount: 1,
-    }),
-    false,
-  );
-});
-
-test('context compaction is attempted only after no-activity retries are exhausted', () => {
-  assert.equal(
-    shouldAttemptContextCompactionAfterNoActivityRetry({
-      error: new NoActivityTimeoutError('silent'),
-      noActivityAttempt: 2,
-      maxNoActivityAttempts: 3,
-      compactionAttempted: false,
-      canCompactContext: true,
-    }),
-    false,
-  );
-
-  assert.equal(
-    shouldAttemptContextCompactionAfterNoActivityRetry({
-      error: new NoActivityTimeoutError('silent'),
-      noActivityAttempt: 3,
-      maxNoActivityAttempts: 3,
-      compactionAttempted: false,
-      canCompactContext: true,
-    }),
-    true,
-  );
-});
-
-test('context compaction is skipped after it already ran or executor cannot compact', () => {
-  assert.equal(
-    shouldAttemptContextCompactionAfterNoActivityRetry({
-      error: new NoActivityTimeoutError('silent'),
-      noActivityAttempt: 3,
-      maxNoActivityAttempts: 3,
-      compactionAttempted: true,
-      canCompactContext: true,
-    }),
-    false,
-  );
-
-  assert.equal(
-    shouldAttemptContextCompactionAfterNoActivityRetry({
-      error: new Error('not no activity'),
-      noActivityAttempt: 3,
-      maxNoActivityAttempts: 3,
-      compactionAttempted: false,
-      canCompactContext: true,
-    }),
-    false,
-  );
-
-  assert.equal(
-    shouldAttemptContextCompactionAfterNoActivityRetry({
-      error: new NoActivityTimeoutError('silent'),
-      noActivityAttempt: 3,
-      maxNoActivityAttempts: 3,
-      compactionAttempted: false,
-      canCompactContext: false,
     }),
     false,
   );

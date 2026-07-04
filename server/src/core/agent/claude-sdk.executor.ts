@@ -19,10 +19,7 @@ import * as os from 'os';
 import * as path from 'path';
 import treeKill from 'tree-kill';
 import { z } from 'zod/v4';
-import { config as appConfig } from '../../config/index.js';
-import { createLlmClient } from '../../lib/llm-client.js';
 import { agentMemoryService } from '../../modules/agent-memory/agent-memory.service.js';
-import { llmProviderService } from '../../modules/llm-provider/llm-provider.service.js';
 import { buildRoomMessageIndexSection } from '../../modules/message/room-message-index.service.js';
 import { quickChatSessionService } from '../../modules/quick-chat-session/quick-chat-session.service.js';
 import { skillInstallService } from '../../modules/skill/skill-install.service.js';
@@ -54,8 +51,6 @@ import {
 } from './agent-long-term-memory.js';
 import type {
     AgentDebugInfo,
-    AgentContextCompactionOptions,
-    AgentContextCompactionResult,
     AgentExecOptions,
     AgentExecResult,
     AgentSessionSnapshot,
@@ -118,85 +113,6 @@ function extractThinkingFromContent(content: unknown): string {
       return '';
     })
     .join('');
-}
-
-const DEFAULT_CLAUDE_SUMMARY_TRANSCRIPT_CHARS = 120_000;
-const CLAUDE_TRANSCRIPT_ENTRY_CHARS = 800;
-
-function truncateClaudeTranscriptEntry(
-  text: string,
-  limit = CLAUDE_TRANSCRIPT_ENTRY_CHARS,
-): string {
-  const trimmed = text.trim();
-  if (trimmed.length <= limit) return trimmed;
-  return `${trimmed.slice(0, limit)}...(truncated)`;
-}
-
-function stringifyClaudeBlockValue(value: unknown): string {
-  if (typeof value === 'string') return value;
-  if (value === undefined || value === null) return '';
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-}
-
-export function extractClaudeConversationTranscript(
-  conversationPath: string,
-  maxChars = DEFAULT_CLAUDE_SUMMARY_TRANSCRIPT_CHARS,
-): string {
-  const text = fs.readFileSync(conversationPath, 'utf-8');
-  const entries: string[] = [];
-
-  for (const line of text.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-
-    let parsed: any;
-    try {
-      parsed = JSON.parse(trimmed);
-    } catch {
-      continue;
-    }
-
-    const message = parsed.message && typeof parsed.message === 'object'
-      ? parsed.message
-      : parsed;
-    const role = message.role || parsed.type;
-    const content = message.content ?? parsed.content;
-    if (role !== 'user' && role !== 'assistant') continue;
-
-    const textContent = typeof content === 'string'
-      ? content
-      : extractTextFromContent(content);
-    if (textContent.trim()) {
-      entries.push(
-        `${role === 'user' ? 'User' : 'Assistant'}: ${truncateClaudeTranscriptEntry(textContent, 4_000)}`,
-      );
-    }
-
-    if (!Array.isArray(content)) continue;
-    for (const block of content) {
-      if (!block || typeof block !== 'object') continue;
-      if (block.type === 'tool_use') {
-        entries.push(
-          `Tool[${block.name || 'tool'}]: ${truncateClaudeTranscriptEntry(stringifyClaudeBlockValue(block.input))}`,
-        );
-      } else if (block.type === 'tool_result') {
-        const output = typeof block.content === 'string'
-          ? block.content
-          : extractTextFromContent(block.content);
-        if (output.trim()) {
-          entries.push(`ToolResult: ${truncateClaudeTranscriptEntry(output)}`);
-        }
-      }
-    }
-  }
-
-  const transcript = entries.join('\n');
-  if (transcript.length <= maxChars) return transcript;
-  return transcript.slice(transcript.length - maxChars);
 }
 
 function normalizeUsage(usage: any): TokenUsage | undefined {
@@ -745,7 +661,6 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
   private lastResponse: string | null = null;
   private lastInvokeResult: string | null = null;
   private lastClaudeStderr = '';
-  private pendingCompactedContextSeed: string | null = null;
   private compactStreamNoticeEmitted = false;
   private stopAutoCompactInternalActivity: (() => void) | null = null;
   // 懒解析：每次访问都查一次（几次 fs.existsSync，开销极小），避免实例化时
@@ -1268,10 +1183,6 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
   ): string {
     let fullMessage = '';
 
-    if (this.pendingCompactedContextSeed) {
-      fullMessage += `${this.pendingCompactedContextSeed}\n\n`;
-    }
-
     const longTermMemorySection = buildAgentLongTermMemoryContentSection(
       this.agentId,
       this.name,
@@ -1384,118 +1295,6 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
       newSessionId: this.sessionId,
       statePath: this.getSessionStatePath(),
     });
-  }
-
-  private async summarizeSessionForRetry(sessionId: string): Promise<string | null> {
-    const conversationPath = this.getClaudeConversationPath(sessionId);
-    if (!fs.existsSync(conversationPath)) return null;
-
-    let transcript: string;
-    try {
-      transcript = extractClaudeConversationTranscript(conversationPath);
-    } catch (error) {
-      console.warn(`${this.name}: 读取 Claude 会话转写失败:`, error);
-      return null;
-    }
-    if (!transcript.trim()) return null;
-
-    const provider = this.llmProvider || (await llmProviderService.findDefault());
-    if (!provider) {
-      debugLog('claudeSdkContextSummaryNoProvider', {
-        agentName: this.name,
-        sessionId,
-      });
-      return null;
-    }
-
-    const targetTokens = appConfig.agent.memorySummaryTargetTokens;
-    const model = createLlmClient(provider, {
-      temperature: 0.2,
-      maxTokens: targetTokens,
-    });
-
-    const prompt = `You are compacting a long coding-assistant session so the work can continue in a fresh context. Summarize the transcript below.
-
-Requirements:
-1. Do not invent information that is not present in the transcript.
-2. Preserve the user's explicit requests, constraints, and preferences.
-3. Preserve unfinished tasks and their current status and next steps.
-4. Preserve key technical details: file paths, function/class names, APIs, DB tables, commands, env vars, and error messages.
-5. Preserve decisions already made and the reasons for them.
-6. Drop pleasantries, repeated confirmations, and verbose tool output with no durable value.
-7. Output structured Markdown within about ${targetTokens} tokens.
-
-Output structure:
-## Current Goal
-## Completed Work
-## Open Tasks / Next Steps
-## Key Files and Code
-## User Preferences and Constraints
-## Key Decisions
-
-Session transcript (oldest to newest, possibly truncated to the most recent part):
-${transcript}
-
-Output the summary only.`;
-
-    try {
-      const summary = (
-        await model.invoke([
-          {
-            role: 'system',
-            content: 'You compact long coding sessions into a concise, faithful handoff summary.',
-          },
-          {role: 'user', content: prompt},
-        ])
-      ).trim();
-      if (!summary) return null;
-      return `[Previous Conversation Summary]
-The earlier conversation in this session repeatedly timed out and was compacted into the summary below. Continue the work based on it.
-
-${summary}`;
-    } catch (error) {
-      console.warn(`${this.name}: 生成 Claude 会话摘要失败:`, error);
-      return null;
-    }
-  }
-
-  async compactContextForRetry(
-    _options: AgentContextCompactionOptions,
-  ): Promise<AgentContextCompactionResult> {
-    if (this.stateless || !this.hasStartedSession || !this.sessionId) {
-      return {
-        compacted: false,
-        message: 'No resumable Claude session is available to compact.',
-      };
-    }
-
-    const previousSessionId = this.sessionId;
-    const summary = await this.summarizeSessionForRetry(previousSessionId);
-    if (!summary) {
-      return {
-        compacted: false,
-        message: 'Claude session summary was empty or unavailable.',
-      };
-    }
-
-    this.pendingCompactedContextSeed = summary;
-    this.sessionId = randomUUID();
-    this.hasStartedSession = false;
-    this.saveSessionId();
-    this.resetCollectors();
-    debugLog('claudeSdkContextCompactedForRetry', {
-      agentName: this.name,
-      agentId: this.agentId,
-      chatRoomId: this.chatRoomId,
-      previousSessionId,
-      newSessionId: this.sessionId,
-      summaryLength: summary.length,
-    });
-
-    return {
-      compacted: true,
-      summaryLength: summary.length,
-    };
   }
 
   private getSystemAssistantTools(): any[] {
@@ -2544,7 +2343,6 @@ ${summary}`;
       history,
       suppressAssistantHandoff,
     );
-    this.pendingCompactedContextSeed = null;
     this.lastContext = fullMessage;
     if (this.stateless) {
       this.sessionId = randomUUID();

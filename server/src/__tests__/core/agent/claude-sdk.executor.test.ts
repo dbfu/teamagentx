@@ -6,7 +6,6 @@ import { describe, test } from 'node:test';
 import {
   ClaudeAgentSdkExecutor,
   __claudeSdkTestUtils,
-  extractClaudeConversationTranscript,
 } from '../../../core/agent/claude-sdk.executor.js';
 import {
   ensureAgentLongTermMemoryFile,
@@ -308,56 +307,6 @@ describe('ClaudeAgentSdkExecutor background idle finish', () => {
     assert.match(enriched.message, /Claude Code process exited with code 1/);
     assert.match(enriched.message, /Claude stderr:/);
     assert.match(enriched.message, /401 Invalid authentication credentials/);
-  });
-
-  test('extracts readable transcript from Claude conversation jsonl', () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-claude-transcript-'));
-    const conversationPath = path.join(tempDir, 'session.jsonl');
-
-    try {
-      fs.writeFileSync(
-        conversationPath,
-        [
-          JSON.stringify({
-            message: {
-              role: 'user',
-              content: [{ type: 'text', text: '请检查构建失败' }],
-            },
-          }),
-          JSON.stringify({
-            message: {
-              role: 'assistant',
-              content: [
-                { type: 'text', text: '我会先跑测试' },
-                { type: 'tool_use', name: 'Bash', input: { command: 'pnpm build' } },
-              ],
-            },
-          }),
-          JSON.stringify({
-            message: {
-              role: 'user',
-              content: [
-                {
-                  type: 'tool_result',
-                  content: [{ type: 'text', text: 'TS2322: type mismatch' }],
-                },
-              ],
-            },
-          }),
-        ].join('\n'),
-        'utf-8',
-      );
-
-      const transcript = extractClaudeConversationTranscript(conversationPath);
-
-      assert.match(transcript, /User: 请检查构建失败/);
-      assert.match(transcript, /Assistant: 我会先跑测试/);
-      assert.match(transcript, /Tool\[Bash\]:/);
-      assert.match(transcript, /pnpm build/);
-      assert.match(transcript, /ToolResult: TS2322: type mismatch/);
-    } finally {
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    }
   });
 
   test('keeps system instructions in the Claude SDK systemPrompt instead of the task prompt', () => {

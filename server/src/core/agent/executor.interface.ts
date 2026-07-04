@@ -96,17 +96,6 @@ export interface AgentExecOptions {
   onInternalActivity?: (label: string) => void;
 }
 
-export interface AgentContextCompactionOptions {
-  reason: 'no_activity_timeout';
-  errorMessage?: string;
-}
-
-export interface AgentContextCompactionResult {
-  compacted: boolean;
-  summaryLength?: number;
-  message?: string;
-}
-
 export type AgentSessionSnapshot =
   | {
       type: 'claude';
@@ -184,9 +173,6 @@ export interface IAgentExecutor {
   // 导出/导入可恢复会话，用于模型 fallback 复用同一助手上下文
   getSessionSnapshot?: () => AgentSessionSnapshot | null;
   applySessionSnapshot?: (snapshot: AgentSessionSnapshot) => boolean;
-  compactContextForRetry?: (
-    options: AgentContextCompactionOptions,
-  ) => Promise<AgentContextCompactionResult>;
 
   // 清理资源（可选，用于正确关闭 ACP 会话等）
   cleanup?: () => Promise<void>;
