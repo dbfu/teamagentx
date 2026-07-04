@@ -19,7 +19,10 @@ import * as os from 'os';
 import * as path from 'path';
 import treeKill from 'tree-kill';
 import { z } from 'zod/v4';
+import { config as appConfig } from '../../config/index.js';
+import { createLlmClient } from '../../lib/llm-client.js';
 import { agentMemoryService } from '../../modules/agent-memory/agent-memory.service.js';
+import { llmProviderService } from '../../modules/llm-provider/llm-provider.service.js';
 import { buildRoomMessageIndexSection } from '../../modules/message/room-message-index.service.js';
 import { quickChatSessionService } from '../../modules/quick-chat-session/quick-chat-session.service.js';
 import { skillInstallService } from '../../modules/skill/skill-install.service.js';
@@ -51,6 +54,8 @@ import {
 } from './agent-long-term-memory.js';
 import type {
     AgentDebugInfo,
+    AgentContextCompactionOptions,
+    AgentContextCompactionResult,
     AgentExecOptions,
     AgentExecResult,
     AgentSessionSnapshot,
@@ -113,6 +118,85 @@ function extractThinkingFromContent(content: unknown): string {
       return '';
     })
     .join('');
+}
+
+const DEFAULT_CLAUDE_SUMMARY_TRANSCRIPT_CHARS = 120_000;
+const CLAUDE_TRANSCRIPT_ENTRY_CHARS = 800;
+
+function truncateClaudeTranscriptEntry(
+  text: string,
+  limit = CLAUDE_TRANSCRIPT_ENTRY_CHARS,
+): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= limit) return trimmed;
+  return `${trimmed.slice(0, limit)}...(truncated)`;
+}
+
+function stringifyClaudeBlockValue(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value === undefined || value === null) return '';
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+export function extractClaudeConversationTranscript(
+  conversationPath: string,
+  maxChars = DEFAULT_CLAUDE_SUMMARY_TRANSCRIPT_CHARS,
+): string {
+  const text = fs.readFileSync(conversationPath, 'utf-8');
+  const entries: string[] = [];
+
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+
+    const message = parsed.message && typeof parsed.message === 'object'
+      ? parsed.message
+      : parsed;
+    const role = message.role || parsed.type;
+    const content = message.content ?? parsed.content;
+    if (role !== 'user' && role !== 'assistant') continue;
+
+    const textContent = typeof content === 'string'
+      ? content
+      : extractTextFromContent(content);
+    if (textContent.trim()) {
+      entries.push(
+        `${role === 'user' ? 'User' : 'Assistant'}: ${truncateClaudeTranscriptEntry(textContent, 4_000)}`,
+      );
+    }
+
+    if (!Array.isArray(content)) continue;
+    for (const block of content) {
+      if (!block || typeof block !== 'object') continue;
+      if (block.type === 'tool_use') {
+        entries.push(
+          `Tool[${block.name || 'tool'}]: ${truncateClaudeTranscriptEntry(stringifyClaudeBlockValue(block.input))}`,
+        );
+      } else if (block.type === 'tool_result') {
+        const output = typeof block.content === 'string'
+          ? block.content
+          : extractTextFromContent(block.content);
+        if (output.trim()) {
+          entries.push(`ToolResult: ${truncateClaudeTranscriptEntry(output)}`);
+        }
+      }
+    }
+  }
+
+  const transcript = entries.join('\n');
+  if (transcript.length <= maxChars) return transcript;
+  return transcript.slice(transcript.length - maxChars);
 }
 
 function normalizeUsage(usage: any): TokenUsage | undefined {
@@ -284,6 +368,59 @@ function isRecoverableSessionError(message: string): boolean {
   );
 }
 
+function createClaudeAbortError(signal?: AbortSignal): Error {
+  const reason = signal?.reason;
+  if (reason instanceof Error) return reason;
+  if (typeof reason === 'string' && reason.trim()) {
+    return new DOMException(reason, 'AbortError');
+  }
+  return new DOMException('执行已被用户中断', 'AbortError');
+}
+
+function appendClaudeStderrToError(error: unknown, stderr: string): unknown {
+  if (!(error instanceof Error)) return error;
+
+  const stderrTail = stderr.trim();
+  if (!stderrTail || error.message.includes(stderrTail)) return error;
+
+  const enriched = new Error(
+    `${error.message}\n\nClaude stderr:\n${stderrTail}`,
+    {cause: error},
+  );
+  enriched.name = error.name;
+  return enriched;
+}
+
+async function waitForAbortableClaudeNext<T>(
+  nextMessage: Promise<IteratorResult<T>>,
+  signal?: AbortSignal,
+): Promise<IteratorResult<T>> {
+  if (!signal) return await nextMessage;
+  if (signal.aborted) throw createClaudeAbortError(signal);
+
+  return await new Promise<IteratorResult<T>>((resolve, reject) => {
+    const cleanup = () => {
+      signal.removeEventListener('abort', onAbort);
+    };
+    const onAbort = () => {
+      cleanup();
+      reject(createClaudeAbortError(signal));
+    };
+
+    signal.addEventListener('abort', onAbort, {once: true});
+    nextMessage.then(
+      (result) => {
+        cleanup();
+        resolve(result);
+      },
+      (error) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
+}
+
 // 会话本身已不可用，必须重置（新建 session），无法靠 resume 同一会话恢复。
 // 注意：resetSession 会删除 jsonl 会话文件 = 丢掉整段对话历史，所以仅限这两类真正
 // 损坏/丢失的情况。其余可恢复错误（如子进程瞬时崩溃 exited with code 1、会话被占用）
@@ -366,6 +503,8 @@ export const __claudeSdkTestUtils = {
   getClaudeAutoCompactInternalActivityMaxMs,
   shouldApplyBackgroundIdleFinish,
   getClaudeAutoCompactWindow,
+  appendClaudeStderrToError,
+  waitForAbortableClaudeNext,
 };
 
 function resolveClaudeCodeExecutable(): string | undefined {
@@ -606,6 +745,8 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
   private lastResponse: string | null = null;
   private lastInvokeResult: string | null = null;
   private lastClaudeStderr = '';
+  private pendingCompactedContextSeed: string | null = null;
+  private compactStreamNoticeEmitted = false;
   private stopAutoCompactInternalActivity: (() => void) | null = null;
   // 懒解析：每次访问都查一次（几次 fs.existsSync，开销极小），避免实例化时
   // 用户尚未装 claude，后续装好仍因为缓存了 undefined 而继续报错。
@@ -1127,6 +1268,10 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
   ): string {
     let fullMessage = '';
 
+    if (this.pendingCompactedContextSeed) {
+      fullMessage += `${this.pendingCompactedContextSeed}\n\n`;
+    }
+
     const longTermMemorySection = buildAgentLongTermMemoryContentSection(
       this.agentId,
       this.name,
@@ -1209,6 +1354,7 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
     this.waitingForAssistantAfterToolResult = false;
     this.receivedAssistantEndTurn = false;
     this.pendingSegmentRecorded = false;
+    this.compactStreamNoticeEmitted = false;
   }
 
   private resetSession(): void {
@@ -1238,6 +1384,118 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
       newSessionId: this.sessionId,
       statePath: this.getSessionStatePath(),
     });
+  }
+
+  private async summarizeSessionForRetry(sessionId: string): Promise<string | null> {
+    const conversationPath = this.getClaudeConversationPath(sessionId);
+    if (!fs.existsSync(conversationPath)) return null;
+
+    let transcript: string;
+    try {
+      transcript = extractClaudeConversationTranscript(conversationPath);
+    } catch (error) {
+      console.warn(`${this.name}: 读取 Claude 会话转写失败:`, error);
+      return null;
+    }
+    if (!transcript.trim()) return null;
+
+    const provider = this.llmProvider || (await llmProviderService.findDefault());
+    if (!provider) {
+      debugLog('claudeSdkContextSummaryNoProvider', {
+        agentName: this.name,
+        sessionId,
+      });
+      return null;
+    }
+
+    const targetTokens = appConfig.agent.memorySummaryTargetTokens;
+    const model = createLlmClient(provider, {
+      temperature: 0.2,
+      maxTokens: targetTokens,
+    });
+
+    const prompt = `You are compacting a long coding-assistant session so the work can continue in a fresh context. Summarize the transcript below.
+
+Requirements:
+1. Do not invent information that is not present in the transcript.
+2. Preserve the user's explicit requests, constraints, and preferences.
+3. Preserve unfinished tasks and their current status and next steps.
+4. Preserve key technical details: file paths, function/class names, APIs, DB tables, commands, env vars, and error messages.
+5. Preserve decisions already made and the reasons for them.
+6. Drop pleasantries, repeated confirmations, and verbose tool output with no durable value.
+7. Output structured Markdown within about ${targetTokens} tokens.
+
+Output structure:
+## Current Goal
+## Completed Work
+## Open Tasks / Next Steps
+## Key Files and Code
+## User Preferences and Constraints
+## Key Decisions
+
+Session transcript (oldest to newest, possibly truncated to the most recent part):
+${transcript}
+
+Output the summary only.`;
+
+    try {
+      const summary = (
+        await model.invoke([
+          {
+            role: 'system',
+            content: 'You compact long coding sessions into a concise, faithful handoff summary.',
+          },
+          {role: 'user', content: prompt},
+        ])
+      ).trim();
+      if (!summary) return null;
+      return `[Previous Conversation Summary]
+The earlier conversation in this session repeatedly timed out and was compacted into the summary below. Continue the work based on it.
+
+${summary}`;
+    } catch (error) {
+      console.warn(`${this.name}: 生成 Claude 会话摘要失败:`, error);
+      return null;
+    }
+  }
+
+  async compactContextForRetry(
+    _options: AgentContextCompactionOptions,
+  ): Promise<AgentContextCompactionResult> {
+    if (this.stateless || !this.hasStartedSession || !this.sessionId) {
+      return {
+        compacted: false,
+        message: 'No resumable Claude session is available to compact.',
+      };
+    }
+
+    const previousSessionId = this.sessionId;
+    const summary = await this.summarizeSessionForRetry(previousSessionId);
+    if (!summary) {
+      return {
+        compacted: false,
+        message: 'Claude session summary was empty or unavailable.',
+      };
+    }
+
+    this.pendingCompactedContextSeed = summary;
+    this.sessionId = randomUUID();
+    this.hasStartedSession = false;
+    this.saveSessionId();
+    this.resetCollectors();
+    debugLog('claudeSdkContextCompactedForRetry', {
+      agentName: this.name,
+      agentId: this.agentId,
+      chatRoomId: this.chatRoomId,
+      previousSessionId,
+      newSessionId: this.sessionId,
+      summaryLength: summary.length,
+    });
+
+    return {
+      compacted: true,
+      summaryLength: summary.length,
+    };
   }
 
   private getSystemAssistantTools(): any[] {
@@ -1967,7 +2225,27 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
     this.stopAutoCompactInternalActivity = stop;
   }
 
-  private handleSdkMessage(message: SDKMessage): TokenUsage | undefined {
+  private markClaudeCompactActivity(
+    onInternalActivity?: (label: string) => void,
+    options?: { keepAlive?: boolean },
+  ): void {
+    onInternalActivity?.('claude-auto-compact');
+    if (!this.compactStreamNoticeEmitted) {
+      this.compactStreamNoticeEmitted = true;
+      this.emitStream?.('\n\n> 系统：正在压缩上下文，请稍候。\n\n');
+    }
+    if (options?.keepAlive) {
+      this.startAutoCompactInternalActivity({
+        enabled: Boolean(onInternalActivity),
+        onInternalActivity,
+      });
+    }
+  }
+
+  private handleSdkMessage(
+    message: SDKMessage,
+    onInternalActivity?: (label: string) => void,
+  ): TokenUsage | undefined {
     this.stopAutoCompactInternalActivity?.();
     this.stopAutoCompactInternalActivity = null;
 
@@ -2018,11 +2296,21 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
           }
         }
         if ((message as any).subtype === 'status') {
+          if ((message as any).status === 'compacting') {
+            this.markClaudeCompactActivity(onInternalActivity, {
+              keepAlive: true,
+            });
+          } else if ((message as any).compact_result) {
+            this.markClaudeCompactActivity(onInternalActivity);
+          }
           const status =
             (message as any).status?.text || (message as any).status?.message;
           if (typeof status === 'string') {
             this.content += status;
           }
+        }
+        if ((message as any).subtype === 'compact_boundary') {
+          this.markClaudeCompactActivity(onInternalActivity);
         }
         if (
           (message as any).subtype === 'task_updated' &&
@@ -2166,6 +2454,10 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
         }
 
         const nextMessage = iterator.next();
+        const abortableNextMessage = waitForAbortableClaudeNext(
+          nextMessage,
+          signal,
+        );
         const result =
           shouldApplyBackgroundIdleFinish({
             hasBackgroundedLongRunningCommand:
@@ -2175,7 +2467,7 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
               this.waitingForAssistantAfterToolResult,
           })
             ? await Promise.race([
-                nextMessage,
+                abortableNextMessage,
                 new Promise<{done: true; value: undefined; timedOut: true}>(
                   (resolve) => {
                     setTimeout(
@@ -2186,10 +2478,11 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
                   },
                 ),
               ])
-            : await nextMessage;
+            : await abortableNextMessage;
 
         if ('timedOut' in result) {
           nextMessage.catch(() => undefined);
+          abortableNextMessage.catch(() => undefined);
           console.warn(
             `${this.name}: Claude SDK 后台任务空闲 ${idleFinishMs}ms，主动结束本轮对话`,
           );
@@ -2200,7 +2493,7 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
         if (result.done) break;
 
         const sdkMessage = result.value;
-        const usage = this.handleSdkMessage(sdkMessage);
+        const usage = this.handleSdkMessage(sdkMessage, onInternalActivity);
         if (usage) tokenUsage = usage;
 
         if (this.receivedAssistantEndTurn && this.content.trim()) {
@@ -2251,6 +2544,7 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
       history,
       suppressAssistantHandoff,
     );
+    this.pendingCompactedContextSeed = null;
     this.lastContext = fullMessage;
     if (this.stateless) {
       this.sessionId = randomUUID();
@@ -2282,10 +2576,14 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
           options?.onInternalActivity,
         );
       } catch (error) {
-        const message = error instanceof Error ? error.message : '';
+        const enrichedError = appendClaudeStderrToError(
+          error,
+          this.lastClaudeStderr,
+        );
+        const message = enrichedError instanceof Error ? enrichedError.message : '';
         const errorDetails = `${message}\n${this.lastClaudeStderr}`;
         console.error(`${this.name}: Claude SDK query failed`, {
-          errorName: error instanceof Error ? error.name : undefined,
+          errorName: enrichedError instanceof Error ? enrichedError.name : undefined,
           errorMessage: message,
           stderrTail: this.lastClaudeStderr || undefined,
           shouldResume,
@@ -2302,7 +2600,7 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
 
         const canRetry = isRecoverableSessionError(errorDetails);
         if (!canRetry) {
-          throw error;
+          throw enrichedError;
         }
 
         // 仅当会话确实不可用时才 resetSession（会删除 jsonl 历史文件）。

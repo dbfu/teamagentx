@@ -6,6 +6,7 @@ import { describe, test } from 'node:test';
 import {
   ClaudeAgentSdkExecutor,
   __claudeSdkTestUtils,
+  extractClaudeConversationTranscript,
 } from '../../../core/agent/claude-sdk.executor.js';
 import {
   ensureAgentLongTermMemoryFile,
@@ -116,6 +117,51 @@ describe('ClaudeAgentSdkExecutor background idle finish', () => {
       });
 
       assert.deepEqual(chunks, ['hello from assistant']);
+    } finally {
+      fs.rmSync(workDir, {recursive: true, force: true});
+    }
+  });
+
+  test('emits a single compacting notice and reports internal activity', () => {
+    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-claude-compact-notice-'));
+    const executor = new ClaudeAgentSdkExecutor(
+      'claude',
+      'test prompt',
+      'room-compact-notice-test',
+      workDir,
+      true,
+      'agent-compact-notice-test',
+    );
+    const chunks: string[] = [];
+    const internalActivity: string[] = [];
+
+    try {
+      (executor as any).emitStream = (content: string) => chunks.push(content);
+      (executor as any).handleSdkMessage(
+        {
+          type: 'system',
+          subtype: 'status',
+          status: 'compacting',
+          session_id: 'session-1',
+        },
+        (label: string) => internalActivity.push(label),
+      );
+      (executor as any).handleSdkMessage(
+        {
+          type: 'system',
+          subtype: 'compact_boundary',
+          session_id: 'session-1',
+        },
+        (label: string) => internalActivity.push(label),
+      );
+
+      assert.equal(chunks.length, 1);
+      assert.match(chunks[0], /正在压缩上下文/);
+      assert.deepEqual(internalActivity, [
+        'claude-auto-compact',
+        'claude-auto-compact',
+        'claude-auto-compact',
+      ]);
     } finally {
       fs.rmSync(workDir, {recursive: true, force: true});
     }
@@ -235,6 +281,82 @@ describe('ClaudeAgentSdkExecutor background idle finish', () => {
       assert.match(fullMessage, /\[当前消息\]\nA$/);
     } finally {
       fs.rmSync(workDir, {recursive: true, force: true});
+    }
+  });
+
+  test('aborts a pending Claude iterator wait promptly', async () => {
+    const controller = new AbortController();
+    const pendingIterator = new Promise<IteratorResult<unknown>>(() => {});
+    const pending = __claudeSdkTestUtils.waitForAbortableClaudeNext(
+      pendingIterator,
+      controller.signal,
+    );
+
+    controller.abort(new Error('no activity timeout'));
+
+    await assert.rejects(pending, /no activity timeout/);
+  });
+
+  test('adds Claude stderr tail to user-facing errors', () => {
+    const original = new Error('Claude Code process exited with code 1');
+    const enriched = __claudeSdkTestUtils.appendClaudeStderrToError(
+      original,
+      'API Error: 401 Invalid authentication credentials',
+    );
+
+    assert(enriched instanceof Error);
+    assert.match(enriched.message, /Claude Code process exited with code 1/);
+    assert.match(enriched.message, /Claude stderr:/);
+    assert.match(enriched.message, /401 Invalid authentication credentials/);
+  });
+
+  test('extracts readable transcript from Claude conversation jsonl', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-claude-transcript-'));
+    const conversationPath = path.join(tempDir, 'session.jsonl');
+
+    try {
+      fs.writeFileSync(
+        conversationPath,
+        [
+          JSON.stringify({
+            message: {
+              role: 'user',
+              content: [{ type: 'text', text: '请检查构建失败' }],
+            },
+          }),
+          JSON.stringify({
+            message: {
+              role: 'assistant',
+              content: [
+                { type: 'text', text: '我会先跑测试' },
+                { type: 'tool_use', name: 'Bash', input: { command: 'pnpm build' } },
+              ],
+            },
+          }),
+          JSON.stringify({
+            message: {
+              role: 'user',
+              content: [
+                {
+                  type: 'tool_result',
+                  content: [{ type: 'text', text: 'TS2322: type mismatch' }],
+                },
+              ],
+            },
+          }),
+        ].join('\n'),
+        'utf-8',
+      );
+
+      const transcript = extractClaudeConversationTranscript(conversationPath);
+
+      assert.match(transcript, /User: 请检查构建失败/);
+      assert.match(transcript, /Assistant: 我会先跑测试/);
+      assert.match(transcript, /Tool\[Bash\]:/);
+      assert.match(transcript, /pnpm build/);
+      assert.match(transcript, /ToolResult: TS2322: type mismatch/);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });
 

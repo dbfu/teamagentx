@@ -51,6 +51,8 @@ import { GROUP_COORDINATOR_ID } from './system-assistant.constants.js';
 import { getContextResetCommand } from './context-reset-command.js';
 import type {
   AgentDebugInfo,
+  AgentContextCompactionOptions,
+  AgentContextCompactionResult,
   AgentExecOptions,
   AgentExecResult,
   AgentSessionSnapshot,
@@ -995,6 +997,7 @@ export class CodexSdkExecutor implements IAgentExecutor {
   private currentAbortController: AbortController | null = null;
   private thread: TeamAgentXCodexThread | null = null;
   private threadSuppressAssistantHandoff: boolean | null = null;
+  private pendingCompactedContextSeed: string | null = null;
   // 当前执行启用的连接器（MCP server），在每轮执行前预加载
   private connectorMcpServers: Record<string, Record<string, unknown>> = {};
   /** 事件流里最后一条被吞掉的瞬时错误信息，用于进程异常退出时还原真实失败原因。 */
@@ -1944,6 +1947,44 @@ Output the summary only.`;
     }
   }
 
+  async compactContextForRetry(
+    _options: AgentContextCompactionOptions,
+  ): Promise<AgentContextCompactionResult> {
+    if (this.stateless || !this.threadId) {
+      return {
+        compacted: false,
+        message: 'No resumable Codex thread is available to compact.',
+      };
+    }
+
+    const resumeThreadId = this.threadId;
+    const summary = await this.summarizeThreadSession(resumeThreadId);
+    if (!summary) {
+      return {
+        compacted: false,
+        message: 'Codex thread summary was empty or unavailable.',
+      };
+    }
+
+    this.pendingCompactedContextSeed = summary;
+    this.thread = null;
+    this.threadId = null;
+    this.saveThreadId();
+    this.resetCollectors();
+    debugLog('codexSdkContextCompactedForRetry', {
+      agentName: this.name,
+      agentId: this.agentId,
+      chatRoomId: this.chatRoomId,
+      previousThreadId: resumeThreadId,
+      summaryLength: summary.length,
+    });
+
+    return {
+      compacted: true,
+      summaryLength: summary.length,
+    };
+  }
+
   private buildEnv(): Record<string, string> {
     if (!this.llmProvider) {
       // 纯本地配置模式：auth.json 有 key/tokens，或 ~/.codex/config.toml 配了自定义
@@ -2589,7 +2630,10 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
     const { input, cleanup } = this.writeAttachments(attachments);
     const execStartTime = Date.now();
 
-    let activeInput = input;
+    let activeInput = this.pendingCompactedContextSeed
+      ? prependSeedToCodexInput(input, this.pendingCompactedContextSeed)
+      : input;
+    this.pendingCompactedContextSeed = null;
     let contextRecoveryDone = false;
 
     try {
