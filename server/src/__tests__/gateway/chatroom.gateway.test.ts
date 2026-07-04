@@ -236,6 +236,46 @@ describe('ChatRoom Gateway API', () => {
   });
 
   describe('POST /chatrooms/:id/duplicate', () => {
+    test('复制群聊时应复制环境变量配置', async () => {
+      const sourceResponse = await app.inject({
+        method: 'POST',
+        url: '/chatrooms',
+        payload: {
+          name: `Env Source Room ${Date.now()}`,
+          workDir: path.join(workDirRoot, 'env-source-room'),
+        },
+      });
+      assert.strictEqual(sourceResponse.statusCode, 201);
+      const sourceRoom = sourceResponse.json().data;
+      const envVars = JSON.stringify([
+        { key: 'DEPLOY_TOKEN', value: 'secret-token', description: '部署令牌' },
+        { key: 'TARGET_ENV', value: 'staging', description: '目标环境' },
+      ]);
+
+      await prisma.chatRoom.update({
+        where: { id: sourceRoom.id },
+        data: { envVars },
+      });
+
+      const duplicateResponse = await app.inject({
+        method: 'POST',
+        url: `/chatrooms/${sourceRoom.id}/duplicate`,
+        payload: {
+          name: `Env Copied Room ${Date.now()}`,
+        },
+      });
+
+      assert.strictEqual(duplicateResponse.statusCode, 201);
+      const copiedRoom = duplicateResponse.json().data;
+      assert.strictEqual(copiedRoom.envVars, envVars);
+
+      const storedCopiedRoom = await prisma.chatRoom.findUniqueOrThrow({
+        where: { id: copiedRoom.id },
+        select: { envVars: true },
+      });
+      assert.strictEqual(storedCopiedRoom.envVars, envVars);
+    });
+
     test('复制群聊时应复制自定义群命令', async () => {
       const sourceResponse = await app.inject({
         method: 'POST',

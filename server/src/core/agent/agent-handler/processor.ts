@@ -802,7 +802,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
                 });
 
                 resetAbortController();
-                const retryMessage = `\n\n系统：${noActivityTimeoutSeconds} 秒没有响应，正在第 ${noActivityAttempt} 次重试。\n\n`;
+                const retryMessage = `\n\n**系统：${noActivityTimeoutSeconds} 秒没有响应，正在第 ${noActivityAttempt} 次重试。**\n\n`;
                 streamCallback(retryMessage);
                 await sleepForNoActivityRetry(noActivityRetryDelayMs, abortController.signal);
               }

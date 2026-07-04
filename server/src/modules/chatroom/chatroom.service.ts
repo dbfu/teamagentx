@@ -429,6 +429,7 @@ export const chatRoomService = {
           rules: source.rules,
           dispatchRules: (source as any).dispatchRules,
           workDir: copiedWorkDir,
+          envVars: source.envVars,
           ownerId: source.ownerId,
           isQuickChatRoom: source.isQuickChatRoom,
           quickChatAgentId: source.quickChatAgentId,
