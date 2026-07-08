@@ -100,6 +100,40 @@ test('list_agents returns category name and categoryId', async () => {
   assert.match(text, /分类名称: Agent Creator Tool Test Category/);
 });
 
+test('get_agent_prompt returns normal assistant prompt', async () => {
+  const agent = await prisma.agent.create({
+    data: {
+      name: 'Agent Creator Tool Test Prompt Reader',
+      description: 'prompt reader target',
+      prompt: 'readable normal assistant prompt',
+    },
+  });
+
+  const result = await getTool('get_agent_prompt').invoke({ agentId: agent.id });
+  const parsed = JSON.parse(String(result));
+
+  assert.equal(parsed.success, true);
+  assert.equal(parsed.agent.id, agent.id);
+  assert.equal(parsed.agent.name, agent.name);
+  assert.equal(parsed.agent.prompt, 'readable normal assistant prompt');
+});
+
+test('get_agent_prompt rejects system assistant prompt', async () => {
+  const agent = await prisma.agent.create({
+    data: {
+      name: 'Agent Creator Tool Test System Prompt Reader',
+      prompt: 'system prompt should not be exposed',
+      agentLevel: 'system',
+    },
+  });
+
+  const result = await getTool('get_agent_prompt').invoke({ agentId: agent.id });
+  const parsed = JSON.parse(String(result));
+
+  assert.equal(parsed.success, false);
+  assert.equal(parsed.error, '系统助手提示词不支持读取。');
+});
+
 test('list_categories returns category ids and names', async () => {
   const category = await prisma.agentCategory.create({
     data: {

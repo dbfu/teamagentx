@@ -191,10 +191,11 @@ export function RoomSettingsPanel({
     try {
       const result = await window.electronAPI.openFolder(displayWorkDir, target, terminalOpenTarget)
       if (!result?.success) {
-        toast.error(t('chat.roomSettings.openFolderFailed'))
+        toast.error(result?.error ? `${t('chat.roomSettings.openFolderFailed')}: ${result.error}` : t('chat.roomSettings.openFolderFailed'))
       }
-    } catch {
-      toast.error(t('chat.roomSettings.openFolderFailed'))
+    } catch (error) {
+      const message = error instanceof Error ? error.message : ''
+      toast.error(message ? `${t('chat.roomSettings.openFolderFailed')}: ${message}` : t('chat.roomSettings.openFolderFailed'))
     } finally {
       setOpeningFolder(false)
     }

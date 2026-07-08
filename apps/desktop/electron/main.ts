@@ -649,30 +649,67 @@ const WIN_APP_CANDIDATES: Record<EditorOpenTarget, string[]> = {
   vscode: [
     '${LOCALAPPDATA}\\Programs\\Microsoft VS Code\\Code.exe',
     '${PROGRAMFILES}\\Microsoft VS Code\\Code.exe',
+    '${PROGRAMFILES(X86)}\\Microsoft VS Code\\Code.exe',
   ],
   cursor: [
     '${LOCALAPPDATA}\\Programs\\Cursor\\Cursor.exe',
     '${PROGRAMFILES}\\Cursor\\Cursor.exe',
+    '${PROGRAMFILES(X86)}\\Cursor\\Cursor.exe',
   ],
   trae: [
     '${LOCALAPPDATA}\\Programs\\Trae\\Trae.exe',
+    '${LOCALAPPDATA}\\Programs\\Trae CN\\Trae.exe',
+    '${LOCALAPPDATA}\\Programs\\Trae CN\\Trae CN.exe',
+    '${PROGRAMFILES}\\Trae\\Trae.exe',
+    '${PROGRAMFILES}\\Trae CN\\Trae.exe',
+    '${PROGRAMFILES}\\Trae CN\\Trae CN.exe',
+    '${PROGRAMFILES(X86)}\\Trae\\Trae.exe',
+    '${PROGRAMFILES(X86)}\\Trae CN\\Trae.exe',
+    '${PROGRAMFILES(X86)}\\Trae CN\\Trae CN.exe',
   ],
   'trae-cn': [
     '${LOCALAPPDATA}\\Programs\\Trae CN\\Trae CN.exe',
+    '${LOCALAPPDATA}\\Programs\\Trae CN\\Trae.exe',
+    '${LOCALAPPDATA}\\Programs\\Trae\\Trae CN.exe',
+    '${LOCALAPPDATA}\\Programs\\Trae\\Trae.exe',
+    '${PROGRAMFILES}\\Trae CN\\Trae CN.exe',
+    '${PROGRAMFILES}\\Trae CN\\Trae.exe',
+    '${PROGRAMFILES}\\Trae\\Trae CN.exe',
+    '${PROGRAMFILES}\\Trae\\Trae.exe',
+    '${PROGRAMFILES(X86)}\\Trae CN\\Trae CN.exe',
+    '${PROGRAMFILES(X86)}\\Trae CN\\Trae.exe',
+    '${PROGRAMFILES(X86)}\\Trae\\Trae CN.exe',
+    '${PROGRAMFILES(X86)}\\Trae\\Trae.exe',
   ],
+};
+
+const WIN_APP_COMMAND_CANDIDATES: Record<EditorOpenTarget, string[]> = {
+  vscode: ['code.cmd', 'code.exe', 'code'],
+  cursor: ['cursor.cmd', 'cursor.exe', 'cursor'],
+  trae: ['trae.cmd', 'trae.exe', 'trae'],
+  'trae-cn': ['trae-cn.cmd', 'trae-cn.exe', 'trae.cmd', 'trae.exe', 'trae'],
+};
+
+const WIN_APP_PATH_REGISTRY_NAMES: Record<EditorOpenTarget, string[]> = {
+  vscode: ['Code.exe'],
+  cursor: ['Cursor.exe'],
+  trae: ['Trae.exe'],
+  'trae-cn': ['Trae CN.exe', 'Trae.exe'],
 };
 
 function getAppCandidates(target: EditorOpenTarget): string[] {
   if (process.platform === 'win32') {
     const candidates = WIN_APP_CANDIDATES[target];
-    // Expand environment variables
-    return candidates.map(p => {
-      return p
-        .replace('${LOCALAPPDATA}', process.env.LOCALAPPDATA || '')
-        .replace('${PROGRAMFILES}', process.env.ProgramFiles || '');
-    });
+    return candidates.map(expandWindowsAppPath);
   }
   return MAC_APP_CANDIDATES[target];
+}
+
+function expandWindowsAppPath(candidate: string): string {
+  return candidate
+    .replace('${LOCALAPPDATA}', process.env.LOCALAPPDATA || '')
+    .replace('${PROGRAMFILES}', process.env.ProgramFiles || '')
+    .replace('${PROGRAMFILES(X86)}', process.env['ProgramFiles(x86)'] || process.env.ProgramFiles || '');
 }
 
 function resolveFolderPath(folderPath: string): string {
@@ -684,9 +721,18 @@ function resolveFolderPath(folderPath: string): string {
 function openFolderInApp(folderPath: string, appName: string): Promise<void> {
   return new Promise((resolve, reject) => {
     if (process.platform === 'win32') {
-      // Windows: use spawn with the app executable
-      spawn(appName, [folderPath], { detached: true, stdio: 'ignore' });
-      resolve();
+      const useShell = /\.(cmd|bat)$/i.test(appName);
+      const child = spawn(appName, [folderPath], {
+        detached: true,
+        shell: useShell,
+        stdio: 'ignore',
+        windowsHide: false,
+      });
+      child.once('error', reject);
+      child.once('spawn', () => {
+        child.unref();
+        resolve();
+      });
     } else {
       // macOS: use 'open' command
       execFile('open', ['-a', appName, folderPath], (error, _stdout, stderr) => {
@@ -1027,6 +1073,73 @@ function resolveExistingAppPath(candidates: string[]): string | null {
       return resolvedPath;
     }
   }
+  return null;
+}
+
+function resolveEditorAppPath(target: EditorOpenTarget): string | null {
+  const appPath = resolveExistingAppPath(getAppCandidates(target));
+  if (appPath || process.platform !== 'win32') {
+    return appPath;
+  }
+
+  for (const registryName of WIN_APP_PATH_REGISTRY_NAMES[target]) {
+    const registryPath = resolveWindowsAppPathFromRegistry(registryName);
+    if (registryPath) {
+      return registryPath;
+    }
+  }
+
+  for (const command of WIN_APP_COMMAND_CANDIDATES[target]) {
+    const commandPath = resolveWindowsCommandPath(command);
+    if (commandPath) {
+      return commandPath;
+    }
+  }
+
+  return null;
+}
+
+function resolveWindowsCommandPath(command: string): string | null {
+  try {
+    const stdout = execFileSync('where.exe', [command], {
+      encoding: 'utf-8',
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const firstPath = stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find(Boolean);
+    return firstPath || null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveWindowsAppPathFromRegistry(executableName: string): string | null {
+  const keys = [
+    `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\${executableName}`,
+    `HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\${executableName}`,
+    `HKLM\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\App Paths\\${executableName}`,
+  ];
+
+  for (const key of keys) {
+    try {
+      const stdout = execFileSync('reg.exe', ['query', key, '/ve'], {
+        encoding: 'utf-8',
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      const match = stdout.match(/REG_\w+\s+(.+)\s*$/m);
+      const appPath = match?.[1]?.trim();
+      if (appPath && pathExists(appPath)) {
+        return appPath;
+      }
+    } catch {
+      // Try the next registry key.
+    }
+  }
+
   return null;
 }
 
@@ -3058,7 +3171,7 @@ app.whenReady().then(async () => {
     const entries = await Promise.all(
       targets.map(async (target) => {
         try {
-          const appPath = resolveExistingAppPath(getAppCandidates(target));
+          const appPath = resolveEditorAppPath(target);
           if (!appPath) return [target, null] as const;
 
           const icon = await app.getFileIcon(appPath, { size: 'small' });
@@ -3093,9 +3206,10 @@ app.whenReady().then(async () => {
       } else if (target === 'terminal') {
         await openFolderInTerminal(resolvedPath, terminalTarget);
       } else {
-        const appPath = resolveExistingAppPath(getAppCandidates(target));
+        const appPath = resolveEditorAppPath(target);
         if (!appPath) {
-          return { success: false, error: `${target} not found` };
+          const targetName = EDITOR_APP_NAMES[target] || target;
+          return { success: false, error: `${targetName} not found. Please check whether it is installed or available in PATH.` };
         }
         await openFolderInApp(resolvedPath, appPath);
       }

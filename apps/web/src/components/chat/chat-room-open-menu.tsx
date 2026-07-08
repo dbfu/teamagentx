@@ -73,10 +73,11 @@ export function ChatRoomOpenMenu({ chatRoom, isElectron }: ChatRoomOpenMenuProps
     try {
       const result = await window.electronAPI.openFolder(getRoomWorkDir(chatRoom), target, terminalOpenTarget)
       if (!result?.success) {
-        toast.error(t('chat.roomSettings.openFolderFailed'))
+        toast.error(result?.error ? `${t('chat.roomSettings.openFolderFailed')}: ${result.error}` : t('chat.roomSettings.openFolderFailed'))
       }
     } catch (error) {
-      toast.error(t('chat.roomSettings.openFolderFailed'))
+      const message = error instanceof Error ? error.message : ''
+      toast.error(message ? `${t('chat.roomSettings.openFolderFailed')}: ${message}` : t('chat.roomSettings.openFolderFailed'))
     }
   }
 

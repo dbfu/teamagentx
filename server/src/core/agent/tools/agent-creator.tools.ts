@@ -86,6 +86,11 @@ type UpdateAgentConfig = {
   injectGroupHistory?: boolean;
 };
 
+type GetAgentPromptInput = {
+  agentId?: string;
+  name?: string;
+};
+
 type AgentCreationModelSnapshot = {
   defaultTextProvider: LlmProvider | null;
   activeTextProviders: LlmProvider[];
@@ -755,6 +760,57 @@ export const listAgentsTool = tool(
   },
 );
 
+// 读取普通助手提示词工具。系统助手提示词属于产品内置编排逻辑，不通过群助手暴露。
+export const getAgentPromptTool = tool(
+  async ({ agentId, name }: GetAgentPromptInput) => {
+    const normalizedAgentId = agentId?.trim();
+    const normalizedName = name?.trim();
+
+    if (!normalizedAgentId && !normalizedName) {
+      return JSON.stringify({
+        success: false,
+        error: '请提供助手 ID 或名称。可先调用 list_agents 获取助手 ID。',
+      });
+    }
+
+    const agent = normalizedAgentId
+      ? await agentService.findById(normalizedAgentId)
+      : await agentService.findByName(normalizedName!);
+
+    if (!agent) {
+      return JSON.stringify({
+        success: false,
+        error: '助手不存在。',
+      });
+    }
+
+    if (agent.agentLevel === 'system') {
+      return JSON.stringify({
+        success: false,
+        error: '系统助手提示词不支持读取。',
+      });
+    }
+
+    return JSON.stringify({
+      success: true,
+      agent: {
+        id: agent.id,
+        name: agent.name,
+        description: agent.description,
+        prompt: agent.prompt,
+      },
+    });
+  },
+  {
+    name: 'get_agent_prompt',
+    description: '读取普通助手的系统提示词。只支持自定义/普通助手；系统助手提示词不开放读取。需要查看或改写某个助手提示词时，先用 list_agents 找到助手 ID，再调用此工具。',
+    schema: z.object({
+      agentId: z.string().optional().describe('助手 ID，优先使用 list_agents 返回的 ID'),
+      name: z.string().optional().describe('助手名称；没有 ID 时可使用名称查询'),
+    }),
+  },
+);
+
 export const listCategoriesTool = tool(
   async () => {
     const categories = await categoryService.findAll();
@@ -1036,6 +1092,7 @@ export function createAgentCreatorTools(defaultChatRoomId?: string) {
     createCreateAgentTool(defaultChatRoomId),
     createCreateAgentsTool(defaultChatRoomId),
     listAgentsTool,
+    getAgentPromptTool,
     listCategoriesTool,
     listVoicePresetsTool,
     listVoiceCatalogTool,
