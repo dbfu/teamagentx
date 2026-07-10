@@ -317,7 +317,21 @@ describe('ClaudeAgentSdkExecutor background idle finish', () => {
       agentId,
       'ClaudeAgent',
     );
+    const skillsDir = skillInstallService.getGlobalAgentSkillsDir(agentId);
+    const skillDir = path.join(skillsDir, 'release-checklist');
     fs.writeFileSync(agentMemoryFile, 'Global memory applies.', 'utf-8');
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(skillDir, 'SKILL.md'),
+      [
+        '---',
+        'name: Release Checklist',
+        'description: Run release validation steps before shipping',
+        '---',
+        'body',
+      ].join('\n'),
+      'utf-8',
+    );
 
     const executor = new ClaudeAgentSdkExecutor(
       'ClaudeAgent',
@@ -343,6 +357,9 @@ describe('ClaudeAgentSdkExecutor background idle finish', () => {
       assert.match(sdkSystemPrompt, /\[Long-Term Memory Rules\]/);
       assert.match(sdkSystemPrompt, /Use this exact file path/);
       assert.ok(sdkSystemPrompt.includes(agentMemoryFile));
+      assert.match(sdkSystemPrompt, /## Installed Skills/);
+      assert.match(sdkSystemPrompt, /Release Checklist: Run release validation steps before shipping/);
+      assert.match(sdkSystemPrompt, /teamagentx\/release-checklist\/SKILL\.md/);
       assert.match(
         sdkSystemPrompt,
         /最终回答请使用人类可读的 Markdown。/,
@@ -360,6 +377,8 @@ describe('ClaudeAgentSdkExecutor background idle finish', () => {
       assert.doesNotMatch(sdkSystemPrompt, /Global memory applies\./);
       assert.doesNotMatch(fullMessage, /\[System Instructions\]/);
       assert.doesNotMatch(fullMessage, /\[Long-Term Memory Rules\]/);
+      assert.doesNotMatch(fullMessage, /## Installed Skills/);
+      assert.doesNotMatch(fullMessage, /Release Checklist/);
       assert.doesNotMatch(fullMessage, /\[群聊成员信息\]/);
       assert.doesNotMatch(
         fullMessage,
@@ -373,6 +392,10 @@ describe('ClaudeAgentSdkExecutor background idle finish', () => {
     } finally {
       fs.rmSync(workDir, {recursive: true, force: true});
       fs.rmSync(agentMemoryFile, {force: true});
+      fs.rmSync(path.join(os.homedir(), '.teamagentx', 'agents', agentId), {
+        recursive: true,
+        force: true,
+      });
     }
   });
 

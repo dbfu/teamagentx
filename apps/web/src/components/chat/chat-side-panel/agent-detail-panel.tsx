@@ -1,8 +1,7 @@
 import { cn } from '@/lib/utils'
-import { Bot, Eye, History, Loader2, Trash2, ExternalLink, List, Send } from 'lucide-react'
+import { Bot, Eye, History, Loader2, Trash2, Info, List, Send } from 'lucide-react'
 import type { AgentStatus } from '@/stores/socket-store'
 import { useState, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useChatStore } from '@/stores/chat-store'
 import { chatRoomApi } from '@/lib/agent-api'
 import { toast } from 'sonner'
@@ -22,6 +21,7 @@ interface AgentDetailPanelProps {
   onViewStream?: () => void
   onViewTaskQueue?: () => void
   onAgentSettingsChange?: (settings: { injectGroupHistory: boolean }) => void
+  onViewAssistantDetails?: () => void
   variant?: 'default' | 'warm' // warm 用于 3D 办公室的黄色主题
   onAssignTask?: () => void // 分配任务回调（用于 3D 办公室）
 }
@@ -44,11 +44,11 @@ export function AgentDetailPanel({
   onViewStream,
   onViewTaskQueue,
   onAgentSettingsChange,
+  onViewAssistantDetails,
   variant = 'default',
   onAssignTask,
 }: AgentDetailPanelProps) {
   const { t } = useTranslation()
-  const navigate = useNavigate()
   const isActive = agentStatus === 'executing' || agentStatus === 'busy'
   const statusConfig = agentStatus ? getStatusConfig(agentStatus, t) : null
 
@@ -265,9 +265,9 @@ export function AgentDetailPanel({
                   ? "border-amber-200 bg-transparent text-amber-700 hover:bg-amber-100 hover:text-amber-800"
                   : "border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground"
               )}
-              onClick={() => navigate(`/assistant/${selectedRoomAgent?.id}`)}
+              onClick={onViewAssistantDetails}
             >
-              <ExternalLink className="size-3.5" />
+              <Info className="size-3.5" />
               {t('chat.agentDetail.assistantDetails')}
             </button>
           )}

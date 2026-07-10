@@ -6,8 +6,9 @@ import { isStreamViewBlocked } from '@/lib/system-agents'
 import { useChatStore, useThrottledStreamEvents, type SidePanelMode } from '@/stores/chat-store'
 import type { AgentStatus } from '@/stores/socket-store'
 import { Bot, ClipboardList, Clock, Info, List, Loader2, MessageSquareMore, MessagesSquare, Settings, Users } from 'lucide-react'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { AssistantDetailModal } from '../assistant-detail'
 import { AgentDetailPanel } from './agent-detail-panel'
 import { AgentsPanel } from './agents-panel'
 import { ClaudeLocalSessionsPanel } from './claude-local-sessions-panel'
@@ -95,6 +96,7 @@ export function ChatSidePanel({
   onInsertMention,
 }: ChatSidePanelProps) {
   const { t } = useTranslation()
+  const [assistantDetailModalOpen, setAssistantDetailModalOpen] = useState(false)
   // 仅打开流式面板时读取事件，关闭状态不启动轮询。
   const streamEvents = useThrottledStreamEvents(80, open && sidePanelMode === 'stream')
   // 来源保存在 store 中，避免跳转详情页导致组件卸载后丢失返回层级。
@@ -473,8 +475,15 @@ export function ChatSidePanel({
           onViewStream={handleViewStream}
           onViewTaskQueue={handleViewTaskQueue}
           onAgentSettingsChange={handleAgentSettingsChange}
+          onViewAssistantDetails={() => setAssistantDetailModalOpen(true)}
         />
       )}
+
+      <AssistantDetailModal
+        agentId={selectedRoomAgent?.id ?? null}
+        open={assistantDetailModalOpen}
+        onOpenChange={setAssistantDetailModalOpen}
+      />
 
       {sidePanelMode === 'context' && (
         <ContextPanel

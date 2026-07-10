@@ -68,7 +68,10 @@ import type {
 } from './executor.interface.js';
 import { coerceThinkingText } from './executor.interface.js';
 import { generateImageForAgent } from './image-generation.service.js';
-import { buildInstalledSkillNames } from './skill-instructions.js';
+import {
+  buildInstalledSkillNames,
+  buildInstalledSkillsInstructions,
+} from './skill-instructions.js';
 import { getContextResetCommand } from './context-reset-command.js';
 import {
   syncGlobalClaudeLocalConfig,
@@ -1156,6 +1159,7 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
         this.agentId,
         this.name,
       ),
+      buildInstalledSkillsInstructions(this.agentId),
       this.buildGroupChatMemberInfoSection(suppressAssistantHandoff),
       getResponseStyleInstruction(this.locale),
     ]

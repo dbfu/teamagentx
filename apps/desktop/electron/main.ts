@@ -658,43 +658,96 @@ const WIN_APP_CANDIDATES: Record<EditorOpenTarget, string[]> = {
   ],
   trae: [
     '${LOCALAPPDATA}\\Programs\\Trae\\Trae.exe',
+    '${LOCALAPPDATA}\\Programs\\Trae\\TraeCN.exe',
     '${LOCALAPPDATA}\\Programs\\Trae CN\\Trae.exe',
     '${LOCALAPPDATA}\\Programs\\Trae CN\\Trae CN.exe',
+    '${LOCALAPPDATA}\\Programs\\Trae CN\\TraeCN.exe',
+    '${LOCALAPPDATA}\\Programs\\TraeCN\\Trae.exe',
+    '${LOCALAPPDATA}\\Programs\\TraeCN\\TraeCN.exe',
     '${PROGRAMFILES}\\Trae\\Trae.exe',
+    '${PROGRAMFILES}\\Trae\\TraeCN.exe',
     '${PROGRAMFILES}\\Trae CN\\Trae.exe',
     '${PROGRAMFILES}\\Trae CN\\Trae CN.exe',
+    '${PROGRAMFILES}\\Trae CN\\TraeCN.exe',
+    '${PROGRAMFILES}\\TraeCN\\Trae.exe',
+    '${PROGRAMFILES}\\TraeCN\\TraeCN.exe',
     '${PROGRAMFILES(X86)}\\Trae\\Trae.exe',
+    '${PROGRAMFILES(X86)}\\Trae\\TraeCN.exe',
     '${PROGRAMFILES(X86)}\\Trae CN\\Trae.exe',
     '${PROGRAMFILES(X86)}\\Trae CN\\Trae CN.exe',
+    '${PROGRAMFILES(X86)}\\Trae CN\\TraeCN.exe',
+    '${PROGRAMFILES(X86)}\\TraeCN\\Trae.exe',
+    '${PROGRAMFILES(X86)}\\TraeCN\\TraeCN.exe',
   ],
   'trae-cn': [
     '${LOCALAPPDATA}\\Programs\\Trae CN\\Trae CN.exe',
     '${LOCALAPPDATA}\\Programs\\Trae CN\\Trae.exe',
+    '${LOCALAPPDATA}\\Programs\\Trae CN\\TraeCN.exe',
     '${LOCALAPPDATA}\\Programs\\Trae\\Trae CN.exe',
     '${LOCALAPPDATA}\\Programs\\Trae\\Trae.exe',
+    '${LOCALAPPDATA}\\Programs\\Trae\\TraeCN.exe',
+    '${LOCALAPPDATA}\\Programs\\TraeCN\\Trae CN.exe',
+    '${LOCALAPPDATA}\\Programs\\TraeCN\\Trae.exe',
+    '${LOCALAPPDATA}\\Programs\\TraeCN\\TraeCN.exe',
     '${PROGRAMFILES}\\Trae CN\\Trae CN.exe',
     '${PROGRAMFILES}\\Trae CN\\Trae.exe',
+    '${PROGRAMFILES}\\Trae CN\\TraeCN.exe',
     '${PROGRAMFILES}\\Trae\\Trae CN.exe',
     '${PROGRAMFILES}\\Trae\\Trae.exe',
+    '${PROGRAMFILES}\\Trae\\TraeCN.exe',
+    '${PROGRAMFILES}\\TraeCN\\Trae CN.exe',
+    '${PROGRAMFILES}\\TraeCN\\Trae.exe',
+    '${PROGRAMFILES}\\TraeCN\\TraeCN.exe',
     '${PROGRAMFILES(X86)}\\Trae CN\\Trae CN.exe',
     '${PROGRAMFILES(X86)}\\Trae CN\\Trae.exe',
+    '${PROGRAMFILES(X86)}\\Trae CN\\TraeCN.exe',
     '${PROGRAMFILES(X86)}\\Trae\\Trae CN.exe',
     '${PROGRAMFILES(X86)}\\Trae\\Trae.exe',
+    '${PROGRAMFILES(X86)}\\Trae\\TraeCN.exe',
+    '${PROGRAMFILES(X86)}\\TraeCN\\Trae CN.exe',
+    '${PROGRAMFILES(X86)}\\TraeCN\\Trae.exe',
+    '${PROGRAMFILES(X86)}\\TraeCN\\TraeCN.exe',
   ],
 };
 
 const WIN_APP_COMMAND_CANDIDATES: Record<EditorOpenTarget, string[]> = {
   vscode: ['code.cmd', 'code.exe', 'code'],
   cursor: ['cursor.cmd', 'cursor.exe', 'cursor'],
-  trae: ['trae.cmd', 'trae.exe', 'trae'],
-  'trae-cn': ['trae-cn.cmd', 'trae-cn.exe', 'trae.cmd', 'trae.exe', 'trae'],
+  trae: ['trae.cmd', 'trae.exe', 'trae', 'traecn.cmd', 'traecn.exe', 'traecn'],
+  'trae-cn': ['trae-cn.cmd', 'trae-cn.exe', 'trae-cn', 'traecn.cmd', 'traecn.exe', 'traecn', 'trae.cmd', 'trae.exe', 'trae'],
 };
 
 const WIN_APP_PATH_REGISTRY_NAMES: Record<EditorOpenTarget, string[]> = {
   vscode: ['Code.exe'],
   cursor: ['Cursor.exe'],
-  trae: ['Trae.exe'],
-  'trae-cn': ['Trae CN.exe', 'Trae.exe'],
+  trae: ['Trae.exe', 'TraeCN.exe'],
+  'trae-cn': ['Trae CN.exe', 'TraeCN.exe', 'Trae.exe'],
+};
+
+const WIN_APP_EXECUTABLE_NAMES: Record<EditorOpenTarget, string[]> = {
+  vscode: ['Code.exe'],
+  cursor: ['Cursor.exe'],
+  trae: ['Trae.exe', 'TraeCN.exe', 'Trae CN.exe'],
+  'trae-cn': ['Trae CN.exe', 'TraeCN.exe', 'Trae.exe'],
+};
+
+const WIN_APP_DIRECTORY_PATTERNS: Record<EditorOpenTarget, RegExp> = {
+  vscode: /(?:^|[\s_-])(?:code|visual studio code|vscode)(?:$|[\s_-])/i,
+  cursor: /cursor/i,
+  trae: /trae/i,
+  'trae-cn': /trae/i,
+};
+
+const WIN_APP_SHORTCUT_NAMES: Record<EditorOpenTarget, RegExp> = {
+  vscode: /(?:visual studio code|code)\.lnk$/i,
+  cursor: /cursor\.lnk$/i,
+  trae: /trae(?:\s*cn)?\.lnk$/i,
+  'trae-cn': /trae(?:\s*cn)?\.lnk$/i,
+};
+
+const EDITOR_PROTOCOL_SCHEMES: Partial<Record<EditorOpenTarget, string[]>> = {
+  trae: ['trae'],
+  'trae-cn': ['trae-cn'],
 };
 
 function getAppCandidates(target: EditorOpenTarget): string[] {
@@ -721,10 +774,13 @@ function resolveFolderPath(folderPath: string): string {
 function openFolderInApp(folderPath: string, appName: string): Promise<void> {
   return new Promise((resolve, reject) => {
     if (process.platform === 'win32') {
-      const useShell = /\.(cmd|bat)$/i.test(appName);
-      const child = spawn(appName, [folderPath], {
+      const isShellTarget = /\.(cmd|bat|lnk)$/i.test(appName);
+      const command = isShellTarget ? 'cmd.exe' : appName;
+      const args = isShellTarget
+        ? ['/c', 'start', '', appName, folderPath]
+        : [folderPath];
+      const child = spawn(command, args, {
         detached: true,
-        shell: useShell,
         stdio: 'ignore',
         windowsHide: false,
       });
@@ -1089,6 +1145,11 @@ function resolveEditorAppPath(target: EditorOpenTarget): string | null {
     }
   }
 
+  const protocolAppPath = resolveWindowsProtocolAppPath(target);
+  if (protocolAppPath) {
+    return protocolAppPath;
+  }
+
   for (const command of WIN_APP_COMMAND_CANDIDATES[target]) {
     const commandPath = resolveWindowsCommandPath(command);
     if (commandPath) {
@@ -1096,7 +1157,114 @@ function resolveEditorAppPath(target: EditorOpenTarget): string | null {
     }
   }
 
+  const discoveredAppPath = findWindowsEditorAppPath(target);
+  if (discoveredAppPath) {
+    return discoveredAppPath;
+  }
+
+  const shortcutPath = findWindowsEditorShortcut(target);
+  if (shortcutPath) {
+    return shortcutPath;
+  }
+
   return null;
+}
+
+function resolveWindowsProtocolAppPath(target: EditorOpenTarget): string | null {
+  const schemes = EDITOR_PROTOCOL_SCHEMES[target];
+  if (!schemes?.length) {
+    return null;
+  }
+
+  const executableNames = new Set(WIN_APP_EXECUTABLE_NAMES[target].map((name) => name.toLowerCase()));
+
+  for (const scheme of schemes) {
+    const command = resolveWindowsProtocolCommand(scheme);
+    if (!command) {
+      continue;
+    }
+
+    const executablePaths = extractWindowsExecutablePaths(command);
+    for (const executablePath of executablePaths) {
+      const normalizedPath = expandWindowsEnvironmentVariables(executablePath);
+      if (pathExists(normalizedPath) && executableNames.has(path.basename(normalizedPath).toLowerCase())) {
+        return normalizedPath;
+      }
+
+      const discoveredPath = findExecutableUnderWindowsRoot(
+        path.dirname(normalizedPath),
+        executableNames,
+        /.*/,
+      );
+      if (discoveredPath) {
+        return discoveredPath;
+      }
+    }
+  }
+
+  return null;
+}
+
+function resolveWindowsProtocolCommand(scheme: string): string | null {
+  const keys = [
+    `HKCU\\Software\\Classes\\${scheme}\\shell\\open\\command`,
+    `HKLM\\Software\\Classes\\${scheme}\\shell\\open\\command`,
+    `HKCR\\${scheme}\\shell\\open\\command`,
+  ];
+
+  for (const key of keys) {
+    try {
+      const stdout = execFileSync('reg.exe', ['query', key, '/ve'], {
+        encoding: 'utf-8',
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      const command = parseWindowsRegistryDefaultValue(stdout);
+      if (command) {
+        return command;
+      }
+    } catch {
+      // Try the next registry key.
+    }
+  }
+
+  return null;
+}
+
+function extractWindowsExecutablePaths(command: string): string[] {
+  const paths: string[] = [];
+  const quotedExePattern = /"([^"]+\.exe)"/gi;
+  const bareExePattern = /((?:%[^%]+%|[A-Za-z]:)[^\s"]*?\.exe)/gi;
+
+  for (const match of command.matchAll(quotedExePattern)) {
+    if (match[1]) {
+      paths.push(match[1]);
+    }
+  }
+
+  for (const match of command.matchAll(bareExePattern)) {
+    if (match[1]) {
+      paths.push(match[1]);
+    }
+  }
+
+  return Array.from(new Set(paths));
+}
+
+function parseWindowsRegistryDefaultValue(stdout: string): string | null {
+  for (const line of stdout.split(/\r?\n/)) {
+    const match = line.match(/REG_\w+\s+(.+)\s*$/);
+    const value = match?.[1]?.trim();
+    if (value) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function expandWindowsEnvironmentVariables(value: string): string {
+  return value.replace(/%([^%]+)%/g, (_match, name: string) => process.env[name] || process.env[name.toUpperCase()] || '');
 }
 
 function resolveWindowsCommandPath(command: string): string | null {
@@ -1130,8 +1298,7 @@ function resolveWindowsAppPathFromRegistry(executableName: string): string | nul
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'ignore'],
       });
-      const match = stdout.match(/REG_\w+\s+(.+)\s*$/m);
-      const appPath = match?.[1]?.trim();
+      const appPath = parseWindowsRegistryDefaultValue(stdout);
       if (appPath && pathExists(appPath)) {
         return appPath;
       }
@@ -1141,6 +1308,118 @@ function resolveWindowsAppPathFromRegistry(executableName: string): string | nul
   }
 
   return null;
+}
+
+function findWindowsEditorAppPath(target: EditorOpenTarget): string | null {
+  const executableNames = new Set(WIN_APP_EXECUTABLE_NAMES[target].map((name) => name.toLowerCase()));
+  const directoryPattern = WIN_APP_DIRECTORY_PATTERNS[target];
+
+  for (const root of getWindowsAppSearchRoots()) {
+    const foundPath = findExecutableUnderWindowsRoot(root, executableNames, directoryPattern);
+    if (foundPath) {
+      return foundPath;
+    }
+  }
+
+  return null;
+}
+
+function getWindowsAppSearchRoots(): string[] {
+  return uniqueExistingPaths([
+    process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Programs') : '',
+    process.env.LOCALAPPDATA || '',
+    process.env.APPDATA || '',
+    process.env.ProgramFiles || '',
+    process.env['ProgramFiles(x86)'] || '',
+  ]);
+}
+
+function findExecutableUnderWindowsRoot(
+  root: string,
+  executableNames: Set<string>,
+  directoryPattern: RegExp,
+): string | null {
+  const maxDepth = 6;
+  const stack: Array<{ dirPath: string; depth: number; matched: boolean }> = [
+    { dirPath: root, depth: 0, matched: directoryPattern.test(path.basename(root)) },
+  ];
+
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    let entries: fs.Dirent[];
+
+    try {
+      entries = fs.readdirSync(current.dirPath, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const entryPath = path.join(current.dirPath, entry.name);
+      if (entry.isFile() && executableNames.has(entry.name.toLowerCase()) && current.matched) {
+        return entryPath;
+      }
+      if (!entry.isDirectory() || current.depth >= maxDepth) {
+        continue;
+      }
+
+      const childMatched = current.matched || directoryPattern.test(entry.name);
+      if (childMatched || current.depth === 0) {
+        stack.push({ dirPath: entryPath, depth: current.depth + 1, matched: childMatched });
+      }
+    }
+  }
+
+  return null;
+}
+
+function findWindowsEditorShortcut(target: EditorOpenTarget): string | null {
+  const shortcutPattern = WIN_APP_SHORTCUT_NAMES[target];
+  const roots = uniqueExistingPaths([
+    process.env.APPDATA ? path.join(process.env.APPDATA, 'Microsoft', 'Windows', 'Start Menu', 'Programs') : '',
+    process.env.ProgramData ? path.join(process.env.ProgramData, 'Microsoft', 'Windows', 'Start Menu', 'Programs') : '',
+  ]);
+
+  for (const root of roots) {
+    const shortcutPath = findShortcutUnderWindowsRoot(root, shortcutPattern);
+    if (shortcutPath) {
+      return shortcutPath;
+    }
+  }
+
+  return null;
+}
+
+function findShortcutUnderWindowsRoot(root: string, shortcutPattern: RegExp): string | null {
+  const stack: Array<{ dirPath: string; depth: number }> = [{ dirPath: root, depth: 0 }];
+  const maxDepth = 4;
+
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    let entries: fs.Dirent[];
+
+    try {
+      entries = fs.readdirSync(current.dirPath, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const entryPath = path.join(current.dirPath, entry.name);
+      if (entry.isFile() && shortcutPattern.test(entry.name)) {
+        return entryPath;
+      }
+      if (entry.isDirectory() && current.depth < maxDepth) {
+        stack.push({ dirPath: entryPath, depth: current.depth + 1 });
+      }
+    }
+  }
+
+  return null;
+}
+
+function uniqueExistingPaths(paths: string[]): string[] {
+  return Array.from(new Set(paths.filter(Boolean))).filter(pathExists);
 }
 
 function pathExists(targetPath: string): boolean {
@@ -3209,7 +3488,9 @@ app.whenReady().then(async () => {
         const appPath = resolveEditorAppPath(target);
         if (!appPath) {
           const targetName = EDITOR_APP_NAMES[target] || target;
-          return { success: false, error: `${targetName} not found. Please check whether it is installed or available in PATH.` };
+          const schemes = EDITOR_PROTOCOL_SCHEMES[target];
+          const protocolHint = schemes?.length ? `, or registered protocol handler ${schemes.map((scheme) => `${scheme}://`).join(', ')}` : '';
+          return { success: false, error: `${targetName} not found. Please check whether it is installed, available in PATH${protocolHint}.` };
         }
         await openFolderInApp(resolvedPath, appPath);
       }

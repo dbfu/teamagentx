@@ -1,5 +1,6 @@
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Agent, AgentSpeechConfig, agentApi, type AgentThinkingMode } from '@/lib/agent-api'
@@ -87,6 +88,8 @@ function ErrorState({ error, onBack }: { error: string; onBack: () => void }) {
 // 头部信息区域
 function AssistantHeader({
   agent,
+  onBack,
+  showBack,
   onQuickChat,
   onEdit,
   onUpdateStatus,
@@ -94,6 +97,8 @@ function AssistantHeader({
   isToggling,
 }: {
   agent: Agent
+  onBack: () => void
+  showBack: boolean
   onQuickChat?: () => void
   onEdit?: () => void
   onUpdateStatus?: (isActive: boolean) => void
@@ -105,14 +110,15 @@ function AssistantHeader({
 
   return (
     <div className="px-8 py-4">
-      {/* 返回按钮 */}
-      <button
-        onClick={() => window.history.back()}
-        className="mb-4 flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <ArrowLeft className="size-4" />
-        {t('assistant.backToList')}
-      </button>
+      {showBack && (
+        <button
+          onClick={onBack}
+          className="mb-4 flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ArrowLeft className="size-4" />
+          {t('assistant.backToList')}
+        </button>
+      )}
 
       {/* 主信息区 */}
       <div className="flex items-start gap-6">
@@ -231,9 +237,15 @@ function AssistantHeader({
   )
 }
 
-export function AssistantDetailPage() {
+interface AssistantDetailContentProps {
+  agentId: string
+  onClose: () => void
+  onBack?: () => void
+  showBack?: boolean
+}
+
+function AssistantDetailContent({ agentId, onClose, onBack = onClose, showBack = true }: AssistantDetailContentProps) {
   const { t } = useTranslation()
-  const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const isMobile = useIsMobile()
   const { user: currentUser } = useAuthStore()
@@ -255,12 +267,7 @@ export function AssistantDetailPage() {
     refreshSkills,
     uninstallSkill,
     updateStatus,
-  } = useAssistantDetail(id!)
-
-  // 返回助手列表
-  const handleBack = () => {
-    navigate('/assistant')
-  }
+  } = useAssistantDetail(agentId)
 
   // 快速对话 - 和助手列表页一样
   const handleQuickChat = () => {
@@ -380,11 +387,11 @@ export function AssistantDetailPage() {
   }
 
   if (error || !agent) {
-    return <ErrorState error={error || t('assistant.assistantNotFound')} onBack={handleBack} />
+    return <ErrorState error={error || t('assistant.assistantNotFound')} onBack={onClose} />
   }
 
   if (isSystemAssistantDetailBlocked(agent)) {
-    return <ErrorState error={t('assistant.systemAssistantDetailBlocked')} onBack={handleBack} />
+    return <ErrorState error={t('assistant.systemAssistantDetailBlocked')} onBack={onClose} />
   }
 
   const showVoiceSettings = agent.agentLevel !== 'system'
@@ -394,6 +401,8 @@ export function AssistantDetailPage() {
       {/* 头部信息区域 */}
       <AssistantHeader
         agent={agent}
+        onBack={onBack}
+        showBack={showBack}
         onQuickChat={handleQuickChat}
         onEdit={handleEdit}
         onUpdateStatus={handleUpdateStatus}
@@ -515,5 +524,43 @@ export function AssistantDetailPage() {
         mode="edit"
       />
     </div>
+  )
+}
+
+interface AssistantDetailModalProps {
+  agentId: string | null
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}
+
+export function AssistantDetailModal({ agentId, open, onOpenChange }: AssistantDetailModalProps) {
+  const handleClose = () => onOpenChange(false)
+
+  if (!agentId) return null
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        aria-describedby={undefined}
+        className="flex h-[min(840px,calc(100vh-2rem))] !w-[min(1100px,calc(100vw-2rem))] !max-w-[1100px] flex-col gap-0 overflow-hidden border-0 p-0 max-md:h-screen max-md:!w-screen max-md:!max-w-none max-md:rounded-none"
+      >
+        <AssistantDetailContent agentId={agentId} onClose={handleClose} showBack={false} />
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+export function AssistantDetailPage() {
+  const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
+
+  if (!id) return null
+
+  return (
+    <AssistantDetailContent
+      agentId={id}
+      onClose={() => navigate('/assistant')}
+      onBack={() => window.history.back()}
+    />
   )
 }
