@@ -2,15 +2,16 @@ import { SelectAgentsDialog } from '@/components/chat/dialogs/select-agents-dial
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Agent, agentApi } from '@/lib/agent-api';
-import { AgentAvatarImage } from '@/lib/agent-avatars';
-import { ExternalSkill, SharedSkill, skillApi } from '@/lib/skill-api';
+import { ExternalSkill, SharedSkill, skillApi, type SkillColor } from '@/lib/skill-api';
 import { cn } from '@/lib/utils';
-import { Check, ChevronDown, ChevronRight, Copy, Download, FileText, FolderOpen, Import, Package, RefreshCw, Search, X } from 'lucide-react';
+import { Check, Copy, Download, FolderOpen, Import, Package, RefreshCw, Search, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
+import { SkillCard } from './skill-card';
 import { SkillDetailModal } from './skill-detail-modal';
+import { SkillInstalledAgentsModal } from './skill-installed-agents-modal';
 
 // 自定义 Tabs 组件
 function SimpleTabs({
@@ -79,7 +80,6 @@ export function SkillPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingExternal, setLoadingExternal] = useState(false);
-  const [expandedSkills, setExpandedSkills] = useState<Set<string>>(new Set());
   const [viewingSkillSlug, setViewingSkillSlug] = useState<string | null>(null);
   // 文件树展开状态
   // 选择助手弹框状态
@@ -88,6 +88,8 @@ export function SkillPage() {
   const [batchInstalling, setBatchInstalling] = useState(false);
   const [unlinkingInstallKey, setUnlinkingInstallKey] = useState<string | null>(null);
   const [pendingUnlinkInstall, setPendingUnlinkInstall] = useState<{ skill: SharedSkill; agent: Agent } | null>(null);
+  const [viewingInstalledSkillSlug, setViewingInstalledSkillSlug] = useState<string | null>(null);
+  const [updatingSkillColorSlug, setUpdatingSkillColorSlug] = useState<string | null>(null);
   // 复制路径状态
   const [copied, setCopied] = useState(false);
   // 打开目录状态
@@ -143,6 +145,16 @@ export function SkillPage() {
   }, {} as Record<string, ExternalSkill[]>);
   const externalImportCount = externalSkills.filter(s => !s.existsInShared).length;
   const localFolderTabKey = 'local-folder';
+  const normalizedSkillSearchQuery = skillSearchQuery.trim().toLowerCase();
+  const filteredSharedSkills = sharedSkills.filter((skill) => (
+    !normalizedSkillSearchQuery
+    || skill.name.toLowerCase().includes(normalizedSkillSearchQuery)
+    || skill.description?.toLowerCase().includes(normalizedSkillSearchQuery)
+    || skill.slug.toLowerCase().includes(normalizedSkillSearchQuery)
+  ));
+  const viewingInstalledSkill = viewingInstalledSkillSlug
+    ? sharedSkills.find((skill) => skill.slug === viewingInstalledSkillSlug) ?? null
+    : null;
 
   const closeImportModal = () => {
     setImportModalOpen(false);
@@ -380,6 +392,9 @@ export function SkillPage() {
       if (result.success) {
         toast.success(t('skill.removedFromAgent', { agentName: agent.name, skillName: skill.name }));
         setPendingUnlinkInstall(null);
+        if (skill.installedAgents.length <= 1) {
+          setViewingInstalledSkillSlug(null);
+        }
         await loadData();
       } else {
         toast.error(t('skill.removeFailed'));
@@ -388,6 +403,33 @@ export function SkillPage() {
       toast.error(t('skill.removeFailed'));
     } finally {
       setUnlinkingInstallKey(null);
+    }
+  };
+
+  const handleSkillColorChange = async (skill: SharedSkill, color: SkillColor) => {
+    if (skill.color === color || updatingSkillColorSlug) return;
+
+    const previousColor = skill.color;
+    setUpdatingSkillColorSlug(skill.slug);
+    setSharedSkills((currentSkills) => currentSkills.map((currentSkill) => (
+      currentSkill.slug === skill.slug ? { ...currentSkill, color } : currentSkill
+    )));
+
+    try {
+      const result = await skillApi.setColor(skill.slug, color);
+      if (!result.success) {
+        setSharedSkills((currentSkills) => currentSkills.map((currentSkill) => (
+          currentSkill.slug === skill.slug ? { ...currentSkill, color: previousColor } : currentSkill
+        )));
+        toast.error(t('skill.colorUpdateFailed'));
+      }
+    } catch {
+      setSharedSkills((currentSkills) => currentSkills.map((currentSkill) => (
+        currentSkill.slug === skill.slug ? { ...currentSkill, color: previousColor } : currentSkill
+      )));
+      toast.error(t('skill.colorUpdateFailed'));
+    } finally {
+      setUpdatingSkillColorSlug(null);
     }
   };
 
@@ -405,38 +447,83 @@ export function SkillPage() {
             <span className="text-base font-semibold text-foreground">{t('nav.skills')}</span>
           </div>
           <div
-            className="ml-auto flex items-center gap-1.5"
+            className="ml-auto flex min-w-0 items-center gap-1.5"
             style={window.electronAPI?.isElectron ? { WebkitAppRegion: 'no-drag' } as React.CSSProperties : {}}
           >
+            <div className="ta-search-shell h-8 min-w-0 max-w-44 flex-1">
+              <Search className="size-3.5 text-muted-foreground" />
+              <input
+                type="text"
+                value={skillSearchQuery}
+                onChange={(e) => setSkillSearchQuery(e.target.value)}
+                placeholder={t('skill.searchPlaceholder')}
+                className="min-w-0 flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+              />
+              {skillSearchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSkillSearchQuery('')}
+                  className="flex size-4 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                  title={t('common.clear')}
+                >
+                  <X className="size-3" />
+                </button>
+              )}
+            </div>
+            {window.electronAPI?.isElectron && (
+              <button
+                onClick={handleOpenFolder}
+                disabled={openingFolder}
+                className="ta-icon-button"
+                title={t('skill.openFolder')}
+              >
+                <FolderOpen className="size-4" />
+              </button>
+            )}
+            <button
+              onClick={handleCopyPath}
+              className="ta-icon-button"
+              title={skillsPath}
+            >
+              {copied ? (
+                <Check className="size-4 text-green-500" />
+              ) : (
+                <Copy className="size-4" />
+              )}
+            </button>
             <button
               onClick={openImportModal}
-              className="ta-button-primary h-8 px-3 text-xs"
+              className="ta-button-primary size-8 shrink-0 px-0 text-xs xl:w-auto xl:px-3"
+              title={externalImportCount > 0 ? t('skill.importSkillWithCount', { count: externalImportCount }) : t('skill.importSkill')}
             >
               <Import className="size-4" />
-              {externalImportCount > 0 ? t('skill.importSkillWithCount', { count: externalImportCount }) : t('skill.importSkill')}
+              <span className="hidden xl:inline">
+                {externalImportCount > 0 ? t('skill.importSkillWithCount', { count: externalImportCount }) : t('skill.importSkill')}
+              </span>
             </button>
             <button
               onClick={loadData}
               disabled={loading}
-              className="ta-button-secondary h-8 px-3 text-xs"
+              className="ta-button-secondary size-8 shrink-0 px-0 text-xs xl:w-auto xl:px-3"
+              title={t('common.refresh')}
             >
               <RefreshCw className={cn('size-4', loading && 'animate-spin')} />
-              {t('common.refresh')}
+              <span className="hidden xl:inline">{t('common.refresh')}</span>
             </button>
           </div>
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex min-h-0 flex-1 flex-col">
           {loading ? (
-            <div className="flex items-center justify-center h-full text-muted-foreground">
-              {t('common.loading')}
+            <div className="flex flex-1 items-center justify-center">
+              <div className="size-6 animate-spin rounded-full border-2 border-muted border-t-primary" />
             </div>
           ) : sharedSkills.length === 0 ? (
-            <div className="ta-page-section flex h-full flex-col items-center justify-center text-muted-foreground">
-              <Package className="size-16 mb-3 opacity-50" />
-              <p className="text-lg">{t('skill.noSkills')}</p>
-              <p className="mt-2 text-sm">{t('skill.createInChatroom')}</p>
+            <div className="flex flex-1 flex-col items-center justify-center text-muted-foreground">
+              <Package className="mb-3 size-12" />
+              <p>{t('skill.noSkills')}</p>
+              <p className="mt-1 text-sm">{t('skill.createInChatroom')}</p>
               <button
                 onClick={openImportModal}
                 className="ta-button-primary mt-4"
@@ -446,202 +533,36 @@ export function SkillPage() {
               </button>
             </div>
           ) : (
-            <div className="ta-page-section space-y-3">
-              {/* 共享技能列表 */}
-              <div>
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  {/* 搜索框 */}
-                  <div className="relative max-w-72 flex-1">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-                    <input
-                      type="text"
-                      value={skillSearchQuery}
-                      onChange={(e) => setSkillSearchQuery(e.target.value)}
-                      placeholder={t('skill.searchPlaceholder')}
-                      className="ta-input w-full pl-9"
-                    />
-                    {skillSearchQuery && (
-                      <button
-                        onClick={() => setSkillSearchQuery('')}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                      >
-                        <X className="size-4" />
-                      </button>
-                    )}
+            <div className="flex-1 overflow-y-auto">
+              <div className="px-5 pb-6 pt-6">
+                {filteredSharedSkills.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+                    <Search className="mb-2 size-12" />
+                    <p>{t('skill.noMatchingSkills')}</p>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {window.electronAPI?.isElectron && (
-                      <button
-                        onClick={handleOpenFolder}
-                        disabled={openingFolder}
-                        className="ta-button-ghost h-9 px-3 text-xs"
-                      >
-                        <FolderOpen className="size-3.5" />
-                        <span>{t('skill.openFolder')}</span>
-                      </button>
-                    )}
-                    <button
-                      onClick={handleCopyPath}
-                      className="ta-button-ghost h-9 px-3 text-xs"
-                    >
-                      <FolderOpen className="size-3.5" />
-                      <span>{skillsPath}</span>
-                      {copied ? (
-                        <Check className="size-3 text-green-500" />
-                      ) : (
-                        <Copy className="size-3" />
-                      )}
-                    </button>
+                ) : (
+                  <div
+                    className="grid gap-4"
+                    style={{
+                      gridTemplateColumns: 'repeat(auto-fill, minmax(max(280px, calc((100% - 4rem) / 5)), 1fr))',
+                    }}
+                  >
+                    {filteredSharedSkills.map((skill) => (
+                      <SkillCard
+                        key={skill.slug}
+                        skill={skill}
+                        updatingColor={updatingSkillColorSlug === skill.slug}
+                        onView={handleViewSkill}
+                        onInstall={handleOpenInstallDialog}
+                        onViewInstalledAgents={(selectedSkill) => setViewingInstalledSkillSlug(selectedSkill.slug)}
+                        onColorChange={handleSkillColorChange}
+                      />
+                    ))}
                   </div>
-                </div>
-                {/* 过滤技能 */}
-                {(() => {
-                  const filteredSkills = sharedSkills.filter(skill => {
-                    if (!skillSearchQuery) return true;
-                    const query = skillSearchQuery.toLowerCase();
-                    return (
-                      skill.name.toLowerCase().includes(query) ||
-                      skill.description?.toLowerCase().includes(query)
-                    );
-                  });
-                  return filteredSkills.length === 0 ? (
-                    <div className="text-center py-8 text-muted-foreground text-sm">
-                      {t('skill.noMatchingSkills')}
-                    </div>
-                  ) : (
-                    <div className="overflow-hidden rounded-md border border-border bg-[var(--surface-raised)]">
-                      {filteredSkills.map((skill) => {
-                        const hasInstallDetails = skill.installedAgents.length > 0
-                        const isExpanded = hasInstallDetails && expandedSkills.has(skill.slug)
-                        return (
-                    <div key={skill.slug} className="border-b border-border/60 last:border-b-0">
-                      {/* 技能标题 */}
-                      <div className="flex w-full items-center justify-between gap-3 px-3 py-2.5 transition-colors hover:bg-accent/70">
-                        <button
-                          onClick={() => {
-                            if (!hasInstallDetails) return
-                            setExpandedSkills(prev => {
-                              const next = new Set(prev);
-                              if (next.has(skill.slug)) {
-                                next.delete(skill.slug);
-                              } else {
-                                next.add(skill.slug);
-                              }
-                              return next;
-                            });
-                          }}
-                          className={cn(
-                            "flex min-w-0 flex-1 items-center gap-2 text-left",
-                            hasInstallDetails ? "cursor-pointer" : "cursor-default"
-                          )}
-                        >
-                          {hasInstallDetails ? (
-                            isExpanded ? (
-                              <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
-                            ) : (
-                              <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
-                            )
-                          ) : (
-                            <Package className="size-4 shrink-0 text-muted-foreground/60" />
-                          )}
-                          <div className="flex-1 w-0">
-                            <div className="truncate text-sm font-medium text-foreground">{skill.name}</div>
-                            <div className="text-xs text-muted-foreground truncate">
-                              {skill.description || t('skill.noDescription')}
-                            </div>
-                          </div>
-                        </button>
-                        <div className="ml-3 flex shrink-0 items-center gap-1.5">
-                          <span className="text-xs text-muted-foreground">
-                            <span className="rounded bg-muted px-2 py-0.5">
-                              {skill.source === 'user-created' ? t('skill.sourceUserCreated') : skill.source.startsWith('external:') ? t('skill.sourceExternalImported') : t('skill.sourceExternal')}
-                            </span>
-                          </span>
-                          { (
-                            <span className="rounded bg-primary/10 px-2 py-0.5 text-xs text-primary">
-                              {skill.installedAgents.length} {t('skill.agentCount')}
-                            </span>
-                          )}
-                          {/* 查看内容按钮 */}
-                          <button
-                            onClick={() => handleViewSkill(skill.slug)}
-                            className="ta-button-secondary h-7 px-2.5 text-xs"
-                          >
-                            <FileText className="size-3" />
-                            {t('common.view')}
-                          </button>
-                          {/* 安装按钮 */}
-                          <button
-                            onClick={() => handleOpenInstallDialog(skill)}
-                            className="ta-button-primary h-7 px-2.5 text-xs"
-                          >
-                            <Download className="size-3" />
-                            {t('skill.install')}
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* 展开的详情 */}
-                      {isExpanded && (
-                        <div className="border-t border-border/60 bg-[var(--surface)] px-3 py-2.5">
-                          {/* 已安装到 */}
-                          {skill.installedAgents.length > 0 && (
-                            <div>
-                              <div className="text-xs font-medium text-muted-foreground mb-2">{t('skill.installedTo')}:</div>
-                              <div className="flex flex-wrap gap-2">
-                                {skill.installedAgents.map((name) => {
-                                  const agent = agents.find(a => a.name === name);
-                                  const installKey = agent ? `${skill.slug}:${agent.id}` : null;
-                                  const isUnlinking = installKey === unlinkingInstallKey;
-                                  return (
-                                    <span
-                                      key={name}
-                                      className="flex items-center gap-1.5 rounded bg-primary/10 px-2 py-1 text-xs text-primary"
-                                    >
-                                      <AgentAvatarImage
-                                        avatar={agent?.avatar ?? null}
-                                        agentId={agent?.id}
-                                        agentName={agent?.name ?? name}
-                                        agentLevel={agent?.agentLevel}
-                                        className="size-4"
-                                      />
-                                      {name}
-                                      {agent && (
-                                        <button
-                                          type="button"
-                                          onClick={() => setPendingUnlinkInstall({ skill, agent })}
-                                          disabled={isUnlinking}
-                                          className="ml-0.5 rounded text-primary/70 hover:bg-primary/10 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
-                                          title={t('skill.removeFromAgent')}
-                                        >
-                                          {isUnlinking ? (
-                                            <RefreshCw className="size-3 animate-spin" />
-                                          ) : (
-                                            <X className="size-3" />
-                                          )}
-                                        </button>
-                                      )}
-                                    </span>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )})}
-                    </div>
-                  );
-                })()}
+                )}
               </div>
             </div>
           )}
-        </div>
-
-        {/* Footer */}
-        <div className="border-t px-6 py-3 text-sm text-muted-foreground">
-          {t('skill.createInChatroom')}
         </div>
       </div>
 
@@ -654,6 +575,14 @@ export function SkillPage() {
         onConfirm={handleBatchInstall}
         title={t('skill.installToAgents', { name: currentSkill?.name || '' })}
         loading={batchInstalling}
+      />
+
+      <SkillInstalledAgentsModal
+        skill={viewingInstalledSkill}
+        agents={agents}
+        unlinkingInstallKey={unlinkingInstallKey}
+        onClose={() => setViewingInstalledSkillSlug(null)}
+        onRequestUnlink={(skill, agent) => setPendingUnlinkInstall({ skill, agent })}
       />
 
       <ConfirmDialog

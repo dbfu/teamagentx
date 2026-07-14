@@ -1463,7 +1463,16 @@
     "copyImportHint": "完全复制技能文件到本地，独立管理，不受外部更新影响。",
     "alreadyImported": "已导入",
     "fromCollection": "来自 {{name}}",
-    "importFailed": "导入失败"
+    "importFailed": "导入失败",
+    "colorLabel": "颜色标记",
+    "colorUpdateFailed": "颜色标记保存失败",
+    "colorGray": "灰色",
+    "colorRed": "红色",
+    "colorOrange": "橙色",
+    "colorYellow": "黄色",
+    "colorGreen": "绿色",
+    "colorBlue": "蓝色",
+    "colorPurple": "紫色"
   },
   "settings": {
     "pageTitle": "设置",

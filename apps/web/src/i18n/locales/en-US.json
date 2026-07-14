@@ -1463,7 +1463,16 @@
     "copyImportHint": "Fully copy skill files to local, independent management, not affected by external updates.",
     "alreadyImported": "Already imported",
     "fromCollection": "from {{name}}",
-    "importFailed": "Import failed"
+    "importFailed": "Import failed",
+    "colorLabel": "Color tag",
+    "colorUpdateFailed": "Failed to save color tag",
+    "colorGray": "Gray",
+    "colorRed": "Red",
+    "colorOrange": "Orange",
+    "colorYellow": "Yellow",
+    "colorGreen": "Green",
+    "colorBlue": "Blue",
+    "colorPurple": "Purple"
   },
   "settings": {
     "pageTitle": "Settings",

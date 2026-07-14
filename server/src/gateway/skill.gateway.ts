@@ -14,6 +14,14 @@ import { parseSkillFrontmatter, readSkillMetadata } from '../modules/skill/skill
 import { replaceWithSkillDirectoryLink } from '../modules/skill/skill-link.js';
 import { agentService } from '../core/agent/agent.service.js';
 import { clearExecutorCache } from '../core/agent/agent-handler/index.js';
+import { appSettingService } from '../modules/app-setting/app-setting.service.js';
+import {
+  getDefaultSkillColor,
+  isSkillColor,
+  parseSkillColorTags,
+  SKILL_COLORS,
+  type SkillColor,
+} from '../modules/skill/skill-color.js';
 import * as path from 'path';
 import * as os from 'os';
 
@@ -111,6 +119,7 @@ async function getAgentSkillsDir(agentId: string): Promise<string> {
 
 // 会话存储（用于保存 discover 结果）
 const discoverSessions = new Map<string, DiscoverResult>();
+const SKILL_COLOR_TAGS_SETTING_KEY = 'skillColorTags';
 
 // 清理过期会话（超过 10 分钟）
 function cleanupExpiredSessions(): void {
@@ -661,8 +670,12 @@ export async function skillGateway(app: FastifyInstance) {
         description: string;
         source: string;
         installedAgents: string[];
+        color: SkillColor;
       }> = [];
       const agents = await agentService.findActive();
+      const skillColorTags = parseSkillColorTags(
+        await appSettingService.get(SKILL_COLOR_TAGS_SETTING_KEY),
+      );
 
       for (const entry of entries) {
         // 跳过非目录和非软连接
@@ -707,7 +720,14 @@ export async function skillGateway(app: FastifyInstance) {
           }
         }
 
-        skills.push({ name, slug: entry.name, description, source, installedAgents });
+        skills.push({
+          name,
+          slug: entry.name,
+          description,
+          source,
+          installedAgents,
+          color: skillColorTags[entry.name] ?? getDefaultSkillColor(entry.name),
+        });
       }
 
       return reply.send({ success: true, data: { skills } });
@@ -715,6 +735,56 @@ export async function skillGateway(app: FastifyInstance) {
       const message = error instanceof Error ? error.message : String(error);
       return reply.code(500).send({ success: false, error: message });
     }
+  });
+
+  app.put<{
+    Params: { slug: string };
+    Body: { color: SkillColor };
+  }>('/skills/:slug/color', {
+    schema: {
+      description: '设置共享技能的颜色标签',
+      tags: ['Skills'],
+      params: {
+        type: 'object',
+        properties: {
+          slug: { type: 'string' },
+        },
+        required: ['slug'],
+      },
+      body: {
+        type: 'object',
+        properties: {
+          color: { type: 'string', enum: [...SKILL_COLORS] },
+        },
+        required: ['color'],
+      },
+    },
+  }, async (request, reply) => {
+    const sharedSkill = resolveSharedSkill(request.params.slug);
+    if (!sharedSkill) {
+      return reply.code(404).send({ success: false, error: '技能不存在' });
+    }
+
+    if (!isSkillColor(request.body.color)) {
+      return reply.code(400).send({ success: false, error: '不支持的颜色标签' });
+    }
+
+    const skillColorTags = parseSkillColorTags(
+      await appSettingService.get(SKILL_COLOR_TAGS_SETTING_KEY),
+    );
+    skillColorTags[sharedSkill.slug] = request.body.color;
+    await appSettingService.set(
+      SKILL_COLOR_TAGS_SETTING_KEY,
+      JSON.stringify(skillColorTags),
+    );
+
+    return reply.send({
+      success: true,
+      data: {
+        slug: sharedSkill.slug,
+        color: request.body.color,
+      },
+    });
   });
 
   // 创建技能到共享目录

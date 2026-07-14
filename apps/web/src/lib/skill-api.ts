@@ -47,12 +47,15 @@ export interface DiscoverResult {
 }
 
 // 共享技能
+export type SkillColor = 'gray' | 'red' | 'orange' | 'yellow' | 'green' | 'blue' | 'purple';
+
 export interface SharedSkill {
   name: string;
   slug: string;
   description: string;
   source: string;
   installedAgents: string[];
+  color: SkillColor;
 }
 
 // 创建技能参数
@@ -227,6 +230,16 @@ export const skillApi = {
       return { success: true, data: result.data.skills };
     }
     return { success: false, error: result.error };
+  },
+
+  /**
+   * 设置共享技能的颜色标签
+   */
+  async setColor(slug: string, color: SkillColor): Promise<ApiResponse<{ slug: string; color: SkillColor }>> {
+    return request<{ slug: string; color: SkillColor }>(`/skills/${encodeURIComponent(slug)}/color`, {
+      method: 'PUT',
+      body: JSON.stringify({ color }),
+    });
   },
 
   /**
