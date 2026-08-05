@@ -609,14 +609,14 @@ export function SkillPage() {
 
       {/* 导入外部技能弹框 */}
       {importModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-4">
           {/* Backdrop */}
           <div
             className="absolute inset-0 bg-black/50"
             onClick={closeImportModal}
           />
           {/* Modal */}
-          <div className="relative z-10 flex max-h-[85vh] w-[900px] flex-col rounded-[var(--radius-panel)] bg-card shadow-xl">
+          <div className="relative z-10 flex max-h-[80vh] w-[900px] max-w-[calc(100vw-2rem)] flex-col rounded-[var(--radius-panel)] bg-card shadow-xl">
             {/* Header */}
             <div className="flex items-center justify-between border-b px-6 py-4">
               <div>

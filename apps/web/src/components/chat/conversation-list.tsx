@@ -470,7 +470,7 @@ export function ConversationList({ chatRooms, selectedId, onSelect, unreadCounts
       {showDeleteConfirm && roomToDelete && (
         <>
           <div className="fixed inset-0 z-50 bg-black/50" onClick={handleCancelDelete} />
-          <div className="fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2 rounded-lg bg-background p-6 shadow-lg border border-border w-80">
+          <div className="fixed left-1/2 top-1/2 z-50 max-h-[80vh] w-80 max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg border border-border bg-background p-6 shadow-lg">
             <h3 className="text-lg font-semibold text-foreground mb-2">{t('chat.confirmDelete')}</h3>
             <p className="text-sm text-muted-foreground mb-4">
               {t('chat.deleteRoomConfirm', { name: roomToDelete.name })}

@@ -304,7 +304,7 @@ export function SkillDetailModal({ slug, onClose }: SkillDetailModalProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative z-10 flex max-h-[85vh] w-[900px] max-w-[calc(100vw-2rem)] flex-col rounded-[var(--radius-panel)] bg-card shadow-xl">
+      <div className="relative z-10 flex max-h-[80vh] w-[900px] max-w-[calc(100vw-2rem)] flex-col rounded-[var(--radius-panel)] bg-card shadow-xl">
         <div className="flex items-center justify-between border-b px-6 py-4">
           <div className="min-w-0">
             <h3 className="truncate text-lg font-semibold text-foreground">{title}</h3>

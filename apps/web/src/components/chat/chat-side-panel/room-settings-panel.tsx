@@ -578,7 +578,7 @@ export function RoomSettingsPanel({
           onClick={() => setAvatarModalOpen(false)}
         >
           <div
-            className="w-full max-w-[34rem] rounded-2xl bg-card shadow-xl"
+            className="w-full max-w-[34rem] max-h-[80vh] overflow-y-auto rounded-2xl bg-card shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-border px-5 py-4">

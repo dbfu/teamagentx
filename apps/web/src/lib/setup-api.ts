@@ -6,6 +6,8 @@ export interface LocalModelConfig {
   name: string
   apiUrl?: string
   apiKey?: string
+  supportedReasoningEfforts?: string[]
+  defaultReasoningEffort?: string | null
 }
 
 // ACP 工具信息
@@ -23,6 +25,7 @@ export interface AcpToolInfo {
   localConfigAvailable?: boolean
   localConfigPath?: string
   localConfigLabel?: string
+  localDefaultModel?: string
   localModels?: LocalModelConfig[]
 }
 

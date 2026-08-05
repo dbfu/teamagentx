@@ -1,7 +1,8 @@
 import { Button } from '@/components/ui/button';
-import { llmProviderApi, type AudioUsage, type CreateLlmProviderRequest, type LlmProvider, type UpdateLlmProviderRequest } from '@/lib/llm-provider-api';
+import { llmProviderApi, type AudioUsage, type CreateLlmProviderRequest, type FetchedModel, type LlmProvider, type UpdateLlmProviderRequest } from '@/lib/llm-provider-api';
 import { tokenUsageApi, type TokenUsageByProvider } from '@/lib/token-usage-api';
 import { getProviderMeta as getAudioProviderMeta } from '@/lib/voice-provider-metadata';
+import { ModelSelector } from './model-selector';
 import { cn } from '@/lib/utils';
 import { AgentAvatarImage } from '@/lib/agent-avatars';
 import {
@@ -260,6 +261,10 @@ export function ModelPage() {
   const [testingProvider, setTestingProvider] = useState<string | null>(null)
   const [testResults, setTestResults] = useState<Record<string, { connected: boolean; message: string }>>({})
 
+  // 模型目录获取状态
+  const [fetchedModels, setFetchedModels] = useState<FetchedModel[]>([])
+  const [isFetchingModels, setIsFetchingModels] = useState(false)
+
   // 密码可见性
   const [showApiKey, setShowApiKey] = useState(false)
   const importInputRef = useRef<HTMLInputElement | null>(null)
@@ -325,6 +330,48 @@ export function ModelPage() {
     toast.error(t('model.loadFailed'))
     return null
   }
+
+  // 根据当前 API 配置获取模型目录，供模型和 STT 模型字段复用
+  const handleFetchModels = async () => {
+    const apiUrl = (formData.apiUrl || '').trim()
+    const apiKey = (formData.apiKey || '').trim()
+    if (!apiUrl || !apiKey) {
+      toast.error(t('model.fetchModelsNeedConfig'))
+      return
+    }
+    if (isMaskedApiKey(apiKey)) {
+      toast.error(t('model.apiKeyMasked'))
+      return
+    }
+
+    setIsFetchingModels(true)
+    try {
+      const response = await llmProviderApi.fetchModels({
+        apiUrl,
+        apiKey,
+        apiProtocol: formData.apiProtocol,
+      })
+      if (response.success && response.data) {
+        setFetchedModels(response.data)
+        if (response.data.length === 0) {
+          toast.info(t('model.fetchModelsEmpty'))
+        } else {
+          toast.success(t('model.fetchModelsSuccess', { count: response.data.length }))
+        }
+      } else {
+        toast.error(response.error || t('model.fetchModelsFailed'))
+      }
+    } catch {
+      toast.error(t('model.fetchModelsFailed'))
+    } finally {
+      setIsFetchingModels(false)
+    }
+  }
+
+  // API 地址、密钥或协议变化后，旧目录不再可靠，需要重新获取
+  useEffect(() => {
+    setFetchedModels([])
+  }, [formData.apiUrl, formData.apiKey, formData.apiProtocol, formData.modelType])
 
   // 自动填充音频模型名：当 apiUrl 匹配已知供应商时，填入推荐模型名
   const autoFilledUrlRef = useRef<string | null>(null)
@@ -423,6 +470,8 @@ export function ModelPage() {
   // 打开创建对话框
   const openCreateDialog = () => {
     setEditingProvider(null)
+    setFetchedModels([])
+    setIsFetchingModels(false)
     setFormData({
       name: '',
       type: 'custom',
@@ -450,6 +499,8 @@ export function ModelPage() {
 
     const imageProvider = providerForForm.imageProvider || 'openai'
     const apiUrl = providerForForm.apiUrl || ((providerForForm.modelType || 'text') === 'image' ? imageProviderBaseUrl(imageProvider) : '')
+    setFetchedModels([])
+    setIsFetchingModels(false)
     setEditingProvider(providerForForm)
     setFormData({
       name: providerForForm.name,
@@ -478,6 +529,8 @@ export function ModelPage() {
 
     const imageProvider = providerForForm.imageProvider || 'openai'
     const apiUrl = providerForForm.apiUrl || ((providerForForm.modelType || 'text') === 'image' ? imageProviderBaseUrl(imageProvider) : '')
+    setFetchedModels([])
+    setIsFetchingModels(false)
     // 打开创建对话框，预填充原数据
     setEditingProvider(null)
     setFormData({
@@ -1130,8 +1183,8 @@ export function ModelPage() {
 
       {/* 创建/编辑对话框 */}
       {!isDialogOpen ? null : (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 py-12">
-          <div className="w-[800px] shrink-0 rounded-md bg-background shadow-xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/50 p-4">
+          <div className="flex h-[80vh] max-h-[80vh] w-[800px] max-w-full shrink-0 flex-col overflow-hidden rounded-md bg-background shadow-xl">
             {/* Header */}
             <div className="flex items-center justify-between border-b border-border px-6 py-4">
               <h2 className="text-lg font-semibold text-foreground">
@@ -1146,8 +1199,8 @@ export function ModelPage() {
             </div>
 
             {/* Form */}
-            <form onSubmit={e => { e.preventDefault(); handleSubmit(); }}>
-              <div className="max-h-[50vh] overflow-y-auto p-6">
+            <form className="flex min-h-0 flex-1 flex-col" onSubmit={e => { e.preventDefault(); handleSubmit(); }}>
+              <div className="min-h-0 flex-1 overflow-y-auto p-6">
                 {/* 名称 */}
                 <div className="mb-4">
                   <label className="mb-1.5 block text-sm font-medium text-foreground">
@@ -1383,12 +1436,14 @@ export function ModelPage() {
                   <label className="mb-1.5 block text-sm font-medium text-foreground">
                     {formData.modelType === 'audio' ? t('model.ttsModelLabel') : t('model.modelLabel')} <span className="text-red-500">*</span>
                   </label>
-                  <input
-                    type="text"
+                  <ModelSelector
+                    id="model"
                     value={formData.model}
-                    onChange={e => setFormData(prev => ({ ...prev, model: e.target.value }))}
+                    onChange={model => setFormData(prev => ({ ...prev, model }))}
                     placeholder={formData.modelType === 'audio' ? 'FunAudioLLM/CosyVoice2-0.5B' : t('model.modelPlaceholder')}
-                    className="ta-input w-full shadow-none"
+                    models={fetchedModels}
+                    isLoading={isFetchingModels}
+                    onFetch={handleFetchModels}
                   />
                 </div>
                 ) : null}
@@ -1398,18 +1453,20 @@ export function ModelPage() {
                   <label className="mb-1.5 block text-sm font-medium text-foreground">
                     {t('model.sttModelLabel')} <span className="text-red-500">*</span>
                   </label>
-                  <input
-                    type="text"
+                  <ModelSelector
+                    id="stt-model"
                     value={formData.audioUsage === 'stt' ? formData.model : (formData.sttModel ?? '')}
-                    onChange={e => {
+                    onChange={model => {
                       if (formData.audioUsage === 'stt') {
-                        setFormData(prev => ({ ...prev, model: e.target.value }))
+                        setFormData(prev => ({ ...prev, model }))
                       } else {
-                        setFormData(prev => ({ ...prev, sttModel: e.target.value || null }))
+                        setFormData(prev => ({ ...prev, sttModel: model || null }))
                       }
                     }}
                     placeholder="FunAudioLLM/SenseVoiceSmall"
-                    className="ta-input w-full shadow-none"
+                    models={fetchedModels}
+                    isLoading={isFetchingModels}
+                    onFetch={handleFetchModels}
                   />
                   {formData.audioUsage === 'both' && (
                     <p className="mt-1.5 text-xs text-muted-foreground">{t('model.sttModelHint')}</p>
@@ -1584,7 +1641,7 @@ export function ModelPage() {
               </div>
 
               {/* Footer */}
-              <div className="flex justify-end gap-3 border-t border-border px-6 py-4">
+              <div className="flex shrink-0 justify-end gap-3 border-t border-border px-6 py-4">
                 <button
                   type="button"
                   onClick={() => setIsDialogOpen(false)}
@@ -1606,8 +1663,8 @@ export function ModelPage() {
 
       {/* AI 创建对话框 */}
       {!isAiDialogOpen ? null : (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-[500px] rounded-md bg-background shadow-xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/50 p-4">
+          <div className="w-[500px] max-w-full max-h-[80vh] overflow-y-auto rounded-md bg-background shadow-xl">
             {/* Header */}
             <div className="flex items-center justify-between border-b border-border px-6 py-4">
               <div className="flex items-center gap-2">
@@ -1672,8 +1729,8 @@ export function ModelPage() {
 
       {/* 导出确认弹框：导出文件包含完整明文 API Key，需用户确认知晓风险 */}
       {!isExportConfirmOpen ? null : (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-[440px] rounded-md bg-background shadow-xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/50 p-4">
+          <div className="w-[440px] max-w-full max-h-[80vh] overflow-y-auto rounded-md bg-background shadow-xl">
             {/* Header */}
             <div className="flex items-center justify-between border-b border-border px-6 py-4">
               <div className="flex items-center gap-2">
@@ -1780,8 +1837,8 @@ export function ModelPage() {
 
       {/* 导入密码弹框：文件已加密时输入密码解密 */}
       {!isImportPasswordOpen ? null : (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-[440px] rounded-md bg-background shadow-xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/50 p-4">
+          <div className="w-[440px] max-w-full max-h-[80vh] overflow-y-auto rounded-md bg-background shadow-xl">
             {/* Header */}
             <div className="flex items-center justify-between border-b border-border px-6 py-4">
               <div className="flex items-center gap-2">
@@ -1867,7 +1924,7 @@ export function ModelPage() {
           onClick={() => setIsAgentsDialogOpen(false)}
         >
           <div
-            className="w-full max-w-md rounded-2xl bg-background shadow-xl"
+            className="w-full max-w-md max-h-[80vh] overflow-y-auto rounded-2xl bg-background shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}

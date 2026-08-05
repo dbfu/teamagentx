@@ -64,8 +64,8 @@ export function LoginModal({ isOpen, onLogin }: LoginModalProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-[400px] shrink-0 rounded-2xl bg-card shadow-xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/50 p-4">
+      <div className="w-[400px] max-w-full shrink-0 max-h-[80vh] overflow-y-auto rounded-2xl bg-card shadow-xl">
         {/* Header */}
         <div className="flex items-center gap-3 border-b border-border px-6 py-4">
           <div className="flex size-11 items-center justify-center overflow-hidden rounded-2xl border border-border bg-[var(--surface-raised)] shadow-sm">

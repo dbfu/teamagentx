@@ -11,6 +11,7 @@ import {
   CodexSdkExecutor,
   enrichCodexExitError,
   extractCodexSessionTranscript,
+  getCodexReasoningEffort,
   isCodexTransientStreamDisconnectError,
   isInputLengthExceededError,
   resolveCodexSpawnCandidate,
@@ -133,6 +134,13 @@ function requestMcpToolsList(
 }
 
 describe('Codex SDK Executor provider config', () => {
+  test('保留 Codex 的 none/max/ultra 思考档位，并兼容旧 off 值', () => {
+    assert.strictEqual(getCodexReasoningEffort('none'), 'none');
+    assert.strictEqual(getCodexReasoningEffort('max'), 'max');
+    assert.strictEqual(getCodexReasoningEffort('ultra'), 'ultra');
+    assert.strictEqual(getCodexReasoningEffort('off'), 'none');
+  });
+
   test('自定义 OpenAI 网关禁用 Responses WebSocket', () => {
     const config = buildCodexModelProviderConfig(provider());
 
@@ -269,6 +277,38 @@ describe('Codex SDK Executor transient stream disconnect detection', () => {
       isCodexTransientStreamDisconnectError('context_length_exceeded'),
       false,
     );
+  });
+});
+
+describe('Codex SDK Executor MCP thread reset', () => {
+  test('MCP 工具变化重建线程时不会中止当前请求', () => {
+    const executor = new CodexSdkExecutor(
+      'CodexAgent',
+      'test prompt',
+      'room-mcp-reset-test',
+      fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-codex-mcp-reset-')),
+      false,
+      'agent-mcp-reset-test',
+    ) as any;
+    const abortController = new AbortController();
+
+    executor.threadId = 'old-thread';
+    executor.lastMcpToolsSignature = 'old-signature';
+    executor.currentAbortController = abortController;
+    executor.ensureTeamAgentXMcpServerFile = () => '/tmp/teamagentx-mcp-reset-test.mjs';
+    executor.buildMcpToolsSignature = () => 'new-signature';
+    executor.saveThreadId = () => undefined;
+
+    try {
+      executor.resetThreadIfMcpToolsChanged();
+
+      assert.strictEqual(abortController.signal.aborted, false);
+      assert.strictEqual(executor.currentAbortController, abortController);
+      assert.strictEqual(executor.threadId, null);
+      assert.strictEqual(executor.lastMcpToolsSignature, 'new-signature');
+    } finally {
+      fs.rmSync(executor.workDir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -414,6 +454,7 @@ describe('Codex SDK Executor builtin MCP servers', () => {
       assert.strictEqual(mcpServers.tax.command, process.execPath);
       assert.deepStrictEqual(mcpServers.tax.args, ['/tmp/teamagentx-agent-tools-mcp.mjs']);
       assert.deepStrictEqual(mcpServers.teamagentx, mcpServers.tax);
+      assert.strictEqual(mcpServers.tax.env.ELECTRON_RUN_AS_NODE, undefined);
       assert.strictEqual(mcpServers.tax.env.TEAMAGENTX_SOURCE_AGENT_ID, 'agent-1');
       assert.strictEqual(
         mcpServers.tax.env.TEAMAGENTX_GENERATE_IMAGE_ENDPOINT,
@@ -461,6 +502,26 @@ describe('Codex SDK Executor builtin MCP servers', () => {
       }
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
+  });
+
+  test('仅 Electron runtime 为 tax/teamagentx MCP 子进程启用 Node 模式', () => {
+    const context = {
+      workDir: '/tmp/teamagentx-codex-electron-mcp',
+      teamAgentXMcpServerPath: '/tmp/teamagentx-agent-tools-mcp.mjs',
+      chatRoomId: 'room-electron-mcp',
+      agentId: 'agent-electron-mcp',
+      agentName: 'Codex',
+      chatRoomAgents: [],
+      systemToolsListEndpoint: 'http://127.0.0.1:11053/internal/agent-tools/system-tools/list',
+    };
+
+    const electronMcpServers = buildBuiltinCodexMcpServerConfigs(context, true) as Record<string, any>;
+    const nodeMcpServers = buildBuiltinCodexMcpServerConfigs(context, false) as Record<string, any>;
+
+    assert.strictEqual(electronMcpServers.tax.env.ELECTRON_RUN_AS_NODE, '1');
+    assert.strictEqual(electronMcpServers.teamagentx.env.ELECTRON_RUN_AS_NODE, '1');
+    assert.strictEqual(nodeMcpServers.tax.env.ELECTRON_RUN_AS_NODE, undefined);
+    assert.strictEqual(nodeMcpServers.teamagentx.env.ELECTRON_RUN_AS_NODE, undefined);
   });
 
   test('生成的 tax MCP server 显式声明 Codex 群历史工具', () => {

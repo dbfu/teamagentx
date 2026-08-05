@@ -139,7 +139,7 @@ export function CreateCronTaskModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-[480px] shrink-0 rounded-2xl bg-card shadow-xl">
+      <div className="w-[480px] max-w-full shrink-0 max-h-[80vh] overflow-y-auto rounded-2xl bg-card shadow-xl">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <h2 className="text-lg font-semibold text-foreground">

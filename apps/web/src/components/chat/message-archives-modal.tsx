@@ -148,7 +148,7 @@ export function MessageArchivesModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[82vh] max-h-[760px] !w-[70vw] !max-w-[70vw] flex-col overflow-hidden p-0 max-md:!w-[calc(100vw-16px)] max-md:!max-w-[calc(100vw-16px)]">
+      <DialogContent className="flex h-[80vh] max-h-[80vh] !w-[70vw] !max-w-[70vw] flex-col overflow-hidden p-0 max-md:!w-[calc(100vw-16px)] max-md:!max-w-[calc(100vw-16px)]">
         <DialogHeader className="border-b border-border px-5 py-4">
           <DialogTitle className="flex items-center gap-2 text-base">
             {selectedArchive && (

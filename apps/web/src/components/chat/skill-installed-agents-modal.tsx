@@ -56,7 +56,7 @@ export function SkillInstalledAgentsModal({
         onClick={onClose}
         className="absolute inset-0 bg-black/50"
       />
-      <div className="relative flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-card shadow-xl sm:max-h-[calc(100vh-4rem)]">
+      <div className="relative flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-card shadow-xl">
         <div className="flex shrink-0 items-center justify-between border-b border-border px-6 py-4">
           <div className="min-w-0">
             <h2 className="truncate text-lg font-semibold text-foreground">

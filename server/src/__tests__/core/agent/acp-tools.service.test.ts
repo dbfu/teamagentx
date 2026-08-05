@@ -3,7 +3,11 @@ import assert from 'node:assert';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { checkAllAcpTools, getInstalledAcpToolIds } from '../../../core/agent/acp-tools.service.js';
+import {
+  checkAllAcpTools,
+  getInstalledAcpToolIds,
+  readCodexModelCatalog,
+} from '../../../core/agent/acp-tools.service.js';
 
 const CODEX_PLATFORM_PACKAGE_BY_TARGET: Record<string, string> = {
   'x86_64-unknown-linux-musl': '@openai/codex-linux-x64',
@@ -53,6 +57,73 @@ function writeCodexPlatformBinary(toolsDir: string) {
 }
 
 describe('ACP Tools Service', () => {
+  test('uses each Codex model catalog entry as the source of reasoning efforts', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-codex-model-catalog-'));
+    const catalogPath = path.join(tmpDir, 'catalog.json');
+    fs.writeFileSync(catalogPath, JSON.stringify({
+      models: [
+        {
+          slug: 'gpt-5.6-sol',
+          supported_reasoning_levels: [
+            { effort: 'low' },
+            { effort: 'medium' },
+            { effort: 'high' },
+            { effort: 'xhigh' },
+            { effort: 'max' },
+            { effort: 'ultra' },
+          ],
+          default_reasoning_level: 'low',
+        },
+        {
+          slug: 'gpt-5.6-terra',
+          supported_reasoning_levels: [
+            { effort: 'low' },
+            { effort: 'medium' },
+            { effort: 'high' },
+            { effort: 'xhigh' },
+            { effort: 'max' },
+            { effort: 'ultra' },
+          ],
+          default_reasoning_level: 'medium',
+        },
+        {
+          slug: 'gpt-5.6-luna',
+          supported_reasoning_levels: [
+            { effort: 'low' },
+            { effort: 'medium' },
+            { effort: 'high' },
+            { effort: 'xhigh' },
+            { effort: 'max' },
+          ],
+          default_reasoning_level: 'medium',
+        },
+        { slug: 'gpt-image-2', visibility: 'hide', supported_reasoning_levels: [{ effort: 'high' }] },
+      ],
+    }));
+
+    try {
+      const models = readCodexModelCatalog(catalogPath);
+      assert.deepStrictEqual(models.map((model) => model.name), [
+        'gpt-5.6-sol',
+        'gpt-5.6-terra',
+        'gpt-5.6-luna',
+      ]);
+      assert.deepStrictEqual(models[0]?.supportedReasoningEfforts, [
+        'low', 'medium', 'high', 'xhigh', 'max', 'ultra',
+      ]);
+      assert.deepStrictEqual(models[1]?.supportedReasoningEfforts, [
+        'low', 'medium', 'high', 'xhigh', 'max', 'ultra',
+      ]);
+      assert.deepStrictEqual(models[2]?.supportedReasoningEfforts, [
+        'low', 'medium', 'high', 'xhigh', 'max',
+      ]);
+      assert.strictEqual(models[0]?.defaultReasoningEffort, 'low');
+      assert.strictEqual(models[1]?.defaultReasoningEffort, 'medium');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   test('reports app-local SDK installation separately from host CLI availability', () => {
     const originalToolsDir = process.env.TOOLS_DIR;
     const toolsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-acp-tools-'));

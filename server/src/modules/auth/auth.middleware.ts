@@ -1,6 +1,7 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { authService } from './auth.service.js';
 import { isWebServingEnabled, resolveWebStaticFile } from '../../lib/web-static.js';
+import { isValidInternalAgentToolToken } from '../../core/agent/agent-handler/internal-agent-tool-auth.js';
 
 /**
  * 认证中间件
@@ -27,6 +28,8 @@ const PUBLIC_PREFIXES = [
   '/uploads/',  // 静态文件
   '/codex-router/',  // Codex 路由模式本地代理：codex 携带 provider key 调用，网关内部自校验内部 token
 ];
+
+const INTERNAL_AGENT_TOOLS_PREFIX = '/internal/agent-tools/';
 
 /**
  * 检查路径是否为公开接口
@@ -84,6 +87,15 @@ export async function authHook(
   }
 
   const token = authHeader.substring(7);
+
+  // Codex/其它助手执行器使用进程内专用令牌访问内部工具端点；这些端点
+  // 会在各自的 gateway handler 中再次校验该令牌，不应先被用户 JWT 校验拦截。
+  if (
+    request.url.startsWith(INTERNAL_AGENT_TOOLS_PREFIX)
+    && isValidInternalAgentToolToken(token)
+  ) {
+    return;
+  }
 
   try {
     const user = await authService.getUserFromToken(token);

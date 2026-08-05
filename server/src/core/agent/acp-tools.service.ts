@@ -40,6 +40,8 @@ export interface LocalModelConfig {
   name: string;
   apiUrl?: string;
   apiKey?: string;
+  supportedReasoningEfforts?: string[];
+  defaultReasoningEffort?: string | null;
 }
 
 export interface AcpToolInfo {
@@ -57,6 +59,153 @@ export interface AcpToolInfo {
   localConfigPath?: string;
   localConfigLabel?: string;
   localModels?: LocalModelConfig[];
+  localDefaultModel?: string;
+}
+
+interface CodexModelCatalogEntry {
+  id?: unknown;
+  slug?: unknown;
+  model?: unknown;
+  supported_reasoning_levels?: unknown;
+  supported_reasoning_efforts?: unknown;
+  reasoning_efforts?: unknown;
+  default_reasoning_level?: unknown;
+  default_reasoning_effort?: unknown;
+  supported_in_api?: unknown;
+  visibility?: unknown;
+}
+
+function parseModelName(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const name = value.trim();
+  return name || undefined;
+}
+
+function parseReasoningEfforts(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+
+  const efforts = new Set<string>();
+  for (const item of value) {
+    const rawEffort = typeof item === 'string'
+      ? item
+      : item && typeof item === 'object'
+        ? (item as { effort?: unknown; reasoning_effort?: unknown; value?: unknown }).effort
+          ?? (item as { reasoning_effort?: unknown }).reasoning_effort
+          ?? (item as { value?: unknown }).value
+        : undefined;
+    const effort = parseModelName(rawEffort)?.toLowerCase();
+    if (effort) efforts.add(effort);
+  }
+  return [...efforts];
+}
+
+function readJsonObject(filePath: string): Record<string, unknown> | null {
+  try {
+    if (!fs.existsSync(filePath)) return null;
+    const value: unknown = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function readTomlStringSetting(configPath: string, key: string): string | undefined {
+  try {
+    if (!fs.existsSync(configPath)) return undefined;
+    const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = fs.readFileSync(configPath, 'utf-8').match(
+      new RegExp(`^\\s*${escapedKey}\\s*=\\s*["']([^"']+)["']`, 'm'),
+    );
+    return parseModelName(match?.[1]);
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveCodexModelCatalogPath(codexHome: string, configPath: string): string | undefined {
+  const configuredCatalog = readTomlStringSetting(configPath, 'model_catalog_json');
+  const candidates = [
+    configuredCatalog
+      ? path.isAbsolute(configuredCatalog)
+        ? configuredCatalog
+        : path.resolve(codexHome, configuredCatalog)
+      : undefined,
+    path.join(codexHome, 'cockpit-local-access-model-catalog.json'),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+
+  return candidates.find((candidate) => fs.existsSync(candidate));
+}
+
+/**
+ * 读取 Codex 自己维护的模型目录。目录中的 supported_reasoning_levels 是
+ * 当前 Codex UI/CLI 真实能力列表，不能用一套固定档位替代。
+ */
+export function readCodexModelCatalog(catalogPath: string): LocalModelConfig[] {
+  const data = readJsonObject(catalogPath);
+  const entries = data?.models;
+  if (!Array.isArray(entries)) return [];
+
+  const models = new Map<string, LocalModelConfig>();
+  for (const rawEntry of entries) {
+    if (!rawEntry || typeof rawEntry !== 'object') continue;
+    const entry = rawEntry as CodexModelCatalogEntry;
+    if (entry.supported_in_api === false || entry.visibility === 'hide') continue;
+    const name = parseModelName(entry.slug) ?? parseModelName(entry.id) ?? parseModelName(entry.model);
+    if (!name) continue;
+
+    const supportedReasoningEfforts = [
+      ...parseReasoningEfforts(entry.supported_reasoning_levels),
+      ...parseReasoningEfforts(entry.supported_reasoning_efforts),
+      ...parseReasoningEfforts(entry.reasoning_efforts),
+    ].filter((effort, index, efforts) => efforts.indexOf(effort) === index);
+    const defaultReasoningEffort = parseModelName(
+      entry.default_reasoning_level ?? entry.default_reasoning_effort,
+    )?.toLowerCase() ?? null;
+
+    models.set(name.toLowerCase(), {
+      id: `codex-catalog-${name}`,
+      name,
+      ...(supportedReasoningEfforts.length > 0 ? { supportedReasoningEfforts } : {}),
+      ...(defaultReasoningEffort ? { defaultReasoningEffort } : {}),
+    });
+  }
+
+  return [...models.values()];
+}
+
+function mergeCodexLocalModels(
+  catalogModels: LocalModelConfig[],
+  configuredModels: LocalModelConfig[],
+  configuredModel?: string,
+): LocalModelConfig[] {
+  const models = new Map<string, LocalModelConfig>();
+  for (const model of [...catalogModels, ...configuredModels]) {
+    const name = parseModelName(model.name);
+    if (!name || name === 'ChatGPT (内置)') continue;
+    const key = name.toLowerCase();
+    const existing = models.get(key);
+    models.set(key, existing
+      ? {
+          ...existing,
+          ...model,
+          name: existing.name,
+          supportedReasoningEfforts: model.supportedReasoningEfforts ?? existing.supportedReasoningEfforts,
+          defaultReasoningEffort: model.defaultReasoningEffort ?? existing.defaultReasoningEffort,
+        }
+      : model);
+  }
+
+  const normalizedConfiguredModel = parseModelName(configuredModel);
+  if (normalizedConfiguredModel && !models.has(normalizedConfiguredModel.toLowerCase())) {
+    models.set(normalizedConfiguredModel.toLowerCase(), {
+      id: 'codex-configured-model',
+      name: normalizedConfiguredModel,
+    });
+  }
+
+  return [...models.values()];
 }
 
 function readClaudeConfigModels(configPath: string): LocalModelConfig[] {
@@ -170,35 +319,54 @@ function checkClaudeLocalConfig(): { available: boolean; path: string; label: st
   };
 }
 
-function checkCodexLocalConfig(): { available: boolean; path: string; label: string; models: LocalModelConfig[] } {
+function checkCodexLocalConfig(): {
+  available: boolean;
+  path: string;
+  label: string;
+  models: LocalModelConfig[];
+  defaultModel?: string;
+} {
   const authPath = path.join(os.homedir(), '.codex', 'auth.json');
+  const codexConfigPath = path.join(os.homedir(), '.codex', 'config.toml');
   try {
-    if (!fs.existsSync(authPath)) {
-      return { available: false, path: authPath, label: 'Codex auth.json', models: [] };
-    }
-    const data = JSON.parse(fs.readFileSync(authPath, 'utf-8'));
-    const hasApiKey = typeof data.OPENAI_API_KEY === 'string' && data.OPENAI_API_KEY.length > 0;
+    const data = readJsonObject(authPath);
+    const hasApiKey = typeof data?.OPENAI_API_KEY === 'string' && data.OPENAI_API_KEY.length > 0;
     const hasChatGptTokens =
-      data.tokens &&
+      data?.tokens &&
       typeof data.tokens === 'object' &&
-      typeof data.tokens.access_token === 'string' &&
-      typeof data.tokens.refresh_token === 'string';
+      typeof (data.tokens as { access_token?: unknown }).access_token === 'string' &&
+      typeof (data.tokens as { refresh_token?: unknown }).refresh_token === 'string';
+    const configuredModel = readTomlStringSetting(codexConfigPath, 'model');
+    const hasConfiguredProvider = (() => {
+      try {
+        return fs.readFileSync(codexConfigPath, 'utf-8').includes('[model_providers.');
+      } catch {
+        return false;
+      }
+    })();
 
-    const available = hasApiKey || hasChatGptTokens;
+    const available = Boolean(hasApiKey || hasChatGptTokens || configuredModel || hasConfiguredProvider);
     const models = readCodexConfigModels(authPath);
+    const catalogPath = resolveCodexModelCatalogPath(path.dirname(authPath), codexConfigPath);
+    const catalogModels = catalogPath ? readCodexModelCatalog(catalogPath) : [];
+    const localModels = mergeCodexLocalModels(catalogModels, models, configuredModel);
+    const defaultModel = configuredModel
+      ?? models.find((model) => model.name !== 'ChatGPT (内置)')?.name;
+    const configPath = fs.existsSync(authPath) ? authPath : codexConfigPath;
 
     return {
       available,
-      path: authPath,
-      label: 'Codex auth.json',
-      models,
+      path: configPath,
+      label: configPath === authPath ? 'Codex auth.json' : 'Codex config.toml',
+      models: localModels,
+      ...(defaultModel ? { defaultModel } : {}),
     };
   } catch {
     return { available: false, path: authPath, label: 'Codex auth.json', models: [] };
   }
 }
 
-function checkLocalConfig(toolId: string): Pick<AcpToolInfo, 'localConfigAvailable' | 'localConfigPath' | 'localConfigLabel' | 'localModels'> {
+function checkLocalConfig(toolId: string): Pick<AcpToolInfo, 'localConfigAvailable' | 'localConfigPath' | 'localConfigLabel' | 'localModels' | 'localDefaultModel'> {
   const result = toolId === 'claude'
     ? checkClaudeLocalConfig()
     : toolId === 'codex'
@@ -206,11 +374,15 @@ function checkLocalConfig(toolId: string): Pick<AcpToolInfo, 'localConfigAvailab
       : null;
 
   if (!result) return {};
+  const localDefaultModel = toolId === 'codex'
+    ? (result as { defaultModel?: string }).defaultModel
+    : undefined;
   return {
     localConfigAvailable: result.available,
     localConfigPath: result.path,
     localConfigLabel: result.label,
     localModels: result.models,
+    ...(localDefaultModel ? { localDefaultModel } : {}),
   };
 }
 

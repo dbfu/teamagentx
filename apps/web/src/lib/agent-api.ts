@@ -5,27 +5,40 @@ const INLINE_AVATAR_REFERENCE_PREFIX = '__teamagentx_inline_avatar__:'
 
 // 智能协作（coordinator）/ 手动（manual）；'auto' 为历史值，仅为兼容旧数据保留，等同 coordinator
 export type AgentTriggerMode = 'auto' | 'manual' | 'coordinator'
-export type AgentThinkingMode = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+export type AgentThinkingMode = 'off' | 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra'
 
 // 不同 ACP 工具支持的思考强度档位（按强度从高到低排列，用于下拉框展示）。
 // Claude 原生 effort 档位为 low/medium/high/xhigh/max（无 minimal），外加显式关闭 off；
-// Codex reasoning effort 为 minimal/low/medium/high/xhigh（无显式关闭、最低 minimal，也无 max）。
+// Codex 的实际档位以模型目录返回的 supported_reasoning_levels 为准；这里是兼容没有模型元数据时的已知集合。
 export const CLAUDE_THINKING_MODES: AgentThinkingMode[] = ['max', 'xhigh', 'high', 'medium', 'low', 'off']
-export const CODEX_THINKING_MODES: AgentThinkingMode[] = ['xhigh', 'high', 'medium', 'low', 'minimal']
+export const CODEX_THINKING_MODES: AgentThinkingMode[] = ['ultra', 'max', 'xhigh', 'high', 'medium', 'low', 'minimal', 'none']
 
-export function getThinkingModeOptions(acpTool?: string | null): AgentThinkingMode[] {
-  return acpTool === 'codex' ? CODEX_THINKING_MODES : CLAUDE_THINKING_MODES
+export function getThinkingModeOptions(
+  acpTool?: string | null,
+  supportedReasoningEfforts?: readonly string[] | null,
+): AgentThinkingMode[] {
+  if (acpTool !== 'codex' || !supportedReasoningEfforts?.length) {
+    return acpTool === 'codex' ? CODEX_THINKING_MODES : CLAUDE_THINKING_MODES
+  }
+
+  const supported = new Set(supportedReasoningEfforts.map((effort) => effort.trim().toLowerCase()))
+  const modelOptions = CODEX_THINKING_MODES.filter((mode) => supported.has(mode))
+  // 供应商返回了能力元数据但没有任何当前 UI/执行器可识别的档位时，
+  // 保留原有 Codex 选项，避免把配置下拉框变成空列表。
+  return modelOptions.length > 0 ? modelOptions : CODEX_THINKING_MODES
 }
 
 // 思考强度 -> i18n key 映射，供下拉框与详情展示统一使用。
 export const THINKING_MODE_I18N_KEY: Record<AgentThinkingMode, string> = {
   off: 'assistant.thinkingOff',
+  none: 'assistant.thinkingNone',
   minimal: 'assistant.thinkingMinimal',
   low: 'assistant.thinkingLow',
   medium: 'assistant.thinkingMedium',
   high: 'assistant.thinkingHigh',
   xhigh: 'assistant.thinkingXhigh',
   max: 'assistant.thinkingMax',
+  ultra: 'assistant.thinkingUltra',
 }
 
 // 分类相关类型
@@ -563,6 +576,15 @@ function parseTemplateFilename(contentDisposition: string | null): string {
 }
 
 // ACP 工具信息类型
+export interface AcpLocalModel {
+  id: string
+  name: string
+  apiUrl?: string
+  apiKey?: string
+  supportedReasoningEfforts?: string[]
+  defaultReasoningEffort?: string | null
+}
+
 export interface AcpToolInfo {
   id: string
   name: string
@@ -577,6 +599,8 @@ export interface AcpToolInfo {
   localConfigAvailable?: boolean
   localConfigPath?: string
   localConfigLabel?: string
+  localDefaultModel?: string
+  localModels?: AcpLocalModel[]
 }
 
 export const acpToolsApi = {

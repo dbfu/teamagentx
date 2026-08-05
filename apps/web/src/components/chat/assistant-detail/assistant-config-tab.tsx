@@ -74,7 +74,7 @@ function FullscreenPromptModal({
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-8">
-      <div className="flex h-[80vh] w-full max-w-4xl flex-col rounded-2xl bg-card shadow-2xl">
+      <div className="flex h-[80vh] max-h-[80vh] w-full max-w-4xl flex-col rounded-2xl bg-card shadow-2xl">
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <h2 className="text-lg font-semibold text-foreground">{t('assistant.editPrompt')}</h2>
           <button
@@ -145,6 +145,7 @@ export function AssistantConfigTab({ agent, onUpdate }: AssistantConfigTabProps)
   const isSystemAgent = agent.agentLevel === 'system'
 
   const thinkingModeLabels: Record<Agent['thinkingMode'], string> = {
+    ultra: t('assistant.thinkingUltraShort'),
     max: t('assistant.thinkingMaxShort'),
     xhigh: t('assistant.thinkingXhighShort'),
     high: t('assistant.thinkingHighShort'),
@@ -152,6 +153,7 @@ export function AssistantConfigTab({ agent, onUpdate }: AssistantConfigTabProps)
     low: t('assistant.thinkingLowShort'),
     minimal: t('assistant.thinkingMinimalShort'),
     off: t('assistant.thinkingOffShort'),
+    none: t('assistant.thinkingNoneShort'),
   }
 
   const handleOpenWorkDir = async (workDir: string) => {

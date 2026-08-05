@@ -251,7 +251,7 @@ export function ScreenshotModal({
       >
         <div className="fixed inset-0 bg-black/50" />
         <div
-          className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-background rounded-lg shadow-lg p-6 max-w-md w-full border"
+          className="fixed left-1/2 top-1/2 max-h-[80vh] max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg border bg-background p-6 shadow-lg w-full"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="text-center">
@@ -276,7 +276,7 @@ export function ScreenshotModal({
       >
         <div className="fixed inset-0 bg-black/50" />
         <div
-          className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-background rounded-lg shadow-lg max-w-3xl w-[90vw] max-h-[90vh] overflow-hidden border"
+          className="fixed left-1/2 top-1/2 max-h-[80vh] max-w-3xl -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-lg border bg-background shadow-lg w-[90vw]"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}

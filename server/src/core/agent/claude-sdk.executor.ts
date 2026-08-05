@@ -36,6 +36,7 @@ import {
   buildGroupChatMemberInfoSection,
   buildHandoffTurnReminder,
   buildNoAssistantHandoffTurnReminder,
+  getClaudeRuntimeMcpConnectorsSection,
   getClaudeShellCommandsSection,
   getResponseStyleInstruction,
 } from './agent-system-prompt.js';
@@ -49,6 +50,7 @@ import {
   buildAgentLongTermMemoryContentSection,
   buildAgentLongTermMemoryInstructions,
 } from './agent-long-term-memory.js';
+import { sanitizeAgentChildEnv } from './agent-child-env.js';
 import type {
     AgentDebugInfo,
     AgentExecOptions,
@@ -222,14 +224,15 @@ function getClaudeThinkingOptions(
 
   if (thinkingMode) {
     const mode = thinkingMode || DEFAULT_AGENT_THINKING_MODE;
-    if (mode === 'off') return {type: 'disabled'};
-    const budgetTokensByMode: Record<Exclude<AgentThinkingMode, 'off'>, number> = {
+    if (mode === 'off' || mode === 'none') return {type: 'disabled'};
+    const budgetTokensByMode: Record<Exclude<AgentThinkingMode, 'off' | 'none'>, number> = {
       minimal: 2000,
       low: 4000,
       medium: 10000,
       high: 16000,
       xhigh: 24000,
       max: 32000,
+      ultra: 32000,
     };
     return {type: 'enabled', budgetTokens: budgetTokensByMode[mode]};
   }
@@ -239,6 +242,7 @@ function getClaudeThinkingOptions(
   if (
     mode === 'disabled' ||
     mode === 'off' ||
+    mode === 'none' ||
     mode === '0'
   ) {
     return {type: 'disabled'};
@@ -985,7 +989,8 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
   }
 
   private buildEnv(): Record<string, string | undefined> {
-    const cleanEnv: Record<string, string | undefined> = {...process.env};
+    const cleanEnv: Record<string, string | undefined> =
+      sanitizeAgentChildEnv(process.env);
     const keysToClear = [
       'ANTHROPIC_API_KEY',
       'ANTHROPIC_AUTH_TOKEN',
@@ -1138,7 +1143,7 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
 
   private buildMcpCommandEnv(): NodeJS.ProcessEnv {
     const base: NodeJS.ProcessEnv = {
-      ...process.env,
+      ...sanitizeAgentChildEnv(process.env),
       CLAUDE_CONFIG_DIR: this.getClaudeConfigDir(),
     };
     // 注入群聊环境变量，让 shell 脚本可以取值（跳过保留键，避免劫持执行器）
@@ -1150,7 +1155,10 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
     return {};
   }
 
-  private buildSdkSystemPrompt(suppressAssistantHandoff = false): string {
+  private buildSdkSystemPrompt(
+    suppressAssistantHandoff = false,
+    connectorNames: string[] = [],
+  ): string {
     return [
       suppressAssistantHandoff
         ? this.systemPromptWithoutAssistantHandoff
@@ -1160,6 +1168,7 @@ export class ClaudeAgentSdkExecutor implements IAgentExecutor {
         this.name,
       ),
       buildInstalledSkillsInstructions(this.agentId),
+      getClaudeRuntimeMcpConnectorsSection(connectorNames, this.locale),
       this.buildGroupChatMemberInfoSection(suppressAssistantHandoff),
       getResponseStyleInstruction(this.locale),
     ]
@@ -2199,7 +2208,10 @@ You may access current chatroom history through tools. Use \`get_recent_room_mes
         cwd: this.workDir,
         env,
         ...(autoCompactWindow ? { settings: { autoCompactEnabled: true, autoCompactWindow } } : {}),
-        systemPrompt: this.buildSdkSystemPrompt(suppressAssistantHandoff),
+        systemPrompt: this.buildSdkSystemPrompt(
+          suppressAssistantHandoff,
+          connectors.map((connector) => connector.name),
+        ),
         model: this.llmProvider?.model,
         includePartialMessages: true,
         maxTurns,

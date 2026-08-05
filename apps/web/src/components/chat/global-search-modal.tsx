@@ -204,9 +204,9 @@ export function GlobalSearchModal({ open, onClose, chatRooms }: GlobalSearchModa
   const isEmpty = query.trim().length > 0 && !loading && activeCount === 0
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/45 px-4 pt-[7vh]" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/45 p-4" onMouseDown={onClose}>
       <div
-        className="flex h-[min(760px,86vh)] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-border bg-background shadow-2xl"
+        className="flex h-[min(760px,80vh)] max-h-[80vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-border bg-background shadow-2xl"
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="flex items-center gap-3 border-b border-border px-5 py-4">

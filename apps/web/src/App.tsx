@@ -862,7 +862,7 @@ function AppContent() {
   }
 
   return (
-    <div className={cn("flex flex-1 h-full w-full bg-[var(--surface)] text-foreground", isMobile ? "overflow-x-hidden" : "overflow-hidden")}>
+    <div className={cn("flex flex-1 h-full w-full bg-background text-foreground", isMobile ? "overflow-x-hidden" : "overflow-hidden")}>
       {/* 桌面端 Sidebar navigation（3D 办公室页面全屏，隐藏左侧侧边栏） */}
       {!isMobile && !location.pathname.startsWith('/office/') && (
         <SidebarNav

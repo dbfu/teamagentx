@@ -104,7 +104,7 @@ const agentResponseSchema = {
     codexModel: { type: 'string', nullable: true },
     codexFastMode: { type: 'boolean' },
     claudeModel: { type: 'string', nullable: true },
-    thinkingMode: { type: 'string', enum: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] },
+    thinkingMode: { type: 'string', enum: ['off', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'] },
     speechConfig: {
       type: 'object',
       nullable: true,
@@ -216,7 +216,7 @@ const createAgentBodySchema = {
     codexModel: { type: 'string', nullable: true, description: 'Codex 本地配置模式下指定的模型名称' },
     codexFastMode: { type: 'boolean', description: 'Codex Fast service tier 开关' },
     claudeModel: { type: 'string', nullable: true, description: 'Claude 本地配置模式下指定的模型名称' },
-    thinkingMode: { type: 'string', enum: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'], description: '思考模式，默认 high' },
+    thinkingMode: { type: 'string', enum: ['off', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'], description: '思考模式，默认 high' },
     speechConfig: {
       type: 'object',
       nullable: true,
@@ -288,7 +288,7 @@ const updateAgentBodySchema = {
     codexModel: { type: 'string', nullable: true },
     codexFastMode: { type: 'boolean' },
     claudeModel: { type: 'string', nullable: true },
-    thinkingMode: { type: 'string', enum: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] },
+    thinkingMode: { type: 'string', enum: ['off', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'] },
     speechConfig: {
       type: 'object',
       nullable: true,
@@ -613,6 +613,25 @@ export async function agentGateway(app: FastifyInstance) {
                     localConfigAvailable: { type: 'boolean', nullable: true },
                     localConfigPath: { type: 'string', nullable: true },
                     localConfigLabel: { type: 'string', nullable: true },
+                    localDefaultModel: { type: 'string', nullable: true },
+                    localModels: {
+                      type: 'array',
+                      nullable: true,
+                      items: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'string' },
+                          name: { type: 'string' },
+                          apiUrl: { type: 'string', nullable: true },
+                          apiKey: { type: 'string', nullable: true },
+                          supportedReasoningEfforts: {
+                            type: 'array',
+                            items: { type: 'string' },
+                          },
+                          defaultReasoningEffort: { type: 'string', nullable: true },
+                        },
+                      },
+                    },
                   },
                 },
               },

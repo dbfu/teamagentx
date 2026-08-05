@@ -542,7 +542,7 @@ export function AssistantDetailModal({ agentId, open, onOpenChange }: AssistantD
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         aria-describedby={undefined}
-        className="flex h-[min(840px,calc(100vh-2rem))] !w-[min(1100px,calc(100vw-2rem))] !max-w-[1100px] flex-col gap-0 overflow-hidden border-0 p-0 max-md:h-screen max-md:!w-screen max-md:!max-w-none max-md:rounded-none"
+        className="flex h-[min(840px,calc(100vh-2rem))] max-h-[80vh] !w-[min(1100px,calc(100vw-2rem))] !max-w-[1100px] flex-col gap-0 overflow-hidden border-0 p-0 max-md:h-screen max-md:!w-screen max-md:!max-w-none max-md:rounded-none"
       >
         <AssistantDetailContent agentId={agentId} onClose={handleClose} showBack={false} />
       </DialogContent>

@@ -3,3 +3,9 @@ packages:
   - 'packages/*'
   - 'server'
 forceLegacyDeploy: true
+onlyBuiltDependencies:
+  - '@prisma/engines'
+  - electron
+  - electron-winstaller
+  - esbuild
+  - prisma

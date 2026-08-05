@@ -44,6 +44,7 @@ export async function setupGateway(app: FastifyInstance) {
                       localConfigAvailable: { type: 'boolean', nullable: true },
                       localConfigPath: { type: 'string', nullable: true },
                       localConfigLabel: { type: 'string', nullable: true },
+                      localDefaultModel: { type: 'string', nullable: true },
                       localModels: {
                         type: 'array',
                         nullable: true,
@@ -54,6 +55,11 @@ export async function setupGateway(app: FastifyInstance) {
                             name: { type: 'string' },
                             apiUrl: { type: 'string', nullable: true },
                             apiKey: { type: 'string', nullable: true },
+                            supportedReasoningEfforts: {
+                              type: 'array',
+                              items: { type: 'string' },
+                            },
+                            defaultReasoningEffort: { type: 'string', nullable: true },
                           },
                         },
                       },

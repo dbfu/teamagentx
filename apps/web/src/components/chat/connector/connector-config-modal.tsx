@@ -95,7 +95,7 @@ export function ConnectorConfigModal({ isOpen, onClose, onSuccess, mode = 'repla
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-8">
-      <div className="flex h-[80vh] w-full max-w-3xl flex-col rounded-2xl bg-card shadow-2xl">
+      <div className="flex h-[80vh] max-h-[80vh] w-full max-w-3xl flex-col rounded-2xl bg-card shadow-2xl">
         {/* 头部 */}
         <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
           <div className="flex items-center gap-3">

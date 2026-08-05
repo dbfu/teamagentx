@@ -567,6 +567,10 @@ export function AssistantPage({ onNavigateToChatRoom, isMobile }: AssistantPageP
     const response = await categoryApi.create(data)
     if (response.success) {
       await fetchData()
+      if (response.data?.id) {
+        setSearchQuery('')
+        setActiveTabKey(response.data.id)
+      }
       setIsCreateCategoryModalOpen(false)
     } else {
       toast.error(t('assistant.categoryCreateFailed'))

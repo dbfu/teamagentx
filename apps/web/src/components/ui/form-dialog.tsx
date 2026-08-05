@@ -33,8 +33,8 @@ export function FormDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-black/50 py-12">
-      <div className={`${width} shrink-0 rounded-2xl bg-card shadow-xl`}>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-black/50 p-4">
+      <div className={`${width} flex max-h-[80vh] min-h-0 max-w-[calc(100vw-2rem)] shrink-0 flex-col overflow-y-auto rounded-2xl bg-card shadow-xl`}>
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <h2 className="text-lg font-semibold text-foreground">{title}</h2>
@@ -47,7 +47,7 @@ export function FormDialog({
         </div>
 
         {/* Content */}
-        <div className="max-h-[50vh] overflow-y-auto p-6">
+        <div className="min-h-0 flex-1 overflow-y-auto p-6">
           {children}
         </div>
 

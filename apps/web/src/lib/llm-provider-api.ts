@@ -6,6 +6,19 @@ export type LlmModelType = 'text' | 'image' | 'video' | 'audio'
 export type AudioUsage = 'tts' | 'stt' | 'both'
 export type ImageGenApiType = 'sync' | 'async' | 'auto'
 
+export interface FetchedModel {
+  id: string
+  ownedBy: string | null
+  supportedReasoningEfforts?: string[]
+  defaultReasoningEffort?: string | null
+}
+
+export interface FetchModelsRequest {
+  apiUrl: string
+  apiKey: string
+  apiProtocol?: 'anthropic' | 'openai'
+}
+
 // LLM 供应商接口
 export interface LlmProvider {
   id: string
@@ -160,6 +173,21 @@ export const llmProviderApi = {
   // 测试连接
   async testConnection(id: string): Promise<ApiResponse<{ connected: boolean; message: string; model: string }>> {
     return request<{ connected: boolean; message: string; model: string }>(`/llm-providers/${id}/test`, {
+      method: 'POST',
+    })
+  },
+
+  // 从供应商 API 获取可用模型列表
+  async fetchModels(data: FetchModelsRequest): Promise<ApiResponse<FetchedModel[]>> {
+    return request<FetchedModel[]>('/llm-providers/fetch-models', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  },
+
+  // 使用已保存的供应商密钥获取模型目录及模型能力元数据
+  async fetchModelsForProvider(id: string): Promise<ApiResponse<FetchedModel[]>> {
+    return request<FetchedModel[]>(`/llm-providers/${id}/fetch-models`, {
       method: 'POST',
     })
   },

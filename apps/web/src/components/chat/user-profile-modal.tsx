@@ -36,7 +36,7 @@ export function UserProfileModal({ open, onClose }: UserProfileModalProps) {
       onClick={onClose}
     >
       <div
-        className="w-[580px] max-w-full overflow-hidden rounded-2xl bg-card shadow-xl"
+        className="w-[580px] max-w-full max-h-[80vh] overflow-y-auto rounded-2xl bg-card shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

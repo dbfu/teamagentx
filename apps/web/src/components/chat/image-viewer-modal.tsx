@@ -77,7 +77,7 @@ export function ImageViewerModal({
 
       {/* 内容 */}
       <div
-        className="relative max-w-[90vw] max-h-[90vh] flex flex-col"
+        className="relative flex max-h-[80vh] max-w-[90vw] flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 工具栏 */}
@@ -117,7 +117,7 @@ export function ImageViewerModal({
         {/* 图片 */}
         <div className={cn(
           "relative rounded-lg bg-black",
-          isTallImage ? "max-h-[85vh] overflow-y-auto" : "overflow-hidden",
+          isTallImage ? "max-h-[80vh] overflow-y-auto" : "overflow-hidden",
           isLoading && "flex items-center justify-center min-w-[200px] min-h-[200px]"
         )}>
           {isLoading && (
@@ -129,7 +129,7 @@ export function ImageViewerModal({
             className={cn(
               isTallImage
                 ? "h-auto w-[min(90vw,720px)] max-w-none"
-                : "max-w-[90vw] max-h-[85vh] object-contain",
+                : "max-w-[90vw] max-h-[80vh] object-contain",
               isLoading && "hidden"
             )}
             onLoad={(event) => {

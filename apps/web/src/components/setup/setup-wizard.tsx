@@ -467,7 +467,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                             className="w-full appearance-none rounded-lg border border-border bg-background px-3 py-2 pr-8 text-sm text-foreground focus:border-blue-500 focus:outline-none"
                           >
                             <option value="__default__">{t('setup.useLocalDefaultModel')}</option>
-                            {getCodexModelOptions(modelName).map(option => (
+                            {getCodexModelOptions(modelName, selectedToolInfo?.localModels).map(option => (
                               <option key={option.value} value={option.value}>
                                 {option.label}
                               </option>

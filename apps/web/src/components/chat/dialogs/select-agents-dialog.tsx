@@ -153,7 +153,7 @@ export function SelectAgentsDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 sm:p-8">
-      <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-card shadow-xl sm:max-h-[calc(100vh-4rem)]">
+      <div className="flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-card shadow-xl">
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-border px-6 py-4">
           <h2 className="min-w-0 truncate text-lg font-semibold text-foreground">{dialogTitle}</h2>

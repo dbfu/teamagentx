@@ -240,7 +240,7 @@ export function MobileConnectCard() {
       {/* 二维码安全提示弹框 */}
       {showQRConfirmModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-[480px] rounded-2xl bg-card shadow-xl p-8">
+          <div className="w-[480px] max-w-full max-h-[80vh] overflow-y-auto rounded-2xl bg-card p-8 shadow-xl">
             <div className="flex items-center justify-center mb-5">
               <div className="rounded-full bg-orange-100 p-4">
                 <VolumeX className="size-7 text-orange-600" />
@@ -275,7 +275,7 @@ export function MobileConnectCard() {
       {/* 二维码弹框 */}
       {showQRModal && generatedQRData && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-[480px] rounded-2xl bg-card shadow-xl p-8">
+          <div className="w-[480px] max-w-full max-h-[80vh] overflow-y-auto rounded-2xl bg-card p-8 shadow-xl">
             <div className="flex items-center justify-between mb-5">
               <h3 className="text-xl font-semibold text-foreground">{t('settings.scanToConnect')}</h3>
               <button

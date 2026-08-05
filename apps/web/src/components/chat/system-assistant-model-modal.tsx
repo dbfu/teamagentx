@@ -14,6 +14,7 @@ import { getClaudeModelOptions } from '@/lib/claude-models'
 import { llmProviderApi, type LlmProvider } from '@/lib/llm-provider-api'
 import { getProviderProtocolHint, isProviderCompatibleWithAgent } from '@/lib/llm-provider-compat'
 import { FallbackModelSelector } from './fallback-model-selector'
+import { ThinkingModeSelector } from './thinking-mode-selector'
 import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
 
@@ -266,8 +267,8 @@ export function SystemAssistantModelModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 py-12">
-      <div className="w-[560px] shrink-0 rounded-2xl bg-card shadow-xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/50 p-4">
+      <div className="w-[560px] max-w-full shrink-0 max-h-[80vh] overflow-y-auto rounded-2xl bg-card shadow-xl">
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <div className="flex items-center gap-3">
             <div className="flex size-9 items-center justify-center rounded-lg bg-blue-500 text-white">
@@ -382,17 +383,17 @@ export function SystemAssistantModelModal({
                 <label className="mb-1.5 block text-sm font-medium text-foreground">
                   {t('assistant.thinkingModeLabel')}
                 </label>
-                <Select value={thinkingMode} onValueChange={(value) => setThinkingMode(value as AgentThinkingMode)}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder={t('assistant.selectThinkingModePlaceholder')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="high">{t('assistant.thinkingHighDefault')}</SelectItem>
-                    <SelectItem value="medium">{t('assistant.thinkingMedium')}</SelectItem>
-                    <SelectItem value="low">{t('assistant.thinkingLow')}</SelectItem>
-                    <SelectItem value="off">{t('assistant.thinkingOff')}</SelectItem>
-                  </SelectContent>
-                </Select>
+                <ThinkingModeSelector
+                  acpTool={acpTool}
+                  providerId={effectiveSelectedProviderId || null}
+                  providerModel={selectedProvider?.model}
+                  modelName={selectedProvider?.model || codexModel}
+                  localDefaultModel={selectedAcpTool?.localDefaultModel}
+                  localModels={selectedAcpTool?.localModels}
+                  value={thinkingMode}
+                  onChange={setThinkingMode}
+                  placeholder={t('assistant.selectThinkingModePlaceholder')}
+                />
                 <p className="mt-1.5 text-xs text-muted-foreground">
                   {t('assistant.thinkingModeHint')}
                 </p>
@@ -425,7 +426,7 @@ export function SystemAssistantModelModal({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__default__">{t('assistant.useLocalDefaultModel')}</SelectItem>
-                      {getCodexModelOptions(codexModel).map((option) => (
+                      {getCodexModelOptions(codexModel, selectedAcpTool?.localModels).map((option) => (
                         <SelectItem key={option.value} value={option.value}>
                           {option.label}
                         </SelectItem>

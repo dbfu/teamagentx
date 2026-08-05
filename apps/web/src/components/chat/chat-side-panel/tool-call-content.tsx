@@ -130,8 +130,8 @@ function CodeBlock({ label, code, language }: { label: string; code: string; lan
         <HighlightedCode code={code} language={language} />
       </pre>
       {expanded && (
-        <div className="fixed inset-0 z-50 flex bg-black/40 p-4" role="dialog" aria-modal="true">
-          <div className="flex min-h-0 w-full flex-col rounded-lg border bg-background shadow-xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/40 p-4" role="dialog" aria-modal="true">
+          <div className="flex max-h-[80vh] min-h-0 w-full max-w-6xl flex-col overflow-hidden rounded-lg border bg-background shadow-xl">
             <div className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3">
               <div className="min-w-0">
                 <div className="truncate text-sm font-medium text-foreground">{label}</div>

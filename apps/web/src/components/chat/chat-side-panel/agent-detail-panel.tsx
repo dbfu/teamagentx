@@ -294,7 +294,7 @@ export function AgentDetailPanel({
       {showConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/50" onClick={() => setShowConfirm(false)} />
-          <div className="relative bg-background rounded-xl shadow-xl p-4 max-w-sm w-full mx-4">
+          <div className="relative max-h-[80vh] w-full max-w-sm mx-4 overflow-y-auto rounded-xl bg-background p-4 shadow-xl">
             <h4 className="text-base font-semibold text-foreground mb-2">{t('chat.agentDetail.confirmClearContext')}</h4>
             <p className="text-sm text-muted-foreground mb-4">
               {t('chat.agentDetail.confirmClearContextDesc', { name: selectedRoomAgent?.name })}

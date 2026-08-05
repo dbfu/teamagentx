@@ -597,7 +597,7 @@ export function IntegrationPage() {
 
       <Dialog open={botEditorOpen} onOpenChange={handleBotEditorOpenChange}>
         <DialogContent
-          className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-2xl"
+          className="max-h-[80vh] overflow-y-auto sm:max-w-2xl"
           style={NO_DRAG_STYLE}
         >
           <DialogHeader>

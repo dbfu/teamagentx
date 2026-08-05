@@ -19,6 +19,7 @@ import {
   buildAgentLongTermMemoryContentSection,
   buildAgentLongTermMemoryInstructions,
 } from './agent-long-term-memory.js';
+import { sanitizeAgentChildEnv } from './agent-child-env.js';
 import {
   buildAgentBaseSystemPrompt,
   buildGroupChatMemberInfoSection,
@@ -82,14 +83,6 @@ function normalizeUsage(usage: Usage | null | undefined): TokenUsage | undefined
     totalTokens: inputTokens + outputTokens + reasoningTokens,
     cacheReadTokens,
   };
-}
-
-function sanitizeEnv(env: NodeJS.ProcessEnv): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const [key, value] of Object.entries(env)) {
-    if (value !== undefined) result[key] = value;
-  }
-  return result;
 }
 
 function attachmentExtension(mimeType: string): string {
@@ -295,18 +288,27 @@ function getPositiveIntegerEnv(name: string, defaultValue: number): number {
   return Number.isFinite(value) && value >= 0 ? value : defaultValue;
 }
 
-type CodexReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+type CodexReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
 
-function getCodexReasoningEffort(thinkingMode?: AgentThinkingMode | null): CodexReasoningEffort {
+export function getCodexReasoningEffort(thinkingMode?: AgentThinkingMode | null): CodexReasoningEffort {
   if (thinkingMode) {
-    // Codex 无 off（最低为 minimal），也无 max（封顶 xhigh）。
-    if (thinkingMode === 'off') return 'minimal';
-    if (thinkingMode === 'max') return 'xhigh';
+    // off 是历史兼容值；Codex 当前使用 none 表示关闭推理。
+    if (thinkingMode === 'off') return 'none';
     return thinkingMode;
   }
 
   const value = process.env.CODEX_SDK_REASONING_EFFORT?.trim().toLowerCase();
-  if (value && ['minimal', 'low', 'medium', 'high', 'xhigh'].includes(value)) {
+  const supportedEfforts: CodexReasoningEffort[] = [
+    'none',
+    'minimal',
+    'low',
+    'medium',
+    'high',
+    'xhigh',
+    'max',
+    'ultra',
+  ];
+  if (value && supportedEfforts.includes(value as CodexReasoningEffort)) {
     return value as CodexReasoningEffort;
   }
   return DEFAULT_AGENT_THINKING_MODE;
@@ -383,6 +385,7 @@ const BUILTIN_CODEX_MCP_SERVERS: CodexBuiltinMcpServerDefinition[] = [
 
 export function buildBuiltinCodexMcpServerConfigs(
   context: CodexBuiltinMcpServerContext,
+  isElectronRuntime: boolean = Boolean(process.versions.electron),
 ): CodexConfigObject {
   const mcpServers: CodexConfigObject = {};
   for (const definition of BUILTIN_CODEX_MCP_SERVERS) {
@@ -393,6 +396,9 @@ export function buildBuiltinCodexMcpServerConfigs(
   }
   const teamAgentXConfig = mcpServers[LEGACY_TEAMAGENTX_CODEX_MCP_SERVER_NAME];
   if (teamAgentXConfig) {
+    if (isElectronRuntime && isPlainObject(teamAgentXConfig) && isPlainObject(teamAgentXConfig.env)) {
+      teamAgentXConfig.env.ELECTRON_RUN_AS_NODE = '1';
+    }
     mcpServers[TEAMAGENTX_CODEX_MCP_SERVER_NAME] = teamAgentXConfig;
   }
   return mcpServers;
@@ -1796,9 +1802,15 @@ process.stdin.on("data", (chunk) => {
     }
   }
 
-  private resetThreadState(reason: string, details: Record<string, unknown> = {}): void {
-    this.currentAbortController?.abort();
-    this.currentAbortController = null;
+  private resetThreadState(
+    reason: string,
+    details: Record<string, unknown> = {},
+    options: { abortCurrent?: boolean } = {},
+  ): void {
+    if (options.abortCurrent !== false) {
+      this.currentAbortController?.abort();
+      this.currentAbortController = null;
+    }
     this.thread = null;
     this.threadId = null;
     this.lastInjectedSkillsSignature = undefined;
@@ -1960,7 +1972,7 @@ Output the summary only.`;
     this.ensureCodexAuthLink();
     this.ensureCodexConfigLink();
 
-    const cleanEnv = sanitizeEnv(process.env);
+    const cleanEnv = sanitizeAgentChildEnv(process.env);
     if (this.llmProvider) {
       // 绑定了 LlmProvider 时，鉴权/base_url 由 provider 注入，清掉宿主机的 OpenAI 相关
       // 变量，避免劫持 provider 的配置。纯本地模式则保留它们，让 config.toml 里
@@ -2165,7 +2177,7 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
         previousThreadId: this.threadId,
         previousMcpToolsSignature: this.lastMcpToolsSignature,
         currentMcpToolsSignature: currentSignature,
-      });
+      }, { abortCurrent: false });
     }
     this.lastMcpToolsSignature = currentSignature;
     if (this.threadId) {
@@ -2192,8 +2204,8 @@ ${buildInstalledSkillsInstructions(this.agentId)}`;
       developer_instructions: this.buildDeveloperInstructions(
         suppressAssistantHandoff,
       ),
-      hide_agent_reasoning: this.thinkingMode === 'off',
-      show_raw_agent_reasoning: this.thinkingMode !== 'off',
+      hide_agent_reasoning: this.thinkingMode === 'off' || this.thinkingMode === 'none',
+      show_raw_agent_reasoning: this.thinkingMode !== 'off' && this.thinkingMode !== 'none',
       model_reasoning_effort: getCodexReasoningEffort(this.thinkingMode),
       model_reasoning_summary: 'concise',
       ...(this.codexFastMode ? { service_tier: 'fast' } : {}),

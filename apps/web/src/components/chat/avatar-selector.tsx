@@ -166,7 +166,7 @@ function AvatarCropModal({ isOpen, imageSrc, onClose, onConfirm }: AvatarCropMod
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4">
-      <div className="w-full max-w-[720px] rounded-2xl bg-white shadow-2xl">
+      <div className="max-h-[80vh] w-full max-w-[720px] overflow-y-auto rounded-2xl bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
           <div>
             <h3 className="text-base font-semibold text-gray-900">{t('assistant.cropAvatar')}</h3>

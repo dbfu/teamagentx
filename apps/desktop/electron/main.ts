@@ -3291,7 +3291,6 @@ function createWindow() {
     // Dev: load Vite dev server (supports dynamic port)
     const viteUrl = process.env.VITE_DEV_SERVER_URL || 'http://127.0.0.1:5173';
     mainWindow.loadURL(viteUrl);
-    mainWindow.webContents.openDevTools();
   } else {
     // Production: use file:// protocol for localStorage support
     const distPath = path.join(__dirname, '../dist');

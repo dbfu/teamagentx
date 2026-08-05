@@ -4,6 +4,7 @@ import { isMaskedApiKey, llmProviderService } from '../modules/llm-provider/llm-
 import { clearExecutorCache } from '../core/agent/agent-handler/index.js';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { authService } from '../modules/auth/auth.service.js';
+import { fetchModels, type ModelFetchApiProtocol } from '../modules/llm-provider/model-fetch.service.js';
 
 // 所有支持的 LLM 供应商类型 - 仅支持自定义
 const LLM_PROVIDER_TYPES = ['custom'] as const;
@@ -142,6 +143,29 @@ const setStatusBodySchema = {
   },
 };
 
+const fetchModelsBodySchema = {
+  type: 'object',
+  required: ['apiUrl', 'apiKey'],
+  properties: {
+    apiUrl: { type: 'string', description: '供应商 API 基础地址' },
+    apiKey: { type: 'string', description: '供应商 API Key' },
+    apiProtocol: { type: 'string', enum: ['anthropic', 'openai'], description: 'API 协议类型' },
+  },
+};
+
+const fetchedModelResponseSchema = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    ownedBy: { type: 'string', nullable: true },
+    supportedReasoningEfforts: {
+      type: 'array',
+      items: { type: 'string' },
+    },
+    defaultReasoningEffort: { type: 'string', nullable: true },
+  },
+};
+
 export type LlmProviderType = typeof LLM_PROVIDER_TYPES[number];
 export type LlmModelType = typeof LLM_MODEL_TYPES[number];
 export type ImageGenApiType = typeof IMAGE_GEN_API_TYPES[number];
@@ -184,6 +208,16 @@ interface UpdateLlmProviderBody {
 
 interface SetStatusBody {
   isActive: boolean;
+}
+
+interface FetchModelsBody {
+  apiUrl: string;
+  apiKey: string;
+  apiProtocol?: ModelFetchApiProtocol;
+}
+
+interface FetchModelsProviderParams {
+  id: string;
 }
 
 interface LlmProviderParams {
@@ -289,6 +323,139 @@ export async function llmProviderGateway(app: FastifyInstance) {
       const masked = providers.map((p: any) => ({ ...p, apiKey: maskApiKey(p.apiKey) }));
       return reply.send({ success: true, data: masked });
     }
+  );
+
+  // 从供应商 API 获取可用模型列表
+  app.post<{ Body: FetchModelsBody }>(
+    '/llm-providers/fetch-models',
+    {
+      schema: {
+        description: '从供应商的模型接口获取可用模型列表',
+        tags: ['LlmProviders'],
+        body: fetchModelsBodySchema,
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              data: { type: 'array', items: fetchedModelResponseSchema },
+            },
+          },
+          400: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: { type: 'string' },
+            },
+          },
+          502: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: { type: 'string' },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const ok = await requireAuth(request, reply);
+      if (!ok) return;
+
+      const { apiUrl, apiKey, apiProtocol } = request.body;
+      try {
+        validateApiUrl(apiUrl);
+      } catch (err: any) {
+        return reply.code(400).send({ success: false, error: err.message });
+      }
+      if (!apiKey?.trim() || isMaskedApiKey(apiKey)) {
+        return reply.code(400).send({ success: false, error: '请填写完整 API Key，不能使用已遮罩的密钥' });
+      }
+
+      try {
+        const models = await fetchModels({
+          apiUrl,
+          apiKey,
+          apiProtocol,
+        });
+        return reply.send({ success: true, data: models });
+      } catch (error: any) {
+        return reply.code(502).send({
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
+  );
+
+  // 使用已保存的供应商密钥获取模型目录。密钥只在服务端读取，不返回给前端。
+  app.post<{ Params: FetchModelsProviderParams }>(
+    '/llm-providers/:id/fetch-models',
+    {
+      schema: {
+        description: '使用已保存的供应商配置获取模型列表及思考强度元数据',
+        tags: ['LlmProviders'],
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string' },
+          },
+        },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              data: { type: 'array', items: fetchedModelResponseSchema },
+            },
+          },
+          404: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: { type: 'string' },
+            },
+          },
+          502: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: { type: 'string' },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const ok = await requireAuth(request, reply);
+      if (!ok) return;
+
+      const provider = await llmProviderService.findById(request.params.id);
+      if (!provider) {
+        return reply.code(404).send({ success: false, error: '供应商不存在' });
+      }
+      if (!provider.apiUrl) {
+        return reply.code(400).send({ success: false, error: '供应商未配置 API URL' });
+      }
+      if (!provider.apiKey?.trim()) {
+        return reply.code(400).send({ success: false, error: '供应商未配置 API Key' });
+      }
+
+      try {
+        const models = await fetchModels({
+          apiUrl: provider.apiUrl,
+          apiKey: provider.apiKey,
+          apiProtocol: provider.apiProtocol === 'anthropic' ? 'anthropic' : 'openai',
+        });
+        return reply.send({ success: true, data: models });
+      } catch (error: any) {
+        return reply.code(502).send({
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
   );
 
   // 获取单个供应商

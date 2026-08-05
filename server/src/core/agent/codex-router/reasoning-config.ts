@@ -193,15 +193,15 @@ function mapReasoningEffort(effort: string, mode: string | undefined): string | 
 
   switch (mode ?? 'passthrough') {
     case 'deepseek':
-      return e === 'max' || e === 'xhigh' ? 'max' : 'high';
+      return e === 'ultra' || e === 'max' || e === 'xhigh' ? 'max' : 'high';
     case 'low_high':
       return e === 'minimal' || e === 'low' ? 'low' : 'high';
     case 'openrouter':
-      if (e === 'max' || e === 'xhigh') return 'xhigh';
+      if (e === 'ultra' || e === 'max' || e === 'xhigh') return 'xhigh';
       if (['high', 'medium', 'low', 'minimal'].includes(e)) return e;
       return undefined;
     default:
-      if (['minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(e)) return e;
+      if (['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'].includes(e)) return e;
       return undefined;
   }
 }

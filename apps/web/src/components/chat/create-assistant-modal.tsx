@@ -1,8 +1,9 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { AcpToolInfo, AgentSpeechConfig, acpToolsApi, AgentCategory, categoryApi, type AgentThinkingMode, getThinkingModeOptions, THINKING_MODE_I18N_KEY } from '@/lib/agent-api';
+import { AcpToolInfo, AgentSpeechConfig, acpToolsApi, AgentCategory, categoryApi, type AgentThinkingMode } from '@/lib/agent-api';
 import { AgentAvatarImage, agentAvatarOptions, getRandomAgentAvatarValue } from '@/lib/agent-avatars';
 import { AvatarSelector } from './avatar-selector';
 import { FallbackModelSelector } from './fallback-model-selector';
+import { ThinkingModeSelector } from './thinking-mode-selector';
 import { getCodexModelOptions } from '@/lib/codex-models';
 import { getClaudeModelOptions } from '@/lib/claude-models';
 import { llmProviderApi, type LlmProvider } from '@/lib/llm-provider-api';
@@ -100,7 +101,7 @@ function FullscreenPromptModal({
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-8">
-      <div className="flex h-[80vh] w-full max-w-4xl flex-col rounded-2xl bg-card shadow-2xl">
+      <div className="flex h-[80vh] max-h-[80vh] w-full max-w-4xl flex-col rounded-2xl bg-card shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <h2 className="text-lg font-semibold text-foreground">{t('assistant.editPrompt')}</h2>
@@ -193,6 +194,7 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
     (provider) => provider.isActive && provider.modelType === 'image'
   )
   const selectedAcpTool = acpTools.find((tool) => tool.id === acpTool)
+  const selectedLlmProvider = llmProviders.find((provider) => provider.id === llmProviderId)
   const showLocalCodexConfig = assistantType === 'acp' && acpTool === 'codex' && !llmProviderId
   const showCodexFastMode = assistantType === 'acp' && acpTool === 'codex'
   const showLocalClaudeConfig = assistantType === 'acp' && acpTool === 'claude' && !llmProviderId
@@ -324,8 +326,8 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 py-12">
-      <div className="w-[560px] shrink-0 rounded-2xl bg-card shadow-xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/50 p-4">
+      <div className="w-[560px] max-w-full shrink-0 max-h-[80vh] overflow-y-auto rounded-2xl bg-card shadow-xl">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <div className="flex items-center gap-3">
@@ -447,16 +449,17 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
                 <label className="mb-1.5 block text-sm font-medium text-foreground">
                   {t('assistant.thinkingMode')}
                 </label>
-                <Select value={thinkingMode} onValueChange={(value) => setThinkingMode(value as AgentThinkingMode)}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder={t('assistant.selectThinkingMode')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {getThinkingModeOptions(acpTool).map((mode) => (
-                      <SelectItem key={mode} value={mode}>{t(THINKING_MODE_I18N_KEY[mode])}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <ThinkingModeSelector
+                  acpTool={acpTool}
+                  providerId={llmProviderId || null}
+                  providerModel={selectedLlmProvider?.model}
+                  modelName={selectedLlmProvider?.model || codexModel}
+                  localDefaultModel={selectedAcpTool?.localDefaultModel}
+                  localModels={selectedAcpTool?.localModels}
+                  value={thinkingMode}
+                  onChange={setThinkingMode}
+                  placeholder={t('assistant.selectThinkingMode')}
+                />
                 <p className="mt-1.5 text-xs text-muted-foreground">
                   {t('assistant.thinkingModeHint')}
                 </p>
@@ -504,7 +507,7 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__default__">{t('assistant.useLocalDefaultModel')}</SelectItem>
-                      {getCodexModelOptions(codexModel).map((option) => (
+                      {getCodexModelOptions(codexModel, selectedAcpTool?.localModels).map((option) => (
                         <SelectItem key={option.value} value={option.value}>
                           {option.label}
                         </SelectItem>

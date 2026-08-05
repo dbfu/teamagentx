@@ -35,6 +35,29 @@ Use TeamAgentX MCP shell tools for shell execution. For normal foreground shell 
   );
 }
 
+export function getClaudeRuntimeMcpConnectorsSection(
+  connectorNames: string[],
+  locale?: string,
+): string {
+  const names = [
+    ...new Set(connectorNames.map((name) => name.trim()).filter(Boolean)),
+  ]
+    .sort()
+    .map((name) => `\`${name}\``)
+    .join(', ');
+  if (!names) return '';
+
+  return pickLocaleText(
+    {
+      'zh-CN': `## 运行时 MCP 连接器
+TeamAgentX 已为本轮运行注入以下 MCP 连接器：${names}。它们通过运行时配置提供，不保证出现在持久化的 Claude 配置中；不要用 \`claude mcp list\` 判断它们是否存在，也不要自行执行 \`claude mcp add/remove\`。如果用户需要某个连接器、但对应的 \`mcp__<连接器名>__*\` 工具尚未出现，先调用一次 \`WaitForMcpServers\` 等待连接完成，再检查并使用工具；等待后仍不可用时才报告连接失败。`,
+      'en-US': `## Runtime MCP Connectors
+TeamAgentX injected these MCP connectors for this run: ${names}. They are supplied through runtime configuration and may not appear in Claude's persistent configuration. Do not use \`claude mcp list\` to decide whether they exist, and do not run \`claude mcp add/remove\` yourself. If the user needs a connector but its \`mcp__<connector>__*\` tools are not visible yet, call \`WaitForMcpServers\` once, then check and use the tools. Report a connection failure only if the connector is still unavailable after waiting.`,
+    },
+    locale,
+  );
+}
+
 export function getCodexBackgroundCommandsSection(locale?: string): string {
   return pickLocaleText(
     {

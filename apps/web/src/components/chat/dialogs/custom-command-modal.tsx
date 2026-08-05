@@ -100,7 +100,7 @@ export function CustomCommandModal({ isOpen, onClose, chatRoomId }: CustomComman
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-8">
-      <div className="flex h-[70vh] w-full max-w-2xl flex-col rounded-2xl bg-card shadow-2xl">
+      <div className="flex h-[70vh] max-h-[80vh] w-full max-w-2xl flex-col rounded-2xl bg-card shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <div className="flex items-center gap-2">

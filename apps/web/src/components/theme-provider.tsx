@@ -60,25 +60,25 @@ export function ThemeProvider({
     return defaultBrandTheme
   })
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     const root = window.document.documentElement
 
     root.classList.remove('light', 'dark')
     root.dataset.brandTheme = brandTheme
 
-    if (theme === 'system') {
-      const systemTheme = window.matchMedia('(prefers-color-scheme: dark)')
-        .matches
-        ? 'dark'
-        : 'light'
+    const resolvedTheme = theme === 'system'
+      ? window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+      : theme
 
-      root.classList.add(systemTheme)
-      notifyFlutterThemeChange(systemTheme, brandTheme)
-      return
-    }
-
-    root.classList.add(theme)
-    notifyFlutterThemeChange(theme, brandTheme)
+    root.classList.add(resolvedTheme)
+    root.dataset.theme = resolvedTheme
+    root.style.colorScheme = resolvedTheme
+    window.document.querySelector('meta[name="color-scheme"]')?.setAttribute('content', resolvedTheme)
+    window.document.querySelector('meta[name="theme-color"]')?.setAttribute(
+      'content',
+      resolvedTheme === 'dark' ? '#292D3E' : '#FAFAFC',
+    )
+    notifyFlutterThemeChange(resolvedTheme, brandTheme)
   }, [theme, brandTheme])
 
   // 监听系统主题变化
@@ -92,6 +92,13 @@ export function ThemeProvider({
       root.classList.remove('light', 'dark')
       const newTheme = e.matches ? 'dark' : 'light'
       root.classList.add(newTheme)
+      root.dataset.theme = newTheme
+      root.style.colorScheme = newTheme
+      window.document.querySelector('meta[name="color-scheme"]')?.setAttribute('content', newTheme)
+      window.document.querySelector('meta[name="theme-color"]')?.setAttribute(
+        'content',
+        newTheme === 'dark' ? '#292D3E' : '#FAFAFC',
+      )
       notifyFlutterThemeChange(newTheme, brandTheme)
     }
 
