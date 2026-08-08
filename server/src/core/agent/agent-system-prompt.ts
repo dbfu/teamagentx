@@ -369,3 +369,6 @@ Other assistants: ${othersInfo}${mentionTip}${groupAssistantHint}`,
     locale,
   );
 }
+
+/** Opencode 执行器复用与 Codex 相同的后台命令说明（MCP 工具名一致）。 */
+export const getOpencodeBackgroundCommandsSection = getCodexBackgroundCommandsSection;

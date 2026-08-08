@@ -141,6 +141,38 @@ describe('createExecutor', () => {
     assert.match(memberInfo, /无描述助手/);
   });
 
+  test('将群规则注入 Opencode 执行器系统指令', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-rules-'));
+    try {
+      const executor = createExecutor({
+        agent: testAgent({
+          id: 'agent-opencode',
+          name: 'OpencodeAgent',
+          type: 'acp',
+          acpTool: 'opencode',
+        }),
+        chatRoomId: 'room-1',
+        threadId: 'room-1_OpencodeAgent',
+        injectGroupHistory: true,
+        chatRoomAgents: [],
+        customWorkDir: tmpDir,
+        chatRoomRules: '输出前先检查群规则。',
+        agentTriggerMode: 'auto',
+      });
+
+      const debugInfo = executor.getDebugInfo();
+      assert.strictEqual(debugInfo.acpTool, 'opencode');
+      assert.match(debugInfo.systemPrompt, /## 群规则/);
+      assert.match(debugInfo.systemPrompt, /输出前先检查群规则。/);
+      assert.match(debugInfo.systemPrompt, /## 助手提及/);
+      assert.match(debugInfo.systemPrompt, /必须调用 mention_agents/);
+      assert.match(debugInfo.systemPrompt, /收尾交接协议（强制）/);
+      assert.match(debugInfo.systemPrompt, /不得用你自己的自测/);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   test('非自由协作模式不注入交接意图自检提示', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamagentx-rules-'));
     try {

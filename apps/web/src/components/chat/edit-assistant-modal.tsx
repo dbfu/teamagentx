@@ -612,7 +612,7 @@ export function EditAssistantModal({ isOpen, onClose, onSubmit, assistant, mode 
               onChange={setFallbackLlmProviderIds}
             />
 
-            {assistantType === 'acp' && (formAcpTool === 'claude' || formAcpTool === 'codex') && (
+            {assistantType === 'acp' && (formAcpTool === 'claude' || formAcpTool === 'codex' || formAcpTool === 'opencode') && (
               <div className="mb-4">
                 <label className="mb-1.5 block text-sm font-medium text-foreground">
                   {t('assistant.thinkingMode')}

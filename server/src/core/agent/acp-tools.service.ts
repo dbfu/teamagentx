@@ -4,8 +4,9 @@ import * as os from 'os';
 import * as path from 'path';
 import { createRequire } from 'module';
 import { findHostPathCodexBinary } from './codex-sdk.executor.js';
+import { findHostPathOpencodeBinary } from './opencode-sdk.executor.js';
 
-// Local agent tool definitions. Only Claude and Codex are currently supported.
+// Local agent tool definitions. Only Claude, Codex and OpenCode are currently supported.
 export const ACP_TOOLS = [
   {
     id: 'claude',
@@ -19,11 +20,18 @@ export const ACP_TOOLS = [
     description: 'OpenAI Codex SDK',
     checkCommand: 'codex --version',
   },
+  {
+    id: 'opencode',
+    name: 'Opencode',
+    description: 'OpenCode Agent SDK',
+    checkCommand: 'opencode --version',
+  },
 ] as const;
 
 const TOOL_PACKAGES: Record<string, string> = {
   claude: '@anthropic-ai/claude-code',
   codex: '@openai/codex',
+  opencode: 'opencode-ai',
 };
 
 const CODEX_PLATFORM_PACKAGE_BY_TARGET: Record<string, string> = {
@@ -366,15 +374,76 @@ function checkCodexLocalConfig(): {
   }
 }
 
+function checkOpencodeLocalConfig(): {
+  available: boolean;
+  path: string;
+  label: string;
+  models: LocalModelConfig[];
+  defaultModel?: string;
+} {
+  const authPath = path.join(os.homedir(), '.local', 'share', 'opencode', 'auth.json');
+  const configPath = path.join(os.homedir(), '.config', 'opencode', 'opencode.json');
+  try {
+    const data = readJsonObject(authPath);
+    const providers = data ? Object.entries(data).filter(([key, value]) => (
+      key !== '_version' &&
+      value &&
+      typeof value === 'object' &&
+      typeof (value as { key?: unknown }).key === 'string' &&
+      (value as { key: string }).key.length > 0
+    )) : [];
+    const hasAuth = providers.length > 0;
+
+    let configModel: string | undefined;
+    let hasConfig = false;
+    try {
+      if (fs.existsSync(configPath)) {
+        const config = readJsonObject(configPath);
+        if (config) {
+          hasConfig = true;
+          if (typeof config.model === 'string') configModel = config.model;
+        }
+      }
+    } catch {
+      // 配置读取失败按不存在处理
+    }
+
+    const models: LocalModelConfig[] = providers.map(([providerId]) => ({
+      id: `opencode-auth-${providerId}`,
+      name: providerId,
+    }));
+    if (configModel && !models.some((model) => model.name.toLowerCase() === configModel?.toLowerCase())) {
+      models.push({
+        id: 'opencode-configured-model',
+        name: configModel,
+      });
+    }
+    const defaultModel = configModel ?? models[0]?.name;
+    const configPathUsed = hasConfig ? configPath : authPath;
+
+    return {
+      available: hasAuth || hasConfig,
+      path: configPathUsed,
+      label: hasConfig ? 'Opencode config.json' : 'Opencode auth.json',
+      models,
+      ...(defaultModel ? { defaultModel } : {}),
+    };
+  } catch {
+    return { available: false, path: authPath, label: 'Opencode auth.json', models: [] };
+  }
+}
+
 function checkLocalConfig(toolId: string): Pick<AcpToolInfo, 'localConfigAvailable' | 'localConfigPath' | 'localConfigLabel' | 'localModels' | 'localDefaultModel'> {
   const result = toolId === 'claude'
     ? checkClaudeLocalConfig()
     : toolId === 'codex'
       ? checkCodexLocalConfig()
-      : null;
+      : toolId === 'opencode'
+        ? checkOpencodeLocalConfig()
+        : null;
 
   if (!result) return {};
-  const localDefaultModel = toolId === 'codex'
+  const localDefaultModel = toolId === 'codex' || toolId === 'opencode'
     ? (result as { defaultModel?: string }).defaultModel
     : undefined;
   return {
@@ -420,6 +489,10 @@ function checkHostCliUsable(toolId: string, checkCommand: string): { installed: 
   if (!result.installed) return result;
 
   if (toolId === 'codex' && !findHostPathCodexBinary()) {
+    return { installed: false };
+  }
+
+  if (toolId === 'opencode' && !findHostPathOpencodeBinary()) {
     return { installed: false };
   }
 
@@ -479,6 +552,16 @@ function hasCodexPlatformBinary(codexPackageDir: string): boolean {
   }
 }
 
+function hasOpencodePlatformBinary(packageDir: string): boolean {
+  // opencode-ai 的 postinstall 会把平台二进制拷贝到 bin/opencode.exe
+  const binaryPath = path.join(packageDir, 'bin', 'opencode.exe');
+  try {
+    return fs.existsSync(binaryPath) && fs.statSync(binaryPath).size > 1024 * 1024;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * 检测 TeamAgentX 应用本地安装目录中的 SDK/工具包。
  */
@@ -490,6 +573,9 @@ function checkAppLocalSdkInstalled(toolId: string): { installed: boolean; versio
   const packageDir = path.join(toolsDir, 'node_modules', ...packageName.split('/'));
   if (!fs.existsSync(packageDir)) return { installed: false };
   if (toolId === 'codex' && !hasCodexPlatformBinary(packageDir)) {
+    return { installed: false, version: readPackageVersion(packageDir) };
+  }
+  if (toolId === 'opencode' && !hasOpencodePlatformBinary(packageDir)) {
     return { installed: false, version: readPackageVersion(packageDir) };
   }
 

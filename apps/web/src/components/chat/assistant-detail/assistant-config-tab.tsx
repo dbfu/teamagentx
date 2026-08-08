@@ -243,7 +243,7 @@ export function AssistantConfigTab({ agent, onUpdate }: AssistantConfigTabProps)
               </div>
             )}
 
-            {agent.type === 'acp' && (agent.acpTool === 'claude' || agent.acpTool === 'codex') && (
+            {agent.type === 'acp' && (agent.acpTool === 'claude' || agent.acpTool === 'codex' || agent.acpTool === 'opencode') && (
               <div className="flex items-center gap-4">
                 <div className="flex size-10 items-center justify-center rounded-lg bg-blue-500/10">
                   <Brain className="size-5 text-blue-500" />

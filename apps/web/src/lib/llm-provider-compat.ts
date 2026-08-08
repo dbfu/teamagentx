@@ -7,6 +7,7 @@ export function getRequiredProviderProtocol(
   if (assistantType !== 'acp') return null
   if (acpTool === 'claude') return 'anthropic'
   if (acpTool === 'codex') return 'openai'
+  // Opencode 同时支持 anthropic / openai 协议
   return null
 }
 
@@ -32,6 +33,9 @@ export function getProviderProtocolHint(
     return '可不选择供应商，直接使用本地 Codex auth.json；如需自定义供应商，仅支持 openai 协议'
   }
   if (assistantType === 'acp') {
+    if (acpTool === 'opencode') {
+      return '可不选择供应商，直接使用本地 Opencode 配置；自定义供应商支持 anthropic / openai 协议'
+    }
     return '该 ACP 工具暂不支持自定义 LLM 供应商'
   }
   return '选择供应商或使用默认供应商'

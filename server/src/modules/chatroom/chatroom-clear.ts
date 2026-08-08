@@ -11,6 +11,7 @@ import {
   clearClaudeSdkFileSystemContext,
   clearCodexSdkFileSystemContext,
 } from '../../core/agent/agent-handler/index.js';
+import { clearOpencodeSdkFileSystemContext } from '../../core/agent/opencode-sdk.executor.js';
 import { clearInternalCoordinatorContext } from '../../core/agent/agent-handler/internal-coordinator-context.js';
 
 export interface ClearChatRoomResult {
@@ -63,6 +64,8 @@ export async function clearChatRoom(chatRoomId: string): Promise<ClearChatRoomRe
       }
       if (cra.agent.acpTool === 'codex') {
         clearCodexSdkFileSystemContext(cra.agent.id, chatRoomId);
+      } else if (cra.agent.acpTool === 'opencode') {
+        clearOpencodeSdkFileSystemContext(cra.agent.id, chatRoomId);
       } else {
         clearClaudeSdkFileSystemContext(cra.agent.id, chatRoomId);
       }

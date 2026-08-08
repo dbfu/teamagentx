@@ -78,14 +78,15 @@ function getRequiredProviderProtocol(type?: AgentType | null, acpTool?: string |
   if (type !== 'acp') return null;
   if (acpTool === 'claude') return 'anthropic';
   if (acpTool === 'codex') return 'openai';
+  if (acpTool === 'opencode') return null; // Opencode 同时支持 anthropic / openai 协议
   return null;
 }
 
 function assertAcpToolSupported(type?: AgentType | null, acpTool?: string | null): void {
   if (type !== 'acp') return;
   const tool = acpTool || 'claude';
-  if (tool !== 'claude' && tool !== 'codex') {
-    throw new Error('目前仅支持 Claude 和 Codex 工具');
+  if (tool !== 'claude' && tool !== 'codex' && tool !== 'opencode') {
+    throw new Error('目前仅支持 Claude、Codex 和 Opencode 工具');
   }
 }
 
@@ -97,7 +98,7 @@ async function assertLlmProviderCompatible(
   if (!llmProviderId) return;
 
   const requiredProtocol = getRequiredProviderProtocol(type, acpTool);
-  if (type === 'acp' && !requiredProtocol) {
+  if (type === 'acp' && !requiredProtocol && acpTool !== 'opencode') {
     throw new Error('该 ACP 工具暂不支持自定义 LLM 供应商');
   }
   if (!requiredProtocol) return;
@@ -162,7 +163,7 @@ async function assertFallbackLlmProvidersCompatible(
   if (!fallbackLlmProviderIds?.length) return;
 
   const requiredProtocol = getRequiredProviderProtocol(type, acpTool);
-  if (type === 'acp' && !requiredProtocol) {
+  if (type === 'acp' && !requiredProtocol && acpTool !== 'opencode') {
     throw new Error('该 ACP 工具暂不支持自定义 LLM 供应商');
   }
 

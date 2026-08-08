@@ -13,6 +13,10 @@ export const abortControllers = new Map<string, AbortController>();
 // 用户取消时的界面语言，按 chatRoomId_agentId 存储，供取消消息按语言落库
 export const abortLocales = new Map<string, string>();
 
+// 用户明确请求停止的执行。与 abortLocales 分开记录，兼容移动端等不携带语言的停止请求，
+// 也能区分「无活动 watchdog 自动中止」和「用户中止后不允许继续重试」。
+export const userAbortKeys = new Set<string>();
+
 // Executions cleared by context/message cleanup should not write final records.
 export const discardExecutionResultKeys = new Set<string>();
 
@@ -97,6 +101,7 @@ export function stopAgentExecution(chatRoomId: string, agentId: string, locale?:
   const controller = abortControllers.get(key);
 
   if (controller) {
+    userAbortKeys.add(key);
     if (locale) {
       abortLocales.set(key, locale);
     }
@@ -120,6 +125,7 @@ export function clearAllExecutionState(): void {
   processingMap.clear();
   abortControllers.clear();
   abortLocales.clear();
+  userAbortKeys.clear();
   discardExecutionResultKeys.clear();
   taskExecutionStartedAt.clear();
   streamEventsCache.clear();

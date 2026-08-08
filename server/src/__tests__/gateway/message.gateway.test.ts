@@ -52,6 +52,73 @@ describe('Message Gateway API', () => {
       assert.ok(Array.isArray(body.data));
     });
 
+    test('应该在重新加载消息时返回消息附件', async () => {
+      const chatRoomId = randomUUID();
+      const messageId = randomUUID();
+
+      await prisma.chatRoom.create({
+        data: {
+          id: chatRoomId,
+          name: 'Attachment Room',
+          updatedAt: new Date(),
+        },
+      });
+      await prisma.message.create({
+        data: {
+          id: messageId,
+          type: 'MESSAGE',
+          content: '',
+          chatRoomId,
+          isHuman: true,
+          updatedAt: new Date(),
+          attachments: {
+            create: {
+              type: 'image',
+              filename: 'photo.jpg',
+              mimeType: 'image/jpeg',
+              size: 1234,
+              url: '/uploads/images/photo.jpg',
+              width: 800,
+              height: 600,
+            },
+          },
+        },
+      });
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/messages?chatRoomId=${chatRoomId}`,
+      });
+
+      assert.strictEqual(response.statusCode, 200);
+
+      const body = response.json();
+      assert.strictEqual(body.data.length, 1);
+      assert.strictEqual(body.data[0].attachments.length, 1);
+      assert.deepStrictEqual(
+        {
+          messageId: body.data[0].attachments[0].messageId,
+          type: body.data[0].attachments[0].type,
+          filename: body.data[0].attachments[0].filename,
+          mimeType: body.data[0].attachments[0].mimeType,
+          size: body.data[0].attachments[0].size,
+          url: body.data[0].attachments[0].url,
+          width: body.data[0].attachments[0].width,
+          height: body.data[0].attachments[0].height,
+        },
+        {
+          messageId,
+          type: 'image',
+          filename: 'photo.jpg',
+          mimeType: 'image/jpeg',
+          size: 1234,
+          url: '/uploads/images/photo.jpg',
+          width: 800,
+          height: 600,
+        },
+      );
+    });
+
     test('群聊消息超过 100 条时应该返回最新 100 条并保持正序', async () => {
       const chatRoomId = randomUUID();
       const baseTime = Date.parse('2026-05-21T00:00:00.000Z');

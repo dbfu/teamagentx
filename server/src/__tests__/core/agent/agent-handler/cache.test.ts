@@ -5,6 +5,7 @@ import {
   abortLocales,
   clearAllExecutionState,
   stopAgentExecution,
+  userAbortKeys,
 } from '../../../../core/agent/agent-handler/cache.js';
 
 describe('agent execution cancellation cache', () => {
@@ -23,6 +24,7 @@ describe('agent execution cancellation cache', () => {
     assert.equal(controller.signal.aborted, true);
     assert.equal(abortControllers.get(key), controller);
     assert.equal(abortLocales.get(key), 'zh-CN');
+    assert.equal(userAbortKeys.has(key), true);
 
     assert.equal(stopAgentExecution(chatRoomId, agentId, 'en-US'), true);
     assert.equal(abortControllers.get(key), controller);

@@ -105,6 +105,10 @@ export type AgentSessionSnapshot =
   | {
       type: 'codex';
       threadId: string;
+    }
+  | {
+      type: 'opencode';
+      sessionId: string;
     };
 
 // 群聊助手信息（包含工作目录）

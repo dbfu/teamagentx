@@ -14,10 +14,30 @@ import {
   clearClaudeSdkFileSystemContext,
   clearCodexSdkFileSystemContext,
 } from '../core/agent/agent-handler/index.js';
+import { clearOpencodeSdkFileSystemContext } from '../core/agent/opencode-sdk.executor.js';
 import { clearInternalCoordinatorContext } from '../core/agent/agent-handler/internal-coordinator-context.js';
 import { chatRoomService } from '../modules/chatroom/chatroom.service.js';
 import { formatBridgeConversationSender } from '../modules/bridge/bridge-platform-display.js';
 import prisma from '../lib/prisma.js';
+
+const attachmentSchema = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    messageId: { type: 'string' },
+    type: { type: 'string', enum: ['image', 'audio', 'file'] },
+    filename: { type: 'string' },
+    mimeType: { type: 'string' },
+    size: { type: 'integer' },
+    url: { type: 'string' },
+    width: { type: 'integer', nullable: true },
+    height: { type: 'integer', nullable: true },
+    durationMs: { type: 'integer', nullable: true },
+    transcript: { type: 'string', nullable: true },
+    waveform: { type: 'string', nullable: true },
+    createdAt: { type: 'string' },
+  },
+};
 
 const messageSchema = {
   type: 'object',
@@ -57,6 +77,10 @@ const messageSchema = {
         avatar: { type: 'string', nullable: true },
         avatarColor: { type: 'string', nullable: true },
       },
+    },
+    attachments: {
+      type: 'array',
+      items: attachmentSchema,
     },
   },
 };
@@ -443,6 +467,8 @@ export async function messageGateway(app: FastifyInstance) {
             const acpTool = (chatRoomAgent.agent as any).acpTool;
             if (acpTool === 'codex') {
               clearCodexSdkFileSystemContext(chatRoomAgent.agent.id, chatRoomId);
+            } else if (acpTool === 'opencode') {
+              clearOpencodeSdkFileSystemContext(chatRoomAgent.agent.id, chatRoomId);
             } else {
               clearClaudeSdkFileSystemContext(chatRoomAgent.agent.id, chatRoomId);
             }
@@ -686,6 +712,8 @@ export async function messageGateway(app: FastifyInstance) {
           const acpTool = (chatRoomAgent.agent as any).acpTool;
           if (acpTool === 'codex') {
             clearCodexSdkFileSystemContext(chatRoomAgent.agent.id, chatRoomId);
+          } else if (acpTool === 'opencode') {
+            clearOpencodeSdkFileSystemContext(chatRoomAgent.agent.id, chatRoomId);
           } else {
             // 默认使用 Claude SDK 清理（包括 acpTool 为 null 或 'claude'）
             clearClaudeSdkFileSystemContext(chatRoomAgent.agent.id, chatRoomId);

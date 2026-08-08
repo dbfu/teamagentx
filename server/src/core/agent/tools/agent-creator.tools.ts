@@ -40,6 +40,7 @@ export const AGENT_CREATOR_AGENT_ID = '29ffb519-82d2-4c32-8bc8-0b8d814a4eee';
 export const ACP_TOOL_VALUES = [
   'claude',
   'codex',
+  'opencode',
 ] as const;
 
 export type AcpToolValue = (typeof ACP_TOOL_VALUES)[number];
@@ -181,11 +182,12 @@ function normalizeAgentTypeConfig(
 function getRequiredAcpProviderProtocol(acpTool?: AcpToolValue): 'anthropic' | 'openai' | null {
   if (acpTool === 'claude') return 'anthropic';
   if (acpTool === 'codex') return 'openai';
+  if (acpTool === 'opencode') return null; // Opencode 同时支持 anthropic / openai 协议
   return null;
 }
 
-function getAcpToolLabel(acpTool: AcpToolValue): 'Claude' | 'Codex' {
-  return acpTool === 'codex' ? 'Codex' : 'Claude';
+function getAcpToolLabel(acpTool: AcpToolValue): string {
+  return acpTool === 'codex' ? 'Codex' : acpTool === 'claude' ? 'Claude' : 'Opencode';
 }
 
 async function getAgentCreationModelSnapshot(): Promise<AgentCreationModelSnapshot> {

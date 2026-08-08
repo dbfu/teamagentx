@@ -210,7 +210,7 @@ const createAgentBodySchema = {
     description: { type: 'string', description: 'Agent 描述' },
     prompt: { type: 'string', description: '系统提示词' },
     type: { type: 'string', enum: ['builtin', 'acp'], description: '助手类型' },
-    acpTool: { type: 'string', description: 'ACP 工具名称（仅 type=acp 时有效，如 claude, codex）' },
+    acpTool: { type: 'string', description: 'ACP 工具名称（仅 type=acp 时有效，如 claude, codex, opencode）' },
     workDir: { type: 'string', description: '工作目录（适用于所有类型）' },
     proxyConfig: { type: 'string', nullable: true, description: 'ACP 工具代理配置（支持代理地址或 export 片段）' },
     codexModel: { type: 'string', nullable: true, description: 'Codex 本地配置模式下指定的模型名称' },
@@ -657,7 +657,7 @@ export async function agentGateway(app: FastifyInstance) {
           type: 'object',
           required: ['toolId'],
           properties: {
-            toolId: { type: 'string', enum: ['claude', 'codex'] },
+            toolId: { type: 'string', enum: ['claude', 'codex', 'opencode'] },
           },
         },
       },

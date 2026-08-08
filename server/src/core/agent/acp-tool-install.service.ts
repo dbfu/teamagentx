@@ -9,6 +9,7 @@ const requireFromHere = createRequire(import.meta.url);
 export const ACP_TOOL_PACKAGES: Record<string, string> = {
   claude: '@anthropic-ai/claude-code',
   codex: '@openai/codex',
+  opencode: 'opencode-ai',
 };
 
 const DEFAULT_ACP_TOOL_INSTALL_REGISTRIES = [

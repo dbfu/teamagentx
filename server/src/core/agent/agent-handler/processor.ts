@@ -23,6 +23,7 @@ import {
   processingMap,
   abortControllers,
   abortLocales,
+  userAbortKeys,
   discardExecutionResultKeys,
   taskExecutionStartedAt,
   streamEventsCache,
@@ -773,6 +774,12 @@ export async function processQueue(chatRoomId: string, agentId: string) {
               try {
                 return await runExecutor(candidateExecutor, providerLabel, attempt, noActivityAttempt);
               } catch (error) {
+                // 用户停止优先级高于无活动重试。尤其是 watchdog 已经先 abort 当前
+                // controller 时，用户随后点击停止只会留下标记；不能再 reset controller
+                // 并把执行重新拉起来。
+                if (userAbortKeys.has(key)) {
+                  throw new DOMException('执行已被用户中断', 'AbortError');
+                }
                 if (!(error instanceof NoActivityTimeoutError) || noActivityAttempt >= maxNoActivityAttempts) {
                   if (error instanceof NoActivityTimeoutError) {
                     resetAbortController();
@@ -1038,7 +1045,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
                 });
               } catch (auditError) {
                 clearMentions(task.id);
-                if (abortController.signal.aborted && abortLocales.has(key)) {
+                if (abortController.signal.aborted && userAbortKeys.has(key)) {
                   throw auditError;
                 }
                 executionEvents.push({
@@ -1069,11 +1076,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
             const abortReason = abortController.signal.aborted
               ? abortController.signal.reason
               : undefined;
-            const isUserRequestedAbort =
-              error instanceof Error &&
-              error.name === 'AbortError' &&
-              abortLocales.has(key) &&
-              !(abortReason instanceof NoActivityTimeoutError);
+            const isUserRequestedAbort = userAbortKeys.has(key);
 
             // 只有用户显式停止的 abort 才按 cancelled 落库并展示“手动取消”。
             if (isUserRequestedAbort) {
@@ -1274,6 +1277,11 @@ export async function processQueue(chatRoomId: string, agentId: string) {
         // 删除已处理的任务
         await taskQueueService.delete(task.id);
 
+        // 先清理本棒的停止标记，再允许生命周期回调派发下一棒，避免同一 agent
+        // 的新任务继承上一棒的用户取消状态。
+        userAbortKeys.delete(key);
+        abortLocales.delete(key);
+
         try {
           await notifyAgentTaskSettled({
             chatRoomId,
@@ -1325,6 +1333,8 @@ export async function processQueue(chatRoomId: string, agentId: string) {
 
     // 清理 AbortController（以防万一）
     abortControllers.delete(key);
+    userAbortKeys.delete(key);
+    abortLocales.delete(key);
 
     // 重要：再次检查队列，防止在处理期间有新任务入队
     // 这确保不会遗漏任何任务

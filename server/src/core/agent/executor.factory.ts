@@ -6,6 +6,7 @@ import type {
 } from './executor.interface.js';
 import { ClaudeAgentSdkExecutor } from './claude-sdk.executor.js';
 import { CodexSdkExecutor } from './codex-sdk.executor.js';
+import { OpencodeSdkExecutor } from './opencode-sdk.executor.js';
 import type { RoomEnvVar } from './room-env-vars.js';
 import {
   DEFAULT_AGENT_THINKING_MODE,
@@ -89,6 +90,31 @@ export function createExecutor(options: CreateExecutorOptions): IAgentExecutor {
       }
       if (acpTool === 'codex') {
         return new CodexSdkExecutor(
+          agent.name,
+          agent.prompt,
+          chatRoomId,
+          agent.workDir,
+          injectGroupHistory,
+          agent.id,
+          sessionDir,
+          customWorkDir,
+          lastInjectedMessageId,
+          chatRoomAgents,
+          llmProvider,
+          imageGenerationProvider,
+          agent.proxyConfig,
+          agent.codexModel,
+          agent.codexFastMode,
+          thinkingMode,
+          chatRoomRules,
+          stateless,
+          collaborationTriggerMode,
+          roomEnvVars,
+          locale,
+        );
+      }
+      if (acpTool === 'opencode') {
+        return new OpencodeSdkExecutor(
           agent.name,
           agent.prompt,
           chatRoomId,

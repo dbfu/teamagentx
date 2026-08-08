@@ -155,6 +155,7 @@ function MenuContent({
 const ACP_TOOL_LABELS: Record<string, string> = {
   claude: 'Claude',
   codex: 'Codex',
+  opencode: 'Opencode',
 }
 
 // 副标题：使用的 agent（ACP 工具名 / 模型提供方名）

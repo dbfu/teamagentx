@@ -444,7 +444,7 @@ export function CreateAssistantModal({ isOpen, onClose, onSubmit, defaultCategor
               onChange={setFallbackLlmProviderIds}
             />
 
-            {assistantType === 'acp' && (acpTool === 'claude' || acpTool === 'codex') && (
+            {assistantType === 'acp' && (acpTool === 'claude' || acpTool === 'codex' || acpTool === 'opencode') && (
               <div className="mb-4">
                 <label className="mb-1.5 block text-sm font-medium text-foreground">
                   {t('assistant.thinkingMode')}

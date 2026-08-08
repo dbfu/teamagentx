@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-type SupportedAcpProviderTool = 'claude' | 'codex';
+type SupportedAcpProviderTool = 'claude' | 'codex' | 'opencode';
 
 interface CreateAcpProviderCommandOptions {
   acpTool: string;
@@ -87,12 +87,12 @@ function normalizeProtocol(provider: LlmProvider): string {
 }
 
 function requireSupportedTool(acpTool: string): SupportedAcpProviderTool {
-  if (acpTool === 'claude' || acpTool === 'codex') {
+  if (acpTool === 'claude' || acpTool === 'codex' || acpTool === 'opencode') {
     return acpTool;
   }
 
   throw new Error(
-    `ACP 工具 ${acpTool} 暂不支持自定义 LLM 供应商。当前最小闭环仅支持 Claude(anthropic 协议) 和 Codex(openai 协议)。`,
+    `ACP 工具 ${acpTool} 暂不支持自定义 LLM 供应商。当前最小闭环仅支持 Claude(anthropic 协议)、Codex(openai 协议) 和 Opencode(anthropic/openai 协议)。`,
   );
 }
 
@@ -132,6 +132,33 @@ export function buildAcpProviderEnv(
     env.CLAUDE_CONFIG_DIR = path.join(os.homedir(), '.teamagentx', 'acp-config', agentId || 'default');
 
     return env;
+  }
+
+  if (acpTool === 'opencode') {
+    // Opencode 原生同时支持 anthropic 与 openai 两种协议：
+    // anthropic 协议走 Claude 变量，openai 协议走 OpenAI 变量。
+    if (protocol === 'anthropic') {
+      env.ANTHROPIC_API_KEY = provider.apiKey;
+      env.ANTHROPIC_AUTH_TOKEN = provider.apiKey;
+      env.ANTHROPIC_MODEL = provider.model;
+      if (provider.apiUrl) {
+        env.ANTHROPIC_BASE_URL = provider.apiUrl;
+        env.ANTHROPIC_API_URL = provider.apiUrl;
+      }
+      return env;
+    }
+    if (protocol === 'openai') {
+      env.OPENAI_API_KEY = provider.apiKey;
+      env.OPENAI_MODEL = provider.model;
+      if (provider.apiUrl) {
+        env.OPENAI_BASE_URL = provider.apiUrl;
+        env.OPENAI_API_BASE = provider.apiUrl;
+      }
+      return env;
+    }
+    throw new Error(
+      `Opencode ACP 仅支持 anthropic / openai 协议供应商，当前供应商 ${provider.name} 的协议是 ${protocol}。`,
+    );
   }
 
   if (protocol !== 'openai') {

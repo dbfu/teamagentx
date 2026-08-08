@@ -37,9 +37,9 @@ extraResources:
       - "!**/README*"
       - "!**/CHANGELOG*"
       - "!**/.DS_Store"
-      # 故意不打入任何 claude/codex native 子包，由 server 端的
-      # resolveClaudeCodeExecutable / findLocalCodexBinary 在运行时优先使用
-      # 用户本地的 claude/codex CLI（TOOLS_DIR 或系统 PATH）。这是为了
+      # 故意不打入任何 claude/codex/opencode native 子包，由 server 端的
+      # resolveClaudeCodeExecutable / findLocalCodexBinary / findSpawnableOpencodeBinary
+      # 在运行时优先使用用户本地的 CLI（TOOLS_DIR 或系统 PATH）。这是为了
       # 控制安装包体积。如果用户机器上没有，setup wizard 会引导安装。
       - "!**/claude-agent-sdk-darwin-*/**"
       - "!**/claude-agent-sdk-linux-*/**"
@@ -47,6 +47,15 @@ extraResources:
       - "!**/@openai+codex@*-darwin-*/**"
       - "!**/@openai+codex@*-linux-*/**"
       - "!**/@openai+codex@*-win32-*/**"
+      - "!**/opencode-*-darwin-*/**"
+      - "!**/opencode-*-linux-*/**"
+      - "!**/opencode-*-windows-*/**"
+      - "!**/opencode-*-darwin*"
+      - "!**/opencode-*-linux*"
+      - "!**/opencode-*-windows*"
+      # opencode-ai 主包保留（依赖声明与版本检测），其 bin 目录内的平台二进制
+      # 由运行时从宿主机 PATH / TOOLS_DIR 解析（与 claude/codex 一致）
+      - "!**/opencode-ai/bin/**"
 
 # Windows 特殊配置 - server 目录不解压到 asar，保持为普通文件
 asar: true
@@ -115,7 +124,7 @@ nsis:
   createStartMenuShortcut: true
   shortcutName: TeamAgentX
   # 安装/升级前先 taskkill 所有 TeamAgentX 进程及其子进程（utilityProcess
-  # 启动的 server 与 claude.exe / codex.exe），否则文件锁会导致覆盖安装失败、
+  # 启动的 server 与 claude.exe / codex.exe / opencode），否则文件锁会导致覆盖安装失败、
   # 必须先手动卸载旧版本才能装新版本。
   include: electron/installer.nsh
 

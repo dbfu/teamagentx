@@ -40,6 +40,7 @@
     "@modelcontextprotocol/sdk": "1.29.0",
     "@neon-rs/load": "^0.2.6",
     "@openai/codex-sdk": "^0.128.0",
+    "@opencode-ai/sdk": "^1.18.13",
     "@prisma/adapter-libsql": "^7.5.0",
     "@prisma/client": "^7.5.0",
     "bcryptjs": "^3.0.3",
