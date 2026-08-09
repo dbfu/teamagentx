@@ -83,8 +83,8 @@ export function ChatAreaHeader({
   const [suppressMoreTooltip, setSuppressMoreTooltip] = useState(false)
   const packageScriptsRequestRef = useRef(0)
   const packageScriptsLoadedRef = useRef(false)
-  const packageScriptsTooltipSuppressTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
-  const moreTooltipSuppressTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
+  const packageScriptsTooltipSuppressTimerRef = useRef<number | null>(null)
+  const moreTooltipSuppressTimerRef = useRef<number | null>(null)
   const visibleScripts = packageScripts?.scripts ?? []
   const shouldShowPackageScriptsMenu = (packageScripts?.hasScripts ?? packageScripts?.hasPackageJson ?? false) || visibleScripts.length > 0
   const quickChatRoomAgent = chatRoom.chatRoomAgents?.find((member) => member.agentId === chatRoom.quickChatAgentId)?.agent
@@ -439,7 +439,7 @@ export function ChatAreaHeader({
                 <TooltipTrigger asChild>
                   <button
                     className={cn(
-                      'rounded-lg p-2 transition-colors',
+                      'hidden rounded-lg p-2 transition-colors',
                       dispatchRulesActive
                         ? 'bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:text-primary-foreground'
                         : 'text-muted-foreground hover:text-primary hover:bg-primary/10'
@@ -560,7 +560,7 @@ export function ChatAreaHeader({
                 <TooltipTrigger asChild>
                   <button
                     className={cn(
-                      'rounded-lg p-2 transition-colors',
+                      'hidden rounded-lg p-2 transition-colors',
                       dispatchRulesActive
                         ? 'bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:text-primary-foreground'
                         : 'text-muted-foreground hover:text-primary hover:bg-primary/10'

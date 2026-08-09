@@ -29,7 +29,7 @@ export function ChatRoomOpenMenu({ chatRoom, isElectron }: ChatRoomOpenMenuProps
   const [menuOpen, setMenuOpen] = useState(false)
   const [tooltipOpen, setTooltipOpen] = useState(false)
   const [suppressTooltip, setSuppressTooltip] = useState(false)
-  const suppressTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
+  const suppressTimerRef = useRef<number | null>(null)
 
   useEffect(() => {
     return () => {

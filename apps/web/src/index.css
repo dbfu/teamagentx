@@ -563,6 +563,17 @@
     overflow-y: hidden !important;
   }
 
+  /* Expanded file preview: the header is the desktop window drag handle. */
+  .workspace-preview-titlebar,
+  .workspace-preview-titlebar * {
+    -webkit-app-region: drag !important;
+  }
+
+  .workspace-preview-titlebar-action,
+  .workspace-preview-titlebar-action * {
+    -webkit-app-region: no-drag !important;
+  }
+
   /* Electron: modal/popover layers must not inherit app window drag regions. */
   [data-slot="dialog-overlay"],
   [data-slot="dialog-content"],

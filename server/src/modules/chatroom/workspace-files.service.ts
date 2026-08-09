@@ -14,7 +14,7 @@ export interface WorkspaceEntry {
 export interface WorkspaceFilePreview {
   path: string;
   name: string;
-  kind: 'text' | 'image' | 'unsupported';
+  kind: 'text' | 'image' | 'document' | 'unsupported';
   mimeType: string;
   content: string;
   size: number;
@@ -30,10 +30,18 @@ const IMAGE_MIME: Record<string, string> = {
   '.svg': 'image/svg+xml',
   '.webp': 'image/webp',
 };
-const UNSUPPORTED_EXTENSIONS = new Set(['.7z', '.avi', '.db', '.dmg', '.exe', '.gz', '.mov', '.mp3', '.mp4', '.pdf', '.tar', '.zip']);
+const DOCUMENT_MIME: Record<string, string> = {
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.pdf': 'application/pdf',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.xls': 'application/vnd.ms-excel',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+};
+const UNSUPPORTED_EXTENSIONS = new Set(['.7z', '.avi', '.db', '.dmg', '.doc', '.exe', '.gz', '.mov', '.mp3', '.mp4', '.ppt', '.tar', '.zip']);
 const MAX_DEPTH = 8;
 const MAX_ENTRIES = 1_000;
-const MAX_FILE_SIZE = 2 * 1024 * 1024;
+const MAX_TEXT_FILE_SIZE = 2 * 1024 * 1024;
+const MAX_DOCUMENT_FILE_SIZE = 20 * 1024 * 1024;
 
 function expandWorkDir(workDir: string): string {
   const expanded = workDir.startsWith('~')
@@ -125,15 +133,20 @@ export function readWorkspaceFile(root: string, relativePath: string): Workspace
   const stat = fs.statSync(absolutePath);
   const normalizedPath = path.relative(fs.realpathSync(root), absolutePath).split(path.sep).join('/');
   const name = path.basename(absolutePath);
+  const extension = path.extname(absolutePath).toLowerCase();
+  const documentMime = DOCUMENT_MIME[extension];
 
-  if (stat.size > MAX_FILE_SIZE) {
+  if (stat.size > (documentMime ? MAX_DOCUMENT_FILE_SIZE : MAX_TEXT_FILE_SIZE)) {
     return { path: normalizedPath, name, kind: 'unsupported', mimeType: 'application/octet-stream', content: '', size: stat.size };
   }
 
-  const extension = path.extname(absolutePath).toLowerCase();
   const imageMime = IMAGE_MIME[extension];
   if (imageMime) {
     return { path: normalizedPath, name, kind: 'image', mimeType: imageMime, content: fs.readFileSync(absolutePath).toString('base64'), size: stat.size };
+  }
+
+  if (documentMime) {
+    return { path: normalizedPath, name, kind: 'document', mimeType: documentMime, content: fs.readFileSync(absolutePath).toString('base64'), size: stat.size };
   }
 
   if (UNSUPPORTED_EXTENSIONS.has(extension)) {

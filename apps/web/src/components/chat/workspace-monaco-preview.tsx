@@ -8,6 +8,7 @@ import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker'
 import tsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker'
 import { createHighlighter, type BundledLanguage } from 'shiki'
 import { useEffect, useState } from 'react'
+import { Maximize2 } from 'lucide-react'
 import { useTheme } from '@/components/theme-provider'
 
 type MonacoEnvironment = {
@@ -109,7 +110,14 @@ function languageForFile(filePath: string): string {
   return languageByExtension[fileName.split('.').at(-1) ?? ''] ?? 'plaintext'
 }
 
-export default function WorkspaceMonacoPreview({ path, content }: { path: string; content: string }) {
+interface WorkspaceMonacoPreviewProps {
+  path: string
+  content: string
+  onExpand?: () => void
+  expandLabel?: string
+}
+
+export default function WorkspaceMonacoPreview({ path, content, onExpand, expandLabel = '放大代码区域' }: WorkspaceMonacoPreviewProps) {
   const { theme } = useTheme()
   const [ready, setReady] = useState(false)
   const [setupError, setSetupError] = useState<string | null>(null)
@@ -139,7 +147,18 @@ export default function WorkspaceMonacoPreview({ path, content }: { path: string
   }
 
   return (
-    <div className="h-full min-h-0 bg-[var(--code-surface)]">
+    <div className="relative h-full min-h-0 bg-[var(--code-surface)]">
+      {onExpand && (
+        <button
+          type="button"
+          className="absolute right-3 top-3 z-10 rounded-md border border-border/70 bg-[var(--code-surface)]/90 p-1.5 text-[var(--code-foreground)] shadow-sm transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+          onClick={onExpand}
+          title={expandLabel}
+          aria-label={expandLabel}
+        >
+          <Maximize2 className="size-3.5" />
+        </button>
+      )}
       <Editor
         key={path}
         height="100%"

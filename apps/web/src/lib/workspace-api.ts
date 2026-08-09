@@ -11,7 +11,7 @@ export interface WorkspaceEntry {
 export interface WorkspaceFilePreview {
   path: string
   name: string
-  kind: 'text' | 'image' | 'unsupported'
+  kind: 'text' | 'image' | 'document' | 'unsupported'
   mimeType: string
   content: string
   size: number

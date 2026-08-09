@@ -59,6 +59,7 @@
     "cmdk": "1.1.1",
     "date-fns": "4.1.0",
     "dayjs": "^1.11.20",
+    "docx-preview": "0.4.0",
     "embla-carousel-react": "8.6.0",
     "highlight.js": "^11.11.1",
     "html-to-image": "^1.11.13",
@@ -69,6 +70,7 @@
     "mdast-util-find-and-replace": "^3.0.2",
     "mermaid": "^11.15.0",
     "monaco-editor": "^0.55.1",
+    "pptx-preview": "1.0.7",
     "qrcode-generator": "^2.0.4",
     "react": "19.2.4",
     "react-day-picker": "9.13.2",
@@ -90,6 +92,7 @@
     "three": "^0.184.0",
     "unist-util-visit": "^5.1.0",
     "vaul": "^1.1.2",
+    "xlsx": "0.18.5",
     "yaml": "^2.8.4",
     "zod": "^3.24.1",
     "zustand": "^5.0.12"
