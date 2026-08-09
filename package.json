@@ -7,6 +7,7 @@
     "start:electron": "./start.sh electron",
     "build:dmg": "./build-dmg.sh",
     "build:win": "./build-win.sh",
-    "build:desktop-all": "./build-desktop-all.sh"
+    "build:desktop-all": "./build-desktop-all.sh",
+    "sync:file-icons": "node scripts/sync-material-file-icons.mjs"
   }
 }

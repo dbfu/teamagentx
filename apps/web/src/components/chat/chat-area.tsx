@@ -342,6 +342,17 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
     setSidePanelMode('codex-local-sessions')
   }
 
+  const handleOpenWorkspace = () => {
+    if (sidePanelMode === 'workspace') {
+      setSidePanelMode(null)
+      return
+    }
+
+    setSelectedRoomAgent(null)
+    setShowDispatchRules(false)
+    setSidePanelMode('workspace')
+  }
+
   const handleDeleteChatRoom = () => {
     if (chatRoom) {
       setSidePanelMode(null)
@@ -438,6 +449,7 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
   }
 
   const isTaskBoardOpen = sidePanelMode === 'task-board'
+  const isWorkspaceOpen = sidePanelMode === 'workspace'
   const isDispatchRulesOpen = showDispatchRules
 
   return (
@@ -465,13 +477,15 @@ export function ChatArea({ chatRoom, onChatRoomChange, onDeleteChatRoom, isMobil
           onScreenshot={() => setShowScreenshot(true)}
           onOpenClaudeLocalSessions={handleOpenClaudeLocalSessions}
           onOpenCodexLocalSessions={handleOpenCodexLocalSessions}
+          onOpenWorkspace={handleOpenWorkspace}
+          workspaceActive={sidePanelMode === 'workspace'}
         />
       )}
 
       {/* Messages, Input and Side Panel */}
       <div className={cn("relative flex min-w-0 flex-1", isMobile ? "min-h-0" : "overflow-hidden")}>
         {/* Messages and Input area */}
-        {!isTaskBoardOpen && !isDispatchRulesOpen && (
+        {!isTaskBoardOpen && !isWorkspaceOpen && !isDispatchRulesOpen && (
           <div className="relative flex flex-1 flex-col min-w-0 bg-background">
             {ownerMentionTodo && (
               <div className="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2">

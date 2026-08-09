@@ -29,6 +29,7 @@ import { uploadGateway } from './modules/upload/upload.gateway.js';
 import { bridgeGateway, handleBindCode } from './gateway/bridge.gateway.js';
 import { templatePackageGateway } from './gateway/template-package.gateway.js';
 import { workbenchGateway } from './gateway/workbench.gateway.js';
+import { workspaceGateway } from './gateway/workspace.gateway.js';
 import { setFeishuBindCodeHandler } from './modules/bridge/feishu-ws-client.js';
 import { setDingtalkBindCodeHandler } from './modules/bridge/dingtalk-stream-client.js';
 import { uploadService } from './modules/upload/upload.service.js';
@@ -193,6 +194,7 @@ export async function createApp(options?: { enableSwagger?: boolean }) {
     bridgeGateway,
     templatePackageGateway,
     workbenchGateway,
+    workspaceGateway,
   ]);
 
   // 确保历史 checkpoint 表存在

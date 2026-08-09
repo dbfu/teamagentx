@@ -6,7 +6,7 @@ import { GroupAvatarImage } from '@/lib/group-avatars';
 import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Box, Camera, ClipboardList, Clock, Eraser, History, KeyRound, Loader2, MessagesSquare, MoreHorizontal, Play, Scroll, Settings, Square, TerminalSquare, UserPlus, Users, Workflow } from 'lucide-react';
+import { Box, Camera, ClipboardList, Clock, Eraser, FolderTree, History, KeyRound, Loader2, MessagesSquare, MoreHorizontal, Play, Scroll, Settings, Square, TerminalSquare, UserPlus, Users, Workflow } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -36,6 +36,8 @@ interface ChatAreaHeaderProps {
   onScreenshot?: () => void
   onOpenClaudeLocalSessions?: () => void
   onOpenCodexLocalSessions?: () => void
+  onOpenWorkspace?: () => void
+  workspaceActive?: boolean
 }
 
 
@@ -59,6 +61,8 @@ export function ChatAreaHeader({
   onScreenshot,
   onOpenClaudeLocalSessions,
   onOpenCodexLocalSessions,
+  onOpenWorkspace,
+  workspaceActive,
 }: ChatAreaHeaderProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -476,6 +480,23 @@ export function ChatAreaHeader({
           <>
             {shouldShowPackageScriptsMenu && packageScriptsMenu}
             <ChatRoomOpenMenu chatRoom={chatRoom} isElectron={isElectron} />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className={cn(
+                    'rounded-lg p-2 transition-colors',
+                    workspaceActive
+                      ? 'bg-primary/10 text-primary'
+                      : 'text-muted-foreground hover:bg-primary/10 hover:text-primary',
+                  )}
+                  onClick={onOpenWorkspace}
+                  type="button"
+                >
+                  <FolderTree className="size-5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{t('chat.viewDirectory')}</TooltipContent>
+            </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
                 <button

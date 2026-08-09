@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils'
 import { isStreamViewBlocked } from '@/lib/system-agents'
 import { useChatStore, useThrottledStreamEvents, type SidePanelMode } from '@/stores/chat-store'
 import type { AgentStatus } from '@/stores/socket-store'
-import { Bot, ClipboardList, Clock, Info, List, Loader2, MessageSquareMore, MessagesSquare, Settings, Users } from 'lucide-react'
+import { Bot, ClipboardList, Clock, FolderTree, Info, List, Loader2, MessageSquareMore, MessagesSquare, Settings, Users } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AssistantDetailModal } from '../assistant-detail'
@@ -21,6 +21,7 @@ import { RoomSettingsPanel } from './room-settings-panel'
 import { StreamPanel } from './stream-panel'
 import { TaskBoardPanel } from './task-board-panel'
 import { TaskQueuePanel } from './task-queue-panel'
+import { WorkspaceFilePanel } from '../workspace-file-panel'
 
 // 记录从任务看板进入的面板来源
 const TASK_BOARD_CHILD_MODES: SidePanelMode[] = ['stream', 'record-detail', 'task-queue']
@@ -195,6 +196,7 @@ export function ChatSidePanel({
       case 'task-board': return t('chat.taskBoardTitle')
       case 'claude-local-sessions': return 'Claude 本地会话'
       case 'codex-local-sessions': return 'Codex 本地会话'
+      case 'workspace': return t('chat.workspaceDirectory')
       default: return t('chat.groupAssistants')
     }
   }
@@ -227,6 +229,10 @@ export function ChatSidePanel({
 
     if (sidePanelMode === 'task-board') {
       return <ClipboardList className="size-4 text-blue-500" />
+    }
+
+    if (sidePanelMode === 'workspace') {
+      return <FolderTree className="size-4 text-primary" />
     }
 
     if (sidePanelMode === 'claude-local-sessions' || sidePanelMode === 'codex-local-sessions') {
@@ -437,22 +443,25 @@ export function ChatSidePanel({
       onClose={handleClose}
       title={getTitle()}
       icon={getIcon()}
-      isMobile={isMobile}
+      isMobile={isMobile && sidePanelMode !== 'workspace'}
+      hideHeader={sidePanelMode === 'workspace'}
       className={cn(
         sidePanelMode === 'context' || sidePanelMode === 'history' || sidePanelMode === 'record-detail' || sidePanelMode === 'reply-detail' || sidePanelMode === 'execution-detail'
           ? 'pt-4 pb-4 pl-4 pr-3'
           : sidePanelMode === 'task-board'
             ? 'p-3'
+            : sidePanelMode === 'workspace'
+              ? 'p-0'
             : sidePanelMode === 'stream'
               ? 'p-0'
               : 'pt-3 pb-3 pl-3 pr-3'
       )}
-      overflow={sidePanelMode === 'room-settings' || sidePanelMode === 'task-board' || sidePanelMode === 'stream' || sidePanelMode === 'claude-local-sessions' || sidePanelMode === 'codex-local-sessions' ? 'hidden' : 'auto'}
-      widthClass={sidePanelMode === 'task-board' ? 'w-full border-l-0' : undefined}
-      resizable={sidePanelMode !== 'task-board'}
-      defaultWidth={370}
-      minWidth={320}
-      maxWidth={760}
+      overflow={sidePanelMode === 'room-settings' || sidePanelMode === 'task-board' || sidePanelMode === 'stream' || sidePanelMode === 'claude-local-sessions' || sidePanelMode === 'codex-local-sessions' || sidePanelMode === 'workspace' ? 'hidden' : 'auto'}
+      widthClass={sidePanelMode === 'task-board' || sidePanelMode === 'workspace' ? 'w-full border-l-0' : undefined}
+      resizable={sidePanelMode !== 'task-board' && sidePanelMode !== 'workspace'}
+      defaultWidth={sidePanelMode === 'workspace' ? 680 : 370}
+      minWidth={sidePanelMode === 'workspace' ? 480 : 320}
+      maxWidth={sidePanelMode === 'workspace' ? 900 : 760}
       storageKey="teamagentx.chatSidePanel.width"
     >
       {sidePanelMode === 'agents' && (
@@ -581,6 +590,8 @@ export function ChatSidePanel({
           }}
         />
       )}
+
+      {sidePanelMode === 'workspace' && <WorkspaceFilePanel chatRoomId={chatRoom.id} />}
 
       {sidePanelMode === 'room-settings' && (
         <RoomSettingsPanel

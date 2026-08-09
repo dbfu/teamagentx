@@ -1,4 +1,4 @@
-import { ArrowLeft, ChevronLeft, ClipboardList, Eraser, History, Loader2, MoreVertical, RefreshCw, Square } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ClipboardList, Eraser, FolderTree, History, Loader2, MoreVertical, RefreshCw, Square } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Route, Routes, useLocation, useNavigate, useSearchParams, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -191,6 +191,15 @@ function MobileChatDetailPage({
     setSidePanelMode(useChatStore.getState().sidePanelMode === 'task-board' ? null : 'task-board')
   }
 
+  const handleOpenWorkspace = () => {
+    if (useChatStore.getState().sidePanelMode === 'workspace') {
+      setSidePanelMode(null)
+      return
+    }
+
+    setSidePanelMode('workspace')
+  }
+
   const handleStopAllTasks = () => {
     if (!selectedRoom || activeTaskAgentIds.length === 0) return
 
@@ -275,6 +284,13 @@ function MobileChatDetailPage({
               >
                 <ClipboardList className="size-4 mr-2" />
                 {t('chat.taskBoardTitle')}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="hover:bg-primary/10 hover:text-primary hover:[&_svg]:text-primary focus:bg-primary/10 focus:text-primary focus:[&_svg]:text-primary"
+                onClick={handleOpenWorkspace}
+              >
+                <FolderTree className="mr-2 size-4" />
+                {t('chat.viewDirectory')}
               </DropdownMenuItem>
               <DropdownMenuItem
                 className="hover:bg-primary/10 hover:text-primary hover:[&_svg]:text-primary focus:bg-primary/10 focus:text-primary focus:[&_svg]:text-primary"

@@ -21,6 +21,8 @@ interface SidePanelProps {
   isMobile?: boolean
   /** 是否允许桌面端拖拽调整宽度 */
   resizable?: boolean
+  /** 是否隐藏面板 header */
+  hideHeader?: boolean
   /** 默认宽度（px） */
   defaultWidth?: number
   /** 最小宽度（px） */
@@ -67,6 +69,7 @@ export function SidePanel({
   widthClass = 'w-[370px]',
   isMobile,
   resizable = false,
+  hideHeader = false,
   defaultWidth = 370,
   minWidth = 300,
   maxWidth = 720,
@@ -148,19 +151,20 @@ export function SidePanel({
           open ? 'opacity-100' : 'opacity-0 pointer-events-none'
         )}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-          <div className="flex items-center gap-2">
-            {icon}
-            <span className="font-medium text-foreground">{title}</span>
+        {!hideHeader && (
+          <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+            <div className="flex items-center gap-2">
+              {icon}
+              <span className="font-medium text-foreground">{title}</span>
+            </div>
+            <button
+              onClick={onClose}
+              className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <X className="size-4" />
+            </button>
           </div>
-          <button
-            onClick={onClose}
-            className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            <X className="size-4" />
-          </button>
-        </div>
+        )}
 
         {/* Content */}
         <div
@@ -216,19 +220,20 @@ export function SidePanel({
         </div>
       )}
 
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-        <div className="flex items-center gap-2">
-          {icon}
-          <span className="font-medium text-foreground">{title}</span>
+      {!hideHeader && (
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+          <div className="flex items-center gap-2">
+            {icon}
+            <span className="font-medium text-foreground">{title}</span>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <X className="size-4" />
+          </button>
         </div>
-        <button
-          onClick={onClose}
-          className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          <X className="size-4" />
-        </button>
-      </div>
+      )}
 
       {/* Content */}
       <div
