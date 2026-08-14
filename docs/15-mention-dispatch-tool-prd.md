@@ -85,7 +85,7 @@ processor 会先暂存业务助手的最终正文和流式正文，不立即落�
 
 | 场景 | 行为 |
 |---|---|
-| **单 @**（A@B） | 自由接力，B 可继续 @；末端不再接力时自然交还人类。无需收敛者 |
+| **单 @**（A@B） | 自由接力，B 可继续 @；B 末端没有继续交接时，系统自动 `@A` 回传一次，且该自动回传任务不会再次反弹 |
 | **多 @**（A@[B,C]） | A 是收敛者；B、C 是**叶子**，它们执行时的 @ **不派发**，作为「建议」回报给 A，由 A 拿回控制权决定下一步 |
 
 兜底：
@@ -240,7 +240,8 @@ export function createMentionTools(ctx: {
 读 pending(已并集去重) + handoffContext：
 
   pending.size === 0
-    → 不接力，收敛：交还人类 / 若自己是某 batch 的 leaf 则正常结束
+    → 有直接分配者：代码自动 `@` 直接分配者并触发一次回传；无直接分配者则交还人类
+      / 若自己是某 batch 的 leaf 则正常结束
 
   handoffContext.isLeaf === true
     → 不派发，把 pending 作为「建议」回报给 convergenceOwner(进它的下一轮上下文)

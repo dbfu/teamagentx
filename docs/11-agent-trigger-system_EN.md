@@ -86,11 +86,12 @@ Rules are evaluated from highest to lowest priority.
 | 12 | Exactly one valid `@` | Smart Collaboration | Fast-path direct trigger, hops +1 |
 | 13 | Exactly one `@` but target invalid (typo / not in room / disabled) | Smart Collaboration | Coordinator (point ②: fix or ask_owner) |
 | 14 | ≥2 triggerable `@`s | Smart Collaboration | Coordinator (point ②): true parallel → open parallel batch; dependent → open serial chain; single real handoff → dispatch one; unclear → ask_owner |
-| 15 | Ends with no `@` | Smart Collaboration | Not processed immediately; only arm the stall watchdog |
-| 16 | `@` the user (question / awaiting confirmation) | Smart Collaboration | No agent triggered; await user reply (rule 7); watchdog skips |
-| 17 | `@` self | Any | Ignored (selfMention skipped) |
-| 18 | `@` inside code / quote block | Any | Not a triggerable mention (`parseKnownMentions` excludes it) |
-| 19 | Any content | Manual | No response, `@` is display-only |
+| 15 | Ends with no `@`, but the task has a direct assigner | Smart Collaboration | Publish and trigger one automatic `@` return to the direct assigner; the automatic return does not bounce back |
+| 16 | Ends with no `@` and has no direct assigner | Smart Collaboration | Not processed immediately; only arm the stall watchdog |
+| 17 | `@` the user (question / awaiting confirmation) | Smart Collaboration | No agent triggered; await user reply (rule 7); watchdog skips |
+| 18 | `@` self | Any | Ignored (selfMention skipped) |
+| 19 | `@` inside code / quote block | Any | Not a triggerable mention (`parseKnownMentions` excludes it) |
+| 20 | Any content | Manual | No response, `@` is display-only |
 
 ### 3.3 During a parallel batch
 
@@ -198,7 +199,7 @@ Notes:
 - When a quick-chat room triggers `quickChatAgentId`, the current implementation skips history injection
 - Business agents in regular rooms still inject history per the `injectGroupHistory` setting
 
-**Important effect**: an agent can see who sent the triggering message and its content. This sometimes makes the LLM naturally start its reply with `@sender`; that's model behavior, not a system-added prefix.
+**Important effect**: an agent can see who sent the triggering message and its content. When a nested single-target handoff completes without another handoff, the system appends `@` plus the direct assigner to the final body and triggers one return task; other cases where the LLM naturally starts with `@sender` are model behavior.
 
 ---
 

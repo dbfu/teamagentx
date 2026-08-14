@@ -249,6 +249,7 @@ export const taskQueueService = {
         convergenceOwnerId: parsed.convergenceOwnerId,
         convergenceOwnerName: parsed.convergenceOwnerName,
         isLeaf: parsed.isLeaf === true,
+        skipAutoReturn: parsed.skipAutoReturn === true,
       };
     } catch {
       return undefined;

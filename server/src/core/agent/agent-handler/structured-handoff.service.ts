@@ -409,6 +409,7 @@ async function dispatchSingle(
     convergenceOwnerId: undefined,
     convergenceOwnerName: undefined,
     isLeaf: false,
+    skipAutoReturn: mention.automatic === true,
   });
   const trigger = buildTargetTriggerMessage(
     source,
@@ -588,6 +589,7 @@ async function dispatchStageBatch(
       convergenceOwnerId: params.ownerAgentId,
       convergenceOwnerName: params.ownerAgentName,
       isLeaf: true,
+      skipAutoReturn: false,
     });
     const trigger = params.priorOutputs
       ? buildSerialChainTrigger(source, params.ownerAgentName, agent, mention.task, params.priorOutputs)

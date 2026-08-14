@@ -2,6 +2,8 @@ export interface HandoffMention {
   agentId: string;
   agentName: string;
   task: string;
+  /** 由代码生成的回传 mention；用于避免自动回传任务再次反弹。 */
+  automatic?: boolean;
 }
 
 /**
@@ -29,6 +31,8 @@ export interface HandoffContext {
   convergenceOwnerId?: string;
   convergenceOwnerName?: string;
   isLeaf?: boolean;
+  /** 自动回传任务只回传一次；显式再次交接时会清除此标记。 */
+  skipAutoReturn?: boolean;
 }
 
 export function createRootHandoffContext(

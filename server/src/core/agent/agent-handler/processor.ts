@@ -52,6 +52,7 @@ import {
   clearMentions,
   endMentionExecution,
   peekMentionState,
+  recordMentions,
   takeMentionState,
   type PendingMentionState,
 } from './mention-buffer.js';
@@ -60,6 +61,12 @@ import { createRootHandoffContext } from '../../../types/handoff.js';
 import { restoreHandoffCascade } from './structured-handoff-runtime.js';
 import { debugLog } from './debug.js';
 import { notifySourceAgentOnFailure } from './task-failure-notification.js';
+import {
+  AUTO_RETURN_TASK,
+  canAutoReturnToAssigner,
+  getImmediateAssignerId,
+  shouldAutoReturnToAssigner,
+} from './automatic-handoff.js';
 import { shouldSuppressInternalCoordinatorMessage } from '../internal-coordinator-agent.js';
 import { GROUP_COORDINATOR_ID } from '../system-assistant.constants.js';
 import {
@@ -324,6 +331,16 @@ export async function processQueue(chatRoomId: string, agentId: string) {
           const markExecutionActivity = () => {
             activeNoActivityMonitor?.markActivity();
           };
+          const automaticReturnCandidate = canAutoReturnToAssigner({
+            handoffContext: taskHandoffContext,
+            agentId: task.agentId,
+            agentLevel: (agentInfo as { agentLevel?: string | null } | null)?.agentLevel,
+            agentTriggerMode: roomForReminder?.agentTriggerMode,
+            coordinatorAgentId: GROUP_COORDINATOR_ID,
+            suppressAssistantHandoff: taskPromptPolicy.suppressAssistantHandoff,
+            isLeaf: taskHandoffContext.isLeaf === true,
+            isQuickChatRoom: roomForReminder?.isQuickChatRoom === true,
+          });
           const deferHandoffOutput = shouldDeferHandoffOutput({
             enabled: config.agent.handoffAuditEnabled,
             agentTriggerMode: roomForReminder?.agentTriggerMode,
@@ -333,7 +350,7 @@ export async function processQueue(chatRoomId: string, agentId: string) {
             suppressAssistantHandoff: taskPromptPolicy.suppressAssistantHandoff,
             isLeaf: taskHandoffContext.isLeaf === true,
             isQuickChatRoom: roomForReminder?.isQuickChatRoom === true,
-          });
+          }) || automaticReturnCandidate;
           // 真正落库并广播最终消息。结构化交接候选任务会先暂存输出，等 mention buffer
           // （含必要时的静默复核）确定后再调用这里，使正文与交接块一次性发布。
           const publishOutputCallback = async (content: string, replyMessageId?: string) => {
@@ -1066,6 +1083,55 @@ export async function processQueue(chatRoomId: string, agentId: string) {
                   agentName: task.agentName,
                   error: auditError instanceof Error ? auditError.message : String(auditError),
                 });
+              }
+            }
+
+            // 单目标结构化接力的末端自动回传给直接分配者。
+            // 只有确实没有后续助手 mention、没有在等待用户时才回传；并且把该 mention
+            // 标记为 automatic，dispatchSingle 会在下一棒设置一次性防反弹标记。
+            if (shouldAutoReturnToAssigner({
+              handoffContext: taskHandoffContext,
+              agentId: task.agentId,
+              agentLevel: (agentInfo as { agentLevel?: string | null } | null)?.agentLevel,
+              agentTriggerMode: roomForReminder?.agentTriggerMode,
+              coordinatorAgentId: GROUP_COORDINATOR_ID,
+              suppressAssistantHandoff: taskPromptPolicy.suppressAssistantHandoff,
+              isLeaf: taskHandoffContext.isLeaf === true,
+              isQuickChatRoom: roomForReminder?.isQuickChatRoom === true,
+              hasFinalMessage: !!prospectiveFinalContent?.trim(),
+              finalMessageMentionsUser,
+              pendingMentionCount: settledMentionState.mentions.length,
+            })) {
+              const assignerId = getImmediateAssignerId(taskHandoffContext, task.agentId);
+              const assigner = assignerId ? await agentService.findById(assignerId) : null;
+              const assignerInRoom = assigner && (
+                assigner.agentLevel === 'system' ||
+                await chatRoomService.isAgentMember(chatRoomId, assigner.id)
+              );
+              if (assigner?.isActive && assignerInRoom) {
+                const recorded = recordMentions(
+                  chatRoomId,
+                  task.agentId,
+                  [{
+                    agentId: assigner.id,
+                    agentName: assigner.name,
+                    task: AUTO_RETURN_TASK,
+                    automatic: true,
+                  }],
+                  'parallel',
+                  'automatic-return-to-assigner',
+                );
+                if (recorded) {
+                  settledMentionState = peekMentionState(task.id);
+                  debugLog('automaticHandoffReturn', {
+                    chatRoomId,
+                    taskId: task.id,
+                    sourceAgentId: task.agentId,
+                    sourceAgentName: task.agentName,
+                    assignerId: assigner.id,
+                    assignerName: assigner.name,
+                  });
+                }
               }
             }
 
